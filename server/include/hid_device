@@ -1,0 +1,47 @@
+#ifndef HIDDEVICE_H
+#define HIDDEVICE_H
+
+#include <bits/stdc++.h>
+#include <hidapi.h>
+#include <string>
+#include <vector>
+
+namespace HID {
+
+struct HIDDeviceFilter {
+  const unsigned short vendorId = 0;
+  const unsigned short productId = 0;
+  const unsigned short usagePage = 0;
+  const unsigned short usage = 0;
+};
+
+class HIDDevice {
+
+public:
+  const unsigned short vendorId;
+  const unsigned short productId;
+  const std::wstring productName;
+  const std::vector<std::string> collections = std::vector<std::string>();
+  static std::vector<HIDDevice> getDevices();
+  static std::vector<HIDDevice> requestDevice(const HIDDeviceFilter &filter = {}, const HIDDeviceFilter &exclusionFilter = {});
+  HIDDevice(const hid_device_info *device);
+  bool open();
+  std::string toString() const;
+  size_t hash() const;
+private:
+  HIDDevice(const unsigned short &vendorId, const unsigned short &productId, const std::wstring &productName,
+            const std::vector<std::string> &collections = std::vector<std::string>())
+      : vendorId(vendorId), productId(productId), productName(productName), collections(collections) {}
+};
+
+} // namespace HID
+
+namespace std {
+template <> struct hash<HID::HIDDevice> {
+  size_t operator()(const HID::HIDDevice &device) const {
+    return std::hash<std::string>()(device.toString());
+  }
+};
+} // namespace std
+
+#endif
