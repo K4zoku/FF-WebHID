@@ -1,0 +1,45 @@
+#ifndef HIDDEVMONITOR_H
+#define HIDDEVMONITOR_H
+
+#include <atomic_queue/atomic_queue.h>
+#include <hid_device>
+#include <thread>
+#include <trlc/platform/platform.hpp>
+#ifdef TRLC_PLATFORM_LINUX
+#include <libudev.h>
+#endif
+namespace HID {
+
+namespace HIDConnection {
+typedef void (*Callback)(const HIDDevice &);
+const Callback NOOP = [](const HIDDevice &) {};
+} // namespace HIDConnection
+
+class HIDDeviceMonitor {
+
+public:
+  HIDDeviceMonitor();
+  ~HIDDeviceMonitor();
+  void start();
+  void stop();
+  bool isRunning();
+  void setOnConnectCallback(HIDConnection::Callback callback);
+  void setOnDisconnectCallback(HIDConnection::Callback callback);
+
+private:
+  std::atomic_bool running;
+  std::unique_ptr<std::thread> monitorThread;
+  HIDConnection::Callback onConnect = HIDConnection::NOOP;
+  HIDConnection::Callback onDisconnect = HIDConnection::NOOP;
+
+  void run();
+  bool loop();
+#ifdef TRLC_PLATFORM_LINUX
+  struct udev *udev = nullptr;
+  struct udev_monitor *monitor = nullptr;
+#endif
+};
+
+} // namespace HID
+
+#endif

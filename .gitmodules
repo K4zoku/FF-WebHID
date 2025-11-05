@@ -1,0 +1,6 @@
+[submodule "server/lib/atomic_queue"]
+	path = server/lib/atomic_queue
+	url = https://github.com/max0x7ba/atomic_queue.git
+[submodule "server/lib/trlc-platform"]
+	path = server/lib/trlc-platform
+	url = https://github.com/tranglecong/trlc-platform
