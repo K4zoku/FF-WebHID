@@ -1,6 +1,6 @@
 [Unit]
 Description=WebHID Daemon
-Documentation=https://github.com/K4zoku/FFWebHID
+Documentation=https://github.com/K4zoku/FF-WebHID
 # Wait for udev to be up so hidraw nodes exist before we start.
 After=systemd-udev-settle.service
 
