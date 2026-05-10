@@ -1,7 +1,0 @@
-{
-  "name": "webhidserver",
-  "description": "WebHID Server",
-  "path": "/usr/bin/webhid-server",
-  "type": "stdio",
-  "allowed_extensions": ["WebHID"]
-}

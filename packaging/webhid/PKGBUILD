@@ -1,0 +1,127 @@
+# Maintainer: K4zoku <k4zoku@pm.me>
+#
+# Build & install:
+#   cd packaging/webhid
+#   makepkg -si
+#
+# This PKGBUILD lives two levels below the project root
+# (packaging/webhid/PKGBUILD), so every function uses
+# "$startdir/../.." to reach the repository root.
+
+pkgname=webhid
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='WebHID implementation for Firefox/Zen via a native-messaging bridge and hidraw daemon'
+arch=('x86_64' 'aarch64')
+url='https://github.com/user/webhid'
+license=('MIT')
+# libudev is provided by systemd on Arch Linux
+depends=('libudev.so')
+makedepends=('cargo')
+optdepends=('webhid-addon: Firefox/Zen browser extension (system-wide install)')
+install=webhid.install
+# No source array – we build directly from the repository tree via startdir.
+# The Cargo workspace lives at  <repo>/crates/Cargo.toml
+source=()
+sha256sums=()
+
+# Silence makepkg's "strip" pass; Rust release builds are already optimised
+# and stripping the debug-info section is handled by the Rust toolchain.
+options=('!lto' '!debug')
+
+_crates_dir() { echo "$startdir/../../crates"; }
+
+prepare() {
+    # Pre-download all crate dependencies into the local cargo registry so
+    # the build() step can run with --frozen (no further network I/O).
+    cargo fetch \
+        --target "$CARCH-unknown-linux-gnu" \
+        --manifest-path "$(_crates_dir)/Cargo.toml"
+}
+
+build() {
+    cargo build \
+        --release \
+        --frozen \
+        --manifest-path "$(_crates_dir)/Cargo.toml"
+}
+
+package() {
+    local _root="$startdir/../.."
+    local _release="$(_crates_dir)/target/release"
+
+    # ------------------------------------------------------------------ #
+    # Binaries
+    # ------------------------------------------------------------------ #
+    install -Dm755 "$_release/webhid-daemon" \
+        "$pkgdir/usr/bin/webhid-daemon"
+
+    install -Dm755 "$_release/webhid-native-messaging" \
+        "$pkgdir/usr/bin/webhid-native-messaging"
+
+    # ------------------------------------------------------------------ #
+    # systemd unit
+    # The installed path uses /usr/bin, not /usr/local/bin, so we write
+    # the unit inline rather than copying the template from manifests/.
+    # ------------------------------------------------------------------ #
+    install -Dm644 /dev/stdin \
+        "$pkgdir/usr/lib/systemd/system/webhid-daemon.service" << 'UNIT'
+[Unit]
+Description=WebHID Daemon
+Documentation=https://github.com/user/webhid
+After=systemd-udev-settle.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/webhid-daemon
+Restart=on-failure
+RestartSec=3
+Environment=RUST_LOG=info
+RuntimeDirectory=webhid
+RuntimeDirectoryMode=0755
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+    # ------------------------------------------------------------------ #
+    # Native-messaging host manifest
+    #
+    # Install to every directory that a Gecko-based browser on Arch Linux
+    # is likely to search, mirroring plasma-browser-integration's approach.
+    # Firefox and Zen Browser share the same app GUID and therefore the
+    # same /usr/lib/mozilla/ search path.
+    # ------------------------------------------------------------------ #
+    local _manifest
+    _manifest=$(cat << 'JSON'
+{
+  "name": "webhid_server",
+  "description": "WebHID native messaging host",
+  "path": "/usr/bin/webhid-native-messaging",
+  "type": "stdio",
+  "allowed_extensions": ["webhid@firefox.org"]
+}
+JSON
+)
+
+    # Firefox, Zen Browser, and all generic Mozilla-compatible forks
+    install -Dm644 /dev/stdin \
+        "$pkgdir/usr/lib/mozilla/native-messaging-hosts/webhid_server.json" \
+        <<< "$_manifest"
+
+    # LibreWolf
+    install -Dm644 /dev/stdin \
+        "$pkgdir/usr/lib/librewolf/native-messaging-hosts/webhid_server.json" \
+        <<< "$_manifest"
+
+    # Waterfox
+    install -Dm644 /dev/stdin \
+        "$pkgdir/usr/lib/waterfox/native-messaging-hosts/webhid_server.json" \
+        <<< "$_manifest"
+
+    # ------------------------------------------------------------------ #
+    # License
+    # ------------------------------------------------------------------ #
+    install -Dm644 "$_root/LICENSE" \
+        "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

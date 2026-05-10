@@ -1,0 +1,29 @@
+# Global .gitignore for WebHID project
+*.swp
+*.swo
+*.tmp
+*.bak
+*.log
+.DS_Store
+Thumbs.db
+node_modules/
+.env
+.idea/
+.vscode/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.orig
+
+# Ignore build/test artifacts
+/build/
+/dist/
+/test/tmp/
+/test/output/
+
+# Ignore by convention
+*.local
+*.secret
+*.old
+*.backup

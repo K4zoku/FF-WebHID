@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "webhid",
+    "webhid-daemon",
+    "webhid-native-messaging",
+]
+resolver = "2"

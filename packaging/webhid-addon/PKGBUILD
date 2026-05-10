@@ -1,0 +1,85 @@
+# Maintainer: K4zoku <k4zoku@pm.me>
+#
+# Build & install:
+#   cd packaging/webhid-addon
+#   makepkg -si
+#
+# Packages the WebHID browser extension as a system-wide XPI so every user
+# on the machine gets it automatically in Firefox, Zen, LibreWolf, and
+# Waterfox – exactly the way plasma-browser-integration installs its
+# extension for Chromium-based browsers.
+#
+# Firefox and all its forks (including Zen) share the same Gecko application
+# GUID {ec8030f7-c20a-464f-9b0e-13a3a9e97384}, so a single install path
+# covers all of them.
+#
+# Extensions installed into the system extension directory bypass the
+# add-on signature requirement – no AMO submission needed.
+
+pkgname=webhid-addon
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='WebHID browser extension for Firefox and Zen (system-wide installation)'
+# Pure JS/JSON – no architecture-dependent code
+arch=('any')
+url='https://github.com/user/webhid'
+license=('MIT')
+# The daemon must be running for the extension to do anything useful
+depends=('webhid')
+makedepends=('zip')
+install=webhid-addon.install
+source=()
+sha256sums=()
+
+# Firefox / Gecko application GUID (shared by Firefox, Zen, Librewolf, etc.)
+_ff_guid='{ec8030f7-c20a-464f-9b0e-13a3a9e97384}'
+# Must match browser_specific_settings.gecko.id in addon/manifest.json
+_ext_id='webhid@firefox.org'
+
+_addon_dir() { echo "$startdir/../../addon"; }
+
+build() {
+    # An XPI is simply a ZIP archive of the extension directory.
+    # We build it into $srcdir so package() can pick it up cleanly.
+    local _xpi="$srcdir/$_ext_id.xpi"
+
+    rm -f "$_xpi"
+
+    # Enter the addon directory so zip stores paths relative to its root.
+    cd "$(_addon_dir)"
+    zip -r "$_xpi" . \
+        --exclude '*.DS_Store' \
+        --exclude '*.git*'    \
+        --exclude '*.swp'
+}
+
+package() {
+    local _root="$startdir/../.."
+    local _xpi="$srcdir/$_ext_id.xpi"
+
+    # ------------------------------------------------------------------ #
+    # System-wide extension directories
+    #
+    # Firefox (and every Firefox fork that shares the same app GUID) looks
+    # for extensions in  /usr/lib/mozilla/extensions/{appGUID}/  before
+    # the user's profile, so the XPI is loaded automatically on next start.
+    # ------------------------------------------------------------------ #
+
+    # Firefox, Zen Browser, and all Mozilla-compatible forks
+    install -Dm644 "$_xpi" \
+        "$pkgdir/usr/lib/mozilla/extensions/$_ff_guid/$_ext_id.xpi"
+
+    # LibreWolf keeps its own search path in addition to the Mozilla one
+    install -Dm644 "$_xpi" \
+        "$pkgdir/usr/lib/librewolf/extensions/$_ext_id.xpi"
+
+    # Waterfox
+    install -Dm644 "$_xpi" \
+        "$pkgdir/usr/lib/waterfox/extensions/$_ext_id.xpi"
+
+    # ------------------------------------------------------------------ #
+    # License
+    # ------------------------------------------------------------------ #
+    install -Dm644 "$_root/LICENSE" \
+        "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

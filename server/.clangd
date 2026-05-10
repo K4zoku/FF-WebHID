@@ -1,5 +1,0 @@
-Style:
-  AngledHeaders: ["/*"]
-
-Completion:
-    HeaderInsertion: Never
