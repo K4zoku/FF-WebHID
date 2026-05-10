@@ -216,34 +216,22 @@ WEBHID_NM=crates/target/debug/webhid-native-messaging \
 
 ---
 
-## Loading the addon in Zen / Firefox
+## Loading the addon in Firefox
 
 The content script only injects into `http://` and `https://` pages, not `file://`.
 You must serve the test page over HTTP (see [Testing](#testing)).
 
-### Zen Browser
+### Firefox
 
 1. Navigate to `about:debugging`
 2. Click **This Firefox**
 3. Click **Load Temporary Add-on…**
 4. Select `addon/manifest.json`
-5. The addon persists until you close Zen or click **Remove**
-
-> **Why does Zen not pick up the system-wide XPI automatically?**  
-> Zen currently reads the per-user native-messaging manifest from
-> `~/.mozilla/native-messaging-hosts/` instead of the Zen-specific path
-> `~/.zen/native-messaging-hosts/` ([upstream bug #10622][zen-nm-bug]).
-> The `webhid-addon` package installs the XPI to
-> `/usr/lib/mozilla/extensions/{ec8030f7-…}/` which uses the same shared path,
-> so it *should* be picked up — but if it isn't, load it temporarily as above.
-> The native-messaging manifest at `/usr/lib/mozilla/native-messaging-hosts/`
-> works correctly for both Firefox and Zen.
-
-[zen-nm-bug]: https://github.com/zen-browser/desktop/issues/10622
+5. The addon persists until you close Firefox or click **Remove**
 
 ### Per-user native-messaging manifest (without packaging)
 
-If you want Firefox / Zen to find the native-messaging host without installing
+If you want Firefox to find the native-messaging host without installing
 the package, copy the manifest manually and point it at the debug binary:
 
 ```sh
