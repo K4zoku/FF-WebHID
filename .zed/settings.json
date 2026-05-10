@@ -8,6 +8,6 @@
     "**/server/lib/**/*"
   ],
   "project_panel": {
-    "hide_hidden": true
+    "hide_hidden": false
   }
 }

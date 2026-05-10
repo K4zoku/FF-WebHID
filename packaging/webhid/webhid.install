@@ -1,0 +1,38 @@
+post_install() {
+    echo ""
+    echo "  ╔══════════════════════════════════════════════════════════════╗"
+    echo "  ║                     webhid installed                        ║"
+    echo "  ╚══════════════════════════════════════════════════════════════╝"
+    echo ""
+    echo "  1) Enable and start the daemon (runs as root to access hidraw):"
+    echo ""
+    echo "       systemctl enable --now webhid-daemon.service"
+    echo ""
+    echo "  2) Optional – allow YOUR user to open HID devices without root"
+    echo "     (recommended for development; adjust the match as needed):"
+    echo ""
+    echo "       # Grant all hidraw nodes to the active seat user:"
+    echo "       echo 'SUBSYSTEM==\"hidraw\", TAG+=\"uaccess\"' \\"
+    echo "         | sudo tee /etc/udev/rules.d/99-webhid.rules"
+    echo "       sudo udevadm control --reload-rules"
+    echo "       sudo udevadm trigger"
+    echo ""
+    echo "     Then re-run the daemon as your normal user instead of root."
+    echo ""
+    echo "  3) Install the Firefox/Zen browser addon:"
+    echo "       • system-wide:  pacman -S webhid-addon"
+    echo "       • temporary:    about:debugging → Load Temporary Add-on"
+    echo ""
+}
+
+post_upgrade() {
+    echo ""
+    echo "  webhid upgraded – restarting daemon…"
+    systemctl try-restart webhid-daemon.service 2>/dev/null || true
+    echo ""
+}
+
+pre_remove() {
+    systemctl stop    webhid-daemon.service 2>/dev/null || true
+    systemctl disable webhid-daemon.service 2>/dev/null || true
+}

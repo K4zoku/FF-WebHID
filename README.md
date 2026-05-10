@@ -1,24 +1,36 @@
-# WebHID for Firefox
+# WebHID Project
 
-https://github.com/libusb/hidapi
+WebHID brings Human Interface Device (HID) support to browsers and native applications on Linux, enabling seamless communication between web applications and HID devices (such as keyboards, gamepads, and more) via a native-messaging bridge and a background daemon.
 
-add udev rules
-```js
-SUBSYSTEM=="hidraw", KERNEL=="hidraw*", ATTRS{idVendor}=="xxxx", ATTRS{idProduct}=="xxxx", TAG+="uaccess"
-```
+## Project Structure
 
-reload udev rules
-```sh
-sudo udevadm control --reload-rules
-sudo udevadm trigger
-```
+- **crates/**: Rust workspace containing the core libraries and binaries:
+  - `webhid`: Core library for HID communication.
+  - `webhid-daemon`: Background service for device access.
+  - `webhid-native-messaging`: Native messaging host for browser integration.
+- **addon/**: Browser extension for Firefox/Zen, enabling WebHID API support.
+- **packaging/**: Distribution packaging (AUR/PKGBUILD scripts).
+- **test/**: Test utilities and scripts.
+- **manifests/**: Additional manifest files for integration.
 
-```sh
-#!/usr/bin/env sh
-HIDRAWS=/dev/hidraw*
-for HIDRAW in $HIDRAWS
-do
-  source /sys/class/hidraw/$(basename ${HIDRAW})/device/uevent
-  printf "%s %s" "${HID_UNIQ}" "${HID_NAME}"
-done
-```
+## Packaging (AUR)
+
+AUR packaging is provided for both the daemon and browser extension:
+- `packaging/webhid/PKGBUILD`: For the daemon and native messaging host.
+- `packaging/webhid-addon/PKGBUILD`: For the browser extension.
+
+**Note:** Only the `PKGBUILD` files are tracked in version control; all other build artifacts and install scripts are ignored.
+
+## Development
+
+- Rust crates use the standard [GitHub Rust .gitignore](https://github.com/github/gitignore/blob/main/Rust.gitignore).
+- Each directory contains its own `.gitignore` as appropriate.
+- See `DEVELOPMENT.md` for contribution and build instructions.
+
+## Maintainers
+
+- K4zoku <k4zoku@pm.me>
+
+## License
+
+This project is licensed under the MIT License. See `LICENSE` for details.

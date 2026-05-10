@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>WebHID Test</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:      #0f1117;
+    --surface: #1a1d27;
+    --border:  #2d3148;
+    --text:    #cdd6f4;
+    --muted:   #6c7086;
+    --green:   #a6e3a1;
+    --red:     #f38ba8;
+    --yellow:  #f9e2af;
+    --blue:    #89b4fa;
+    --purple:  #cba6f7;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.6 "JetBrains Mono", "Cascadia Code", monospace;
+    padding: 1.5rem;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto 1fr;
+    gap: 1rem;
+    height: 100dvh;
+  }
+
+  h1 { font-size: 1rem; letter-spacing: .1em; text-transform: uppercase; color: var(--blue); }
+  h2 { font-size: .75rem; letter-spacing: .15em; text-transform: uppercase; color: var(--muted); margin-bottom: .5rem; }
+
+  /* ── header ─────────────────────────────────────────────────────── */
+  #header {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: .75rem 1rem;
+  }
+
+  #header h1 { flex: 1; }
+
+  .badge {
+    font-size: .7rem;
+    padding: .2em .6em;
+    border-radius: 4px;
+    font-weight: 700;
+  }
+  .badge-ok  { background: #1e3a2a; color: var(--green); }
+  .badge-err { background: #3a1e23; color: var(--red);   }
+  .badge-warn{ background: #3a301e; color: var(--yellow); }
+
+  /* ── panels ─────────────────────────────────────────────────────── */
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: .75rem;
+    overflow: hidden;
+  }
+
+  /* ── controls ───────────────────────────────────────────────────── */
+  .row { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
+
+  button {
+    background: #252836;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: .3em .9em;
+    font: inherit;
+    cursor: pointer;
+    transition: background .15s;
+  }
+  button:hover:not(:disabled)  { background: #2e3250; border-color: var(--blue); }
+  button:disabled               { opacity: .4; cursor: default; }
+  button.primary                { background: #1e2d50; border-color: var(--blue); color: var(--blue); }
+
+  input[type=text], input[type=number], select {
+    background: #252836;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: .3em .6em;
+    font: inherit;
+    flex: 1;
+    min-width: 0;
+  }
+
+  label { font-size: .75rem; color: var(--muted); white-space: nowrap; }
+
+  /* ── device list ─────────────────────────────────────────────────── */
+  #device-list { display: flex; flex-direction: column; gap: .4rem; overflow-y: auto; }
+
+  .device-card {
+    background: #151720;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: .5rem .75rem;
+    cursor: pointer;
+    transition: border-color .15s;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: .1rem .75rem;
+    align-items: center;
+  }
+  .device-card:hover           { border-color: var(--blue); }
+  .device-card.selected        { border-color: var(--purple); background: #1c1a2e; }
+  .device-card.opened          { border-color: var(--green); }
+
+  .device-vid  { color: var(--yellow); font-size: .85rem; grid-row: span 2; align-self: center; }
+  .device-name { color: var(--text);   font-size: .85rem; }
+  .device-path { color: var(--muted);  font-size: .7rem;  }
+
+  /* ── io panel ────────────────────────────────────────────────────── */
+  #io-panel { grid-row: 2; }
+
+  .hex-input {
+    font-family: monospace;
+    width: 100%;
+    background: #151720;
+    border: 1px solid var(--border);
+    color: var(--yellow);
+    border-radius: 6px;
+    padding: .4em .6em;
+  }
+
+  /* ── log ─────────────────────────────────────────────────────────── */
+  #log-panel { grid-row: 2; }
+
+  #log {
+    flex: 1;
+    overflow-y: auto;
+    font-size: .75rem;
+    line-height: 1.8;
+    display: flex;
+    flex-direction: column-reverse; /* newest at bottom = reverse display */
+  }
+
+  .log-entry { white-space: pre-wrap; word-break: break-all; }
+  .log-ok    { color: var(--green);  }
+  .log-err   { color: var(--red);    }
+  .log-warn  { color: var(--yellow); }
+  .log-info  { color: var(--muted);  }
+  .log-data  { color: var(--blue);   }
+  .log-event { color: var(--purple); }
+  .log-ts    { color: #45475a; user-select: none; }
+</style>
+</head>
+<body>
+
+<!-- ── Header ──────────────────────────────────────────────────────────────── -->
+<header id="header">
+  <h1>⬡ WebHID Test</h1>
+  <span id="badge-api"  class="badge badge-warn">API: checking…</span>
+  <span id="badge-nm"   class="badge badge-warn">NM: unknown</span>
+  <span id="badge-dev"  class="badge badge-warn">no device selected</span>
+</header>
+
+<!-- ── Left column: device list ────────────────────────────────────────────── -->
+<section class="panel">
+  <h2>Devices</h2>
+  <div class="row">
+    <button class="primary" id="btn-enumerate">Enumerate</button>
+    <button id="btn-request">Request Device…</button>
+    <button id="btn-open"   disabled>Open</button>
+    <button id="btn-close"  disabled>Close</button>
+  </div>
+  <div id="device-list"><span style="color:var(--muted);font-size:.8rem">Click Enumerate to list connected devices.</span></div>
+</section>
+
+<!-- ── Right column: I/O ───────────────────────────────────────────────────── -->
+<section class="panel" id="io-panel">
+  <h2>I/O</h2>
+
+  <!-- Read -->
+  <fieldset style="border:1px solid var(--border);border-radius:6px;padding:.6rem">
+    <legend style="color:var(--muted);font-size:.7rem;padding:0 .3em">READ</legend>
+    <div class="row">
+      <label>timeout ms</label>
+      <input type="number" id="read-timeout" value="1000" style="width:5rem;flex:none">
+      <button id="btn-read" disabled>Read</button>
+      <button id="btn-read-loop" disabled>Loop</button>
+      <button id="btn-read-stop" disabled>Stop</button>
+    </div>
+  </fieldset>
+
+  <!-- Write -->
+  <fieldset style="border:1px solid var(--border);border-radius:6px;padding:.6rem">
+    <legend style="color:var(--muted);font-size:.7rem;padding:0 .3em">WRITE</legend>
+    <div class="row">
+      <label>hex bytes</label>
+      <input type="text" class="hex-input" id="write-hex" value="00" placeholder="00 01 02 …">
+    </div>
+    <div class="row" style="margin-top:.4rem">
+      <button id="btn-write" disabled>Write</button>
+      <label style="flex:1;color:var(--muted);font-size:.7rem">
+        First byte = report ID (use 00 for devices without numbered reports)
+      </label>
+    </div>
+  </fieldset>
+
+  <!-- inputreport events -->
+  <fieldset style="border:1px solid var(--border);border-radius:6px;padding:.6rem">
+    <legend style="color:var(--muted);font-size:.7rem;padding:0 .3em">INPUT REPORT EVENTS</legend>
+    <div class="row">
+      <button id="btn-listen"   disabled>Start listening</button>
+      <button id="btn-unlisten" disabled>Stop</button>
+      <span id="event-count" style="color:var(--muted);font-size:.75rem">0 events</span>
+    </div>
+  </fieldset>
+</section>
+
+<!-- ── Log ─────────────────────────────────────────────────────────────────── -->
+<section class="panel" id="log-panel">
+  <h2 style="display:flex;justify-content:space-between">
+    Log
+    <button onclick="document.getElementById('log').innerHTML=''" style="font-size:.65rem;padding:.1em .4em">clear</button>
+  </h2>
+  <div id="log"></div>
+</section>
+
+<script>
+'use strict';
+
+// ── Logging ────────────────────────────────────────────────────────────────────
+const $log = document.getElementById('log');
+function log(msg, cls = 'log-info') {
+  const ts  = new Date().toTimeString().slice(0, 8);
+  const div = document.createElement('div');
+  div.className = `log-entry ${cls}`;
+  div.innerHTML = `<span class="log-ts">${ts} </span>${escHtml(msg)}`;
+  $log.prepend(div);    // newest at top (column-reverse shows it at bottom)
+}
+function logOk(m)    { log('✓ ' + m, 'log-ok');    }
+function logErr(m)   { log('✗ ' + m, 'log-err');   }
+function logWarn(m)  { log('⚠ ' + m, 'log-warn');  }
+function logData(m)  { log(m,          'log-data');  }
+function logEvent(m) { log('⚡ ' + m, 'log-event'); }
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function hexBytes(arr) {
+  return Array.from(arr).map(b => b.toString(16).padStart(2,'0')).join(' ');
+}
+
+// ── State ──────────────────────────────────────────────────────────────────────
+let selectedDevice = null;   // HIDDevice instance
+let readLoopActive = false;
+let inputReportListener = null;
+let eventCount = 0;
+
+// ── Badge helpers ──────────────────────────────────────────────────────────────
+function setBadge(id, text, ok) {
+  const el = document.getElementById(id);
+  el.textContent = text;
+  el.className = 'badge ' + (ok === true ? 'badge-ok' : ok === false ? 'badge-err' : 'badge-warn');
+}
+
+// ── API availability check ─────────────────────────────────────────────────────
+window.addEventListener('load', () => {
+  if (typeof navigator.hid !== 'undefined') {
+    setBadge('badge-api', 'API: available ✓', true);
+    logOk('navigator.hid is available (addon is loaded)');
+  } else {
+    setBadge('badge-api', 'API: missing ✗', false);
+    logErr('navigator.hid is NOT available');
+    logWarn('Load the addon: about:debugging → This Firefox → Load Temporary Add-on → addon/manifest.json');
+    logWarn('The page must be served over http:// – file:// URLs may not get content scripts.');
+  }
+});
+
+// ── Enumerate ─────────────────────────────────────────────────────────────────
+document.getElementById('btn-enumerate').addEventListener('click', async () => {
+  log('Enumerating…');
+  try {
+    const devices = await navigator.hid.getDevices();
+    if (devices.length === 0) {
+      logWarn('No devices returned. Try "Request Device…" to grant access first.');
+    } else {
+      logOk(`${devices.length} device(s) found`);
+    }
+    renderDeviceList(devices);
+    setBadge('badge-nm', `NM: ok (${devices.length} dev)`, true);
+  } catch (e) {
+    logErr('Enumerate failed: ' + e.message);
+    setBadge('badge-nm', 'NM: error', false);
+  }
+});
+
+// ── Request Device ────────────────────────────────────────────────────────────
+document.getElementById('btn-request').addEventListener('click', async () => {
+  log('Requesting device (picker will open)…');
+  try {
+    const device = await navigator.hid.requestDevice({ filters: [] });
+    if (device) {
+      logOk(`Selected: ${device.productName} [${device.vendorId.toString(16).padStart(4,'0')}:${device.productId.toString(16).padStart(4,'0')}]`);
+      selectDevice(device);
+      setBadge('badge-nm', 'NM: ok', true);
+    }
+  } catch (e) {
+    if (e.name !== 'NotFoundError') logErr('Request failed: ' + e.message);
+    else log('Picker cancelled');
+  }
+});
+
+// ── Device list rendering ─────────────────────────────────────────────────────
+function renderDeviceList(devices) {
+  const list = document.getElementById('device-list');
+  list.innerHTML = '';
+  if (devices.length === 0) {
+    list.innerHTML = '<span style="color:var(--muted);font-size:.8rem">No devices</span>';
+    return;
+  }
+  devices.forEach(dev => {
+    const card = document.createElement('div');
+    card.className = 'device-card' + (dev === selectedDevice ? ' selected' : '') + (dev.opened ? ' opened' : '');
+    card.innerHTML = `
+      <div class="device-vid">${dev.vendorId.toString(16).padStart(4,'0')}<br>${dev.productId.toString(16).padStart(4,'0')}</div>
+      <div class="device-name">${escHtml(dev.productName || '(no name)')}</div>
+      <div class="device-path">${escHtml(dev.manufacturer||'')} · ${escHtml(dev.serialNumber||'')}</div>`;
+    card.addEventListener('click', () => selectDevice(dev));
+    list.appendChild(card);
+  });
+}
+
+function selectDevice(dev) {
+  selectedDevice = dev;
+  setBadge('badge-dev', `${dev.productName || 'device'} [${dev.vendorId.toString(16).padStart(4,'0')}:${dev.productId.toString(16).padStart(4,'0')}]`, null);
+  document.getElementById('btn-open').disabled  = dev.opened;
+  document.getElementById('btn-close').disabled = !dev.opened;
+  document.getElementById('btn-read').disabled  = !dev.opened;
+  document.getElementById('btn-read-loop').disabled = !dev.opened;
+  document.getElementById('btn-write').disabled = !dev.opened;
+  document.getElementById('btn-listen').disabled = !dev.opened;
+  log(`Selected: ${dev.productName}`);
+  // Re-render to show selection highlight
+  navigator.hid.getDevices().then(renderDeviceList).catch(() => {});
+}
+
+// ── Open ──────────────────────────────────────────────────────────────────────
+document.getElementById('btn-open').addEventListener('click', async () => {
+  if (!selectedDevice) return;
+  try {
+    await selectedDevice.open();
+    logOk(`Opened: ${selectedDevice.productName}`);
+    setBadge('badge-dev', selectedDevice.productName + ' [open]', true);
+    document.getElementById('btn-open').disabled  = true;
+    document.getElementById('btn-close').disabled = false;
+    document.getElementById('btn-read').disabled  = false;
+    document.getElementById('btn-read-loop').disabled = false;
+    document.getElementById('btn-write').disabled = false;
+    document.getElementById('btn-listen').disabled = false;
+  } catch (e) {
+    logErr('Open failed: ' + e.message);
+  }
+});
+
+// ── Close ─────────────────────────────────────────────────────────────────────
+document.getElementById('btn-close').addEventListener('click', async () => {
+  if (!selectedDevice) return;
+  stopReadLoop();
+  stopListening();
+  try {
+    await selectedDevice.close();
+    logOk('Closed');
+    setBadge('badge-dev', selectedDevice.productName || 'device', null);
+    document.getElementById('btn-open').disabled  = false;
+    document.getElementById('btn-close').disabled = true;
+    document.getElementById('btn-read').disabled  = true;
+    document.getElementById('btn-read-loop').disabled = true;
+    document.getElementById('btn-write').disabled = true;
+    document.getElementById('btn-listen').disabled = true;
+  } catch (e) {
+    logErr('Close failed: ' + e.message);
+  }
+});
+
+// ── Read ──────────────────────────────────────────────────────────────────────
+document.getElementById('btn-read').addEventListener('click', doRead);
+
+async function doRead() {
+  if (!selectedDevice?.opened) return;
+  const timeout = parseInt(document.getElementById('read-timeout').value) || 1000;
+  try {
+    const view = await selectedDevice.read(64, timeout);
+    const bytes = new Uint8Array(view.buffer);
+    logData(`Read ${bytes.length}B: ${hexBytes(bytes)}`);
+    return bytes;
+  } catch (e) {
+    if (e.message?.includes('timed out') || e.name === 'NetworkError') {
+      logWarn('Read timed out (device idle)');
+    } else {
+      logErr('Read: ' + e.message);
+    }
+  }
+}
+
+// ── Read loop ─────────────────────────────────────────────────────────────────
+document.getElementById('btn-read-loop').addEventListener('click', startReadLoop);
+document.getElementById('btn-read-stop').addEventListener('click', stopReadLoop);
+
+function startReadLoop() {
+  if (readLoopActive) return;
+  readLoopActive = true;
+  document.getElementById('btn-read-loop').disabled = true;
+  document.getElementById('btn-read-stop').disabled = false;
+  log('Read loop started');
+  (async () => {
+    while (readLoopActive && selectedDevice?.opened) {
+      await doRead();
+    }
+  })();
+}
+
+function stopReadLoop() {
+  if (!readLoopActive) return;
+  readLoopActive = false;
+  document.getElementById('btn-read-loop').disabled = false;
+  document.getElementById('btn-read-stop').disabled = true;
+  log('Read loop stopped');
+}
+
+// ── Write ─────────────────────────────────────────────────────────────────────
+document.getElementById('btn-write').addEventListener('click', async () => {
+  if (!selectedDevice?.opened) return;
+  const hex = document.getElementById('write-hex').value.trim();
+  const bytes = hex.split(/\s+/).filter(Boolean).map(h => parseInt(h, 16));
+  if (bytes.some(isNaN)) { logErr('Invalid hex bytes'); return; }
+  try {
+    await selectedDevice.write(new Uint8Array(bytes));
+    logOk(`Wrote ${bytes.length}B: ${hexBytes(bytes)}`);
+  } catch (e) {
+    logErr('Write: ' + e.message);
+  }
+});
+
+// ── inputreport events ────────────────────────────────────────────────────────
+document.getElementById('btn-listen').addEventListener('click', startListening);
+document.getElementById('btn-unlisten').addEventListener('click', stopListening);
+
+function startListening() {
+  if (!selectedDevice || inputReportListener) return;
+  eventCount = 0;
+  inputReportListener = (e) => {
+    eventCount++;
+    document.getElementById('event-count').textContent = `${eventCount} events`;
+    const bytes = new Uint8Array(e.data.buffer);
+    logEvent(`inputreport  reportId=${e.reportId}  ${hexBytes(bytes)}`);
+  };
+  selectedDevice.addEventListener('inputreport', inputReportListener);
+  document.getElementById('btn-listen').disabled   = true;
+  document.getElementById('btn-unlisten').disabled = false;
+  logOk('Listening for inputreport events');
+}
+
+function stopListening() {
+  if (!selectedDevice || !inputReportListener) return;
+  selectedDevice.removeEventListener('inputreport', inputReportListener);
+  inputReportListener = null;
+  document.getElementById('btn-listen').disabled   = false;
+  document.getElementById('btn-unlisten').disabled = true;
+  log('Stopped listening');
+}
+</script>
+</body>
+</html>

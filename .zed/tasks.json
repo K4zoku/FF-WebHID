@@ -1,0 +1,44 @@
+[
+  {
+    "label": "Setup",
+    "command": "meson",
+    "args": ["setup", "--wipe", "build"],
+    "cwd": "$ZED_WORKTREE_ROOT/server",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "no_focus",
+    "hide": "never",
+    "shell": "system",
+    "show_summary": true,
+    "show_command": false,
+    "tags": ["setup", "server"]
+  },
+  {
+    "label": "Build",
+    "command": "meson",
+    "args": ["compile"],
+    "cwd": "$ZED_WORKTREE_ROOT/server/build",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "no_focus",
+    "hide": "never",
+    "shell": "system",
+    "show_summary": true,
+    "show_command": false,
+    "tags": ["build", "server"],
+  },
+  {
+    "label": "Run",
+    "command": "pkexec",
+    "args": ["./WebHIDServer"],
+    "cwd": "$ZED_WORKTREE_ROOT/server/build",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "always",
+    "hide": "never",
+    "shell": "system",
+    "show_summary": true,
+    "show_command": false,
+    "tags": ["run", "server"]
+  }
+]
