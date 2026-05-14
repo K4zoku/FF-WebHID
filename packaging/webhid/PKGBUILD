@@ -11,14 +11,14 @@
 pkgname=webhid
 pkgver=0.1.0
 pkgrel=1
-pkgdesc='WebHID implementation for Firefox/Zen via a native-messaging bridge and hidraw daemon'
+pkgdesc='WebHID implementation for Firefox via a native-messaging bridge and hidraw daemon'
 arch=('x86_64' 'aarch64')
-url='https://github.com/user/webhid'
+url='https://github.com/k4zoku/FF-WebHID'
 license=('MIT')
 # libudev is provided by systemd on Arch Linux
 depends=('libudev.so')
 makedepends=('cargo')
-optdepends=('webhid-addon: Firefox/Zen browser extension (system-wide install)')
+optdepends=('webhid-addon: Firefox browser extension (system-wide install)')
 install=webhid.install
 # No source array – we build directly from the repository tree via startdir.
 # The Cargo workspace lives at  <repo>/crates/Cargo.toml

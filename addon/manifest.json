@@ -30,7 +30,7 @@
 
   "web_accessible_resources": [
     {
-      "resources": ["res/*.svg"],
+      "resources": ["res/*.svg", "webhid-modal.css"],
       "matches": ["<all_urls>"]
     }
   ],
@@ -38,7 +38,11 @@
   "browser_specific_settings": {
     "gecko": {
       "id": "webhid@firefox.org",
-      "strict_min_version": "109.0"
+      "strict_min_version": "142.0",
+      "data_collection_permissions": {
+        "required": ["websiteContent"],
+        "optional": []
+      }
     }
   }
 }

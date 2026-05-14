@@ -19,8 +19,7 @@ post_install() {
     echo ""
     echo "     Then re-run the daemon as your normal user instead of root."
     echo ""
-    echo "  3) Install the Firefox/Zen browser addon:"
-    echo "       • system-wide:  pacman -S webhid-addon"
+    echo "  3) Install the Firefox browser addon:"
     echo "       • temporary:    about:debugging → Load Temporary Add-on"
     echo ""
 }
