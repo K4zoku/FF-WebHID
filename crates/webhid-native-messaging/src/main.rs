@@ -186,6 +186,16 @@ fn nm_to_ipc(req: NmRequest, id: u32) -> IpcRequest {
             let device_id = String::from_utf8_lossy(&device_id).into_owned();
             IpcRequest::Write { id, device_id, data }
         }
+
+        NmRequest::ReadFeatureReport { device_id, report_id } => {
+            let device_id = String::from_utf8_lossy(&device_id).into_owned();
+            IpcRequest::ReadFeature { id, device_id, report_id }
+        }
+
+        NmRequest::WriteFeatureReport { device_id, data } => {
+            let device_id = String::from_utf8_lossy(&device_id).into_owned();
+            IpcRequest::WriteFeature { id, device_id, data }
+        }
     }
 }
 

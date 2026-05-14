@@ -77,6 +77,22 @@ const NativeMessaging = {
     });
   },
 
+  async readFeatureReport(deviceId, reportId) {
+    return await this.sendRequest({
+      action: "readFeatureReport",
+      device_id: deviceId.split("").map((c) => c.charCodeAt(0)),
+      report_id: reportId,
+    });
+  },
+
+  async writeFeatureReport(deviceId, data) {
+    return await this.sendRequest({
+      action: "writeFeatureReport",
+      device_id: deviceId.split("").map((c) => c.charCodeAt(0)),
+      data: Array.from(data),
+    });
+  },
+
   onMessage(message) {
     if (message.event_type) {
       // Forward device events to every content script so HIDDevice instances
@@ -142,6 +158,24 @@ browser.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     case "write":
       // device_id and data arrive as separate arrays from the content script.
       NativeMessaging.writeDevice(
+        String.fromCharCode(...request.device_id),
+        request.data
+      )
+        .then(sendResponse)
+        .catch((e) => sendResponse({ success: false, error: e.message }));
+      return true;
+
+    case "readFeatureReport":
+      NativeMessaging.readFeatureReport(
+        String.fromCharCode(...request.device_id),
+        request.report_id
+      )
+        .then(sendResponse)
+        .catch((e) => sendResponse({ success: false, error: e.message }));
+      return true;
+
+    case "writeFeatureReport":
+      NativeMessaging.writeFeatureReport(
         String.fromCharCode(...request.device_id),
         request.data
       )

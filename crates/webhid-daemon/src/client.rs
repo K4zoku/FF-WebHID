@@ -154,5 +154,43 @@ async fn dispatch(device_mgr: &DeviceManager, client_id: u64, req: IpcRequest) -
                 }
             }
         }
+
+        IpcRequest::ReadFeature { device_id, report_id, .. } => {
+            match device_mgr.get_file(&device_id, client_id) {
+                Err(e) => IpcResponse::Error { id, message: e.to_string() },
+                Ok(file_arc) => {
+                    let result = tokio::task::spawn_blocking(move || {
+                        let file = file_arc.lock().unwrap();
+                        hid::read_feature_report(&file, report_id)
+                    })
+                    .await;
+
+                    match result {
+                        Ok(Ok(data)) => IpcResponse::Data { id, data },
+                        Ok(Err(e)) => IpcResponse::Error { id, message: e.to_string() },
+                        Err(e) => IpcResponse::Error { id, message: e.to_string() },
+                    }
+                }
+            }
+        }
+
+        IpcRequest::WriteFeature { device_id, data, .. } => {
+            match device_mgr.get_file(&device_id, client_id) {
+                Err(e) => IpcResponse::Error { id, message: e.to_string() },
+                Ok(file_arc) => {
+                    let result = tokio::task::spawn_blocking(move || {
+                        let file = file_arc.lock().unwrap();
+                        hid::write_feature_report(&file, &data)
+                    })
+                    .await;
+
+                    match result {
+                        Ok(Ok(())) => IpcResponse::Ok { id },
+                        Ok(Err(e)) => IpcResponse::Error { id, message: e.to_string() },
+                        Err(e) => IpcResponse::Error { id, message: e.to_string() },
+                    }
+                }
+            }
+        }
     }
 }
