@@ -4,7 +4,7 @@ use std::fs::{File, OpenOptions};
 use std::io;
 use std::os::unix::io::AsRawFd;
 
-use webhid::DeviceInfo;
+use webhid::{DeviceInfo, Collection};
 
 // ---------------------------------------------------------------------------
 // Enumeration
@@ -31,6 +31,29 @@ pub fn info_from_device(dev: &udev::Device) -> Option<DeviceInfo> {
     let manufacturer = prop_str(dev, "ID_VENDOR");
     let serial_number = prop_str(dev, "ID_SERIAL_SHORT");
 
+    // Attempt to read the raw report descriptor from sysfs. For a hidraw
+    // node `/dev/hidrawN` the descriptor is typically available at
+    // `/sys/class/hidraw/hidrawN/device/report_descriptor`. If this fails we
+    // simply omit the descriptor. If we successfully obtain the descriptor we
+    // parse it into a shallow `collections` tree so the addon gets structured
+    // metadata directly from the daemon.
+    let (report_descriptor, collections) = std::path::Path::new(&path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .and_then(|devname| {
+            let sys_path = format!("/sys/class/hidraw/{}/device/report_descriptor", devname);
+            match std::fs::read(&sys_path) {
+                Ok(bytes) => {
+                    // Parse into collections; parsing is forgiving and may
+                    // return an empty vector on errors.
+                    let cols = parse_report_descriptor(&bytes);
+                    Some((Some(bytes), if cols.is_empty() { None } else { Some(cols) }))
+                }
+                Err(_) => None,
+            }
+        })
+        .unwrap_or((None, None));
+
     Some(DeviceInfo {
         vendor_id: vid,
         product_id: pid,
@@ -39,6 +62,8 @@ pub fn info_from_device(dev: &udev::Device) -> Option<DeviceInfo> {
         serial_number,
         usage_page: None,
         usage: None,
+        report_descriptor,
+        collections,
         path,
     })
 }
@@ -118,4 +143,251 @@ pub fn write_report(file: &File, data: &[u8]) -> io::Result<()> {
         return Err(io::Error::last_os_error());
     }
     Ok(())
+}
+
+/// Parse a raw HID report descriptor into a shallow collection tree.
+/// This is a forgiving, limited parser sufficient to extract Collection
+/// boundaries along with the most recent Usage Page / Usage. It is not a
+/// full HID descriptor implementation but covers common descriptors.
+fn parse_report_descriptor(buf: &[u8]) -> Vec<Collection> {
+    let mut flat: Vec<Collection> = Vec::new();
+    let mut parents: Vec<Option<usize>> = Vec::new();
+    let mut stack_parents: Vec<usize> = Vec::new();
+    let mut i: usize = 0;
+
+    // Global state
+    let mut usage_page: Option<u16> = None;
+    let mut report_size: u32 = 0;
+    let mut report_count: u32 = 0;
+    let mut report_id: u8 = 0;
+
+    // Local state
+    let mut usages: Vec<u16> = Vec::new();
+    let mut usage_min: Option<u16> = None;
+    let mut usage_max: Option<u16> = None;
+
+    while i < buf.len() {
+        let b = buf[i];
+        i += 1;
+
+        // Long item (0xFE) - skip
+        if b == 0xFE {
+            if i >= buf.len() { break; }
+            let len = buf[i] as usize;
+            i += 1;
+            // skip tag
+            if i >= buf.len() { break; }
+            i += 1;
+            i = i.saturating_add(len);
+            continue;
+        }
+
+        // Common opcodes we care about (for a more complete parser this
+        // should be expanded to fully decode short-item format, but this
+        // covers the idiomatic opcodes found in most USB HID descriptors).
+        match b {
+            0x05 => {
+                // Usage Page (1 byte)
+                if i < buf.len() {
+                    usage_page = Some(buf[i] as u16);
+                    i += 1;
+                }
+            }
+            0x06 => {
+                // Usage Page (16-bit)
+                if i + 1 < buf.len() {
+                    let v = (buf[i] as u16) | ((buf[i + 1] as u16) << 8);
+                    usage_page = Some(v);
+                    i += 2;
+                }
+            }
+            0x09 => {
+                // Usage (1 byte)
+                if i < buf.len() {
+                    usages.push(buf[i] as u16);
+                    i += 1;
+                }
+            }
+            0x0A => {
+                // Usage (16-bit)
+                if i + 1 < buf.len() {
+                    let v = (buf[i] as u16) | ((buf[i + 1] as u16) << 8);
+                    usages.push(v);
+                    i += 2;
+                }
+            }
+            0x19 => {
+                // Usage Minimum (1 byte)
+                if i < buf.len() {
+                    usage_min = Some(buf[i] as u16);
+                    i += 1;
+                }
+            }
+            0x29 => {
+                // Usage Maximum (1 byte)
+                if i < buf.len() {
+                    usage_max = Some(buf[i] as u16);
+                    i += 1;
+                }
+            }
+            0x2A => {
+                // Usage Min/Max (16-bit)
+                if i + 1 < buf.len() {
+                    let v = (buf[i] as u16) | ((buf[i + 1] as u16) << 8);
+                    // Ambiguous tag in short parsing; prefer treating as a single
+                    // usage entry when used as 'Usage'
+                    usages.push(v);
+                    i += 2;
+                }
+            }
+            0x75 => {
+                // Report Size (bits)
+                if i < buf.len() {
+                    report_size = buf[i] as u32;
+                    i += 1;
+                }
+            }
+            0x95 => {
+                // Report Count
+                if i < buf.len() {
+                    report_count = buf[i] as u32;
+                    i += 1;
+                }
+            }
+            0x85 => {
+                // Report ID
+                if i < buf.len() {
+                    report_id = buf[i];
+                    i += 1;
+                }
+            }
+            0xA1 => {
+                // Collection: next byte is collection type
+                if i < buf.len() {
+                    let col_type = buf[i];
+                    i += 1;
+                    let col = Collection { collection_type: col_type, usage_page, usage: usages.last().cloned(), children: Vec::new(), reports: None };
+                    let parent = stack_parents.last().cloned().map(|v| v);
+                    flat.push(col);
+                    parents.push(parent);
+                    let new_idx = flat.len() - 1;
+                    stack_parents.push(new_idx);
+                    // reset local usages so children don't inherit unless specified
+                    usages.clear();
+                    usage_min = None;
+                    usage_max = None;
+                }
+            }
+            0xC0 => {
+                // End Collection
+                stack_parents.pop();
+            }
+            other if (other & 0xF0) == 0x80 || (other & 0xF0) == 0x90 || (other & 0xF0) == 0xB0 => {
+                // Main items: Input (0x80..), Output (0x90..), Feature (0xB0..)
+                // Determine size of the item payload from low two bits.
+                let size_code = (other & 0x03) as usize;
+                let payload_size = match size_code {
+                    0 => 0,
+                    1 => 1,
+                    2 => 2,
+                    3 => 4,
+                    _ => 0,
+                };
+                // Consume payload bytes (these are the item data/flags, not
+                // the report payload itself).
+                i = i.saturating_add(payload_size);
+
+                let report_id_opt = if report_id == 0 { None } else { Some(report_id) };
+                let report_type = if (other & 0xF0) == 0x80 { "input" } else if (other & 0xF0) == 0x90 { "output" } else { "feature" };
+
+                // Build usage list for this field
+                let mut field_usages: Option<Vec<u16>> = None;
+                if !usages.is_empty() {
+                    field_usages = Some(usages.clone());
+                } else if usage_min.is_some() && usage_max.is_some() {
+                    let min = usage_min.unwrap();
+                    let max = usage_max.unwrap();
+                    if max >= min {
+                        let mut v = Vec::new();
+                        for u in min..=max {
+                            v.push(u);
+                        }
+                        field_usages = Some(v);
+                    }
+                }
+
+                // Compose a Field
+                let field = webhid::Field {
+                    report_id: report_id_opt,
+                    report_type: report_type.to_string(),
+                    size: report_size,
+                    count: report_count,
+                    usage_page,
+                    usage: usages.last().cloned(),
+                    usages: field_usages,
+                };
+
+                // Insert field into the active collection's report bucket.
+                if let Some(&col_idx) = stack_parents.last() {
+                    if let Some(col) = flat.get_mut(col_idx) {
+                        if col.reports.is_none() { col.reports = Some(Vec::new()); }
+                        let reports = col.reports.as_mut().unwrap();
+                        // find matching report by id + type
+                        let mut found = false;
+                        for r in reports.iter_mut() {
+                            if r.id == field.report_id && r.report_type == field.report_type {
+                                r.fields.push(field.clone());
+                                found = true;
+                                break;
+                            }
+                        }
+                        if !found {
+                            let rep = webhid::Report { id: field.report_id, report_type: field.report_type.clone(), size_bits: field.size * field.count, fields: vec![field] };
+                            reports.push(rep);
+                        }
+                    }
+                } else {
+                    // No active collection, create a root placeholder
+                    let mut col = Collection { collection_type: 0, usage_page, usage: None, children: Vec::new(), reports: None };
+                    let rep = webhid::Report { id: field.report_id, report_type: field.report_type.clone(), size_bits: field.size * field.count, fields: vec![field] };
+                    col.reports = Some(vec![rep]);
+                    flat.push(col);
+                    parents.push(None);
+                }
+
+                // Clear local usages after assigning them to a field.
+                usages.clear();
+                usage_min = None;
+                usage_max = None;
+            }
+            _ => {
+                // Fallback: interpret the short-item size and skip payload.
+                let size_code = (b & 0x03) as usize;
+                let size = match size_code {
+                    0 => 0,
+                    1 => 1,
+                    2 => 2,
+                    3 => 4,
+                    _ => 0,
+                };
+                i = i.saturating_add(size);
+            }
+        }
+    }
+
+    // Build nested tree from flat list using parent indices.
+    let mut nodes: Vec<Collection> = flat.iter().map(|c| Collection { collection_type: c.collection_type, usage_page: c.usage_page, usage: c.usage, children: Vec::new(), reports: c.reports.clone() }).collect();
+    let mut roots: Vec<Collection> = Vec::new();
+
+    // Use a clone of nodes for safe immutable access while mutating `nodes`.
+    let clones = nodes.clone();
+    for (idx, parent_opt) in parents.into_iter().enumerate() {
+        if let Some(p) = parent_opt {
+            nodes[p].children.push(clones[idx].clone());
+        } else {
+            roots.push(clones[idx].clone());
+        }
+    }
+
+    roots
 }

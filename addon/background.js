@@ -157,12 +157,12 @@ browser.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     case "getSavedDevices":
       (async () => {
         try {
-          const key = "webhid_" + request.origin.replace(/[^a-zA-Z0-9]/g, "_");
+          const key = encodeURIComponent(request.origin);
           const result = await browser.storage.local.get(key);
-          const devices = result[key] || [];
-          sendResponse({ success: true, devices });
+          const hashes = result[key] || [];
+          sendResponse({ success: true, hashes });
         } catch (e) {
-          sendResponse({ success: false, error: e.message, devices: [] });
+          sendResponse({ success: false, error: e.message, hashes: [] });
         }
       })();
       return true;
@@ -170,20 +170,22 @@ browser.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     case "saveDevice":
       (async () => {
         try {
-          const key = "webhid_" + request.origin.replace(/[^a-zA-Z0-9]/g, "_");
+          const key = encodeURIComponent(request.origin);
           const result = await browser.storage.local.get(key);
-          const saved = result[key] || [];
-          const exists = saved.some((d) => d.hash === request.device.hash);
-          if (!exists) {
-            saved.push(request.device);
-            await browser.storage.local.set({ [key]: saved });
+          const hashes = result[key] || [];
+          const deviceHash = request.device.hash;
+          if (!hashes.includes(deviceHash)) {
+            hashes.push(deviceHash);
+            await browser.storage.local.set({ [key]: hashes });
           }
-          sendResponse({ success: true, devices: saved });
+          sendResponse({ success: true, hashes });
         } catch (e) {
-          sendResponse({ success: false, error: e.message, devices: [] });
+          sendResponse({ success: false, error: e.message, hashes: [] });
         }
       })();
       return true;
+
+
 
     default:
       return false;
