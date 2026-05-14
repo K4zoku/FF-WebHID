@@ -54,7 +54,7 @@ async fn main() -> anyhow::Result<()> {
     udev_monitor::start(event_tx.clone()).context("start udev monitor")?;
 
     // Shared device manager.
-    let device_mgr = Arc::new(DeviceManager::new());
+    let device_mgr = Arc::new(DeviceManager::new(event_tx.clone()));
 
     let mut next_client_id: u64 = 0;
     loop {

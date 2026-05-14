@@ -4,6 +4,49 @@ use serde::{Deserialize, Serialize};
 // Shared device info
 // ---------------------------------------------------------------------------
 
+/// A (shallow) collection entry derived from a HID report descriptor.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Collection {
+    #[serde(rename = "type")]
+    pub collection_type: u8,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage_page: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage: Option<u16>,
+    #[serde(default)]
+    pub children: Vec<Collection>,
+    /// Optional, richer report metadata parsed from the descriptor.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reports: Option<Vec<Report>>,
+}
+
+/// A field within a HID report (input/output/feature).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Field {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub report_id: Option<u8>,
+    pub report_type: String,
+    pub size: u32,
+    pub count: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage_page: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usages: Option<Vec<u16>>,
+}
+
+/// A HID report grouping (identified by report-id and type).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Report {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<u8>,
+    pub report_type: String,
+    pub size_bits: u32,
+    #[serde(default)]
+    pub fields: Vec<Field>,
+}
+
 /// Information about a connected HID device, derived from udev/sysfs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceInfo {
@@ -19,6 +62,15 @@ pub struct DeviceInfo {
     pub usage_page: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<u16>,
+    /// Raw HID report descriptor bytes, when available (from sysfs). This is
+    /// provided so the addon can parse full `collections` metadata without
+    /// requiring the daemon to implement descriptor parsing.  (Daemon may
+    /// also populate `collections` directly.)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub report_descriptor: Option<Vec<u8>>,
+    /// Parsed collection metadata (populated by daemon when possible).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub collections: Option<Vec<Collection>>,
     /// Absolute path to the hidraw node, e.g. `/dev/hidraw0`.
     /// This doubles as the stable device ID sent to the addon.
     pub path: String,
@@ -118,9 +170,6 @@ pub enum NmRequest {
 }
 
 /// A response or event sent back to Firefox via stdout.
-///
-/// Fields that are not relevant for a particular message are omitted from the
-/// serialised JSON thanks to `skip_serializing_if`.
 #[derive(Debug, Default, Serialize)]
 pub struct NmResponse {
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -16,6 +16,10 @@
       this._onDeviceClick = null;
       this._onDialogCancel = null;
 
+      this._savedDevices = null;
+      // Map from rendered deviceId -> array of device objects (1 or more)
+      this._deviceGroups = {};
+
       this.init();
     }
 
@@ -180,17 +184,59 @@
         });
         if (response.success) {
           this.devices = response.devices || [];
-          this.renderDevices();
+          await this.renderDevices();
         } else {
           this.showError("Failed to load devices");
         }
       } catch (error) {
-        console.error("Failed to load devices:", error);
         this.showError("Failed to connect to server");
+        console.debug("[WebHID]", "Failed to connect to server", error);
       }
     }
 
-    renderDevices() {
+    createDeviceHash(device) {
+      const vendorId = String(device.vendor_id || 0);
+      const productId = String(device.product_id || 0);
+      const serialNumber = String(device.serial_number || "");
+      const path = String(device.path || "");
+      const identifier = vendorId + ":" + productId + ":" + serialNumber + ":" + path;
+
+      // Simple DJB2 hash algorithm
+      let hash = 5381;
+      for (let i = 0; i < identifier.length; i++) {
+        hash = ((hash << 5) + hash) + identifier.charCodeAt(i);
+        hash = hash & 0xFFFFFFFF; // Convert to 32-bit integer
+      }
+
+      // Convert to positive hex string
+      return Math.abs(hash).toString(16);
+    }
+
+    async getSavedDevices() {
+      // Return cached hashes if available
+      if (this._savedDevices !== null) {
+        return this._savedDevices;
+      }
+
+      try {
+        const result = await browser.runtime.sendMessage({
+          action: "getSavedDevices",
+          origin: window.location.origin,
+        });
+        this._savedDevices = result.hashes || [];
+        return this._savedDevices;
+      } catch (error) {
+        return [];
+      }
+    }
+
+    async deviceMatchesSaved(device) {
+      const savedHashes = await this.getSavedDevices();
+      const deviceHash = this.createDeviceHash(device);
+      return savedHashes.includes(deviceHash);
+    }
+
+    async renderDevices() {
       if (!this.dialog) return;
 
       const deviceList = this.dialog.querySelector("#webhidDeviceList");
@@ -207,42 +253,67 @@
         return;
       }
 
-      const ambiguous = this._ambiguousPaths(filteredDevices);
+      // Group devices by display name so ambiguous (same-name) devices are
+      // shown as a single picker item but selecting that item returns all
+      // underlying HID interfaces as an array.
+      const groups = new Map();
+      for (const device of filteredDevices) {
+        const name = device.product_name || "Unknown Device";
+        if (!groups.has(name)) groups.set(name, []);
+        groups.get(name).push(device);
+      }
 
-      deviceList.innerHTML = filteredDevices
-        .map((device) => {
-          const deviceId = this.getDeviceId(device);
-          const type    = this._guessDeviceType(device);
-          const iconUrl = browser.runtime.getURL(`res/${type}.svg`);
-          // When multiple interfaces share the same display name, append the
-          // hidraw node (e.g. "hidraw3") so the user can tell them apart.
-          const iface = ambiguous.has(device.path)
-            ? `<div class="webhid-device-iface">${this.escapeHtml(device.path.split("/").pop())}</div>`
-            : "";
-          return `
-            <div class="webhid-device-item" data-device-id="${this.escapeHtml(deviceId)}" tabindex="0" role="button" aria-label="Select device ${this.escapeHtml(device.product_name || "Unknown Device")}">
-              <img class="webhid-device-icon" src="${iconUrl}" alt="${type}" draggable="false">
-              <div class="webhid-device-body">
-                <div class="webhid-device-name">${this.escapeHtml(device.product_name || "Unknown Device")}</div>
-                <div class="webhid-device-info">Vendor: ${this.hex(device.vendor_id)} Product: ${this.hex(device.product_id)}</div>
-                ${device.manufacturer ? `<div class="webhid-device-vendor">${this.escapeHtml(device.manufacturer)}</div>` : ""}
-                ${iface}
-              </div>
-            </div>
-          `;
-        })
-        .join("");
+      // Use Promise.all to properly await all paired status checks in parallel
+      const pairedStatuses = await Promise.all(
+        filteredDevices.map((device) => this.deviceMatchesSaved(device))
+      );
 
-      // Measure each name element after it's in the DOM.
-      // If the text overflows its container, tag it and set the exact
-      // scroll distance as a CSS variable so the animation never over-scrolls.
-      deviceList.querySelectorAll(".webhid-device-name").forEach((el) => {
-        const overflow = el.scrollWidth - el.clientWidth;
-        if (overflow > 0) {
-          el.classList.add("webhid-name-overflow");
-          el.style.setProperty("--webhid-overflow", overflow);
+      // Build device groups mapping for selection lookup
+      this._deviceGroups = {};
+
+      // Render one item per group
+      const itemsHtml = [];
+      let pairedIndex = 0; // index into pairedStatuses for devices in filteredDevices
+      for (const [name, devices] of groups.entries()) {
+        // Determine if any device in this group is paired (saved)
+        let isPaired = false;
+        const deviceIds = [];
+        for (const d of devices) {
+          // Find index of this device in filteredDevices to read pairedStatuses
+          const idx = filteredDevices.indexOf(d);
+          if (idx >= 0 && pairedStatuses[idx]) isPaired = true;
+          deviceIds.push(d.path);
         }
-      });
+
+        // Create a stable group id. For single-device groups use the path so
+        // external code relying on unique paths continues to work; for multi-
+        // interface groups use a generated id prefixed with 'group:'.
+        const groupId = devices.length === 1 ? devices[0].path : `group:${this.createDeviceHash(devices[0])}`;
+        this._deviceGroups[groupId] = devices.slice(); // store copy
+
+        // Use the first device to determine icon/type/manufacturer
+        const primary = devices[0];
+        const deviceId = groupId;
+        const type = this._guessDeviceType(primary);
+        const iconUrl = browser.runtime.getURL(`res/${type}.svg`);
+
+        const iface = devices.length > 1
+          ? `<div class="webhid-device-iface">${this.escapeHtml(devices.length + " interfaces")}</div>`
+          : "";
+
+        itemsHtml.push(`
+          <div class="webhid-device-item${isPaired ? " webhid-device-paired" : ""}" data-device-id="${this.escapeHtml(deviceId)}" tabindex="0" role="button" aria-label="Select device ${this.escapeHtml(primary.product_name || "Unknown Device")}">
+            <img class="webhid-device-icon" src="${iconUrl}" alt="${type}" draggable="false">
+            <div class="webhid-device-body">
+              <div class="webhid-device-name">${this.escapeHtml(name)}</div>
+              ${primary.manufacturer ? `<div class="webhid-device-vendor">${this.escapeHtml(primary.manufacturer)}</div>` : ""}
+              ${iface}
+            </div>
+          </div>
+        `);
+      }
+
+      deviceList.innerHTML = itemsHtml.join("");
     }
 
     applyFilters(devices, filters) {
@@ -273,9 +344,10 @@
 
       // Get device info
       const deviceId = item.dataset.deviceId;
-      this.selectedDevice = this.devices.find(
-        (d) => this.getDeviceId(d) === deviceId,
-      );
+      const devices = this._deviceGroups[deviceId] || [];
+
+      // Set selectedDevice to the array of devices (1 or more)
+      this.selectedDevice = devices;
 
       // Close the dialog with returnValue "selected".
       // _onDialogClose reads this value before cleanup and calls onDeviceSelected.
@@ -285,9 +357,9 @@
     }
 
     getDeviceId(device) {
-      // Use the hidraw path as the stable, per-interface unique ID.
-      // A physical device with multiple HID interfaces has multiple paths
-      // (e.g. /dev/hidraw3 and /dev/hidraw4) that must remain distinct.
+      // Use the hidraw path as the stable, per-interface unique ID for
+      // single-interface items. For grouped items the id is generated during
+      // render and stored in _deviceGroups.
       return device.path;
     }
 
@@ -339,17 +411,36 @@
     }
 
     escapeHtml(text) {
-      const div = document.createElement("div");
-      div.textContent = text;
-      return div.innerHTML;
+      const span = document.createElement("span");
+      span.textContent = text;
+      return span.innerHTML;
     }
 
-    onDeviceSelected(device) {
-      const event = new CustomEvent("webhid-device-selected", {
-        detail: { device },
-      });
-      window.dispatchEvent(event);
-    }
+    onDeviceSelected(devices) {
+          // Normalize to an array so consumers always receive an array of devices
+          const devicesArr = Array.isArray(devices) ? devices : [devices];
+
+          // Dispatch event with the devices array and update local saved-hashes cache asynchronously.
+          const event = new CustomEvent("webhid-device-selected", {
+            detail: { devices: devicesArr },
+          });
+
+          // Update local saved devices cache so the UI reflects pairing state
+          (async () => {
+            try {
+              const saved = await this.getSavedDevices();
+              for (const d of devicesArr) {
+                const h = this.createDeviceHash(d);
+                if (!saved.includes(h)) saved.push(h);
+              }
+              this._savedDevices = saved;
+            } catch (e) {
+              // ignore
+            }
+          })();
+
+          window.dispatchEvent(event);
+        }
 
     onDeviceCancelled() {
       const event = new CustomEvent("webhid-device-cancelled", { detail: {} });
@@ -401,8 +492,9 @@
 
       onSelected = (e) => {
         cleanup();
+        // result contains an array of devices under `devices`
         window.postMessage(
-          { __webhid_bridge: "res", id, result: { device: e.detail.device } },
+          { __webhid_bridge: "res", id, result: { devices: e.detail.devices } },
           "*",
         );
       };
@@ -466,7 +558,7 @@
     // ── Device persistence helpers ────────────────────────────────────────────
     // Store and retrieve device permissions from addon storage (browser.storage.local)
     // Device permissions are stored per site origin on the addon side
-    // Communication happens via browser.runtime.sendMessage
+    // Communication happens via sendRequest
     //
     // Device identification hash includes:
     // - vendor_id & product_id (USB IDs)
@@ -474,7 +566,8 @@
     // - path (device path, may be empty)
     // Hash is created from these fields to uniquely identify physical devices
 
-    let _savedDevices = null; // Cache for granted devices
+    let _savedDevices = null; // Cache for granted device hashes
+    let _deviceInfoCache = null; // Cache for device info (hash -> device) mapping
 
     /**
      * Creates a hash from device identifiers for effective unique device identification.
@@ -501,22 +594,48 @@
     }
 
     async function getSavedDevices() {
-      // Return cached devices if available
+      // Return cached hashes if available
       if (_savedDevices !== null) {
         return _savedDevices;
       }
 
       try {
-        const result = await browser.runtime.sendMessage({
-          action: "getSavedDevices",
-          origin: window.location.origin,
-        });
-        _savedDevices = result.devices || [];
+        const result = await sendRequest(
+          "getSavedDevices",
+          { origin: window.location.origin },
+        );
+        _savedDevices = result.hashes || [];
+        // Clear device cache so next getDevices() refreshes
+        _deviceInfoCache = null;
         return _savedDevices;
       } catch (error) {
-        console.warn("Failed to retrieve saved devices:", error);
         return [];
       }
+    }
+
+    async function getDeviceCache() {
+      if (_deviceInfoCache !== null) {
+        return _deviceInfoCache;
+      }
+
+      try {
+        const response = await sendRequest("enumerate");
+        const devices = response.success && Array.isArray(response.devices) ? response.devices : [];
+        _deviceInfoCache = new Map();
+        for (const device of devices) {
+          const hash = createDeviceHash(device);
+          _deviceInfoCache.set(hash, device);
+        }
+        return _deviceInfoCache;
+      } catch (error) {
+        _deviceInfoCache = new Map();
+        return _deviceInfoCache;
+      }
+    }
+
+    async function getDeviceByHash(hash) {
+      const cache = await getDeviceCache();
+      return cache.get(hash) || null;
     }
 
     async function saveDevice(deviceInfo) {
@@ -525,34 +644,31 @@
         _savedDevices = null;
         const deviceHash = createDeviceHash(deviceInfo);
 
-        const result = await browser.runtime.sendMessage({
-          action: "saveDevice",
-          origin: window.location.origin,
-          device: {
-            hash: deviceHash,
-            vendor_id: deviceInfo.vendor_id,
-            product_id: deviceInfo.product_id,
-            serial_number: deviceInfo.serial_number || "",
-            path: deviceInfo.path || "",
-            product_name: deviceInfo.product_name,
-            manufacturer: deviceInfo.manufacturer,
-            timestamp: new Date().toISOString(),
-          },
-        });
+        const result = await sendRequest(
+          "saveDevice",
+          {
+            origin: window.location.origin,
+            device: {
+              hash: deviceHash,
+            },
+          }
+        );
 
         if (result.success) {
-          // Update cache
-          _savedDevices = result.devices || [];
+          // Update cache with just the hashes array
+          _savedDevices = result.hashes || [];
+          // Clear device cache so next getDevices() refreshes
+          _deviceInfoCache = null;
         }
       } catch (error) {
-        console.warn("Failed to save device:", error);
+
       }
     }
 
     async function deviceMatchesSaved(device) {
-      const saved = await getSavedDevices();
+      const savedHashes = await getSavedDevices();
       const deviceHash = createDeviceHash(device);
-      return saved.some((d) => d.hash === deviceHash);
+      return savedHashes.includes(deviceHash);
     }
 
     // Listen for responses and events from the content script bridge.
@@ -603,9 +719,85 @@
       }
     }
 
+    // Very small, forgiving HID report-descriptor parser that extracts a
+    // shallow collection tree (usage page / usage per Collection). This is
+    // intentionally minimal: it looks for common opcodes (Usage Page = 0x05,
+    // Usage = 0x09, Collection = 0xA1, End Collection = 0xC0) and associates
+    // the most-recent usage/page with the following Collection. This will
+    // cover many USB HID descriptors and provides immediate `collections`
+    // data for pages; it is not a fully-compliant HID parser.
+    function parseReportDescriptor(bytes) {
+      const collections = [];
+      const stack = [];
+      let i = 0;
+      let currentUsagePage = null;
+      let currentUsage = null;
+
+      const readData = (size) => {
+        if (i + size > bytes.length) return null;
+        let val = 0;
+        for (let k = 0; k < size; k++) {
+          val |= bytes[i + k] << (8 * k);
+        }
+        i += size;
+        return val;
+      };
+
+      while (i < bytes.length) {
+        const b = bytes[i++];
+        if (b === 0x05) {
+          // Usage Page (1 byte or 2)
+          const v = readData(1);
+          if (v !== null) currentUsagePage = v;
+        } else if (b === 0x06) {
+          // Usage Page (16-bit)
+          const v = readData(2);
+          if (v !== null) currentUsagePage = v;
+        } else if (b === 0x09) {
+          // Usage (1 byte)
+          const v = readData(1);
+          if (v !== null) currentUsage = v;
+        } else if (b === 0x29) {
+          // Usage (1 byte) (usage minimum/maximum - ignore)
+          const v = readData(1);
+        } else if (b === 0xA1) {
+          // Collection, next byte is collection type
+          const colType = readData(1);
+          const col = { type: colType, usagePage: currentUsagePage, usage: currentUsage, children: [] };
+          if (stack.length === 0) {
+            collections.push(col);
+          } else {
+            stack[stack.length - 1].children.push(col);
+          }
+          stack.push(col);
+          // After creating a collection, reset currentUsage to avoid leaking to subsequent siblings
+          currentUsage = null;
+        } else if (b === 0xC0) {
+          // End Collection
+          stack.pop();
+        } else {
+          // For other items interpret the short-item size encoded in low 2 bits
+          const sizeCode = b & 0x03;
+          let size = 0;
+          if (sizeCode === 0) size = 0;
+          else if (sizeCode === 1) size = 1;
+          else if (sizeCode === 2) size = 2;
+          else if (sizeCode === 3) size = 4;
+          // consume that many bytes
+          i += size;
+        }
+      }
+
+      return collections;
+    }
+
     // ── HIDDevice ─────────────────────────────────────────────────────────────
 
     class HIDDevice extends EventTarget {
+      // Private fields for internal bookkeeping
+      #inputReportListener = null;
+      #parsedCollections = null;
+
       constructor(deviceInfo) {
         super();
         this.vendorId = deviceInfo.vendor_id;
@@ -615,9 +807,88 @@
         this.serialNumber = deviceInfo.serial_number;
         this.usbVendorId = deviceInfo.vendor_id;
         this.usbProductId = deviceInfo.product_id;
+        // HID usage information (may be null/undefined if daemon didn't provide it)
+        this.usagePage = deviceInfo.usage_page !== undefined ? deviceInfo.usage_page : null;
+        this.usage = deviceInfo.usage !== undefined ? deviceInfo.usage : null;
         this.opened = false;
         this.deviceId = null;
-        this._inputReportListener = null;
+
+        // If the daemon provided parsed `collections`, prefer them. The
+        // daemon-side collection objects may use snake_case field names; we
+        // normalise them to the page API shape (camelCase + `type` instead
+        // of `collection_type`).
+        this.reportDescriptor = null;
+
+        function normalizeCollection(c) {
+          const out = {
+            type: c.type !== undefined ? c.type : (c.collection_type !== undefined ? c.collection_type : null),
+            usagePage: c.usagePage !== undefined ? c.usagePage : (c.usage_page !== undefined ? c.usage_page : null),
+            usage: c.usage !== undefined ? c.usage : (c.usage !== undefined ? c.usage : null),
+            children: [],
+          };
+
+          // Normalize children recursively
+          if (Array.isArray(c.children) && c.children.length > 0) {
+            out.children = c.children.map(normalizeCollection);
+          }
+
+          // If the daemon provided richer report metadata, expose it in a
+          // shape compatible with the WebHID `HIDDevice.collections` examples
+          // on MDN: provide `inputReports`, `outputReports` and `featureReports`
+          // arrays. Each report contains `reportId` and an `items` array with
+          // field-level metadata.
+          if (Array.isArray(c.reports) && c.reports.length > 0) {
+            out.inputReports = [];
+            out.outputReports = [];
+            out.featureReports = [];
+
+            c.reports.forEach((r) => {
+              const rep = {
+                reportId: r.id !== undefined && r.id !== null ? r.id : 0,
+                items: Array.isArray(r.fields)
+                  ? r.fields.map((f) => ({
+                      reportId: f.report_id !== undefined && f.report_id !== null ? f.report_id : (r.id !== undefined && r.id !== null ? r.id : 0),
+                      reportType: f.report_type !== undefined ? f.report_type : (r.report_type !== undefined ? r.report_type : null),
+                      reportSize: f.size !== undefined ? f.size : (r.size_bits !== undefined ? r.size_bits : null),
+                      reportCount: f.count !== undefined ? f.count : null,
+                      usagePage: f.usage_page !== undefined ? f.usage_page : (f.usagePage !== undefined ? f.usagePage : null),
+                      usage: f.usage !== undefined ? f.usage : null,
+                      usages: Array.isArray(f.usages) ? f.usages : null,
+                    }))
+                  : [],
+              };
+
+              if (r.report_type === "input") out.inputReports.push(rep);
+              else if (r.report_type === "output") out.outputReports.push(rep);
+              else if (r.report_type === "feature") out.featureReports.push(rep);
+            });
+          }
+
+          return out;
+        }
+
+        if (deviceInfo.collections && Array.isArray(deviceInfo.collections)) {
+          try {
+            this.#parsedCollections = deviceInfo.collections.map(normalizeCollection);
+          } catch (e) {
+            this.#parsedCollections = null;
+          }
+        } else if (deviceInfo.report_descriptor && Array.isArray(deviceInfo.report_descriptor)) {
+          try {
+            const arr = new Uint8Array(deviceInfo.report_descriptor);
+            this.reportDescriptor = arr;
+            this.#parsedCollections = parseReportDescriptor(arr);
+          } catch (e) {
+            this.reportDescriptor = null;
+            this.#parsedCollections = null;
+          }
+        }
+      }
+
+      // Return parsed collections (if available) or fallback to usage info.
+      get collections() {
+        if (this.#parsedCollections) return this.#parsedCollections;
+        return [{ usagePage: this.usagePage, usage: this.usage }];
       }
 
       async open() {
@@ -694,8 +965,8 @@
 
       addEventListener(type, listener) {
         super.addEventListener(type, listener);
-        if (type === "inputreport" && !this._inputReportListener) {
-          this._inputReportListener = (event) => {
+        if (type === "inputreport" && !this.#inputReportListener) {
+          this.#inputReportListener = (event) => {
             if (!event.data || event.data.__webhid_bridge !== "evt") return;
             const detail = event.data.event;
             if (!detail || detail.event_type !== "input_report") return;
@@ -713,15 +984,15 @@
               }),
             );
           };
-          window.addEventListener("message", this._inputReportListener);
+          window.addEventListener("message", this.#inputReportListener);
         }
       }
 
       removeEventListener(type, listener) {
         super.removeEventListener(type, listener);
-        if (type === "inputreport" && this._inputReportListener) {
-          window.removeEventListener("message", this._inputReportListener);
-          this._inputReportListener = null;
+        if (type === "inputreport" && this.#inputReportListener) {
+          window.removeEventListener("message", this.#inputReportListener);
+          this.#inputReportListener = null;
         }
       }
     }
@@ -734,17 +1005,17 @@
         // that the user has previously been granted access to in response to a
         // requestDevice() call.
         try {
-          const response = await sendRequest("enumerate");
-          if (response.success && Array.isArray(response.devices)) {
-            // Filter to only return devices that were previously granted access
-            const grantedDevices = response.devices.filter((d) =>
-              deviceMatchesSaved(d)
-            );
-            return grantedDevices.map((d) => new HIDDevice(d));
+          const savedHashes = await getSavedDevices();
+          const deviceCache = await getDeviceCache();
+          const grantedDevices = [];
+          for (const hash of savedHashes) {
+            const device = deviceCache.get(hash);
+            if (device) {
+              grantedDevices.push(new HIDDevice(device));
+            }
           }
-          return [];
+          return grantedDevices;
         } catch (error) {
-          console.warn("getDevices error:", error);
           return [];
         }
       }
@@ -758,9 +1029,20 @@
             if (result.cancelled) {
               reject(new DOMException("No device selected", "NotFoundError"));
             } else {
-              // Save the selected device to localStorage for future getDevices() calls
-              saveDevice(result.device);
-              resolve(new HIDDevice(result.device));
+              // result may contain 'devices' (array) or legacy 'device' (single)
+              const devices = result.devices || (result.device ? [result.device] : []);
+              if (devices.length === 0) {
+                reject(new DOMException("No device selected", "NotFoundError"));
+                return;
+              }
+
+              // Save each selected device permission for future getDevices() calls
+              for (const d of devices) {
+                saveDevice(d);
+              }
+
+              // Resolve with an array of HIDDevice instances per spec
+              resolve(devices.map((d) => new HIDDevice(d)));
             }
           };
           window.postMessage(

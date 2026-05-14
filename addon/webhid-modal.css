@@ -56,7 +56,7 @@
     transform: translateY(-8px);
     opacity: 0;
   }
-  to {
+  to   {
     transform: translateY(0);
     opacity: 1;
   }
@@ -104,6 +104,8 @@
 }
 
 .webhid-device-list {
+  display: flex;
+  flex-direction: column;
   max-height: 300px;
   overflow-y: auto;
   padding: 6px 8px;
@@ -181,17 +183,9 @@
   color: #999;
 }
 
-.webhid-loading {
-  text-align: center;
-  padding: 40px;
-  color: #666;
-}
-
-.webhid-no-devices {
-  text-align: center;
-  padding: 40px;
-  color: #999;
-  font-style: italic;
+.webhid-device-paired {
+  background: #dcfce7;
+  order: -1;
 }
 
 .webhid-device-iface {

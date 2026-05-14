@@ -259,10 +259,49 @@ function hexBytes(arr) {
 }
 
 // ── State ──────────────────────────────────────────────────────────────────────
-let selectedDevice = null;   // HIDDevice instance
+let selectedDevice = null;   // HIDDevice instance (primary)
+let selectedDevices = [];     // array of HIDDevice instances returned by requestDevice
 let readLoopActive = false;
 let inputReportListener = null;
 let eventCount = 0;
+
+function deviceLabel(d) {
+  return `${d.productName || 'device'} [${(d.vendorId||0).toString(16).padStart(4,'0')}:${(d.productId||0).toString(16).padStart(4,'0')}]`;
+}
+
+function sameDevice(a, b) {
+  if (!a || !b) return false;
+  return a.vendorId === b.vendorId && a.productId === b.productId && (a.serialNumber || '') === (b.serialNumber || '');
+}
+
+function isDeviceSelected(dev) {
+  if (selectedDevices && selectedDevices.length) {
+    return selectedDevices.some(d => sameDevice(d, dev));
+  }
+  return selectedDevice ? sameDevice(selectedDevice, dev) : false;
+}
+
+function updateUIForSelected() {
+  const primary = (selectedDevices.length>0) ? selectedDevices[0] : selectedDevice;
+  // badge shows primary or count
+  if (selectedDevices.length > 1) {
+    setBadge('badge-dev', `${deviceLabel(primary)} (+${selectedDevices.length-1} more)`, null);
+  } else if (primary) {
+    setBadge('badge-dev', deviceLabel(primary), null);
+  } else {
+    setBadge('badge-dev', 'no device selected', null);
+  }
+
+  const anyOpened = selectedDevices.length>0 ? selectedDevices.some(d => d.opened) : (primary ? primary.opened : false);
+  const anyClosed = selectedDevices.length>0 ? selectedDevices.some(d => !d.opened) : (primary ? !primary.opened : false);
+
+  document.getElementById('btn-open').disabled  = !anyClosed; // enable if any device is closed
+  document.getElementById('btn-close').disabled = !anyOpened;
+  document.getElementById('btn-read').disabled  = !anyOpened;
+  document.getElementById('btn-read-loop').disabled = !anyOpened;
+  document.getElementById('btn-write').disabled = !anyOpened;
+  document.getElementById('btn-listen').disabled = !anyOpened;
+}
 
 // ── Badge helpers ──────────────────────────────────────────────────────────────
 function setBadge(id, text, ok) {
@@ -306,10 +345,23 @@ document.getElementById('btn-enumerate').addEventListener('click', async () => {
 document.getElementById('btn-request').addEventListener('click', async () => {
   log('Requesting device (picker will open)…');
   try {
-    const device = await navigator.hid.requestDevice({ filters: [] });
-    if (device) {
-      logOk(`Selected: ${device.productName} [${device.vendorId.toString(16).padStart(4,'0')}:${device.productId.toString(16).padStart(4,'0')}]`);
-      selectDevice(device);
+    // The API now returns an array of selected devices (even for single selections)
+    const devices = await navigator.hid.requestDevice({ filters: [] });
+    if (Array.isArray(devices) && devices.length > 0) {
+      // Remember full returned array and pick the first as the primary for UI actions
+      selectedDevices = devices;
+      const device = devices[0];
+      if (devices.length === 1) {
+        logOk(`Selected: ${deviceLabel(device)}`);
+      } else {
+        logOk(`Selected ${devices.length} devices, primary: ${deviceLabel(device)}`);
+      }
+      // Update UI selection to the primary device (selectDevice sets selectedDevices to [dev])
+      selectedDevice = device;
+      // Keep selectedDevices as the full array
+      updateUIForSelected();
+      // Re-render device list highlight
+      navigator.hid.getDevices().then(renderDeviceList).catch(() => {});
       setBadge('badge-nm', 'NM: ok', true);
     }
   } catch (e) {
@@ -328,7 +380,7 @@ function renderDeviceList(devices) {
   }
   devices.forEach(dev => {
     const card = document.createElement('div');
-    card.className = 'device-card' + (dev === selectedDevice ? ' selected' : '') + (dev.opened ? ' opened' : '');
+    card.className = 'device-card' + (isDeviceSelected(dev) ? ' selected' : '') + (dev.opened ? ' opened' : '');
     card.innerHTML = `
       <div class="device-vid">${dev.vendorId.toString(16).padStart(4,'0')}<br>${dev.productId.toString(16).padStart(4,'0')}</div>
       <div class="device-name">${escHtml(dev.productName || '(no name)')}</div>
@@ -340,31 +392,23 @@ function renderDeviceList(devices) {
 
 function selectDevice(dev) {
   selectedDevice = dev;
-  setBadge('badge-dev', `${dev.productName || 'device'} [${dev.vendorId.toString(16).padStart(4,'0')}:${dev.productId.toString(16).padStart(4,'0')}]`, null);
-  document.getElementById('btn-open').disabled  = dev.opened;
-  document.getElementById('btn-close').disabled = !dev.opened;
-  document.getElementById('btn-read').disabled  = !dev.opened;
-  document.getElementById('btn-read-loop').disabled = !dev.opened;
-  document.getElementById('btn-write').disabled = !dev.opened;
-  document.getElementById('btn-listen').disabled = !dev.opened;
+  // When a device is selected from the list by the user, treat it as the sole selected device
+  selectedDevices = [dev];
   log(`Selected: ${dev.productName}`);
   // Re-render to show selection highlight
   navigator.hid.getDevices().then(renderDeviceList).catch(() => {});
+  updateUIForSelected();
 }
 
 // ── Open ──────────────────────────────────────────────────────────────────────
 document.getElementById('btn-open').addEventListener('click', async () => {
-  if (!selectedDevice) return;
+  // Open all selected devices
+  const toOpen = Array.isArray(selectedDevices) && selectedDevices.length > 0 ? selectedDevices : (selectedDevice ? [selectedDevice] : []);
+  if (toOpen.length === 0) return;
   try {
-    await selectedDevice.open();
-    logOk(`Opened: ${selectedDevice.productName}`);
-    setBadge('badge-dev', selectedDevice.productName + ' [open]', true);
-    document.getElementById('btn-open').disabled  = true;
-    document.getElementById('btn-close').disabled = false;
-    document.getElementById('btn-read').disabled  = false;
-    document.getElementById('btn-read-loop').disabled = false;
-    document.getElementById('btn-write').disabled = false;
-    document.getElementById('btn-listen').disabled = false;
+    await Promise.all(toOpen.map(async (d) => { try { if (!d.opened) await d.open(); } catch (e) { logErr(`Open ${deviceLabel(d)} failed: ${e.message}`); } }));
+    logOk(`Opened ${toOpen.length} device(s)`);
+    updateUIForSelected();
   } catch (e) {
     logErr('Open failed: ' + e.message);
   }
@@ -372,19 +416,15 @@ document.getElementById('btn-open').addEventListener('click', async () => {
 
 // ── Close ─────────────────────────────────────────────────────────────────────
 document.getElementById('btn-close').addEventListener('click', async () => {
-  if (!selectedDevice) return;
+  if (!selectedDevice && (!Array.isArray(selectedDevices) || selectedDevices.length===0)) return;
   stopReadLoop();
   stopListening();
   try {
-    await selectedDevice.close();
+    // Close all selected devices (the API may have returned multiple interfaces)
+    const toClose = Array.isArray(selectedDevices) && selectedDevices.length > 0 ? selectedDevices : [selectedDevice];
+    await Promise.all(toClose.map(async (d) => { try { if (d.opened) await d.close(); } catch (e) { /* ignore per-device errors */ } }));
     logOk('Closed');
-    setBadge('badge-dev', selectedDevice.productName || 'device', null);
-    document.getElementById('btn-open').disabled  = false;
-    document.getElementById('btn-close').disabled = true;
-    document.getElementById('btn-read').disabled  = true;
-    document.getElementById('btn-read-loop').disabled = true;
-    document.getElementById('btn-write').disabled = true;
-    document.getElementById('btn-listen').disabled = true;
+    updateUIForSelected();
   } catch (e) {
     logErr('Close failed: ' + e.message);
   }
@@ -394,20 +434,26 @@ document.getElementById('btn-close').addEventListener('click', async () => {
 document.getElementById('btn-read').addEventListener('click', doRead);
 
 async function doRead() {
-  if (!selectedDevice?.opened) return;
   const timeout = parseInt(document.getElementById('read-timeout').value) || 1000;
-  try {
-    const view = await selectedDevice.read(64, timeout);
-    const bytes = new Uint8Array(view.buffer);
-    logData(`Read ${bytes.length}B: ${hexBytes(bytes)}`);
-    return bytes;
-  } catch (e) {
-    if (e.message?.includes('timed out') || e.name === 'NetworkError') {
-      logWarn('Read timed out (device idle)');
-    } else {
-      logErr('Read: ' + e.message);
+  const toRead = Array.isArray(selectedDevices) && selectedDevices.length > 0 ? selectedDevices : (selectedDevice ? [selectedDevice] : []);
+  if (toRead.length === 0) return;
+  const results = [];
+  for (const d of toRead) {
+    if (!d.opened) continue;
+    try {
+      const view = await d.read(64, timeout);
+      const bytes = new Uint8Array(view.buffer);
+      logData(`Read from ${deviceLabel(d)}: ${hexBytes(bytes)}`);
+      results.push({ device: d, bytes });
+    } catch (e) {
+      if (e.message?.includes('timed out') || e.name === 'NetworkError') {
+        logWarn(`Read timed out (device idle) on ${deviceLabel(d)}`);
+      } else {
+        logErr(`Read ${deviceLabel(d)}: ` + e.message);
+      }
     }
   }
+  return results;
 }
 
 // ── Read loop ─────────────────────────────────────────────────────────────────
@@ -421,7 +467,7 @@ function startReadLoop() {
   document.getElementById('btn-read-stop').disabled = false;
   log('Read loop started');
   (async () => {
-    while (readLoopActive && selectedDevice?.opened) {
+    while (readLoopActive && ((selectedDevices.length>0 && selectedDevices.some(d=>d.opened)) || (selectedDevice && selectedDevice.opened))) {
       await doRead();
     }
   })();
@@ -437,13 +483,14 @@ function stopReadLoop() {
 
 // ── Write ─────────────────────────────────────────────────────────────────────
 document.getElementById('btn-write').addEventListener('click', async () => {
-  if (!selectedDevice?.opened) return;
+  const toWrite = Array.isArray(selectedDevices) && selectedDevices.length > 0 ? selectedDevices : (selectedDevice ? [selectedDevice] : []);
+  if (toWrite.length === 0) return;
   const hex = document.getElementById('write-hex').value.trim();
   const bytes = hex.split(/\s+/).filter(Boolean).map(h => parseInt(h, 16));
   if (bytes.some(isNaN)) { logErr('Invalid hex bytes'); return; }
   try {
-    await selectedDevice.write(new Uint8Array(bytes));
-    logOk(`Wrote ${bytes.length}B: ${hexBytes(bytes)}`);
+    await Promise.all(toWrite.map(async (d) => { try { if (d.opened) await d.write(new Uint8Array(bytes)); else logWarn(`Skipping write to ${deviceLabel(d)} (not open)`); } catch (e) { logErr(`Write ${deviceLabel(d)}: ${e.message}`); } }));
+    logOk(`Wrote ${bytes.length}B to ${toWrite.length} device(s)`);
   } catch (e) {
     logErr('Write: ' + e.message);
   }
@@ -454,23 +501,26 @@ document.getElementById('btn-listen').addEventListener('click', startListening);
 document.getElementById('btn-unlisten').addEventListener('click', stopListening);
 
 function startListening() {
-  if (!selectedDevice || inputReportListener) return;
+  const toListen = Array.isArray(selectedDevices) && selectedDevices.length > 0 ? selectedDevices : (selectedDevice ? [selectedDevice] : []);
+  if (toListen.length === 0 || inputReportListener) return;
   eventCount = 0;
   inputReportListener = (e) => {
     eventCount++;
     document.getElementById('event-count').textContent = `${eventCount} events`;
     const bytes = new Uint8Array(e.data.buffer);
-    logEvent(`inputreport  reportId=${e.reportId}  ${hexBytes(bytes)}`);
+    const deviceName = e.device ? (e.device.productName || 'device') : '';
+    logEvent(`inputreport from ${deviceName} reportId=${e.reportId}  ${hexBytes(bytes)}`);
   };
-  selectedDevice.addEventListener('inputreport', inputReportListener);
+  toListen.forEach(d => d.addEventListener('inputreport', inputReportListener));
   document.getElementById('btn-listen').disabled   = true;
   document.getElementById('btn-unlisten').disabled = false;
-  logOk('Listening for inputreport events');
+  logOk('Listening for inputreport events on ' + toListen.length + ' device(s)');
 }
 
 function stopListening() {
-  if (!selectedDevice || !inputReportListener) return;
-  selectedDevice.removeEventListener('inputreport', inputReportListener);
+  const toListen = Array.isArray(selectedDevices) && selectedDevices.length > 0 ? selectedDevices : (selectedDevice ? [selectedDevice] : []);
+  if (toListen.length === 0 || !inputReportListener) return;
+  toListen.forEach(d => { try { d.removeEventListener('inputreport', inputReportListener); } catch (e) { } });
   inputReportListener = null;
   document.getElementById('btn-listen').disabled   = false;
   document.getElementById('btn-unlisten').disabled = true;
