@@ -825,6 +825,12 @@
             usagePage: c.usagePage !== undefined ? c.usagePage : (c.usage_page !== undefined ? c.usage_page : null),
             usage: c.usage !== undefined ? c.usage : (c.usage !== undefined ? c.usage : null),
             children: [],
+            // Always initialize report arrays to prevent "items is undefined" errors
+            // when iterating over collections - WebHID spec expects these arrays
+            // to always be present (even if empty).
+            inputReports: [],
+            outputReports: [],
+            featureReports: [],
           };
 
           // Normalize children recursively
@@ -832,16 +838,9 @@
             out.children = c.children.map(normalizeCollection);
           }
 
-          // If the daemon provided richer report metadata, expose it in a
-          // shape compatible with the WebHID `HIDDevice.collections` examples
-          // on MDN: provide `inputReports`, `outputReports` and `featureReports`
-          // arrays. Each report contains `reportId` and an `items` array with
-          // field-level metadata.
+          // If the daemon provided richer report metadata, populate the report arrays
+          // Each report contains `reportId` and an `items` array with field-level metadata.
           if (Array.isArray(c.reports) && c.reports.length > 0) {
-            out.inputReports = [];
-            out.outputReports = [];
-            out.featureReports = [];
-
             c.reports.forEach((r) => {
               const rep = {
                 reportId: r.id !== undefined && r.id !== null ? r.id : 0,
@@ -853,7 +852,24 @@
                       reportCount: f.count !== undefined ? f.count : null,
                       usagePage: f.usage_page !== undefined ? f.usage_page : (f.usagePage !== undefined ? f.usagePage : null),
                       usage: f.usage !== undefined ? f.usage : null,
-                      usages: Array.isArray(f.usages) ? f.usages : null,
+                      // Accept either legacy small `usages` (u16) or packed `packed_usages` (u32)
+                      usages: Array.isArray(f.usages) ? f.usages : (Array.isArray(f.packed_usages) ? f.packed_usages : null),
+                      // Forward additional optional attributes if present so pages can
+                      // inspect them when available (preserve both snake_case and
+                      // camelCase names from daemon-side serialization).
+                      isArray: f.is_array !== undefined ? f.is_array : f.isArray !== undefined ? f.isArray : undefined,
+                      isRange: f.is_range !== undefined ? f.is_range : f.isRange !== undefined ? f.isRange : undefined,
+                      isAbsolute: f.is_absolute !== undefined ? f.is_absolute : f.isAbsolute !== undefined ? f.isAbsolute : undefined,
+                      hasNull: f.has_null !== undefined ? f.has_null : f.hasNull !== undefined ? f.hasNull : undefined,
+                      logicalMinimum: f.logical_minimum !== undefined ? f.logical_minimum : f.logicalMinimum !== undefined ? f.logicalMinimum : undefined,
+                      logicalMaximum: f.logical_maximum !== undefined ? f.logical_maximum : f.logicalMaximum !== undefined ? f.logicalMaximum : undefined,
+                      physicalMinimum: f.physical_minimum !== undefined ? f.physical_minimum : f.physicalMinimum !== undefined ? f.physicalMinimum : undefined,
+                      physicalMaximum: f.physical_maximum !== undefined ? f.physical_maximum : f.physicalMaximum !== undefined ? f.physicalMaximum : undefined,
+                      unitExponent: f.unit_exponent !== undefined ? f.unit_exponent : f.unitExponent !== undefined ? f.unitExponent : undefined,
+                      unitSystem: f.unit_system !== undefined ? f.unit_system : f.unitSystem !== undefined ? f.unitSystem : undefined,
+                      usageMinimum: f.usage_minimum !== undefined ? f.usage_minimum : f.usageMinimum !== undefined ? f.usageMinimum : undefined,
+                      usageMaximum: f.usage_maximum !== undefined ? f.usage_maximum : f.usageMaximum !== undefined ? f.usageMaximum : undefined,
+                      bitOffset: f.bit_offset !== undefined ? f.bit_offset : f.bitOffset !== undefined ? f.bitOffset : undefined,
                     }))
                   : [],
               };
@@ -888,7 +904,16 @@
       // Return parsed collections (if available) or fallback to usage info.
       get collections() {
         if (this.#parsedCollections) return this.#parsedCollections;
-        return [{ usagePage: this.usagePage, usage: this.usage }];
+        // Return a properly structured collection with empty report arrays
+        // to match the WebHID spec and prevent "items is undefined" errors
+        return [{
+          usagePage: this.usagePage,
+          usage: this.usage,
+          inputReports: [],
+          outputReports: [],
+          featureReports: [],
+          children: []
+        }];
       }
 
       async open() {
@@ -958,6 +983,26 @@
           });
           if (response.success) return buffer.length;
           throw new Error("Write failed");
+        } catch (error) {
+          throw new DOMException(error.message, "NetworkError");
+        }
+      }
+
+      async sendReport(reportId, data) {
+        // Alias for write() - sends to output reports or general write
+        if (!this.opened)
+          throw new DOMException("Device is not open", "InvalidStateError");
+        const buffer =
+          data instanceof DataView
+            ? new Uint8Array(data.buffer)
+            : new Uint8Array(data);
+        try {
+          const response = await sendRequest("write", {
+            device_id: this.deviceId.split("").map((c) => c.charCodeAt(0)),
+            data: Array.from(buffer),
+          });
+          if (response.success) return buffer.length;
+          throw new Error("sendReport failed");
         } catch (error) {
           throw new DOMException(error.message, "NetworkError");
         }

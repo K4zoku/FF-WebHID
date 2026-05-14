@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 // ---------------------------------------------------------------------------
 
 /// A (shallow) collection entry derived from a HID report descriptor.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Collection {
     #[serde(rename = "type")]
     pub collection_type: u8,
@@ -21,23 +21,89 @@ pub struct Collection {
 }
 
 /// A field within a HID report (input/output/feature).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// This struct was intentionally kept small historically but needs to be
+/// expanded to carry the richer set of attributes Chromium exposes (flags,
+/// logical/physical ranges, units, usage ranges, and packed usages). Keep
+/// backward-compatible field names where possible so older consumers still
+/// work.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Field {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub report_id: Option<u8>,
+
+    // report_type is typically "input" | "output" | "feature"
     pub report_type: String,
+
+    // size in bits and count of items (as before)
     pub size: u32,
     pub count: u32,
+
+    // Usage information: keep both the split `usage_page`/`usage` form for
+    // compatibility and a packed `packed_usages` vector (u32) to match
+    // Chromium's representation which may pack usagePage<<16 | usage.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage_page: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<u16>,
+
+    /// Legacy small-usages array (kept for backward compatibility).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usages: Option<Vec<u16>>,
+
+    /// Packed usages (u32) to match Chromium's packed encoding.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub packed_usages: Option<Vec<u32>>,
+
+    // Per-item flags (optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_array: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_range: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_absolute: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub has_null: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub has_preferred_state: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_linear: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_buffered_bytes: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_constant: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_volatile: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wrap: Option<bool>,
+
+    // Numeric ranges and units
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logical_minimum: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logical_maximum: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub physical_minimum: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub physical_maximum: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unit_exponent: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unit_system: Option<String>,
+
+    // Usage range (when item uses UsageMinimum/UsageMaximum)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage_minimum: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage_maximum: Option<u32>,
+
+    // Optional bit offset within the report payload (helpful for consumers).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bit_offset: Option<u32>,
 }
 
 /// A HID report grouping (identified by report-id and type).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Report {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<u8>,
@@ -98,6 +164,10 @@ pub enum IpcRequest {
     Read { id: u32, device_id: String, timeout_ms: u64 },
     /// Send a HID output report.
     Write { id: u32, device_id: String, data: Vec<u8> },
+    /// Receive a HID feature report.
+    ReadFeature { id: u32, device_id: String, report_id: u8 },
+    /// Send a HID feature report.
+    WriteFeature { id: u32, device_id: String, data: Vec<u8> },
 }
 
 impl IpcRequest {
@@ -107,7 +177,9 @@ impl IpcRequest {
             | Self::Open { id, .. }
             | Self::Close { id, .. }
             | Self::Read { id, .. }
-            | Self::Write { id, .. } => *id,
+            | Self::Write { id, .. }
+            | Self::ReadFeature { id, .. }
+            | Self::WriteFeature { id, .. } => *id,
         }
     }
 }
@@ -167,6 +239,10 @@ pub enum NmRequest {
     Read { data: Vec<u8>, timeout: u64 },
     /// `device_id` is the device path as bytes; `data` is the report payload.
     Write { device_id: Vec<u8>, data: Vec<u8> },
+    /// `device_id` is the device path as bytes; `report_id` is the feature report ID.
+    ReadFeatureReport { device_id: Vec<u8>, report_id: u8 },
+    /// `device_id` is the device path as bytes; `data` is the feature report payload.
+    WriteFeatureReport { device_id: Vec<u8>, data: Vec<u8> },
 }
 
 /// A response or event sent back to Firefox via stdout.

@@ -145,6 +145,60 @@ pub fn write_report(file: &File, data: &[u8]) -> io::Result<()> {
     Ok(())
 }
 
+/// Receive a HID feature report.
+///
+/// This uses the HIDIOCGFEATURE ioctl to retrieve a feature report.
+/// The report_id should be the feature report ID to request.
+/// Returns the raw feature report bytes including the report ID.
+///
+/// Call this only from `spawn_blocking`.
+pub fn read_feature_report(file: &File, report_id: u8) -> io::Result<Vec<u8>> {
+    let fd = file.as_raw_fd();
+    // The buffer format for HIDIOCGFEATURE is:
+    // [report_id] [report_data...]
+    // The driver fills in the report data starting after the report_id byte.
+    let mut buf = vec![0u8; 256]; // Max HID report size + 1 for report_id
+    buf[0] = report_id;
+
+    // HIDIOCGFEATURE = _IOCGFEATURE('H', 0x07)
+    // From Linux kernel uapi/linux/hidraw.h - evaluates to 0xc0244807 on little-endian
+    let ioctl_cmd = 0xc0244807u64;
+    let ret = unsafe {
+        libc::ioctl(fd, ioctl_cmd as libc::c_ulong, buf.as_mut_ptr())
+    };
+
+    if ret < 0 {
+        return Err(io::Error::last_os_error());
+    }
+
+    buf.truncate(ret as usize);
+    Ok(buf)
+}
+
+/// Send a HID feature report.
+///
+/// This uses the HIDIOCSFEATURE ioctl to send a feature report.
+/// The data should include the report ID as the first byte.
+///
+/// Call this only from `spawn_blocking`.
+pub fn write_feature_report(file: &File, data: &[u8]) -> io::Result<()> {
+    let fd = file.as_raw_fd();
+
+    // HIDIOCSFEATURE = _IOCSFEATURE('H', 0x06)
+    // From Linux kernel uapi/linux/hidraw.h - evaluates to 0xc0244806 on little-endian
+    let ioctl_cmd = 0xc0244806u64;
+    let mut buf = data.to_vec();
+    let ret = unsafe {
+        libc::ioctl(fd, ioctl_cmd as libc::c_ulong, buf.as_mut_ptr())
+    };
+
+    if ret < 0 {
+        return Err(io::Error::last_os_error());
+    }
+
+    Ok(())
+}
+
 /// Parse a raw HID report descriptor into a shallow collection tree.
 /// This is a forgiving, limited parser sufficient to extract Collection
 /// boundaries along with the most recent Usage Page / Usage. It is not a
@@ -325,6 +379,7 @@ fn parse_report_descriptor(buf: &[u8]) -> Vec<Collection> {
                     usage_page,
                     usage: usages.last().cloned(),
                     usages: field_usages,
+                    ..Default::default()
                 };
 
                 // Insert field into the active collection's report bucket.
