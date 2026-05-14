@@ -463,6 +463,98 @@
     let _reqId = 0;
     const _pending = {};
 
+    // ── Device persistence helpers ────────────────────────────────────────────
+    // Store and retrieve device permissions from addon storage (browser.storage.local)
+    // Device permissions are stored per site origin on the addon side
+    // Communication happens via browser.runtime.sendMessage
+    //
+    // Device identification hash includes:
+    // - vendor_id & product_id (USB IDs)
+    // - serial_number (device serial, may be empty)
+    // - path (device path, may be empty)
+    // Hash is created from these fields to uniquely identify physical devices
+
+    let _savedDevices = null; // Cache for granted devices
+
+    /**
+     * Creates a hash from device identifiers for effective unique device identification.
+     * Uses vendor_id, product_id, serial_number, and path to create a stable identifier.
+     * @param {Object} device - Device object with vendor_id, product_id, serial_number, path
+     * @returns {string} Hex string hash
+     */
+    function createDeviceHash(device) {
+      const vendorId = String(device.vendor_id || 0);
+      const productId = String(device.product_id || 0);
+      const serialNumber = String(device.serial_number || "");
+      const path = String(device.path || "");
+      const identifier = vendorId + ":" + productId + ":" + serialNumber + ":" + path;
+
+      // Simple DJB2 hash algorithm
+      let hash = 5381;
+      for (let i = 0; i < identifier.length; i++) {
+        hash = ((hash << 5) + hash) + identifier.charCodeAt(i);
+        hash = hash & 0xFFFFFFFF; // Convert to 32-bit integer
+      }
+
+      // Convert to positive hex string
+      return Math.abs(hash).toString(16);
+    }
+
+    async function getSavedDevices() {
+      // Return cached devices if available
+      if (_savedDevices !== null) {
+        return _savedDevices;
+      }
+
+      try {
+        const result = await browser.runtime.sendMessage({
+          action: "getSavedDevices",
+          origin: window.location.origin,
+        });
+        _savedDevices = result.devices || [];
+        return _savedDevices;
+      } catch (error) {
+        console.warn("Failed to retrieve saved devices:", error);
+        return [];
+      }
+    }
+
+    async function saveDevice(deviceInfo) {
+      try {
+        // Clear cache to force refresh
+        _savedDevices = null;
+        const deviceHash = createDeviceHash(deviceInfo);
+
+        const result = await browser.runtime.sendMessage({
+          action: "saveDevice",
+          origin: window.location.origin,
+          device: {
+            hash: deviceHash,
+            vendor_id: deviceInfo.vendor_id,
+            product_id: deviceInfo.product_id,
+            serial_number: deviceInfo.serial_number || "",
+            path: deviceInfo.path || "",
+            product_name: deviceInfo.product_name,
+            manufacturer: deviceInfo.manufacturer,
+            timestamp: new Date().toISOString(),
+          },
+        });
+
+        if (result.success) {
+          // Update cache
+          _savedDevices = result.devices || [];
+        }
+      } catch (error) {
+        console.warn("Failed to save device:", error);
+      }
+    }
+
+    async function deviceMatchesSaved(device) {
+      const saved = await getSavedDevices();
+      const deviceHash = createDeviceHash(device);
+      return saved.some((d) => d.hash === deviceHash);
+    }
+
     // Listen for responses and events from the content script bridge.
     window.addEventListener("message", (event) => {
       if (!event.data) return;
@@ -638,13 +730,21 @@
 
     class HID extends EventTarget {
       async getDevices() {
+        // Returns a Promise that resolves with an array of connected HID devices
+        // that the user has previously been granted access to in response to a
+        // requestDevice() call.
         try {
           const response = await sendRequest("enumerate");
-          if (response.success) {
-            return response.devices.map((d) => new HIDDevice(d));
+          if (response.success && Array.isArray(response.devices)) {
+            // Filter to only return devices that were previously granted access
+            const grantedDevices = response.devices.filter((d) =>
+              deviceMatchesSaved(d)
+            );
+            return grantedDevices.map((d) => new HIDDevice(d));
           }
           return [];
-        } catch {
+        } catch (error) {
+          console.warn("getDevices error:", error);
           return [];
         }
       }
@@ -658,6 +758,8 @@
             if (result.cancelled) {
               reject(new DOMException("No device selected", "NotFoundError"));
             } else {
+              // Save the selected device to localStorage for future getDevices() calls
+              saveDevice(result.device);
               resolve(new HIDDevice(result.device));
             }
           };

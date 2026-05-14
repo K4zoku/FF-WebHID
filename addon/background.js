@@ -154,6 +154,37 @@ browser.runtime.onMessage.addListener((request, _sender, sendResponse) => {
       // background just acknowledges the notification.
       return false;
 
+    case "getSavedDevices":
+      (async () => {
+        try {
+          const key = "webhid_" + request.origin.replace(/[^a-zA-Z0-9]/g, "_");
+          const result = await browser.storage.local.get(key);
+          const devices = result[key] || [];
+          sendResponse({ success: true, devices });
+        } catch (e) {
+          sendResponse({ success: false, error: e.message, devices: [] });
+        }
+      })();
+      return true;
+
+    case "saveDevice":
+      (async () => {
+        try {
+          const key = "webhid_" + request.origin.replace(/[^a-zA-Z0-9]/g, "_");
+          const result = await browser.storage.local.get(key);
+          const saved = result[key] || [];
+          const exists = saved.some((d) => d.hash === request.device.hash);
+          if (!exists) {
+            saved.push(request.device);
+            await browser.storage.local.set({ [key]: saved });
+          }
+          sendResponse({ success: true, devices: saved });
+        } catch (e) {
+          sendResponse({ success: false, error: e.message, devices: [] });
+        }
+      })();
+      return true;
+
     default:
       return false;
   }
