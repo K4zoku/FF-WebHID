@@ -76,13 +76,18 @@ fn prop_str(dev: &udev::Device, key: &str) -> Option<String> {
 // Open / close
 // ---------------------------------------------------------------------------
 
-/// Find and open the first hidraw node that matches `vendor_id`:`product_id`.
-/// Returns `(DeviceInfo, File)`.
-pub fn open(vendor_id: u16, product_id: u16) -> anyhow::Result<(DeviceInfo, File)> {
+/// Open a hidraw node by its absolute path.
+///
+/// This is the preferred (and only) way to open a device because a single
+/// logical USB device often exposes several HID interfaces — one hidraw
+/// node each — and vid/pid alone can't distinguish them.  The returned `DeviceInfo` is looked up via udev so
+/// the caller still gets descriptor / collections metadata for the
+/// specific interface.
+pub fn open_by_path(path: &str) -> anyhow::Result<(DeviceInfo, File)> {
     let info = enumerate()?
         .into_iter()
-        .find(|d| d.vendor_id == vendor_id && d.product_id == product_id)
-        .ok_or_else(|| anyhow::anyhow!("device {:04x}:{:04x} not found", vendor_id, product_id))?;
+        .find(|d| d.path == path)
+        .ok_or_else(|| anyhow::anyhow!("hidraw '{path}' not found"))?;
 
     let file = OpenOptions::new()
         .read(true)
@@ -91,6 +96,55 @@ pub fn open(vendor_id: u16, product_id: u16) -> anyhow::Result<(DeviceInfo, File
         .map_err(|e| anyhow::anyhow!("open '{}': {e}", info.path))?;
 
     Ok((info, file))
+}
+
+/// Scan a raw HID report descriptor for the presence of any `Report ID`
+/// global item (tag `0x85`).
+///
+/// Per the HID spec, an interface either uses *numbered* reports (every
+/// report has an explicit ID and the kernel prepends that ID byte to each
+/// `read()`), or *unnumbered* reports (no ID byte is prepended).  This
+/// flag determines whether the daemon should strip `buf[0]` as the report
+/// ID when forwarding input reports.
+///
+/// The walk only needs to recognise the *short item* encoding for the
+/// `Report ID` item — the descriptor parser elsewhere handles long items
+/// and bSize=3 payloads, but for this purpose we can use a simple linear
+/// scan that skips over each item by its declared size.
+pub fn uses_numbered_reports(buf: &[u8]) -> bool {
+    let mut i = 0usize;
+    while i < buf.len() {
+        let prefix = buf[i];
+
+        // Long item (rare): bTag=0xF, bType=0x3, bSize=0x2 → header 0xFE.
+        if prefix == 0xFE {
+            // [0xFE, bDataSize, bLongItemTag, ...data]
+            if i + 1 >= buf.len() { break; }
+            let data_size = buf[i + 1] as usize;
+            i = i.saturating_add(3).saturating_add(data_size);
+            continue;
+        }
+
+        // Short item:  bSize bits 0-1, bType bits 2-3, bTag bits 4-7.
+        // `Report ID` is a Global item, tag 0b1000 (0x85 is the canonical
+        // 1-byte form 0b10000101).  Detect by comparing the upper nibble
+        // (tag+type) — that masks off the size bits so any payload length
+        // matches.
+        if (prefix & 0xFC) == 0x84 {
+            return true;
+        }
+
+        // bSize encoding: 0,1,2,3 → 0,1,2,4 bytes of payload.
+        let payload = match prefix & 0x03 {
+            0 => 0,
+            1 => 1,
+            2 => 2,
+            3 => 4,
+            _ => unreachable!(),
+        };
+        i = i.saturating_add(1).saturating_add(payload);
+    }
+    false
 }
 
 // ---------------------------------------------------------------------------
@@ -131,14 +185,24 @@ pub fn read_with_timeout(file: &File, timeout_ms: u64) -> io::Result<Vec<u8>> {
     Ok(buf)
 }
 
-/// Write a HID output report.  The caller is responsible for prepending the
-/// report-ID byte (use `0x00` when the device has no numbered reports).
+/// Write a HID output report.
+///
+/// Linux `write(2)` on `/dev/hidrawN` requires the first byte of the
+/// buffer to be the report ID (`0` for interfaces that don't use
+/// numbered reports).  `payload` is the report data *without* that
+/// leading byte; this function prepends it before calling the kernel.
 ///
 /// Call this only from `spawn_blocking`.
-pub fn write_report(file: &File, data: &[u8]) -> io::Result<()> {
+pub fn write_report(file: &File, report_id: u8, payload: &[u8]) -> io::Result<()> {
     let fd = file.as_raw_fd();
-    // SAFETY: data slice is valid; fd is open for writing.
-    let n = unsafe { libc::write(fd, data.as_ptr().cast(), data.len()) };
+
+    // Build the wire-format buffer: `[report_id, ...payload]`.
+    let mut buf = Vec::with_capacity(payload.len() + 1);
+    buf.push(report_id);
+    buf.extend_from_slice(payload);
+
+    // SAFETY: buf is a valid contiguous slice; fd is open for writing.
+    let n = unsafe { libc::write(fd, buf.as_ptr().cast(), buf.len()) };
     if n < 0 {
         return Err(io::Error::last_os_error());
     }
@@ -177,17 +241,24 @@ pub fn read_feature_report(file: &File, report_id: u8) -> io::Result<Vec<u8>> {
 
 /// Send a HID feature report.
 ///
-/// This uses the HIDIOCSFEATURE ioctl to send a feature report.
-/// The data should include the report ID as the first byte.
+/// Uses the `HIDIOCSFEATURE` ioctl, which expects a buffer of the form
+/// `[report_id, ...payload]`.  `payload` is the data without that
+/// leading byte; this function prepends `report_id` before issuing the
+/// ioctl.
 ///
 /// Call this only from `spawn_blocking`.
-pub fn write_feature_report(file: &File, data: &[u8]) -> io::Result<()> {
+pub fn write_feature_report(file: &File, report_id: u8, payload: &[u8]) -> io::Result<()> {
     let fd = file.as_raw_fd();
 
+    // Build the wire-format buffer: `[report_id, ...payload]`.
+    let mut buf = Vec::with_capacity(payload.len() + 1);
+    buf.push(report_id);
+    buf.extend_from_slice(payload);
+
     // HIDIOCSFEATURE = _IOCSFEATURE('H', 0x06)
-    // From Linux kernel uapi/linux/hidraw.h - evaluates to 0xc0244806 on little-endian
+    // From Linux kernel uapi/linux/hidraw.h - evaluates to 0xc0244806 on
+    // little-endian.
     let ioctl_cmd = 0xc0244806u64;
-    let mut buf = data.to_vec();
     let ret = unsafe {
         libc::ioctl(fd, ioctl_cmd as libc::c_ulong, buf.as_mut_ptr())
     };

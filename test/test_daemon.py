@@ -174,6 +174,7 @@ def main():
         "type":      "Write",
         "id":        4,
         "device_id": device_id,
+        "report_id": 0,
         "data":      [0x00],
     })
 

@@ -134,11 +134,10 @@ def main():
 
     # 3. Open ------------------------------------------------------------------
     dev = devices[0]
-    head(f"3 · Open  (vendor={dev['vendor_id']:04x} product={dev['product_id']:04x})")
+    head(f"3 · Open  (path={dev['path']})")
     resp = client.request({
-        "action":     "open",
-        "vendor_id":  dev["vendor_id"],
-        "product_id": dev["product_id"],
+        "action":    "open",
+        "device_id": list(dev["path"].encode()),
     })
 
     if not resp.get("success"):
@@ -177,6 +176,7 @@ def main():
     resp = client.request({
         "action":    "write",
         "device_id": list(device_id.encode()),
+        "report_id": 0,
         "data":      [0x00],
     })
 
