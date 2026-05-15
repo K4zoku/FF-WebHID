@@ -156,18 +156,29 @@ pub struct DeviceInfo {
 pub enum IpcRequest {
     /// List every connected HID device.
     Enumerate { id: u32 },
-    /// Open the first device that matches the given vendor/product IDs.
-    Open { id: u32, vendor_id: u16, product_id: u16 },
+    /// Open a specific hidraw node by absolute path (e.g. `/dev/hidraw3`).
+    ///
+    /// A single logical USB device may expose several HID interfaces, each
+    /// surfacing as a separate hidraw node.  The addon receives one
+    /// `DeviceInfo` (and therefore one path) per interface from
+    /// `Enumerate`, and must open each one it cares about individually so
+    /// every interface gets its own reader task.
+    Open { id: u32, device_path: String },
     /// Release an open device.
     Close { id: u32, device_id: String },
     /// Block until a HID input report arrives or `timeout_ms` elapses.
     Read { id: u32, device_id: String, timeout_ms: u64 },
-    /// Send a HID output report.
-    Write { id: u32, device_id: String, data: Vec<u8> },
+    /// Send a HID output report.  `data` is the report *payload only*;
+    /// the daemon is responsible for prepending the `report_id` byte
+    /// before handing the buffer to `write(2)`.  Use `report_id = 0`
+    /// for interfaces that don't use numbered reports (Linux hidraw
+    /// still requires the leading zero).
+    Write { id: u32, device_id: String, report_id: u8, data: Vec<u8> },
     /// Receive a HID feature report.
     ReadFeature { id: u32, device_id: String, report_id: u8 },
-    /// Send a HID feature report.
-    WriteFeature { id: u32, device_id: String, data: Vec<u8> },
+    /// Send a HID feature report.  `data` is the report *payload only*
+    /// (same convention as `Write`).
+    WriteFeature { id: u32, device_id: String, report_id: u8, data: Vec<u8> },
 }
 
 impl IpcRequest {
@@ -228,21 +239,33 @@ impl IpcResponse {
 #[serde(tag = "action", rename_all = "lowercase")]
 pub enum NmRequest {
     Enumerate,
-    Open {
-        vendor_id: u16,
-        product_id: u16,
-    },
+    /// `device_id` is the absolute hidraw path encoded as a byte array,
+    /// matching the same convention used by Close / Read / Write.
+    Open { device_id: Vec<u8> },
     /// `data` is the device path encoded as a byte array, e.g.
     /// `"/dev/hidraw0"` → `[47, 100, 101, 118, ...]`.
     Close { data: Vec<u8> },
     /// `data` is the device path as bytes; `timeout` is in milliseconds.
     Read { data: Vec<u8>, timeout: u64 },
-    /// `device_id` is the device path as bytes; `data` is the report payload.
-    Write { device_id: Vec<u8>, data: Vec<u8> },
+    /// `device_id` is the device path as bytes; `data` is the report
+    /// *payload only* (without the leading report-ID byte).  The daemon
+    /// prepends `report_id` itself before calling `write(2)`.
+    Write {
+        device_id: Vec<u8>,
+        #[serde(default)]
+        report_id: u8,
+        data: Vec<u8>,
+    },
     /// `device_id` is the device path as bytes; `report_id` is the feature report ID.
     ReadFeatureReport { device_id: Vec<u8>, report_id: u8 },
-    /// `device_id` is the device path as bytes; `data` is the feature report payload.
-    WriteFeatureReport { device_id: Vec<u8>, data: Vec<u8> },
+    /// `device_id` is the device path as bytes; `data` is the feature
+    /// report *payload only* (same convention as `Write`).
+    WriteFeatureReport {
+        device_id: Vec<u8>,
+        #[serde(default)]
+        report_id: u8,
+        data: Vec<u8>,
+    },
 }
 
 /// A response or event sent back to Firefox via stdout.

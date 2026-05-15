@@ -78,9 +78,11 @@ async fn main() -> anyhow::Result<()> {
         loop {
             match protocol::read_message::<_, IpcResponse>(&mut reader).await {
                 Ok(response) => {
+                    log::debug!("[daemon_reader] received response: {:?}", response);
                     if response.id() == 0 {
                         // Unsolicited event → convert and forward to Firefox.
                         if let Some(nm) = ipc_event_to_nm(response) {
+                            log::debug!("[daemon_reader] forwarding event: {:?}", nm);
                             let _ = stdout_tx_ev.send(nm).await;
                         }
                     } else {
@@ -167,8 +169,9 @@ fn nm_to_ipc(req: NmRequest, id: u32) -> IpcRequest {
     match req {
         NmRequest::Enumerate => IpcRequest::Enumerate { id },
 
-        NmRequest::Open { vendor_id, product_id } => {
-            IpcRequest::Open { id, vendor_id, product_id }
+        NmRequest::Open { device_id } => {
+            let device_path = String::from_utf8_lossy(&device_id).into_owned();
+            IpcRequest::Open { id, device_path }
         }
 
         NmRequest::Close { data } => {
@@ -182,9 +185,9 @@ fn nm_to_ipc(req: NmRequest, id: u32) -> IpcRequest {
             IpcRequest::Read { id, device_id, timeout_ms: timeout }
         }
 
-        NmRequest::Write { device_id, data } => {
+        NmRequest::Write { device_id, report_id, data } => {
             let device_id = String::from_utf8_lossy(&device_id).into_owned();
-            IpcRequest::Write { id, device_id, data }
+            IpcRequest::Write { id, device_id, report_id, data }
         }
 
         NmRequest::ReadFeatureReport { device_id, report_id } => {
@@ -192,9 +195,9 @@ fn nm_to_ipc(req: NmRequest, id: u32) -> IpcRequest {
             IpcRequest::ReadFeature { id, device_id, report_id }
         }
 
-        NmRequest::WriteFeatureReport { device_id, data } => {
+        NmRequest::WriteFeatureReport { device_id, report_id, data } => {
             let device_id = String::from_utf8_lossy(&device_id).into_owned();
-            IpcRequest::WriteFeature { id, device_id, data }
+            IpcRequest::WriteFeature { id, device_id, report_id, data }
         }
     }
 }
@@ -237,6 +240,12 @@ fn ipc_event_to_nm(resp: IpcResponse) -> Option<NmResponse> {
         IpcResponse::InputReport { device_id, report_id, data, .. } => {
             // Encode device_id as bytes so the addon can compare with its
             // stored deviceId string.
+            log::debug!(
+                "[ipc_event_to_nm] InputReport: device_id='{}', report_id={}, data_len={}",
+                device_id,
+                report_id,
+                data.len()
+            );
             Some(NmResponse::event_input_report(device_id.into_bytes(), report_id, data))
         }
 

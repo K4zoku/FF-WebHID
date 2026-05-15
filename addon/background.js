@@ -1,17 +1,52 @@
 const NativeMessaging = {
   port: null,
+  // FIFO queue of resolvers waiting for the next non-event response.
+  //
+  // The native-messaging process handles requests serially and emits
+  // responses to stdout in the same order they were sent, so popping the
+  // queue head on each non-event message correctly correlates each
+  // response with the request that produced it.
+  //
+  // The previous implementation registered an ad-hoc `onMessage` listener
+  // per call which made concurrent calls race: every listener fired on
+  // every incoming message, so two simultaneous `open()` requests would
+  // both resolve with the *first* response (and the second response would
+  // be dropped because both listeners had already detached).
+  _pending: [],
 
   connect() {
     try {
       this.port = browser.runtime.connectNative("webhid_server");
 
       this.port.onMessage.addListener((message) => {
-        this.onMessage(message);
+        // Events are pushed by the daemon (id=0) and identified by an
+        // `event_type` field.  They are routed to `onMessage` regardless
+        // of any in-flight request.
+        if (message.event_type) {
+          this.onMessage(message);
+          return;
+        }
+        // Otherwise it's a response: hand it to the request that has
+        // been waiting the longest.
+        const resolver = this._pending.shift();
+        if (resolver) {
+          resolver(message);
+        } else {
+          console.warn(
+            "webhid: received NM response with no pending request:",
+            message,
+          );
+        }
       });
 
       this.port.onDisconnect.addListener(() => {
         console.log("Native messaging disconnected");
+        // Fail every still-pending request so callers don't hang forever.
+        const pending = this._pending.splice(0);
         this.port = null;
+        for (const resolver of pending) {
+          resolver({ success: false, error: "Native messaging disconnected" });
+        }
       });
 
       return Promise.resolve();
@@ -27,16 +62,18 @@ const NativeMessaging = {
         reject(new Error("Not connected to native messaging"));
         return;
       }
-
-      const onResponse = (message) => {
-        // Skip push events – they are handled separately by onMessage().
-        if (message.event_type) return;
-        this.port.onMessage.removeListener(onResponse);
-        resolve(message);
-      };
-
-      this.port.onMessage.addListener(onResponse);
-      this.port.postMessage(request);
+      // Enqueue BEFORE posting so a very fast response can never find an
+      // empty queue.
+      this._pending.push(resolve);
+      try {
+        this.port.postMessage(request);
+      } catch (e) {
+        // Roll back the queued resolver so subsequent responses still
+        // line up with their requests.
+        const idx = this._pending.indexOf(resolve);
+        if (idx !== -1) this._pending.splice(idx, 1);
+        reject(e);
+      }
     });
   },
 
@@ -44,11 +81,14 @@ const NativeMessaging = {
     return await this.sendRequest({ action: "enumerate" });
   },
 
-  async openDevice(vendorId, productId) {
+  // The hidraw path uniquely identifies one HID interface; a composite
+  // USB device exposes several of them, so we must open each one we want
+  // to read from explicitly (vid/pid alone would be ambiguous and would
+  // only open the first matching node).
+  async openDevice(deviceId) {
     return await this.sendRequest({
       action: "open",
-      vendor_id: vendorId,
-      product_id: productId,
+      device_id: deviceId.split("").map((c) => c.charCodeAt(0)),
     });
   },
 
@@ -67,12 +107,15 @@ const NativeMessaging = {
     });
   },
 
-  // device_id and data are kept as separate fields so the native-messaging
-  // process can distinguish the path from the report payload without guessing.
-  async writeDevice(deviceId, data) {
+  // device_id, report_id, and data are kept as separate fields so the
+  // native-messaging process can distinguish the path, report ID, and
+  // payload without guessing.  The daemon is responsible for prepending
+  // `report_id` to the buffer before calling `write(2)`.
+  async writeDevice(deviceId, reportId, data) {
     return await this.sendRequest({
       action: "write",
       device_id: deviceId.split("").map((c) => c.charCodeAt(0)),
+      report_id: reportId,
       data: Array.from(data),
     });
   },
@@ -85,10 +128,13 @@ const NativeMessaging = {
     });
   },
 
-  async writeFeatureReport(deviceId, data) {
+  // Same convention as writeDevice: the daemon prepends `report_id`
+  // before issuing HIDIOCSFEATURE, so `data` is the payload only.
+  async writeFeatureReport(deviceId, reportId, data) {
     return await this.sendRequest({
       action: "writeFeatureReport",
       device_id: deviceId.split("").map((c) => c.charCodeAt(0)),
+      report_id: reportId,
       data: Array.from(data),
     });
   },
@@ -135,7 +181,7 @@ browser.runtime.onMessage.addListener((request, _sender, sendResponse) => {
       return true; // keep channel open for async response
 
     case "open":
-      NativeMessaging.openDevice(request.vendor_id, request.product_id)
+      NativeMessaging.openDevice(String.fromCharCode(...request.device_id))
         .then(sendResponse)
         .catch((e) => sendResponse({ success: false, error: e.message }));
       return true;
@@ -156,9 +202,11 @@ browser.runtime.onMessage.addListener((request, _sender, sendResponse) => {
       return true;
 
     case "write":
-      // device_id and data arrive as separate arrays from the content script.
+      // device_id, report_id and data arrive as separate fields from the
+      // content script (see HIDDevice.sendReport / HIDDevice.write).
       NativeMessaging.writeDevice(
         String.fromCharCode(...request.device_id),
+        request.report_id || 0,
         request.data
       )
         .then(sendResponse)
@@ -177,6 +225,7 @@ browser.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     case "writeFeatureReport":
       NativeMessaging.writeFeatureReport(
         String.fromCharCode(...request.device_id),
+        request.report_id || 0,
         request.data
       )
         .then(sendResponse)

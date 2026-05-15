@@ -105,8 +105,8 @@ async fn dispatch(device_mgr: &DeviceManager, client_id: u64, req: IpcRequest) -
             Err(e) => IpcResponse::Error { id, message: e.to_string() },
         },
 
-        IpcRequest::Open { vendor_id, product_id, .. } => {
-            match device_mgr.open(vendor_id, product_id, client_id) {
+        IpcRequest::Open { device_path, .. } => {
+            match device_mgr.open(&device_path, client_id) {
                 Ok(device_id) => IpcResponse::Opened { id, device_id },
                 Err(e) => IpcResponse::Error { id, message: e.to_string() },
             }
@@ -136,13 +136,13 @@ async fn dispatch(device_mgr: &DeviceManager, client_id: u64, req: IpcRequest) -
             }
         }
 
-        IpcRequest::Write { device_id, data, .. } => {
+        IpcRequest::Write { device_id, report_id, data, .. } => {
             match device_mgr.get_file(&device_id, client_id) {
                 Err(e) => IpcResponse::Error { id, message: e.to_string() },
                 Ok(file_arc) => {
                     let result = tokio::task::spawn_blocking(move || {
                         let file = file_arc.lock().unwrap();
-                        hid::write_report(&file, &data)
+                        hid::write_report(&file, report_id, &data)
                     })
                     .await;
 
@@ -174,13 +174,13 @@ async fn dispatch(device_mgr: &DeviceManager, client_id: u64, req: IpcRequest) -
             }
         }
 
-        IpcRequest::WriteFeature { device_id, data, .. } => {
+        IpcRequest::WriteFeature { device_id, report_id, data, .. } => {
             match device_mgr.get_file(&device_id, client_id) {
                 Err(e) => IpcResponse::Error { id, message: e.to_string() },
                 Ok(file_arc) => {
                     let result = tokio::task::spawn_blocking(move || {
                         let file = file_arc.lock().unwrap();
-                        hid::write_feature_report(&file, &data)
+                        hid::write_feature_report(&file, report_id, &data)
                     })
                     .await;
 

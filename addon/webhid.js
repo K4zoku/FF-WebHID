@@ -539,6 +539,8 @@
         { __webhid_bridge: "evt", event: message.event },
         "*",
       );
+    } else {
+      console.debug("[content] skipping non-event message or missing event", message);
     }
   });
 
@@ -794,24 +796,34 @@
     // ── HIDDevice ─────────────────────────────────────────────────────────────
 
     class HIDDevice extends EventTarget {
-      // Private fields for internal bookkeeping
-      #inputReportListener = null;
-      #parsedCollections = null;
+          // Private fields for internal bookkeeping
+          #inputReportListeners = new Map();  // Maps wrapper -> original listener
+          #inputReportEventWrappers = new Map();  // Maps wrapper -> event wrapper function
+          #oninputreportListener = null;  // The current oninputreport listener
+          #parsedCollections = null;
+          // Backing store for the read-only `opened` attribute.  The WebHID
+          // spec mandates that `HIDDevice.opened` is a read-only boolean;
+          // page code must not be able to flip it directly.
+          #opened = false;
 
-      constructor(deviceInfo) {
-        super();
-        this.vendorId = deviceInfo.vendor_id;
-        this.productId = deviceInfo.product_id;
-        this.productName = deviceInfo.product_name;
-        this.manufacturer = deviceInfo.manufacturer;
-        this.serialNumber = deviceInfo.serial_number;
-        this.usbVendorId = deviceInfo.vendor_id;
+          constructor(deviceInfo) {
+            super();
+            this.vendorId = deviceInfo.vendor_id;
+            this.productId = deviceInfo.product_id;
+            this.productName = deviceInfo.product_name;
+            this.manufacturer = deviceInfo.manufacturer;
+            this.serialNumber = deviceInfo.serial_number;
+            this.usbVendorId = deviceInfo.vendor_id;
         this.usbProductId = deviceInfo.product_id;
         // HID usage information (may be null/undefined if daemon didn't provide it)
         this.usagePage = deviceInfo.usage_page !== undefined ? deviceInfo.usage_page : null;
         this.usage = deviceInfo.usage !== undefined ? deviceInfo.usage : null;
-        this.opened = false;
         this.deviceId = null;
+        // The hidraw path uniquely identifies this HID interface and is
+        // what the daemon expects on `open`.  A composite USB device
+        // exposes several interfaces — each gets its own HIDDevice
+        // instance with a distinct path, even when vid/pid are identical.
+        this.path = deviceInfo.path || null;
 
         // If the daemon provided parsed `collections`, prefer them. The
         // daemon-side collection objects may use snake_case field names; we
@@ -901,6 +913,15 @@
         }
       }
 
+
+
+      // Read-only `opened` attribute (WebHID spec compliant).  Page code
+      // cannot assign to this; only `open()` / `close()` flip the
+      // underlying private field.
+      get opened() {
+        return this.#opened;
+      }
+
       // Return parsed collections (if available) or fallback to usage info.
       get collections() {
         if (this.#parsedCollections) return this.#parsedCollections;
@@ -917,18 +938,29 @@
       }
 
       async open() {
+        if (this.opened) {
+          throw new DOMException("InvalidStateError");
+        }
+        if (!this.path) {
+          throw new DOMException(
+            "HIDDevice has no underlying hidraw path",
+            "InvalidStateError",
+          );
+        }
         try {
+          // Address the specific hidraw interface by path — sending only
+          // vid/pid would let the daemon pick any one of several matching
+          // interfaces and silently ignore the rest.
           const response = await sendRequest("open", {
-            vendor_id: this.vendorId,
-            product_id: this.productId,
+            device_id: this.path.split("").map((c) => c.charCodeAt(0)),
           });
           if (response.success) {
-            this.opened = true;
+            this.#opened = true;
             this.deviceId = String.fromCharCode(...response.data);
             this.dispatchEvent(new Event("open"));
             return true;
           }
-          throw new Error("Failed to open device");
+          throw new Error(response.error || "Failed to open device");
         } catch (error) {
           throw new DOMException(error.message, "InvalidStateError");
         }
@@ -941,7 +973,7 @@
             data: this.deviceId.split("").map((c) => c.charCodeAt(0)),
           });
           if (response.success) {
-            this.opened = false;
+            this.#opened = false;
             this.deviceId = null;
             this.dispatchEvent(new Event("close"));
           } else {
@@ -952,24 +984,48 @@
         }
       }
 
-      async read(expectedLength, timeout = null) {
+      async sendReport(reportId, data) {
+        // console.debug("[WebHID]", `sendReport(${reportId}, new Uint8Array([${data}]).buffer)`);
+        if (!this.opened)
+          throw new DOMException("Device is not open", "InvalidStateError");
+        const buffer =
+          data instanceof DataView
+            ? new Uint8Array(data.buffer)
+            : new Uint8Array(data);
+        try {
+          // The daemon prepends `report_id` to `data` before calling
+          // `write(2)`; we must NOT include it in the data buffer
+          // ourselves or the device will receive a corrupted report.
+          const response = await sendRequest("write", {
+            device_id: this.deviceId.split("").map((c) => c.charCodeAt(0)),
+            report_id: reportId,
+            data: Array.from(buffer),
+          });
+          if (response.success) return;
+          throw new Error("sendReport failed");
+        } catch (error) {
+          throw new DOMException(error.message, "NetworkError");
+        }
+      }
+
+      async receiveFeatureReport(reportId) {
         if (!this.opened)
           throw new DOMException("Device is not open", "InvalidStateError");
         try {
-          const response = await sendRequest("read", {
-            data: this.deviceId.split("").map((c) => c.charCodeAt(0)),
-            timeout: timeout || 1000,
+          const response = await sendRequest("readFeatureReport", {
+            device_id: this.deviceId.split("").map((c) => c.charCodeAt(0)),
+            report_id: reportId,
           });
-          if (response.success) {
+          if (response.success && response.data) {
             return new DataView(new Uint8Array(response.data).buffer);
           }
-          throw new Error("Read failed");
+          throw new Error("receiveFeatureReport failed");
         } catch (error) {
           throw new DOMException(error.message, "NetworkError");
         }
       }
 
-      async write(data) {
+      async sendFeatureReport(reportId, data) {
         if (!this.opened)
           throw new DOMException("Device is not open", "InvalidStateError");
         const buffer =
@@ -977,32 +1033,15 @@
             ? new Uint8Array(data.buffer)
             : new Uint8Array(data);
         try {
-          const response = await sendRequest("write", {
+          const response = await sendRequest("writeFeatureReport", {
             device_id: this.deviceId.split("").map((c) => c.charCodeAt(0)),
+            report_id: reportId,
             data: Array.from(buffer),
           });
-          if (response.success) return buffer.length;
-          throw new Error("Write failed");
-        } catch (error) {
-          throw new DOMException(error.message, "NetworkError");
-        }
-      }
-
-      async sendReport(reportId, data) {
-        // Alias for write() - sends to output reports or general write
-        if (!this.opened)
-          throw new DOMException("Device is not open", "InvalidStateError");
-        const buffer =
-          data instanceof DataView
-            ? new Uint8Array(data.buffer)
-            : new Uint8Array(data);
-        try {
-          const response = await sendRequest("write", {
-            device_id: this.deviceId.split("").map((c) => c.charCodeAt(0)),
-            data: Array.from(buffer),
-          });
-          if (response.success) return buffer.length;
-          throw new Error("sendReport failed");
+          if (response.success) {
+            return undefined;
+          }
+          throw new Error("sendFeatureReport failed");
         } catch (error) {
           throw new DOMException(error.message, "NetworkError");
         }
@@ -1010,34 +1049,112 @@
 
       addEventListener(type, listener) {
         super.addEventListener(type, listener);
-        if (type === "inputreport" && !this.#inputReportListener) {
-          this.#inputReportListener = (event) => {
+        if (type === "inputreport") {
+          const wrapper = (event) => {
             if (!event.data || event.data.__webhid_bridge !== "evt") return;
             const detail = event.data.event;
-            if (!detail || detail.event_type !== "input_report") return;
+
+            if (!detail) {
+              console.debug("[WebHID] wrapper: no detail, skipping");
+              return;
+            }
+
+            const event_type = detail.event_type;
+
+            // Decode device_id from the event for comparison
             const evDeviceId = detail.device_id
               ? String.fromCharCode(...detail.device_id)
               : null;
-            if (evDeviceId !== this.deviceId) return;
-            this.dispatchEvent(
-              new HIDInputReportEvent("inputreport", {
-                device: this,
-                reportId: detail.report_id ?? 0,
-                data: new DataView(
-                  new Uint8Array(detail.data ?? []).buffer,
-                ),
-              }),
-            );
+
+            // For input_report events, verify device ID matches
+            if (event_type === "input_report") {
+              if (evDeviceId && this.deviceId && evDeviceId !== this.deviceId) {
+                return;
+              }
+              this.dispatchEvent(
+                new HIDInputReportEvent("inputreport", {
+                  device: this,
+                  reportId: detail.report_id ?? 0,
+                  data: new DataView(
+                    new Uint8Array(detail.data ?? []).buffer,
+                  ),
+                }),
+              );
+              return;
+            }
+
+            // Handle connection events
+            if (event_type === "connected") {
+              this.dispatchEvent(new HIDConnectionEvent("connected", this));
+              return;
+            }
+
+            // Handle disconnection events
+            if (event_type === "disconnected") {
+              this.dispatchEvent(new HIDConnectionEvent("disconnected", this));
+              return;
+            }
+
+            console.debug("[WebHID] wrapper: unknown event_type:", event_type);
           };
-          window.addEventListener("message", this.#inputReportListener);
+
+          // Register this wrapper for the original listener
+          // Use the listener's unique identity as key (listener.toString())
+          const listenerKey = listener.toString();
+          this.#inputReportListeners.set(listenerKey, listener);
+          this.#inputReportEventWrappers.set(wrapper, (event) => {
+            // Call the registered listener
+            listener(event);
+          });
+
+          window.addEventListener("message", wrapper);
+
         }
       }
 
       removeEventListener(type, listener) {
         super.removeEventListener(type, listener);
-        if (type === "inputreport" && this.#inputReportListener) {
-          window.removeEventListener("message", this.#inputReportListener);
-          this.#inputReportListener = null;
+        if (type === "inputreport") {
+          // For removeEventListener called from oninputreport setter (with null),
+          // the listener passed is the current one stored in #oninputreportListener
+          if (!listener || !listener.toString()) {
+            // Clear all listeners when removing oninputreport
+            this.#inputReportListeners.clear();
+            this.#inputReportEventWrappers.forEach((fn, wrapperKey) => {
+              window.removeEventListener("message", fn);
+            });
+            this.#inputReportEventWrappers.clear();
+          } else {
+            // Remove specific listener
+            const listenerKey = listener.toString();
+            this.#inputReportListeners.delete(listenerKey);
+
+            // Remove window message listener if no wrappers left
+            if (this.#inputReportListeners.size === 0) {
+              this.#inputReportEventWrappers.forEach((fn, wrapperKey) => {
+                window.removeEventListener("message", fn);
+              });
+              this.#inputReportEventWrappers.clear();
+              this.#inputReportListeners.clear();
+            }
+          }
+        }
+      }
+
+      get oninputreport() {
+        return this.#oninputreportListener;
+      }
+
+      set oninputreport(listener) {
+        // Always pass the current listener to removeEventListener
+        const currentListener = this.#oninputreportListener;
+        this.removeEventListener("inputreport", currentListener);
+
+        // Set the new listener
+        if (listener !== null) {
+          this.addEventListener("inputreport", listener);
+        } else {
+          this.#oninputreportListener = null;
         }
       }
     }
