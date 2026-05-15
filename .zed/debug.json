@@ -6,11 +6,11 @@
   {
       "label": "Debug",
       "build": {
-        "command": "meson",
-        "args": ["compile", "-C", "build"],
-        "cwd": "$ZED_WORKTREE_ROOT/server"
+        "command": "cargo",
+        "args": ["build", "--manifest-path", "crates/Cargo.toml"],
+        "cwd": "$ZED_WORKTREE_ROOT"
       },
-      "program": "$ZED_WORKTREE_ROOT/server/build/WebHIDServer",
+      "program": "$ZED_WORKTREE_ROOT/crates/target/debug/webhid-daemon",
       "request": "launch",
       "adapter": "CodeLLDB"
     }

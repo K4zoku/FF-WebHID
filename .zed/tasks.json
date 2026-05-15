@@ -1,37 +1,23 @@
 [
   {
-    "label": "Setup",
-    "command": "meson",
-    "args": ["setup", "--wipe", "build"],
-    "cwd": "$ZED_WORKTREE_ROOT/server",
-    "use_new_terminal": false,
-    "allow_concurrent_runs": false,
-    "reveal": "no_focus",
-    "hide": "never",
-    "shell": "system",
-    "show_summary": true,
-    "show_command": false,
-    "tags": ["setup", "server"]
-  },
-  {
     "label": "Build",
-    "command": "meson",
-    "args": ["compile"],
-    "cwd": "$ZED_WORKTREE_ROOT/server/build",
+    "command": "cargo",
+    "args": ["build", "--manifest-path", "crates/Cargo.toml"],
+    "cwd": "$ZED_WORKTREE_ROOT",
     "use_new_terminal": false,
     "allow_concurrent_runs": false,
     "reveal": "no_focus",
     "hide": "never",
     "shell": "system",
     "show_summary": true,
-    "show_command": false,
-    "tags": ["build", "server"],
+    "show_command": true,
+    "tags": ["build"],
   },
   {
     "label": "Run",
     "command": "pkexec",
-    "args": ["./WebHIDServer"],
-    "cwd": "$ZED_WORKTREE_ROOT/server/build",
+    "args": ["./webhid-daemon"],
+    "cwd": "$ZED_WORKTREE_ROOT/crates/target/debug",
     "use_new_terminal": false,
     "allow_concurrent_runs": false,
     "reveal": "always",
@@ -39,6 +25,6 @@
     "shell": "system",
     "show_summary": true,
     "show_command": false,
-    "tags": ["run", "server"]
+    "tags": ["run", "daemon"]
   }
 ]
