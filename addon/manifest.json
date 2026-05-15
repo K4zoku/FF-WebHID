@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "WebHID for Firefox",
+  "name": "FF WebHID",
   "version": "1.0",
   "description": "WebHID API implementation for Firefox",
 
