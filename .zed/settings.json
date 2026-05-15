@@ -1,13 +1,1 @@
-{
-  "file_types": {
-    "C++": [
-      "**/server/include/*"
-    ],
-  },
-  "file_scan_exclusions": [
-    "**/server/lib/**/*"
-  ],
-  "project_panel": {
-    "hide_hidden": false
-  }
-}
+{}
