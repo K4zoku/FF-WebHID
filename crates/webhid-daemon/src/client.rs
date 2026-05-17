@@ -31,7 +31,7 @@ pub async fn handle(
 
     // All outbound messages go through this channel so the writer task owns
     // the socket write half exclusively.
-    let (tx, mut rx) = mpsc::channel::<IpcResponse>(128);
+    let (tx, mut rx) = mpsc::channel::<IpcResponse>(1024);
 
     // --- Writer task ---
     let writer_task = tokio::spawn(async move {
