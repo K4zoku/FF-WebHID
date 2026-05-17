@@ -14,7 +14,7 @@ use device_mgr::DeviceManager;
 
 const DEFAULT_SOCKET: &str = "/run/webhid/webhid.sock";
 /// How many broadcast slots for device events before receivers start lagging.
-const EVENT_CAPACITY: usize = 256;
+const EVENT_CAPACITY: usize = 1024;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
