@@ -22,10 +22,11 @@
 //! task routes incoming IPC messages: responses go to the pending `oneshot`
 //! channel; events are forwarded directly to the stdout channel.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
+use tokio::io::{AsyncWriteExt, BufReader, BufWriter};
 use std::sync::Arc;
 
-use tokio::io::{BufReader, BufWriter};
+
 use tokio::net::UnixStream;
 use tokio::sync::{Mutex, mpsc, oneshot};
 use webhid::{IpcRequest, IpcResponse, NmRequest, NmResponse, protocol};
@@ -54,16 +55,56 @@ async fn main() -> anyhow::Result<()> {
 
     let (daemon_read, daemon_write) = stream.into_split();
 
-    // Serialise all writes to stdout through one task.
+    // Serialise all writes to stdout through one task with batching.
+    const BATCH_SIZE: usize = 16;
+    const BATCH_FLUSH_MS: u64 = 5;
+
     let (stdout_tx, mut stdout_rx) = mpsc::channel::<NmResponse>(64);
-    let stdout_writer = tokio::spawn(async move {
-        let mut out = BufWriter::new(tokio::io::stdout());
-        while let Some(msg) = stdout_rx.recv().await {
-            if let Err(e) = protocol::write_message(&mut out, &msg).await {
+    #[allow(unused_must_use)]
+    let _stdout_writer = tokio::spawn(async move {
+        let mut out = BufWriter::with_capacity(256 * 1024, tokio::io::stdout());
+        let mut batch: VecDeque<NmResponse> = VecDeque::with_capacity(BATCH_SIZE);
+
+        loop {
+            // Collect messages until batch is full or flush timeout
+            let mut got_first = false;
+            while batch.len() < BATCH_SIZE {
+                let timeout = tokio::time::sleep(tokio::time::Duration::from_millis(BATCH_FLUSH_MS));
+                tokio::select! {
+                    msg = stdout_rx.recv() => {
+                        match msg {
+                            Some(m) => {
+                                batch.push_back(m);
+                                got_first = true;
+                            },
+                            None => {
+                                // Channel closed, flush and exit
+                                flush_batch(&mut out, &mut batch).await;
+                                return Ok::<(), anyhow::Error>(());
+                            }
+                        }
+                    }
+                    _ = timeout => {
+                        if got_first {
+                            break; // Timeout reached after getting first message
+                        }
+                        // No messages received yet, continue waiting
+                    }
+                }
+            }
+
+            // Flush the batch
+            if let Err(e) = flush_batch(&mut out, &mut batch).await {
                 log::error!("stdout write: {e}");
                 break;
             }
+
+            // If channel is closed, exit
+            if stdout_rx.is_closed() {
+                break;
+            }
         }
+        Ok::<(), anyhow::Error>(())
     });
 
     // Pending request map: request_id → oneshot sender waiting for the reply.
@@ -107,7 +148,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Main loop: one NM request at a time.
     let mut next_id: u32 = 1;
-    let mut stdin = BufReader::new(tokio::io::stdin());
+    let mut stdin = BufReader::with_capacity(64 * 1024, tokio::io::stdin());
 
     loop {
         let nm_req: NmRequest = match protocol::read_message(&mut stdin).await {
@@ -155,7 +196,32 @@ async fn main() -> anyhow::Result<()> {
     }
 
     daemon_reader.abort();
-    stdout_writer.abort();
+    #[allow(unused_variables)]
+    let _ = _stdout_writer.abort();
+    Ok(())
+}
+
+
+// ---------------------------------------------------------------------------
+// Batching helpers
+// ---------------------------------------------------------------------------
+
+async fn flush_batch<W: tokio::io::AsyncWrite + Unpin>(
+    out: &mut W,
+    batch: &mut VecDeque<NmResponse>,
+) -> std::io::Result<()> {
+    if batch.is_empty() {
+        return Ok(());
+    }
+
+    // Write all messages in batch
+    for msg in batch.drain(..) {
+        protocol::write_message(out, &msg).await?;
+    }
+
+    // Flush the buffer
+    out.flush().await?;
+
     Ok(())
 }
 
