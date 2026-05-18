@@ -1,3 +1,31 @@
+browser.webRequest.onBeforeRequest.addListener(
+	(details) => {
+		const filter = browser.webRequest.filterResponseData(details.requestId);
+		const decoder = new TextDecoder("utf-8");
+		const encoder = new TextEncoder();
+
+		filter.ondata = (event) => {
+			let str = decoder.decode(event.data, { stream: true });
+			str = str.replace(
+				/<meta\s+[^>]*http-equiv=["']?\s*Content-Security-Policy\s*["']?[^>]*>/gi,
+				"<!-- CSP stripped by FF WebHID -->"
+			);
+			filter.write(encoder.encode(str));
+			filter.disconnect();
+		};
+
+		return {};
+	},
+	{
+		urls: [
+			"https://wootility.io/",
+			"https://beta.wootility.io/",
+		],
+		types: ["main_frame"]
+	},
+	["blocking"]
+);
+
 const NativeMessaging = {
   port: null,
   // FIFO queue of resolvers waiting for the next non-event response.
@@ -146,7 +174,10 @@ const NativeMessaging = {
       browser.tabs.query({}).then((tabs) => {
         for (const tab of tabs) {
           browser.tabs
-            .sendMessage(tab.id, { action: "webhid-device-event", event: message })
+            .sendMessage(tab.id, {
+              action: "webhid-device-event",
+              event: message,
+            })
             .catch(() => {
               // Tab may not have the content script injected – ignore.
             });
@@ -175,9 +206,11 @@ browser.runtime.onInstalled.addListener(() => {
 browser.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   switch (request.action) {
     case "enumerate":
-      NativeMessaging.enumerateDevices().then(sendResponse).catch((e) => {
-        sendResponse({ success: false, error: e.message });
-      });
+      NativeMessaging.enumerateDevices()
+        .then(sendResponse)
+        .catch((e) => {
+          sendResponse({ success: false, error: e.message });
+        });
       return true; // keep channel open for async response
 
     case "open":
@@ -195,7 +228,7 @@ browser.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     case "read":
       NativeMessaging.readDevice(
         String.fromCharCode(...request.data),
-        request.timeout
+        request.timeout,
       )
         .then(sendResponse)
         .catch((e) => sendResponse({ success: false, error: e.message }));
@@ -207,7 +240,7 @@ browser.runtime.onMessage.addListener((request, _sender, sendResponse) => {
       NativeMessaging.writeDevice(
         String.fromCharCode(...request.device_id),
         request.report_id || 0,
-        request.data
+        request.data,
       )
         .then(sendResponse)
         .catch((e) => sendResponse({ success: false, error: e.message }));
@@ -216,7 +249,7 @@ browser.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     case "readFeatureReport":
       NativeMessaging.readFeatureReport(
         String.fromCharCode(...request.device_id),
-        request.report_id
+        request.report_id,
       )
         .then(sendResponse)
         .catch((e) => sendResponse({ success: false, error: e.message }));
@@ -226,7 +259,7 @@ browser.runtime.onMessage.addListener((request, _sender, sendResponse) => {
       NativeMessaging.writeFeatureReport(
         String.fromCharCode(...request.device_id),
         request.report_id || 0,
-        request.data
+        request.data,
       )
         .then(sendResponse)
         .catch((e) => sendResponse({ success: false, error: e.message }));
@@ -267,8 +300,6 @@ browser.runtime.onMessage.addListener((request, _sender, sendResponse) => {
         }
       })();
       return true;
-
-
 
     default:
       return false;
