@@ -9,11 +9,9 @@
   },
 
   "permissions": [
-    "storage",
     "nativeMessaging",
-    "webRequest",
-		"webRequestBlocking",
-		"webRequestFilterResponse"
+    "scripting",
+    "storage"
   ],
 
   "host_permissions": [
@@ -26,14 +24,23 @@
 
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["webhid.js"]
-    }
+        "matches": ["<all_urls>"],
+        "js": ["webhid-polyfill.js"],
+        "world": "MAIN"
+      },
+      {
+        "matches": ["<all_urls>"],
+        "js": ["webhid-bridge.js"]
+      }
   ],
+
+  "content_security_policy": {
+    "extension_pages": "default-src 'self'"
+  },
 
   "web_accessible_resources": [
     {
-      "resources": ["res/*.svg", "webhid-modal.css"],
+      "resources": ["res/*.svg", "webhid.css"],
       "matches": ["<all_urls>"]
     }
   ],

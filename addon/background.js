@@ -1,31 +1,3 @@
-browser.webRequest.onBeforeRequest.addListener(
-	(details) => {
-		const filter = browser.webRequest.filterResponseData(details.requestId);
-		const decoder = new TextDecoder("utf-8");
-		const encoder = new TextEncoder();
-
-		filter.ondata = (event) => {
-			let str = decoder.decode(event.data, { stream: true });
-			str = str.replace(
-				/<meta\s+[^>]*http-equiv=["']?\s*Content-Security-Policy\s*["']?[^>]*>/gi,
-				"<!-- CSP stripped by FF WebHID -->"
-			);
-			filter.write(encoder.encode(str));
-			filter.disconnect();
-		};
-
-		return {};
-	},
-	{
-		urls: [
-			"https://wootility.io/",
-			"https://beta.wootility.io/",
-		],
-		types: ["main_frame"]
-	},
-	["blocking"]
-);
-
 const NativeMessaging = {
   port: null,
   // FIFO queue of resolvers waiting for the next non-event response.
@@ -203,8 +175,14 @@ browser.runtime.onInstalled.addListener(() => {
 // Message handler for content-script requests
 // ---------------------------------------------------------------------------
 
-browser.runtime.onMessage.addListener((request, _sender, sendResponse) => {
+browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
   switch (request.action) {
+    case "injectCSS":
+      browser.scripting.insertCSS({
+        target: { tabId: sender.tab.id },
+        files: ['webhid.css']
+      });
+      return true;
     case "enumerate":
       NativeMessaging.enumerateDevices()
         .then(sendResponse)
