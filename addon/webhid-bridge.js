@@ -48,7 +48,7 @@
             </div>
             <div class="webhid-modal-content">
               <div class="webhid-device-list" id="webhidDeviceList">
-                <div class="webhid-loading">Loading devices...</div>
+                <div class="webhid-loading" id="webhidLoading">Loading devices...</div>
               </div>
             </div>
             <div class="webhid-modal-footer">
@@ -57,7 +57,20 @@
           </form>
         </dialog>
       `;
+      const itemTpl = document.createElement("template");
+      itemTpl.id = "webhid-device-item-template";
+      itemTpl.innerHTML = `
+        <div class="webhid-device-item" tabindex="0" role="button">
+          <img class="webhid-device-icon" draggable="false">
+          <div class="webhid-device-body">
+            <div class="webhid-device-name"></div>
+            <div class="webhid-device-vendor"></div>
+            <div class="webhid-device-iface"></div>
+          </div>
+        </div>
+      `;
       document.body.appendChild(tpl);
+      document.body.appendChild(itemTpl);
     }
 
     setupEventListeners() {
@@ -233,8 +246,9 @@
 
     async renderDevices() {
       if (!this.dialog) return;
-
       const deviceList = this.dialog.querySelector("#webhidDeviceList");
+      const loading = deviceList.querySelector("#webhidLoading");
+      loading.remove();
       if (this.devices.length === 0) {
         deviceList.innerHTML =
           '<div class="webhid-no-devices">No HID devices found</div>';
@@ -266,9 +280,8 @@
       // Build device groups mapping for selection lookup
       this._deviceGroups = {};
 
-      // Render one item per group
-      const itemsHtml = [];
-      let pairedIndex = 0; // index into pairedStatuses for devices in filteredDevices
+      const tpl = document.getElementById("webhid-device-item-template");
+
       for (const [name, devices] of groups.entries()) {
         // Determine if any device in this group is paired (saved)
         let isPaired = false;
@@ -287,28 +300,36 @@
         this._deviceGroups[groupId] = devices.slice(); // store copy
 
         // Use the first device to determine icon/type/manufacturer
-        const primary = devices[0];
+        const device = devices[0];
         const deviceId = groupId;
-        const type = this._guessDeviceType(primary);
+        const type = this._guessDeviceType(device);
         const iconUrl = browser.runtime.getURL(`res/${type}.svg`);
 
-        const iface = devices.length > 1
-          ? `<div class="webhid-device-iface">${this.escapeHtml(devices.length + " interfaces")}</div>`
-          : "";
+        const clone = tpl.content.cloneNode(true);
+        const item  = clone.querySelector(".webhid-device-item");
 
-        itemsHtml.push(`
-          <div class="webhid-device-item${isPaired ? " webhid-device-paired" : ""}" data-device-id="${this.escapeHtml(deviceId)}" tabindex="0" role="button" aria-label="Select device ${this.escapeHtml(primary.product_name || "Unknown Device")}">
-            <img class="webhid-device-icon" src="${iconUrl}" alt="${type}" draggable="false">
-            <div class="webhid-device-body">
-              <div class="webhid-device-name">${this.escapeHtml(name)}</div>
-              ${primary.manufacturer ? `<div class="webhid-device-vendor">${this.escapeHtml(primary.manufacturer)}</div>` : ""}
-              ${iface}
-            </div>
-          </div>
-        `);
+        item.classList.toggle("webhid-device-paired", isPaired);
+        item.dataset.deviceId = deviceId;
+        item.setAttribute("aria-label", `Select device ${device.product_name || "Unknown Device"}`);
+
+        const icon = clone.querySelector(".webhid-device-icon");
+        icon.src = iconUrl;
+        icon.alt = type;
+
+        clone.querySelector(".webhid-device-name").textContent = name;
+
+        const vendor = clone.querySelector(".webhid-device-vendor");
+        device.manufacturer
+          ? (vendor.textContent = device.manufacturer)
+          : vendor.remove();
+
+        const iface = clone.querySelector(".webhid-device-iface");
+        devices.length > 1
+          ? (iface.textContent = `${devices.length} interfaces`)
+          : iface.remove();
+
+        deviceList.appendChild(clone);
       }
-
-      deviceList.innerHTML = itemsHtml.join("");
     }
 
     applyFilters(devices, filters) {
@@ -445,7 +466,10 @@
     showError(message) {
       if (!this.dialog) return;
       const deviceList = this.dialog.querySelector("#webhidDeviceList");
-      deviceList.innerHTML = `<div class="webhid-error">${this.escapeHtml(message)}</div>`;
+      const span = document.createElement("span");
+      span.className = "webhid-error";
+      span.textContent = message;
+      deviceList.appendChild(span);
     }
   }
 
