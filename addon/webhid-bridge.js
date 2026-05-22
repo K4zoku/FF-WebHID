@@ -482,17 +482,12 @@
   // ---------------------------------------------------------------------------
   // Content script ↔ Page bridge
   //
-  // Firefox Xray Vision isolates content script JS from the page's JS world, so
-  // `window.navigator.hid = ...` written here is invisible to the page.  The
-  // fix (same approach as Sainan/WebHID-for-Firefox) is to inject the API code
-  // as a <script> element so it executes in the page's own world.  We then
-  // proxy every call back here via window.postMessage, because browser.*
-  // extension APIs are only available in the content script context.
-  //
   // Page  →  content script:  postMessage({ __webhid_bridge: 'req', id, action, payload })
   // Content script  →  page:  postMessage({ __webhid_bridge: 'res', id, result })
   //                           postMessage({ __webhid_bridge: 'evt', event })
   // ---------------------------------------------------------------------------
+  const _workers = new Map(); // deviceId (string) -> Worker
+
   window.addEventListener("message", async (event) => {
     if (!event.data || event.data.__webhid_bridge !== "req") return;
 
@@ -537,6 +532,43 @@
     try {
       const msg = Object.assign({ action }, payload || {});
       const response = await browser.runtime.sendMessage(msg);
+
+      if (action === "open" && response.success && response.session_token) {
+        const deviceId = String.fromCharCode(...response.data);
+        const worker = new Worker(browser.runtime.getURL('hid-worker.js'));
+        _workers.set(deviceId, worker);
+
+        worker.postMessage({
+          type: 'connect',
+          token: response.session_token,
+          wsPort: response.ws_port,
+          reportSize: payload.reportSize || 64,
+        });
+
+        worker.onmessage = ({ data }) => {
+          if (data.type === 'ready') {
+            window.postMessage({
+              __webhid_bridge: 'evt',
+              event: {
+                event_type: 'webhid-sab',
+                device_id: response.data,
+                sab: data.sab,
+                reportSize: payload.reportSize || 64
+              }
+            }, '*');
+          }
+        };
+      }
+
+      if (action === "close") {
+        const deviceId = String.fromCharCode(...(payload.data || []));
+        const worker = _workers.get(deviceId);
+        if (worker) {
+          worker.terminate();
+          _workers.delete(deviceId);
+        }
+      }
+
       window.postMessage({ __webhid_bridge: "res", id, result: response }, "*");
     } catch (error) {
       window.postMessage(

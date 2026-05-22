@@ -238,29 +238,54 @@ impl IpcResponse {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "action", rename_all = "lowercase")]
 pub enum NmRequest {
-    Enumerate,
+    Enumerate {
+        #[serde(default)]
+        id: Option<u32>,
+    },
     /// `device_id` is the absolute hidraw path encoded as a byte array,
     /// matching the same convention used by Close / Read / SendReport.
-    Open { device_id: Vec<u8> },
+    Open {
+        #[serde(default)]
+        id: Option<u32>,
+        device_id: Vec<u8>,
+    },
     /// `data` is the device path encoded as a byte array, e.g.
     /// `"/dev/hidraw0"` → `[47, 100, 101, 118, ...]`.
-    Close { data: Vec<u8> },
+    Close {
+        #[serde(default)]
+        id: Option<u32>,
+        data: Vec<u8>,
+    },
     /// `data` is the device path as bytes; `timeout` is in milliseconds.
-    Read { data: Vec<u8>, timeout: u64 },
+    Read {
+        #[serde(default)]
+        id: Option<u32>,
+        data: Vec<u8>,
+        timeout: u64,
+    },
     /// `device_id` is the device path as bytes; `data` is the report
     /// *payload only* (without the leading report-ID byte).  The daemon
     /// prepends `report_id` itself before calling `write(2)`.
     SendReport {
+        #[serde(default)]
+        id: Option<u32>,
         device_id: Vec<u8>,
         #[serde(default)]
         report_id: u8,
         data: Vec<u8>,
     },
     /// `device_id` is the device path as bytes; `report_id` is the feature report ID.
-    ReceiveFeatureReport { device_id: Vec<u8>, report_id: u8 },
+    ReceiveFeatureReport {
+        #[serde(default)]
+        id: Option<u32>,
+        device_id: Vec<u8>,
+        report_id: u8,
+    },
     /// `device_id` is the device path as bytes; `data` is the feature
     /// report *payload only* (same convention as `SendReport`).
     SendFeatureReport {
+        #[serde(default)]
+        id: Option<u32>,
         device_id: Vec<u8>,
         #[serde(default)]
         report_id: u8,
@@ -268,9 +293,25 @@ pub enum NmRequest {
     },
 }
 
+impl NmRequest {
+    pub fn id(&self) -> Option<u32> {
+        match self {
+            Self::Enumerate { id }
+            | Self::Open { id, .. }
+            | Self::Close { id, .. }
+            | Self::Read { id, .. }
+            | Self::SendReport { id, .. }
+            | Self::ReceiveFeatureReport { id, .. }
+            | Self::SendFeatureReport { id, .. } => *id,
+        }
+    }
+}
+
 /// A response or event sent back to Firefox via stdout.
 #[derive(Debug, Default, Serialize)]
 pub struct NmResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub success: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]

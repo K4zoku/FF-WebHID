@@ -358,9 +358,29 @@
           this.#parsedCollections = null;
         }
       }
+
+      this.maxInputReportSize = this.#calculateMaxInputReportSize();
     }
 
-
+    #calculateMaxInputReportSize() {
+      let max = 64; // default
+      const visit = (c) => {
+        if (c.inputReports) {
+          for (const r of c.inputReports) {
+            // size_bits / 8, rounded up.
+            // Note: `r.items` contains individual fields; the total report size
+            // is often provided by the daemon in the parent report object.
+            // If not, we'll have to sum up items or use a safe default.
+            // For now, look for the daemon-provided bit size.
+            const size = Math.ceil((r.size_bits || 0) / 8);
+            if (size > max) max = size;
+          }
+        }
+        if (c.children) c.children.forEach(visit);
+      };
+      this.collections.forEach(visit);
+      return max;
+    }
 
     // Read-only `opened` attribute (WebHID spec compliant).  Page code
     // cannot assign to this; only `open()` / `close()` flip the
@@ -400,6 +420,7 @@
         // interfaces and silently ignore the rest.
         const response = await sendRequest("open", {
           device_id: this.path.split("").map((c) => c.charCodeAt(0)),
+          reportSize: this.maxInputReportSize,
         });
         if (response.success) {
           this.#opened = true;
@@ -513,20 +534,11 @@
             ? String.fromCharCode(...detail.device_id)
             : null;
 
-          // For input_report events, verify device ID matches
-          if (event_type === "input_report") {
-            if (evDeviceId && this.deviceId && evDeviceId !== this.deviceId) {
-              return;
+          // Handle SharedArrayBuffer loop initiation
+          if (event_type === "webhid-sab") {
+            if (evDeviceId && this.deviceId && evDeviceId === this.deviceId) {
+              startInputReportLoop(this, detail.sab, detail.reportSize);
             }
-            this.dispatchEvent(
-              new HIDInputReportEvent("inputreport", {
-                device: this,
-                reportId: detail.report_id ?? 0,
-                data: new DataView(
-                  new Uint8Array(detail.data ?? []).buffer,
-                ),
-              }),
-            );
             return;
           }
 
@@ -604,6 +616,59 @@
         this.#oninputreportListener = null;
       }
     }
+  }
+
+  /**
+   * High-frequency input loop that drains the SharedArrayBuffer ring buffer.
+   * Uses Atomics.waitAsync to sleep until the Worker notifies us of new data.
+   */
+  function startInputReportLoop(device, sab, reportSize) {
+    const meta    = new Int32Array(sab, 0, 3);  // [head, tail, dropped]
+    const reports = new Uint8Array(sab, 12);
+    const cap     = (sab.byteLength - 12) / reportSize;
+    let   tail    = Atomics.load(meta, 1);
+
+    function drain() {
+      // consume every report that has arrived since last wake
+      let head = Atomics.load(meta, 0);
+      while (tail !== head) {
+        // use subarray (no allocation) — copy only what dispatchEvent needs
+        const offset = tail * reportSize;
+        const slice  = reports.slice(offset, offset + reportSize);
+        device.dispatchEvent(new HIDInputReportEvent('inputreport', {
+          device,
+          reportId: slice[0],
+          data: new DataView(slice.buffer, slice.byteOffset + 1, reportSize - 1),
+        }));
+        tail = (tail + 1) % cap;
+        Atomics.store(meta, 1, tail); // advance consumer index
+        head = Atomics.load(meta, 0); // re-read head in case worker advanced it
+      }
+    }
+
+    function wait() {
+      const head = Atomics.load(meta, 0);
+      if (head !== tail) {
+        // reports already waiting — drain without sleeping
+        drain();
+      }
+      // sleep until Worker calls Atomics.notify(meta, 0)
+      const result = Atomics.waitAsync(meta, 0, Atomics.load(meta, 0));
+      if (result.async) {
+        result.value.then(() => {
+          drain();
+          wait(); // re-arm
+        });
+      } else {
+        // Value changed synchronously or error occurred
+        drain();
+        // Use requestAnimationFrame or setTimeout to avoid deep recursion if
+        // the worker is incredibly fast (unlikely but safe)
+        requestAnimationFrame(wait);
+      }
+    }
+
+    wait();
   }
 
   // ── HID (navigator.hid) ───────────────────────────────────────────────────

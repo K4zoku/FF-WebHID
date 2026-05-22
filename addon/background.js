@@ -1,18 +1,8 @@
 const NativeMessaging = {
   port: null,
-  // FIFO queue of resolvers waiting for the next non-event response.
-  //
-  // The native-messaging process handles requests serially and emits
-  // responses to stdout in the same order they were sent, so popping the
-  // queue head on each non-event message correctly correlates each
-  // response with the request that produced it.
-  //
-  // The previous implementation registered an ad-hoc `onMessage` listener
-  // per call which made concurrent calls race: every listener fired on
-  // every incoming message, so two simultaneous `open()` requests would
-  // both resolve with the *first* response (and the second response would
-  // be dropped because both listeners had already detached).
-  _pending: [],
+  _nextId: 1,
+  // Map of requestId -> { resolve, reject } for in-flight requests.
+  _pending: new Map(),
 
   connect() {
     try {
@@ -26,27 +16,31 @@ const NativeMessaging = {
           this.onMessage(message);
           return;
         }
-        // Otherwise it's a response: hand it to the request that has
-        // been waiting the longest.
-        const resolver = this._pending.shift();
-        if (resolver) {
-          resolver(message);
-        } else {
-          console.warn(
-            "webhid: received NM response with no pending request:",
-            message,
-          );
+
+        // Otherwise it's a response: use the ID to find the waiter.
+        if (message.id) {
+          const p = this._pending.get(message.id);
+          if (p) {
+            this._pending.delete(message.id);
+            p.resolve(message);
+            return;
+          }
         }
+
+        console.warn(
+          "webhid: received NM response with no matching pending request:",
+          message,
+        );
       });
 
       this.port.onDisconnect.addListener(() => {
         console.log("Native messaging disconnected");
         // Fail every still-pending request so callers don't hang forever.
-        const pending = this._pending.splice(0);
         this.port = null;
-        for (const resolver of pending) {
-          resolver({ success: false, error: "Native messaging disconnected" });
+        for (const [id, p] of this._pending) {
+          p.resolve({ success: false, error: "Native messaging disconnected" });
         }
+        this._pending.clear();
       });
 
       return Promise.resolve();
@@ -62,16 +56,14 @@ const NativeMessaging = {
         reject(new Error("Not connected to native messaging"));
         return;
       }
-      // Enqueue BEFORE posting so a very fast response can never find an
-      // empty queue.
-      this._pending.push(resolve);
+
+      const id = this._nextId++;
+      this._pending.set(id, { resolve, reject });
+
       try {
-        this.port.postMessage(request);
+        this.port.postMessage({ ...request, id });
       } catch (e) {
-        // Roll back the queued resolver so subsequent responses still
-        // line up with their requests.
-        const idx = this._pending.indexOf(resolve);
-        if (idx !== -1) this._pending.splice(idx, 1);
+        this._pending.delete(id);
         reject(e);
       }
     });
@@ -162,6 +154,28 @@ browser.runtime.onStartup.addListener(() => {
 browser.runtime.onInstalled.addListener(() => {
   NativeMessaging.connect();
 });
+
+// ---------------------------------------------------------------------------
+// Security Headers (COOP/COEP)
+// ---------------------------------------------------------------------------
+
+// To enable SharedArrayBuffer support in the browser, the addon injects
+// security headers into all http:// and https:// responses.
+browser.webRequest.onHeadersReceived.addListener(
+  (details) => {
+    const headers = details.responseHeaders.filter(h =>
+      !['cross-origin-opener-policy',
+        'cross-origin-embedder-policy'].includes(h.name.toLowerCase())
+    );
+    headers.push(
+      { name: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
+      { name: 'Cross-Origin-Embedder-Policy', value: 'require-corp' },
+    );
+    return { responseHeaders: headers };
+  },
+  { urls: ['http://*/*', 'https://*/*'] },
+  ['blocking', 'responseHeaders']
+);
 
 // ---------------------------------------------------------------------------
 // Message handler for content-script requests
