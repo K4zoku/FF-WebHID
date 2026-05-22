@@ -250,7 +250,7 @@ WEBHID_NM=crates/target/debug/webhid-native-messaging \
 | Variable | Default | Description |
 |---|---|---|
 | `WEBHID_SOCKET` | `/run/webhid/webhid.sock` | IPC socket path, respected by both binaries |
-| `WEBHID_WS_PORT` | `7878` | WebSocket server port for high-frequency data |
+| `WEBHID_WS_PORT` | `31337` | WebSocket server port for high-frequency data |
 | `WEBHID_WS_BATCH_MS` | `1` | Batch flush interval in milliseconds |
 | `RUST_LOG` | `info` | Log level: `error`, `warn`, `info`, `debug`, `trace` |
 

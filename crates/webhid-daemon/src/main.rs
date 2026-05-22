@@ -14,7 +14,7 @@ use webhid::IpcResponse;
 use device_mgr::DeviceManager;
 
 const DEFAULT_SOCKET: &str = "/run/webhid/webhid.sock";
-const DEFAULT_WS_PORT: u16 = 7878;
+const DEFAULT_WS_PORT: u16 = 31337;
 /// How many broadcast slots for device events before receivers start lagging.
 const EVENT_CAPACITY: usize = 1024;
 
