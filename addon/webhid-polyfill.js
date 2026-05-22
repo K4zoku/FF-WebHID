@@ -443,7 +443,7 @@
         // The daemon prepends `report_id` to `data` before calling
         // `write(2)`; we must NOT include it in the data buffer
         // ourselves or the device will receive a corrupted report.
-        const response = await sendRequest("write", {
+        const response = await sendRequest("sendreport", {
           device_id: this.deviceId.split("").map((c) => c.charCodeAt(0)),
           report_id: reportId,
           data: Array.from(buffer),
@@ -459,7 +459,7 @@
       if (!this.opened)
         throw new DOMException("Device is not open", "InvalidStateError");
       try {
-        const response = await sendRequest("readFeatureReport", {
+        const response = await sendRequest("receivefeaturereport", {
           device_id: this.deviceId.split("").map((c) => c.charCodeAt(0)),
           report_id: reportId,
         });
@@ -480,7 +480,7 @@
           ? new Uint8Array(data.buffer)
           : new Uint8Array(data);
       try {
-        const response = await sendRequest("writeFeatureReport", {
+        const response = await sendRequest("sendfeaturereport", {
           device_id: this.deviceId.split("").map((c) => c.charCodeAt(0)),
           report_id: reportId,
           data: Array.from(buffer),

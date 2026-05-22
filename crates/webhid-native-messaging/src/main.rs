@@ -251,19 +251,19 @@ fn nm_to_ipc(req: NmRequest, id: u32) -> IpcRequest {
             IpcRequest::Read { id, device_id, timeout_ms: timeout }
         }
 
-        NmRequest::Write { device_id, report_id, data } => {
+        NmRequest::SendReport { device_id, report_id, data } => {
             let device_id = String::from_utf8_lossy(&device_id).into_owned();
-            IpcRequest::Write { id, device_id, report_id, data }
+            IpcRequest::SendReport { id, device_id, report_id, data }
         }
 
-        NmRequest::ReadFeatureReport { device_id, report_id } => {
+        NmRequest::ReceiveFeatureReport { device_id, report_id } => {
             let device_id = String::from_utf8_lossy(&device_id).into_owned();
-            IpcRequest::ReadFeature { id, device_id, report_id }
+            IpcRequest::ReceiveFeatureReport { id, device_id, report_id }
         }
 
-        NmRequest::WriteFeatureReport { device_id, report_id, data } => {
+        NmRequest::SendFeatureReport { device_id, report_id, data } => {
             let device_id = String::from_utf8_lossy(&device_id).into_owned();
-            IpcRequest::WriteFeature { id, device_id, report_id, data }
+            IpcRequest::SendFeatureReport { id, device_id, report_id, data }
         }
     }
 }
@@ -273,10 +273,10 @@ fn ipc_to_nm(resp: IpcResponse) -> NmResponse {
     match resp {
         IpcResponse::Devices { devices, .. } => NmResponse::ok_with_devices(devices),
 
-        IpcResponse::Opened { device_id, .. } => {
+        IpcResponse::Opened { device_id, session_token, ws_port, .. } => {
             // The addon decodes the device ID as `String.fromCharCode(...data)`,
             // so we send the path as a byte array.
-            NmResponse::ok_with_data(device_id.into_bytes())
+            NmResponse::ok_opened(device_id.into_bytes(), session_token, ws_port)
         }
 
         IpcResponse::Ok { .. } => NmResponse::ok(),

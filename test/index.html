@@ -183,42 +183,47 @@
 
 <!-- ── Right column: I/O ───────────────────────────────────────────────────── -->
 <section class="panel" id="io-panel">
-  <h2>I/O</h2>
+  <h2>Standard I/O</h2>
 
-  <!-- Read -->
+  <!-- Input Reports (Events) -->
   <fieldset style="border:1px solid var(--border);border-radius:6px;padding:.6rem">
-    <legend style="color:var(--muted);font-size:.7rem;padding:0 .3em">READ</legend>
-    <div class="row">
-      <label>timeout ms</label>
-      <input type="number" id="read-timeout" value="1000" style="width:5rem;flex:none">
-      <button id="btn-read" disabled>Read</button>
-      <button id="btn-read-loop" disabled>Loop</button>
-      <button id="btn-read-stop" disabled>Stop</button>
-    </div>
-  </fieldset>
-
-  <!-- Write -->
-  <fieldset style="border:1px solid var(--border);border-radius:6px;padding:.6rem">
-    <legend style="color:var(--muted);font-size:.7rem;padding:0 .3em">WRITE</legend>
-    <div class="row">
-      <label>hex bytes</label>
-      <input type="text" class="hex-input" id="write-hex" value="00" placeholder="00 01 02 …">
-    </div>
-    <div class="row" style="margin-top:.4rem">
-      <button id="btn-write" disabled>Write</button>
-      <label style="flex:1;color:var(--muted);font-size:.7rem">
-        First byte = report ID (use 00 for devices without numbered reports)
-      </label>
-    </div>
-  </fieldset>
-
-  <!-- inputreport events -->
-  <fieldset style="border:1px solid var(--border);border-radius:6px;padding:.6rem">
-    <legend style="color:var(--muted);font-size:.7rem;padding:0 .3em">INPUT REPORT EVENTS</legend>
+    <legend style="color:var(--muted);font-size:.7rem;padding:0 .3em">INPUT REPORTS (oninputreport)</legend>
     <div class="row">
       <button id="btn-listen"   disabled>Start listening</button>
       <button id="btn-unlisten" disabled>Stop</button>
       <span id="event-count" style="color:var(--muted);font-size:.75rem">0 events</span>
+    </div>
+    <div style="margin-top:.4rem;font-size:.7rem;color:var(--muted)">
+      Standard event-driven input. High-frequency devices (8000Hz) use binary WebSocket + SAB data plane.
+    </div>
+  </fieldset>
+
+  <!-- Output Reports -->
+  <fieldset style="border:1px solid var(--border);border-radius:6px;padding:.6rem">
+    <legend style="color:var(--muted);font-size:.7rem;padding:0 .3em">OUTPUT REPORTS (sendReport)</legend>
+    <div class="row">
+      <label>ID</label>
+      <input type="number" id="output-report-id" value="0" style="width:3rem;flex:none">
+      <label>hex bytes</label>
+      <input type="text" class="hex-input" id="output-hex" value="00" placeholder="00 01 02 …">
+    </div>
+    <div class="row" style="margin-top:.4rem">
+      <button id="btn-send-report" disabled>sendReport()</button>
+    </div>
+  </fieldset>
+
+  <!-- Feature Reports -->
+  <fieldset style="border:1px solid var(--border);border-radius:6px;padding:.6rem">
+    <legend style="color:var(--muted);font-size:.7rem;padding:0 .3em">FEATURE REPORTS</legend>
+    <div class="row">
+      <label>ID</label>
+      <input type="number" id="feature-report-id" value="0" style="width:3rem;flex:none">
+      <button id="btn-receive-feature" disabled>receiveFeatureReport()</button>
+    </div>
+    <div class="row" style="margin-top:.4rem">
+      <label>hex bytes</label>
+      <input type="text" class="hex-input" id="feature-hex" value="00" placeholder="00 01 02 …">
+      <button id="btn-send-feature" disabled>sendFeatureReport()</button>
     </div>
   </fieldset>
 </section>
@@ -261,7 +266,6 @@ function hexBytes(arr) {
 // ── State ──────────────────────────────────────────────────────────────────────
 let selectedDevice = null;   // HIDDevice instance (primary)
 let selectedDevices = [];     // array of HIDDevice instances returned by requestDevice
-let readLoopActive = false;
 let inputReportListener = null;
 let eventCount = 0;
 
@@ -297,10 +301,12 @@ function updateUIForSelected() {
 
   document.getElementById('btn-open').disabled  = !anyClosed; // enable if any device is closed
   document.getElementById('btn-close').disabled = !anyOpened;
-  document.getElementById('btn-read').disabled  = !anyOpened;
-  document.getElementById('btn-read-loop').disabled = !anyOpened;
-  document.getElementById('btn-write').disabled = !anyOpened;
+
+  // Standard I/O buttons
   document.getElementById('btn-listen').disabled = !anyOpened;
+  document.getElementById('btn-send-report').disabled = !anyOpened;
+  document.getElementById('btn-send-feature').disabled = !anyOpened;
+  document.getElementById('btn-receive-feature').disabled = !anyOpened;
 }
 
 // ── Badge helpers ──────────────────────────────────────────────────────────────
@@ -417,7 +423,6 @@ document.getElementById('btn-open').addEventListener('click', async () => {
 // ── Close ─────────────────────────────────────────────────────────────────────
 document.getElementById('btn-close').addEventListener('click', async () => {
   if (!selectedDevice && (!Array.isArray(selectedDevices) || selectedDevices.length===0)) return;
-  stopReadLoop();
   stopListening();
   try {
     // Close all selected devices (the API may have returned multiple interfaces)
@@ -430,69 +435,73 @@ document.getElementById('btn-close').addEventListener('click', async () => {
   }
 });
 
-// ── Read ──────────────────────────────────────────────────────────────────────
-document.getElementById('btn-read').addEventListener('click', doRead);
+// ── sendReport ────────────────────────────────────────────────────────────────
+document.getElementById('btn-send-report').addEventListener('click', async () => {
+  const toWrite = Array.isArray(selectedDevices) && selectedDevices.length > 0 ? selectedDevices : (selectedDevice ? [selectedDevice] : []);
+  if (toWrite.length === 0) return;
 
-async function doRead() {
-  const timeout = parseInt(document.getElementById('read-timeout').value) || 1000;
+  const reportId = parseInt(document.getElementById('output-report-id').value) || 0;
+  const hex = document.getElementById('output-hex').value.trim();
+  const bytes = hex.split(/\s+/).filter(Boolean).map(h => parseInt(h, 16));
+  if (bytes.some(isNaN)) { logErr('Invalid hex bytes'); return; }
+
+  try {
+    await Promise.all(toWrite.map(async (d) => {
+      try {
+        if (d.opened) {
+          await d.sendReport(reportId, new Uint8Array(bytes));
+          logOk(`sendReport(${reportId}) to ${deviceLabel(d)}: ${hexBytes(bytes)}`);
+        }
+      } catch (e) {
+        logErr(`sendReport ${deviceLabel(d)}: ${e.message}`);
+      }
+    }));
+  } catch (e) {
+    logErr('sendReport overall failed: ' + e.message);
+  }
+});
+
+// ── Feature Reports ───────────────────────────────────────────────────────────
+document.getElementById('btn-receive-feature').addEventListener('click', async () => {
   const toRead = Array.isArray(selectedDevices) && selectedDevices.length > 0 ? selectedDevices : (selectedDevice ? [selectedDevice] : []);
   if (toRead.length === 0) return;
-  const results = [];
+
+  const reportId = parseInt(document.getElementById('feature-report-id').value) || 0;
+
   for (const d of toRead) {
     if (!d.opened) continue;
     try {
-      const view = await d.read(64, timeout);
+      const view = await d.receiveFeatureReport(reportId);
       const bytes = new Uint8Array(view.buffer);
-      logData(`Read from ${deviceLabel(d)}: ${hexBytes(bytes)}`);
-      results.push({ device: d, bytes });
+      logData(`receiveFeatureReport(${reportId}) from ${deviceLabel(d)}: ${hexBytes(bytes)}`);
     } catch (e) {
-      if (e.message?.includes('timed out') || e.name === 'NetworkError') {
-        logWarn(`Read timed out (device idle) on ${deviceLabel(d)}`);
-      } else {
-        logErr(`Read ${deviceLabel(d)}: ` + e.message);
-      }
+      logErr(`receiveFeatureReport(${reportId}) ${deviceLabel(d)}: ${e.message}`);
     }
   }
-  return results;
-}
+});
 
-// ── Read loop ─────────────────────────────────────────────────────────────────
-document.getElementById('btn-read-loop').addEventListener('click', startReadLoop);
-document.getElementById('btn-read-stop').addEventListener('click', stopReadLoop);
-
-function startReadLoop() {
-  if (readLoopActive) return;
-  readLoopActive = true;
-  document.getElementById('btn-read-loop').disabled = true;
-  document.getElementById('btn-read-stop').disabled = false;
-  log('Read loop started');
-  (async () => {
-    while (readLoopActive && ((selectedDevices.length>0 && selectedDevices.some(d=>d.opened)) || (selectedDevice && selectedDevice.opened))) {
-      await doRead();
-    }
-  })();
-}
-
-function stopReadLoop() {
-  if (!readLoopActive) return;
-  readLoopActive = false;
-  document.getElementById('btn-read-loop').disabled = false;
-  document.getElementById('btn-read-stop').disabled = true;
-  log('Read loop stopped');
-}
-
-// ── Write ─────────────────────────────────────────────────────────────────────
-document.getElementById('btn-write').addEventListener('click', async () => {
+document.getElementById('btn-send-feature').addEventListener('click', async () => {
   const toWrite = Array.isArray(selectedDevices) && selectedDevices.length > 0 ? selectedDevices : (selectedDevice ? [selectedDevice] : []);
   if (toWrite.length === 0) return;
-  const hex = document.getElementById('write-hex').value.trim();
+
+  const reportId = parseInt(document.getElementById('feature-report-id').value) || 0;
+  const hex = document.getElementById('feature-hex').value.trim();
   const bytes = hex.split(/\s+/).filter(Boolean).map(h => parseInt(h, 16));
   if (bytes.some(isNaN)) { logErr('Invalid hex bytes'); return; }
+
   try {
-    await Promise.all(toWrite.map(async (d) => { try { if (d.opened) await d.write(new Uint8Array(bytes)); else logWarn(`Skipping write to ${deviceLabel(d)} (not open)`); } catch (e) { logErr(`Write ${deviceLabel(d)}: ${e.message}`); } }));
-    logOk(`Wrote ${bytes.length}B to ${toWrite.length} device(s)`);
+    await Promise.all(toWrite.map(async (d) => {
+      try {
+        if (d.opened) {
+          await d.sendFeatureReport(reportId, new Uint8Array(bytes));
+          logOk(`sendFeatureReport(${reportId}) to ${deviceLabel(d)}: ${hexBytes(bytes)}`);
+        }
+      } catch (e) {
+        logErr(`sendFeatureReport ${deviceLabel(d)}: ${e.message}`);
+      }
+    }));
   } catch (e) {
-    logErr('Write: ' + e.message);
+    logErr('sendFeatureReport overall failed: ' + e.message);
   }
 });
 

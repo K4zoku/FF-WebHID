@@ -145,43 +145,39 @@ def main():
     device_id = resp["device_id"]
     ok(f"Opened  →  device_id = {device_id!r}")
 
-    # 4. Read (short timeout) --------------------------------------------------
-    head("4 · Read  (500 ms timeout)")
+    # 4. SendReport (no-op byte) -----------------------------------------------
+    head("4 · SendReport  (single 0x00 byte)")
     resp = client.request({
-        "type":       "Read",
-        "id":         3,
-        "device_id":  device_id,
-        "timeout_ms": 500,
-    })
-
-    if resp.get("type") == "Data":
-        data = resp["data"]
-        hex_str = " ".join(f"{b:02x}" for b in data[:16])
-        suffix  = "…" if len(data) > 16 else ""
-        ok(f"Read {len(data)} byte(s):  {hex_str}{suffix}")
-    elif resp.get("type") == "Error":
-        msg = resp.get("message", "")
-        if "timed out" in msg.lower():
-            info("Timed out – device sent no data in 500 ms (normal for idle devices)")
-        else:
-            fail(f"Read error: {msg}")
-    else:
-        info(f"Response: {resp}")
-
-    # 5. Write (no-op byte) ----------------------------------------------------
-    head("5 · Write  (single 0x00 byte)")
-    resp = client.request({
-        "type":      "Write",
-        "id":        4,
+        "type":      "SendReport",
+        "id":        3,
         "device_id": device_id,
         "report_id": 0,
         "data":      [0x00],
     })
 
     if resp.get("type") == "Ok":
-        ok("Write acknowledged")
+        ok("Report sent acknowledged")
     elif resp.get("type") == "Error":
-        info(f"Write returned error: {resp['message']}  (device may not support writes)")
+        info(f"SendReport returned error: {resp['message']}  (device may not support writes)")
+    else:
+        info(f"Response: {resp}")
+
+    # 5. ReceiveFeatureReport --------------------------------------------------
+    head("5 · ReceiveFeatureReport  (report_id=0)")
+    resp = client.request({
+        "type":      "ReceiveFeatureReport",
+        "id":        4,
+        "device_id": device_id,
+        "report_id": 0,
+    })
+
+    if resp.get("type") == "Data":
+        data = resp["data"]
+        hex_str = " ".join(f"{b:02x}" for b in data[:16])
+        suffix  = "…" if len(data) > 16 else ""
+        ok(f"Received feature report: {hex_str}{suffix}")
+    elif resp.get("type") == "Error":
+        info(f"ReceiveFeatureReport error: {resp['message']}")
     else:
         info(f"Response: {resp}")
 

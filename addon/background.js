@@ -99,40 +99,32 @@ const NativeMessaging = {
     });
   },
 
-  async readDevice(deviceId, timeout) {
-    return await this.sendRequest({
-      action: "read",
-      data: deviceId.split("").map((c) => c.charCodeAt(0)),
-      timeout,
-    });
-  },
-
   // device_id, report_id, and data are kept as separate fields so the
   // native-messaging process can distinguish the path, report ID, and
   // payload without guessing.  The daemon is responsible for prepending
   // `report_id` to the buffer before calling `write(2)`.
-  async writeDevice(deviceId, reportId, data) {
+  async sendReport(deviceId, reportId, data) {
     return await this.sendRequest({
-      action: "write",
+      action: "sendreport",
       device_id: deviceId.split("").map((c) => c.charCodeAt(0)),
       report_id: reportId,
       data: Array.from(data),
     });
   },
 
-  async readFeatureReport(deviceId, reportId) {
+  async receiveFeatureReport(deviceId, reportId) {
     return await this.sendRequest({
-      action: "readFeatureReport",
+      action: "receivefeaturereport",
       device_id: deviceId.split("").map((c) => c.charCodeAt(0)),
       report_id: reportId,
     });
   },
 
-  // Same convention as writeDevice: the daemon prepends `report_id`
+  // Same convention as sendReport: the daemon prepends `report_id`
   // before issuing HIDIOCSFEATURE, so `data` is the payload only.
-  async writeFeatureReport(deviceId, reportId, data) {
+  async sendFeatureReport(deviceId, reportId, data) {
     return await this.sendRequest({
-      action: "writeFeatureReport",
+      action: "sendfeaturereport",
       device_id: deviceId.split("").map((c) => c.charCodeAt(0)),
       report_id: reportId,
       data: Array.from(data),
@@ -203,19 +195,10 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
         .catch((e) => sendResponse({ success: false, error: e.message }));
       return true;
 
-    case "read":
-      NativeMessaging.readDevice(
-        String.fromCharCode(...request.data),
-        request.timeout,
-      )
-        .then(sendResponse)
-        .catch((e) => sendResponse({ success: false, error: e.message }));
-      return true;
-
-    case "write":
+    case "sendreport":
       // device_id, report_id and data arrive as separate fields from the
-      // content script (see HIDDevice.sendReport / HIDDevice.write).
-      NativeMessaging.writeDevice(
+      // content script (see HIDDevice.sendReport).
+      NativeMessaging.sendReport(
         String.fromCharCode(...request.device_id),
         request.report_id || 0,
         request.data,
@@ -224,8 +207,8 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
         .catch((e) => sendResponse({ success: false, error: e.message }));
       return true;
 
-    case "readFeatureReport":
-      NativeMessaging.readFeatureReport(
+    case "receivefeaturereport":
+      NativeMessaging.receiveFeatureReport(
         String.fromCharCode(...request.device_id),
         request.report_id,
       )
@@ -233,8 +216,8 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
         .catch((e) => sendResponse({ success: false, error: e.message }));
       return true;
 
-    case "writeFeatureReport":
-      NativeMessaging.writeFeatureReport(
+    case "sendfeaturereport":
+      NativeMessaging.sendFeatureReport(
         String.fromCharCode(...request.device_id),
         request.report_id || 0,
         request.data,
