@@ -11,7 +11,7 @@
 //!  [stdin reader]──►[nm_to_ipc]──►[daemon writer]──► webhid-daemon
 //!                                                           │
 //!  Firefox addon                                    IpcResponse
-//!    ▲  stdout (NmResponse, length-prefixed JSON)          │
+//!    ▲  stdout (NmResponse, length-prefixed JSON)           │
 //!    │                                                      │
 //!  [stdout writer]◄──────────────────────────────[daemon reader]
 //!                   id>0 → ipc_to_nm (response)
@@ -160,6 +160,7 @@ async fn main() -> anyhow::Result<()> {
             }
         };
         log::debug!("← Firefox: {nm_req:?}");
+        let firefox_id = nm_req.id();
 
         let id = next_id;
         // Reserve id=0 for events; wrap around skipping 0.
@@ -177,19 +178,22 @@ async fn main() -> anyhow::Result<()> {
             if let Err(e) = protocol::write_message(&mut *w, &ipc_req).await {
                 log::error!("daemon write: {e}");
                 pending.lock().await.remove(&id);
-                let _ = stdout_tx.send(NmResponse::err("daemon communication error")).await;
+                let mut err_resp = NmResponse::err("daemon communication error");
+                err_resp.id = firefox_id;
+                let _ = stdout_tx.send(err_resp).await;
                 continue;
             }
         }
 
         // Await the matching response (the daemon reader task will deliver it).
-        let nm_resp = match resp_rx.await {
+        let mut nm_resp = match resp_rx.await {
             Ok(ipc_resp) => {
                 log::debug!("→ daemon: {ipc_resp:?}");
                 ipc_to_nm(ipc_resp)
             }
             Err(_) => NmResponse::err("daemon disconnected"),
         };
+        nm_resp.id = firefox_id;
 
         log::debug!("→ Firefox: {nm_resp:?}");
         let _ = stdout_tx.send(nm_resp).await;
@@ -233,35 +237,35 @@ async fn flush_batch<W: tokio::io::AsyncWrite + Unpin>(
 /// the daemon, attaching the given sequence `id`.
 fn nm_to_ipc(req: NmRequest, id: u32) -> IpcRequest {
     match req {
-        NmRequest::Enumerate => IpcRequest::Enumerate { id },
+        NmRequest::Enumerate { .. } => IpcRequest::Enumerate { id },
 
-        NmRequest::Open { device_id } => {
+        NmRequest::Open { device_id, .. } => {
             let device_path = String::from_utf8_lossy(&device_id).into_owned();
             IpcRequest::Open { id, device_path }
         }
 
-        NmRequest::Close { data } => {
+        NmRequest::Close { data, .. } => {
             // `data` is the device path encoded as individual char codes.
             let device_id = String::from_utf8_lossy(&data).into_owned();
             IpcRequest::Close { id, device_id }
         }
 
-        NmRequest::Read { data, timeout } => {
+        NmRequest::Read { data, timeout, .. } => {
             let device_id = String::from_utf8_lossy(&data).into_owned();
             IpcRequest::Read { id, device_id, timeout_ms: timeout }
         }
 
-        NmRequest::SendReport { device_id, report_id, data } => {
+        NmRequest::SendReport { device_id, report_id, data, .. } => {
             let device_id = String::from_utf8_lossy(&device_id).into_owned();
             IpcRequest::SendReport { id, device_id, report_id, data }
         }
 
-        NmRequest::ReceiveFeatureReport { device_id, report_id } => {
+        NmRequest::ReceiveFeatureReport { device_id, report_id, .. } => {
             let device_id = String::from_utf8_lossy(&device_id).into_owned();
             IpcRequest::ReceiveFeatureReport { id, device_id, report_id }
         }
 
-        NmRequest::SendFeatureReport { device_id, report_id, data } => {
+        NmRequest::SendFeatureReport { device_id, report_id, data, .. } => {
             let device_id = String::from_utf8_lossy(&device_id).into_owned();
             IpcRequest::SendFeatureReport { id, device_id, report_id, data }
         }

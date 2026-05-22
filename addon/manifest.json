@@ -11,7 +11,9 @@
   "permissions": [
     "nativeMessaging",
     "scripting",
-    "storage"
+    "storage",
+    "webRequest",
+    "webRequestBlocking"
   ],
 
   "host_permissions": [
@@ -36,7 +38,7 @@
 
   "web_accessible_resources": [
     {
-      "resources": ["res/*.svg", "webhid.css"],
+      "resources": ["res/*.svg", "webhid.css", "hid-worker.js"],
       "matches": ["<all_urls>"]
     }
   ],
