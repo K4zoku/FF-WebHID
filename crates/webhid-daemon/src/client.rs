@@ -25,6 +25,7 @@ pub async fn handle(
     client_id: u64,
     device_mgr: Arc<DeviceManager>,
     mut event_rx: broadcast::Receiver<IpcResponse>,
+    ws_port: u16,
 ) -> anyhow::Result<()> {
     let (reader, writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
@@ -76,7 +77,7 @@ pub async fn handle(
         };
 
         log::debug!("[client {client_id}] request: {request:?}");
-        let response = dispatch(&device_mgr, client_id, request).await;
+        let response = dispatch(&device_mgr, client_id, request, ws_port).await;
         log::debug!("[client {client_id}] response: {response:?}");
 
         if tx.send(response).await.is_err() {
@@ -96,7 +97,7 @@ pub async fn handle(
 // Request dispatch
 // ---------------------------------------------------------------------------
 
-async fn dispatch(device_mgr: &DeviceManager, client_id: u64, req: IpcRequest) -> IpcResponse {
+async fn dispatch(device_mgr: &DeviceManager, client_id: u64, req: IpcRequest, ws_port: u16) -> IpcResponse {
     let id = req.id();
 
     match req {
@@ -107,7 +108,7 @@ async fn dispatch(device_mgr: &DeviceManager, client_id: u64, req: IpcRequest) -
 
         IpcRequest::Open { device_path, .. } => {
             match device_mgr.open(&device_path, client_id) {
-                Ok(device_id) => IpcResponse::Opened { id, device_id },
+                Ok((device_id, session_token)) => IpcResponse::Opened { id, device_id, session_token, ws_port: Some(ws_port) },
                 Err(e) => IpcResponse::Error { id, message: e.to_string() },
             }
         }
@@ -136,7 +137,7 @@ async fn dispatch(device_mgr: &DeviceManager, client_id: u64, req: IpcRequest) -
             }
         }
 
-        IpcRequest::Write { device_id, report_id, data, .. } => {
+        IpcRequest::SendReport { device_id, report_id, data, .. } => {
             match device_mgr.get_file(&device_id, client_id) {
                 Err(e) => IpcResponse::Error { id, message: e.to_string() },
                 Ok(file_arc) => {
@@ -155,7 +156,7 @@ async fn dispatch(device_mgr: &DeviceManager, client_id: u64, req: IpcRequest) -
             }
         }
 
-        IpcRequest::ReadFeature { device_id, report_id, .. } => {
+        IpcRequest::ReceiveFeatureReport { device_id, report_id, .. } => {
             match device_mgr.get_file(&device_id, client_id) {
                 Err(e) => IpcResponse::Error { id, message: e.to_string() },
                 Ok(file_arc) => {
@@ -174,7 +175,7 @@ async fn dispatch(device_mgr: &DeviceManager, client_id: u64, req: IpcRequest) -
             }
         }
 
-        IpcRequest::WriteFeature { device_id, report_id, data, .. } => {
+        IpcRequest::SendFeatureReport { device_id, report_id, data, .. } => {
             match device_mgr.get_file(&device_id, client_id) {
                 Err(e) => IpcResponse::Error { id, message: e.to_string() },
                 Ok(file_arc) => {

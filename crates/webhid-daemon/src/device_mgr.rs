@@ -5,6 +5,8 @@ use std::fs::File;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use rand::RngExt;
+
 use tokio::task::JoinHandle;
 use tokio::sync::broadcast;
 
@@ -31,11 +33,21 @@ struct Entry {
     stop_flag: Arc<AtomicBool>,
     /// Join handle for the reader task so we can abort it on close.
     handle: Option<JoinHandle<()>>,
+    /// Session token for WebSocket authentication (optional)
+    session_token: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
+
+/// Generate a random 128-bit hex session token for WebSocket authentication.
+fn generate_session_token() -> String {
+    let mut rng = rand::rng();
+    // 16 bytes = 128 bits, encoded as hex = 32 characters
+    let bytes: [u8; 16] = rng.random();
+    hex::encode(bytes)
+}
 
 pub struct DeviceManager {
     // Key: hidraw node path (e.g. "/dev/hidraw0"), which is also the device_id
@@ -74,14 +86,14 @@ impl DeviceManager {
     /// * If a *different* client holds it open the call still fails, so
     ///   two independent native-messaging connections can't fight over
     ///   one hidraw fd.
-    pub fn open(&self, device_path: &str, client_id: u64) -> anyhow::Result<String> {
+    pub fn open(&self, device_path: &str, client_id: u64) -> anyhow::Result<(String, Option<String>)> {
         // Fast path: avoid the expensive `hid::open_by_path` (which
         // re-enumerates udev) when the device is already owned by us.
         {
             let map = self.devices.lock().unwrap();
             if let Some(existing) = map.get(device_path) {
                 return if existing.client_id == client_id {
-                    Ok(device_path.to_string())
+                    Ok((device_path.to_string(), existing.session_token.clone()))
                 } else {
                     Err(anyhow!(
                         "'{device_path}' is open by a different client"
@@ -99,7 +111,7 @@ impl DeviceManager {
         if let Some(existing) = map.get(&path) {
             drop(file); // discard the redundant fd we just opened
             return if existing.client_id == client_id {
-                Ok(path)
+                Ok((path, existing.session_token.clone()))
             } else {
                 Err(anyhow!("'{path}' is open by a different client"))
             };
@@ -114,6 +126,9 @@ impl DeviceManager {
             .map(hid::uses_numbered_reports)
             .unwrap_or(false);
 
+        // Generate session token for WebSocket authentication
+        let session_token = self::generate_session_token();
+
         // Prepare entry with a stopped reader for now; we'll spawn the reader
         // and then store its handle in the map so we can stop it later.
         let stop_flag = Arc::new(AtomicBool::new(false));
@@ -124,6 +139,7 @@ impl DeviceManager {
             client_id,
             stop_flag: Arc::clone(&stop_flag),
             handle: None,
+            session_token: Some(session_token.clone()),
         };
 
         map.insert(path.clone(), entry);
@@ -208,7 +224,7 @@ impl DeviceManager {
             e.handle = Some(handle);
         }
 
-        Ok(path)
+        Ok((path, Some(session_token)))
     }
 
     /// Close a device owned by `client_id`.
@@ -253,5 +269,14 @@ impl DeviceManager {
                 }
             }
         }
+    }
+
+    /// Look up a device_id by its session token.
+    /// Returns `None` if no device matches the token.
+    pub fn get_device_by_token(&self, token: &str) -> Option<String> {
+        let map = self.devices.lock().unwrap();
+        map.iter()
+            .find(|(_, entry)| entry.session_token.as_deref() == Some(token))
+            .map(|(device_id, _)| device_id.clone())
     }
 }
