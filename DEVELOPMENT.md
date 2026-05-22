@@ -39,7 +39,7 @@ The project is split into a **Control Plane** for low-frequency management tasks
    │                  │ addon/hid-worker.js │ ← Web Worker
    ▼                  └─────────┬───────────┘
  addon/background.js            │
-   │                            │ (Batched input reports)
+   │                            │ (Batched input reports via SharedArrayBuffer)
    ▼                            │
  webhid-native-messaging        │
    │                            │

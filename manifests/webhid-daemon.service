@@ -12,6 +12,8 @@ RestartSec=3
 
 # Log level can be changed without recompiling:  info | debug | warn | error
 Environment=RUST_LOG=info
+Environment=WEBHID_WS_PORT=7878
+Environment=WEBHID_WS_BATCH_MS=1
 
 # The daemon creates /run/webhid/ itself, but RuntimeDirectory makes systemd
 # handle the lifetime of that directory cleanly.
