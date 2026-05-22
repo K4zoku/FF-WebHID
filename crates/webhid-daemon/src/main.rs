@@ -2,6 +2,7 @@ mod client;
 mod device_mgr;
 mod hid;
 mod udev_monitor;
+mod websocket;
 
 use std::sync::Arc;
 
@@ -13,6 +14,7 @@ use webhid::IpcResponse;
 use device_mgr::DeviceManager;
 
 const DEFAULT_SOCKET: &str = "/run/webhid/webhid.sock";
+const DEFAULT_WS_PORT: u16 = 7878;
 /// How many broadcast slots for device events before receivers start lagging.
 const EVENT_CAPACITY: usize = 1024;
 
@@ -24,6 +26,10 @@ async fn main() -> anyhow::Result<()> {
 
     let socket_path = std::env::var("WEBHID_SOCKET")
         .unwrap_or_else(|_| DEFAULT_SOCKET.to_string());
+    let ws_port: u16 = std::env::var("WEBHID_WS_PORT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(DEFAULT_WS_PORT);
 
     // Ensure the parent directory exists (e.g. /run/webhid/).
     if let Some(parent) = std::path::Path::new(&socket_path).parent() {
@@ -46,6 +52,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     log::info!("webhid-daemon listening on {socket_path}");
+    log::info!("webhid-daemon WebSocket server on port {ws_port}");
 
     // Shared event bus: daemon → all connected clients.
     let (event_tx, _) = broadcast::channel::<IpcResponse>(EVENT_CAPACITY);
@@ -56,6 +63,17 @@ async fn main() -> anyhow::Result<()> {
     // Shared device manager.
     let device_mgr = Arc::new(DeviceManager::new(event_tx.clone()));
 
+    // Spawn WebSocket server
+    {
+        let event_tx_clone = event_tx.clone();
+        let device_mgr_clone = Arc::clone(&device_mgr);
+        tokio::spawn(async move {
+            if let Err(e) = websocket::start_server(ws_port, event_tx_clone, device_mgr_clone).await {
+                log::error!("WebSocket server error: {e:#}");
+            }
+        });
+    }
+
     let mut next_client_id: u64 = 0;
     loop {
         match listener.accept().await {
@@ -64,9 +82,10 @@ async fn main() -> anyhow::Result<()> {
                 let cid = next_client_id;
                 let mgr = Arc::clone(&device_mgr);
                 let rx = event_tx.subscribe();
+                let ws_port = ws_port;
                 tokio::spawn(async move {
                     log::info!("[client {cid}] connected");
-                    if let Err(e) = client::handle(stream, cid, mgr, rx).await {
+                    if let Err(e) = client::handle(stream, cid, mgr, rx, ws_port).await {
                         log::warn!("[client {cid}] error: {e:#}");
                     }
                     log::info!("[client {cid}] disconnected");
