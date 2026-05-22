@@ -173,12 +173,12 @@ pub enum IpcRequest {
     /// before handing the buffer to `write(2)`.  Use `report_id = 0`
     /// for interfaces that don't use numbered reports (Linux hidraw
     /// still requires the leading zero).
-    Write { id: u32, device_id: String, report_id: u8, data: Vec<u8> },
+    SendReport { id: u32, device_id: String, report_id: u8, data: Vec<u8> },
     /// Receive a HID feature report.
-    ReadFeature { id: u32, device_id: String, report_id: u8 },
+    ReceiveFeatureReport { id: u32, device_id: String, report_id: u8 },
     /// Send a HID feature report.  `data` is the report *payload only*
-    /// (same convention as `Write`).
-    WriteFeature { id: u32, device_id: String, report_id: u8, data: Vec<u8> },
+    /// (same convention as `SendReport`).
+    SendFeatureReport { id: u32, device_id: String, report_id: u8, data: Vec<u8> },
 }
 
 impl IpcRequest {
@@ -188,20 +188,20 @@ impl IpcRequest {
             | Self::Open { id, .. }
             | Self::Close { id, .. }
             | Self::Read { id, .. }
-            | Self::Write { id, .. }
-            | Self::ReadFeature { id, .. }
-            | Self::WriteFeature { id, .. } => *id,
+            | Self::SendReport { id, .. }
+            | Self::ReceiveFeatureReport { id, .. }
+            | Self::SendFeatureReport { id, .. } => *id,
         }
     }
 }
 
-/// Response or unsolicited event sent from the daemon to the native-messaging process.
+/// A response or unsolicited event sent from the daemon to the native-messaging process.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum IpcResponse {
     // Responses (id mirrors the matching request)
     Devices { id: u32, devices: Vec<DeviceInfo> },
-    Opened { id: u32, device_id: String },
+    Opened { id: u32, device_id: String, session_token: Option<String>, ws_port: Option<u16> },
     Ok { id: u32 },
     Data { id: u32, data: Vec<u8> },
     Error { id: u32, message: String },
@@ -240,7 +240,7 @@ impl IpcResponse {
 pub enum NmRequest {
     Enumerate,
     /// `device_id` is the absolute hidraw path encoded as a byte array,
-    /// matching the same convention used by Close / Read / Write.
+    /// matching the same convention used by Close / Read / SendReport.
     Open { device_id: Vec<u8> },
     /// `data` is the device path encoded as a byte array, e.g.
     /// `"/dev/hidraw0"` → `[47, 100, 101, 118, ...]`.
@@ -250,17 +250,17 @@ pub enum NmRequest {
     /// `device_id` is the device path as bytes; `data` is the report
     /// *payload only* (without the leading report-ID byte).  The daemon
     /// prepends `report_id` itself before calling `write(2)`.
-    Write {
+    SendReport {
         device_id: Vec<u8>,
         #[serde(default)]
         report_id: u8,
         data: Vec<u8>,
     },
     /// `device_id` is the device path as bytes; `report_id` is the feature report ID.
-    ReadFeatureReport { device_id: Vec<u8>, report_id: u8 },
+    ReceiveFeatureReport { device_id: Vec<u8>, report_id: u8 },
     /// `device_id` is the device path as bytes; `data` is the feature
-    /// report *payload only* (same convention as `Write`).
-    WriteFeatureReport {
+    /// report *payload only* (same convention as `SendReport`).
+    SendFeatureReport {
         device_id: Vec<u8>,
         #[serde(default)]
         report_id: u8,
@@ -280,6 +280,10 @@ pub struct NmResponse {
     /// Raw bytes: device path for `open`, HID report for `read`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<Vec<u8>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ws_port: Option<u16>,
     // Event fields
     #[serde(skip_serializing_if = "Option::is_none")]
     pub event_type: Option<String>,
@@ -304,6 +308,16 @@ impl NmResponse {
 
     pub fn ok_with_devices(devices: Vec<DeviceInfo>) -> Self {
         Self { success: Some(true), devices: Some(devices), ..Default::default() }
+    }
+
+    pub fn ok_opened(device_id: Vec<u8>, session_token: Option<String>, ws_port: Option<u16>) -> Self {
+        Self {
+            success: Some(true),
+            data: Some(device_id),
+            session_token,
+            ws_port,
+            ..Default::default()
+        }
     }
 
     pub fn err(message: impl Into<String>) -> Self {

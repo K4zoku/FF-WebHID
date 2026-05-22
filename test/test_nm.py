@@ -151,39 +151,35 @@ def main():
     device_id = bytes(resp["data"]).decode()
     ok(f"Opened  →  device_id = {device_id!r}")
 
-    # 4. Read ------------------------------------------------------------------
-    head("4 · Read  (timeout=500 ms)")
+    # 4. sendreport ------------------------------------------------------------
+    head("4 · sendreport  (0x00 report byte)")
     resp = client.request({
-        "action":  "read",
-        "data":    list(device_id.encode()),
-        "timeout": 500,
-    }, timeout=3.0)
-
-    if resp.get("success"):
-        data = resp["data"]
-        hex_str = " ".join(f"{b:02x}" for b in data[:16])
-        suffix  = "…" if len(data) > 16 else ""
-        ok(f"Read {len(data)} byte(s):  {hex_str}{suffix}")
-    else:
-        err = resp.get("error", "")
-        if "timed out" in err.lower():
-            info("Timed out – device was idle (normal)")
-        else:
-            info(f"Read error: {err}")
-
-    # 5. Write -----------------------------------------------------------------
-    head("5 · Write  (0x00 report byte)")
-    resp = client.request({
-        "action":    "write",
+        "action":    "sendreport",
         "device_id": list(device_id.encode()),
         "report_id": 0,
         "data":      [0x00],
     })
 
     if resp.get("success"):
-        ok("Write acknowledged")
+        ok("Report acknowledged")
     else:
-        info(f"Write error: {resp.get('error')}  (device may be read-only)")
+        info(f"sendreport error: {resp.get('error')}  (device may be read-only)")
+
+    # 5. receivefeaturereport --------------------------------------------------
+    head("5 · receivefeaturereport (report_id=0)")
+    resp = client.request({
+        "action":    "receivefeaturereport",
+        "device_id": list(device_id.encode()),
+        "report_id": 0,
+    })
+
+    if resp.get("success"):
+        data = resp["data"]
+        hex_str = " ".join(f"{b:02x}" for b in data[:16])
+        suffix  = "…" if len(data) > 16 else ""
+        ok(f"Received feature report: {hex_str}{suffix}")
+    else:
+        info(f"receivefeaturereport error: {resp.get('error')}")
 
     # 6. Close -----------------------------------------------------------------
     head("6 · Close")
