@@ -1,0 +1,51 @@
+name: Build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build WebHID Components
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libudev-dev zip
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates -> target
+
+      - name: Build Rust binaries
+        run: cargo build --release --manifest-path crates/Cargo.toml
+
+      - name: Build Addon XPI
+        run: ./scripts/build-addon.sh
+
+      - name: Prepare Artifacts
+        run: |
+          mkdir -p artifacts/bin
+          mkdir -p artifacts/manifests
+          cp crates/target/release/webhid-daemon artifacts/bin/
+          cp crates/target/release/webhid-native-messaging artifacts/bin/
+          cp manifests/webhid_server.json artifacts/manifests/
+          cp manifests/webhid-daemon.service artifacts/manifests/
+          cp dist/webhid-addon.xpi artifacts/
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: webhid-linux-x86_64
+          path: artifacts/
