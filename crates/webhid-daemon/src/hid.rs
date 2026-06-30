@@ -1,7 +1,5 @@
 //! HID device access via hidapi (cross-platform) + udev hot-plug (Linux).
 
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use hidapi::{HidApi, HidDevice, DeviceInfo as HidDeviceInfo};
 use webhid::{DeviceInfo, Collection};
