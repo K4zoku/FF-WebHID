@@ -2,8 +2,7 @@
 
 WebHID is not supported in Firefox. This project adds it through a Firefox addon
 that polyfills `navigator.hid`, a native-messaging bridge process, and a
-privileged daemon that reads and writes `/dev/hidraw*` nodes on behalf of the
-browser.
+privileged daemon that accesses HID devices via [hidapi](https://github.com/libusb/hidapi).
 
 ---
 
@@ -18,75 +17,87 @@ browser.
 7. [Testing](#testing)
 8. [HID device access and udev rules](#hid-device-access-and-udev-rules)
 9. [Packaging (Arch Linux)](#packaging-arch-linux)
-10. [Protocol reference](#protocol-reference)
-11. [Troubleshooting]
+10. [Troubleshooting](#troubleshooting)
 
 ---
 
 ## Architecture
 
-The project is split into a **Control Plane** for low-frequency management tasks and a **Data Plane** for high-frequency HID input reports.
+The project is split into a **Control Plane** for low-frequency management tasks and a **Data Plane** for high-frequency HID data.
 
 ```
  Web page
-   │  window.navigator.hid  (WebHID API, polyfilled by webhid-polyfill.js)
+   │  navigator.hid  (polyfilled by webhid-polyfill.js, MAIN world)
    ▼
- addon/webhid-polyfill.js      ← content script, injected into every page
-   │                           │
-   │  (Control Plane - JSON)   │  (Data Plane - Binary WebSocket)
-   │                           ▼
-   │                  ┌─────────────────────┐
-   │                  │ addon/hid-worker.js │ ← Web Worker
-   ▼                  └─────────┬───────────┘
- addon/background.js            │
-   │                            │ (Batched input reports via SharedArrayBuffer)
-   ▼                            │
- webhid-native-messaging        │
-   │                            │
-   ▼                            │
- webhid-daemon  ◄───────────────┘
-   │
-   ▼
- HID device
+ addon/webhid-bridge.js ────────────────┐  (Data plane: binary WebSocket)
+   │  runtime.sendMessage               │
+   ▼                                    ▼
+ addon/hid-worker.js (Web Worker)
+   │ SharedArrayBuffer ring buffer      │
+   │ + Atomics.waitAsync                │
+   ▼                                    ▼
+ addon/background.js              WebSocket (127.0.0.1:31337)
+   │ nativeMessaging (stdio, JSON)      │
+   ▼                                    ▼
+ webhid-native-messaging (Rust)    webhid-daemon (Rust, root)
+   │ Unix socket                        │ hidapi → hidraw
+   ▼                                    ▼
+ webhid-daemon ───────────────────► HID device
 ```
 
 ### Component responsibilities
 
 | Component | What it does |
 |---|---|
-| `addon/webhid-polyfill.js` | Polyfills `navigator.hid` in every page; shows the device-picker modal; manages the `Atomics.waitAsync` loop to drain input reports from `SharedArrayBuffer` |
-| `addon/webhid-bridge.js` | Content script bridge that handles the device picker UI and forwards messages to `background.js` |
-| `addon/background.js` | Bridge between content scripts and native messaging; concurrent request handler; injects COOP/COEP headers to enable `SharedArrayBuffer` support in pages |
-| `addon/hid-worker.js` | Dedicated Web Worker that maintains the WebSocket connection to the daemon and writes batched reports into a `SharedArrayBuffer` ring buffer |
-| `webhid-native-messaging` | Spawned by Firefox per-profile; translates between the native-messaging protocol and the IPC protocol |
-| `webhid-daemon` | Long-running system service; owns all open hidraw file descriptors; provides a WebSocket server for high-frequency binary data; batches input reports to minimize overhead |
-| `crates/webhid` | Shared Rust library: all message types, protocol framing helpers |
+| `addon/webhid-polyfill.js` | Polyfills `navigator.hid` in every page (MAIN world); shows the device-picker modal; drains input reports from `SharedArrayBuffer` |
+| `addon/webhid-bridge.js` | Content script (isolated world); handles device picker UI; forwards messages between page and background.js; spawns per-device Web Worker |
+| `addon/background.js` | Background script; owns the native-messaging port; auto-reconnect on disconnect; injects COOP/COEP headers for SharedArrayBuffer |
+| `addon/hid-worker.js` | Web Worker; maintains WebSocket connection to daemon; writes input reports into SAB ring buffer; sends output/feature reports via WS binary frames (fire-and-forget) |
+| `addon/settings.html` | Settings page for toggling performance logging and fire-and-forget mode |
+| `webhid-native-messaging` | Spawned by Firefox per-profile; translates between native-messaging protocol and daemon IPC; auto-reconnect to daemon on disconnect |
+| `webhid-daemon` | Long-running system service; owns HID device handles via hidapi; provides WebSocket server for data plane; udev hot-plug monitor |
+| `crates/webhid` | Shared Rust library: message types, protocol framing |
 
-### Data Plane and Security Headers
+### Control plane (JSON)
 
-The Data Plane handles high-frequency input reports (up to 8000 Hz) using a side-channel to bypass the slow extension messaging pipeline.
+Low-frequency operations: `enumerate`, `open`, `close`. Uses length-prefixed JSON over Unix socket (daemon ↔ NM host) and native messaging stdio (NM host ↔ Firefox).
 
-#### Low-latency architecture
+### Data plane (binary WebSocket)
 
-1. **Daemon:** Accumulates HID reports from `/dev/hidraw`.
-2. **Daemon:** Every 1ms (configurable via `WEBHID_WS_BATCH_MS`), sends all accumulated reports in a single binary WebSocket frame on `WEBHID_WS_PORT`.
-3. **Worker (`hid-worker.js`):** Receives the frame, parses reports, and writes them into a `SharedArrayBuffer` (SAB) ring buffer.
-4. **Worker:** Calls `Atomics.notify` to signal that new data is available.
-5. **Page:** `Atomics.waitAsync` (in `webhid-polyfill.js`) resolves immediately, and the page drains the SAB ring buffer.
+High-frequency operations: `sendReport`, `sendFeatureReport`, `receiveFeatureReport`, input reports. Uses binary WebSocket frames on `127.0.0.1:31337`.
 
-#### Binary Framing
+**sendReport (page → daemon):** fire-and-forget. Worker resolves Promise immediately after `ws.send()`, no round-trip wait. Wire format:
+```
+[type:u8][req_id:u32 LE][report_id:u8][...payload]
+```
 
-Each WebSocket frame contains one or more HID reports packed as:
-`[u8 length][u8 data...][u8 length][u8 data...]`
+**Input reports (daemon → page):** batched, 1ms flush interval. Wire format:
+```
+[len:u16 LE][report_id:u8][...payload][len:u16 LE][report_id:u8][...payload]...
+```
 
-#### Security Isolation (COOP/COEP)
+**SAB ring buffer:** each slot is `[len:u16 LE][report_id:u8][...payload]`. Worker writes, page drains via `Atomics.waitAsync`.
 
-To enable `SharedArrayBuffer` support in the browser, the addon injects security headers into all `http://` and `https://` responses:
+### Security headers (COOP/COEP)
 
-- `Cross-Origin-Opener-Policy: same-origin`
-- `Cross-Origin-Embedder-Policy: require-corp`
+The addon injects `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` on all HTTP/HTTPS responses to enable `SharedArrayBuffer`. This may break pages with cross-origin resources lacking CORP headers.
 
-**Warning:** These headers enforce strict isolation. Pages that embed cross-origin resources (images, scripts, iframes) may fail to load them if the external server does not provide a `Cross-Origin-Resource-Policy` (CORP) header.
+### Device IDs
+
+Device identifiers are stable, platform-independent hashes:
+```
+device_id = djb2_hash("vid:pid:serial:interface:usage_page:usage:raw_path")
+```
+
+Composite USB devices (multiple HID interfaces) are grouped by (vid, pid, serial) and the "primary" interface (vendor-defined usage_page ≥ 0xFF00, or first non-boot) is selected for enumeration. This matches what most WebHID-consuming pages expect.
+
+### Reconnect
+
+All layers auto-reconnect with exponential backoff:
+- **NM host → daemon:** retry Unix socket connect (100ms → 2s, up to 30s)
+- **background.js → NM host:** retry `connectNative` (1s → 10s)
+- **Worker → daemon WS:** retry WebSocket (500ms → 5s)
+- **Daemon:** detects NM host disconnect, closes devices; page receives `disconnect` event, re-opens on `connect` event
 
 ### Message flow example — `navigator.hid.getDevices()`
 
@@ -96,7 +107,7 @@ page                  background.js       native-messaging    daemon
  │──sendMessage(enumerate)►│                     │                │
  │                         │──NM write──────────►│                │
  │                         │                     │──IPC write────►│
- │                         │                     │                │ udev enum
+ │                         │                     │                │ hidapi enum
  │                         │                     │◄──IPC Devices──│
  │                         │◄──NM read───────────│                │
  │◄──sendResponse(devices)─│                     │                │
@@ -110,31 +121,33 @@ page                  background.js       native-messaging    daemon
 WebHID/
 ├── addon/                   Firefox extension (manifest v3)
 │   ├── manifest.json
-│   ├── background.js        Background service worker (concurrent NM bridge)
-│   ├── webhid-polyfill.js   Content script — navigator.hid polyfill
-│   ├── webhid-bridge.js     Content script — device picker UI & communication
-│   ├── hid-worker.js        Web Worker — WebSocket client & SAB manager
+│   ├── background.js        Background script — NM bridge, auto-reconnect, COOP/COEP
+│   ├── webhid-polyfill.js   Content script (MAIN world) — navigator.hid polyfill
+│   ├── webhid-bridge.js     Content script (isolated world) — device picker, worker spawn
+│   ├── hid-worker.js        Web Worker — WebSocket client, SAB ring buffer, fire-and-forget
+│   ├── settings.html/js     Settings page — perf logging, fire-and-forget toggle
 │   ├── webhid.css           Styles for the device picker
 │   ├── icons/               Extension icons
-│   └── res/                 Device-specific icons (SVG)
+│   └── res/                 Device-type icons (SVG)
 │
 ├── crates/                  Rust workspace
 │   ├── Cargo.toml           Workspace manifest
 │   ├── webhid/              Common library (types, protocol framing)
 │   │   └── src/
 │   │       ├── lib.rs
-│   │       ├── types.rs     IpcRequest, IpcResponse, DeviceInfo, Session Tokens
-│   │       └── protocol.rs  Control Plane framing (length-prefixed JSON)
+│   │       ├── types.rs     IpcRequest, IpcResponse, NmRequest, NmResponse, DeviceInfo
+│   │       └── protocol.rs  Length-prefixed JSON framing
 │   ├── webhid-daemon/       System daemon
 │   │   └── src/
 │   │       ├── main.rs      Unix socket + WebSocket server entry point
-│   │       ├── hid.rs       udev enumeration, hidraw I/O, report batching
-│   │       ├── device_mgr.rs  Per-client device ownership tracking
-│   │       ├── udev_monitor.rs  Hot-plug event thread
-│   │       └── client.rs    IPC handler, session token management
+│   │       ├── hid.rs       hidapi enumeration, I/O, device_id generation
+│   │       ├── device_mgr.rs  Per-client device ownership, dual-handle (reader+writer)
+│   │       ├── udev_monitor.rs  Hot-plug event thread (udev, cached DeviceInfo)
+│   │       ├── client.rs    IPC handler, Hello event, ws_active flag
+│   │       └── websocket.rs WS data plane, binary frame dispatch, ws_active
 │   └── webhid-native-messaging/
 │       └── src/
-│           └── main.rs      Firefox ↔ daemon bridge
+│           └── main.rs      Firefox ↔ daemon bridge, auto-reconnect, Hello forwarding
 │
 ├── manifests/               Installation helpers
 │   ├── webhid_server.json   Native-messaging host manifest template
@@ -146,11 +159,12 @@ WebHID/
 │   └── webhid-addon/PKGBUILD  browser extension XPI (system-wide)
 │
 ├── test/                    Test suite
-│   ├── test_daemon.py       IPC socket test (no browser)
 │   ├── test_nm.py           Native-messaging bridge test (no browser)
 │   └── index.html           In-browser test UI
 │
-└── server/                  Reference C++ implementation (read-only, do not edit)
+└── scripts/                 Build helpers
+    ├── install.sh           One-shot install
+    └── build-addon.sh       Build XPI from addon/
 ```
 
 ---

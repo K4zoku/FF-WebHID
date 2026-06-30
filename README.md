@@ -4,52 +4,59 @@ WebHID brings Human Interface Device (HID) support to Firefox and other Gecko-ba
 
 ## Features
 
-- **Full Polyfill:** Implements the standard `navigator.hid` API in the browser.
-- **High Performance:** Designed to support high-polling rate devices (up to 8000 Hz) with minimal latency.
-- **System Integration:** Runs as a secure system daemon to manage hardware access on behalf of the browser.
+- **Full WebHID polyfill:** implements `navigator.hid` API in Firefox
+- **High performance:** WebSocket + SharedArrayBuffer data plane with fire-and-forget `sendReport` (~3ms avg latency)
+- **Cross-platform HID access:** uses [hidapi](https://github.com/libusb/hidapi) for device access (Linux hidraw, ready for Windows/macOS)
+- **Stable device IDs:** platform-independent `device_id` hash, survives reboots
+- **Auto-reconnect:** daemon restart, addon reload, WS disconnect — all handled automatically
+- **Hot-plug:** udev-based device connect/disconnect events
+- **System integration:** runs as a systemd daemon managing hardware access
 
 ## Getting Started
 
-To use WebHID in your browser, you need to install the system components and the browser extension.
+### 1. Build & install system components
 
-### 1. Install System Components
+```sh
+# Build Rust binaries + addon XPI
+cargo build --release --manifest-path crates/Cargo.toml
+./scripts/build-addon.sh
 
-The project includes an automated installation script that sets up the background daemon and the communication bridge.
+# Install (daemon + NM manifest + systemd service)
+sudo ./scripts/install.sh
 
-1. Open a terminal in the project directory.
-2. Run the installation script:
-   ```sh
-   sudo ./manifests/install.sh
-   ```
-3. Ensure the service is running:
-   ```sh
-   systemctl status webhid-daemon
-   ```
+# Verify daemon is running
+systemctl status webhid-daemon
+```
 
-### 2. Configure Hardware Permissions
+### 2. Configure hardware permissions
 
-Linux requires explicit permission to access raw HID devices. You can grant access to the currently logged-in user by adding a udev rule:
+```sh
+echo 'SUBSYSTEM=="hidraw", TAG+="uaccess"' | sudo tee /etc/udev/rules.d/99-webhid.rules
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
 
-1. Create the rule file:
-   ```sh
-   echo 'SUBSYSTEM=="hidraw", TAG+="uaccess"' | sudo tee /etc/udev/rules.d/99-webhid.rules
-   ```
-2. Apply the new rules:
-   ```sh
-   sudo udevadm control --reload-rules && sudo udevadm trigger
-   ```
+Alternatively, the packaged systemd unit runs the daemon as root (no udev rule needed).
 
-### 3. Install the Browser Extension
+### 3. Install the browser extension
 
-Install the WebHID extension to enable the API in your browser.
+- **Arch Linux:** `cd packaging/webhid-addon && makepkg -si`
+- **Manual:** Load `dist/webhid-addon.xpi` as a temporary add-on via `about:debugging`
+- **Temporary:** Load `addon/manifest.json` directly via `about:debugging → Load Temporary Add-on`
 
-- **Arch Linux:** Build and install the package from `packaging/webhid-addon/PKGBUILD`.
-- **Manual:** Load the extension from the `dist/` directory or follow your distribution's specific guide for installing Firefox system extensions.
+## Usage
 
-## How to Use
+Once installed, compatible websites will detect and interact with your HID devices. A device picker appears when a website requests access.
 
-Once installed, compatible websites will be able to detect and interact with your HID devices. When a website requests access, a device picker will appear allowing you to select which hardware to share with the site.
+### Settings
 
----
+Open the addon's options page (`about:addons → FF WebHID → Options`) to toggle:
+- **Performance logging** — log `[worker]` timing messages to addon console
+- **Fire-and-forget sendReport** — resolve Promise immediately without waiting for daemon ack (faster, default ON)
 
-**For Developers:** If you want to build from source, contribute, or understand the architecture, please refer to the [Development Guide (DEVELOPMENT.md)](DEVELOPMENT.md).
+## Development
+
+See [DEVELOPMENT.md](DEVELOPMENT.md) for architecture details, build instructions, and testing.
+
+## License
+
+MIT
