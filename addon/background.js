@@ -60,6 +60,25 @@ const NativeMessaging = {
       const id = this._nextId++;
       this._pending.set(id, { resolve, reject });
 
+      // Timing instrumentation: capture the start time so the response
+      // listener can compute round-trip latency.  Logged to the addon's
+      // background console when total > 5ms so spikes are easy to spot.
+      const _t0 = performance.now();
+      const wrappedResolve = (msg) => {
+        const dt = performance.now() - _t0;
+        if (dt > 5) {
+          console.info(
+            `[nm-timing] ${request.action} id=${id} total=${dt.toFixed(1)}ms`,
+          );
+        } else {
+          console.debug(
+            `[nm-timing] ${request.action} id=${id} total=${dt.toFixed(1)}ms`,
+          );
+        }
+        resolve(msg);
+      };
+      this._pending.set(id, { resolve: wrappedResolve, reject });
+
       try {
         this.port.postMessage({ ...request, id });
       } catch (e) {

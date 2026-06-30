@@ -59,12 +59,12 @@ fi
 # ---------------------------------------------------------------------------
 # 4. Systemd service
 # ---------------------------------------------------------------------------
-SERVICE_FILE="$SCRIPT_DIR/webhid-daemon.service"
-install -m 0644 "$SERVICE_FILE" /etc/systemd/system/webhid-daemon.service
+# SERVICE_FILE="$SCRIPT_DIR/webhid-daemon.service"
+# install -m 0644 "$SERVICE_FILE" /etc/systemd/system/webhid-daemon.service
 
-systemctl daemon-reload
-systemctl enable --now webhid-daemon.service
-echo "==> webhid-daemon service enabled and started"
+# systemctl daemon-reload
+# systemctl enable --now webhid-daemon.service
+# echo "==> webhid-daemon service enabled and started"
 
 echo ""
 echo "Done.  Load the addon in Firefox (about:debugging → Load Temporary Add-on)"

@@ -25,6 +25,7 @@
 use std::collections::{HashMap, VecDeque};
 use tokio::io::{AsyncWriteExt, BufReader, BufWriter};
 use std::sync::Arc;
+use std::time::Instant;
 
 
 use tokio::net::UnixStream;
@@ -32,6 +33,11 @@ use tokio::sync::{Mutex, mpsc, oneshot};
 use webhid::{IpcRequest, IpcResponse, NmRequest, NmResponse, protocol};
 
 const DEFAULT_SOCKET: &str = "/run/webhid/webhid.sock";
+
+/// Threshold below which we don't log timing (avoid noise).  Anything above
+/// this is logged at `info` so you can spot the slow stage without digging
+/// through debug logs.
+const SLOW_THRESHOLD_MS: u128 = 5;
 
 // ---------------------------------------------------------------------------
 // Entry point
@@ -151,6 +157,7 @@ async fn main() -> anyhow::Result<()> {
     let mut stdin = BufReader::with_capacity(64 * 1024, tokio::io::stdin());
 
     loop {
+        let t_loop_start = Instant::now();
         let nm_req: NmRequest = match protocol::read_message(&mut stdin).await {
             Ok(r) => r,
             Err(e) => {
@@ -159,8 +166,10 @@ async fn main() -> anyhow::Result<()> {
                 break;
             }
         };
+        let t_read_stdin = t_loop_start.elapsed();
         log::debug!("← Firefox: {nm_req:?}");
         let firefox_id = nm_req.id();
+        let action_label = nm_req.action_label();
 
         let id = next_id;
         // Reserve id=0 for events; wrap around skipping 0.
@@ -173,6 +182,7 @@ async fn main() -> anyhow::Result<()> {
         pending.lock().await.insert(id, resp_tx);
 
         // Send request to daemon.
+        let t_send_daemon_start = Instant::now();
         {
             let mut w = daemon_writer.lock().await;
             if let Err(e) = protocol::write_message(&mut *w, &ipc_req).await {
@@ -184,8 +194,10 @@ async fn main() -> anyhow::Result<()> {
                 continue;
             }
         }
+        let t_sent_daemon = t_send_daemon_start.elapsed();
 
         // Await the matching response (the daemon reader task will deliver it).
+        let t_daemon_resp_start = Instant::now();
         let mut nm_resp = match resp_rx.await {
             Ok(ipc_resp) => {
                 log::debug!("→ daemon: {ipc_resp:?}");
@@ -193,10 +205,37 @@ async fn main() -> anyhow::Result<()> {
             }
             Err(_) => NmResponse::err("daemon disconnected"),
         };
+        let t_daemon_resp = t_daemon_resp_start.elapsed();
         nm_resp.id = firefox_id;
 
         log::debug!("→ Firefox: {nm_resp:?}");
+        let t_stdout_send_start = Instant::now();
         let _ = stdout_tx.send(nm_resp).await;
+        // NOTE: `stdout_tx.send` only enqueues into the channel; the actual
+        // write to stdout happens in the writer task (batched up to 5ms / 16
+        // msgs). The `t_stdout_send` here therefore measures only the
+        // enqueue cost, NOT the full trip-to-Firefox cost. The 5ms batch
+        // window shows up as added latency on the *next* read of stdin.
+        let t_stdout_send = t_stdout_send_start.elapsed();
+
+        let total = t_loop_start.elapsed();
+        // Log every request with full stage timing at debug, or at info when
+        // the total exceeds the slow threshold so spikes are easy to spot.
+        let total_ms = total.as_millis();
+        let log_msg = format!(
+            "[nm-timing] action={:<20} total={:>5}ms  read_stdin={:>4}ms  send_daemon={:>4}ms  daemon_resp={:>5}ms  stdout_enqueue={:>4}ms",
+            action_label,
+            total_ms,
+            t_read_stdin.as_millis(),
+            t_sent_daemon.as_millis(),
+            t_daemon_resp.as_millis(),
+            t_stdout_send.as_millis(),
+        );
+        if total_ms >= SLOW_THRESHOLD_MS {
+            log::info!("{}", log_msg);
+        } else {
+            log::debug!("{}", log_msg);
+        }
     }
 
     daemon_reader.abort();

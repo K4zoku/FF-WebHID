@@ -24,7 +24,13 @@ struct Entry {
     /// re-query udev for already-open devices).
     #[allow(dead_code)]
     info: DeviceInfo,
-    /// Shared file handle – cloned out to blocking tasks for I/O.
+    /// Writer file handle – used by `sendReport` / `sendFeatureReport`.
+    /// Cloned out to blocking tasks for I/O. Has its own `Mutex` so writer
+    /// tasks never block on the reader task's `poll(2)` window.
+    ///
+    /// The background reader task holds its *own* `Arc<Mutex<File>>` over
+    /// a separately-`dup(2)`'d fd (see `open()`), so reader and writer
+    /// never contend on the same userspace lock.
     file: Arc<Mutex<File>>,
     /// The client that performed the `open`; only that client may use or
     /// close the device.
@@ -132,10 +138,25 @@ impl DeviceManager {
         // Prepare entry with a stopped reader for now; we'll spawn the reader
         // and then store its handle in the map so we can stop it later.
         let stop_flag = Arc::new(AtomicBool::new(false));
-        let file_arc = Arc::new(Mutex::new(file));
+        // `dup(2)` the fd so the reader task has its own file descriptor
+        // with its own `Mutex`. Without this, the reader task would hold
+        // the shared `Mutex<File>` for the entire 5-second `poll(2)`
+        // window inside `hid::read_with_timeout`, blocking every writer
+        // (output and feature reports) for up to 5 seconds per call. On
+        // rapid multi-packet transfers (e.g. SayoDevice image upload) the
+        // cumulative latency caused the device to time out mid-transfer
+        // and report CRC mismatches.
+        //
+        // Both fds refer to the same hidraw device; the kernel still
+        // serializes actual I/O at the device level, so this is safe.
+        let reader_file = file.try_clone().map_err(|e| {
+            anyhow!("dup() reader fd for '{path}': {e}")
+        })?;
+        let reader_arc = Arc::new(Mutex::new(reader_file));
+        let writer_arc = Arc::new(Mutex::new(file));
         let entry = Entry {
             info: info.clone(),
-            file: Arc::clone(&file_arc),
+            file: Arc::clone(&writer_arc),
             client_id,
             stop_flag: Arc::clone(&stop_flag),
             handle: None,
@@ -148,7 +169,7 @@ impl DeviceManager {
         // `IpcResponse::InputReport` events. Use `spawn_blocking` for the
         // blocking read while keeping the outer task lightweight.
         let device_id = path.clone();
-        let file_for_task = Arc::clone(&file_arc);
+        let file_for_task = Arc::clone(&reader_arc);
         let stop_for_task = Arc::clone(&stop_flag);
         let tx = self.event_tx.clone();
         // Captured by the reader closure below — decides whether to peel

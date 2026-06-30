@@ -175,7 +175,12 @@ pub fn read_with_timeout(file: &File, timeout_ms: u64) -> io::Result<Vec<u8>> {
         return Err(io::Error::new(io::ErrorKind::BrokenPipe, "HID device error"));
     }
 
-    let mut buf = vec![0u8; 256]; // 64-byte USB HID max + headroom for BT
+    // SayoDevice and similar keypads send input reports up to 511 bytes
+    // (e.g. large image chunk ACKs, index tables, config dumps). The
+    // standard USB HID full-speed max packet is 64 bytes but high-speed
+    // and vendor-defined interfaces can go much larger. 4096 covers
+    // every report we've seen in the wild.
+    let mut buf = vec![0u8; 4096];
     // SAFETY: buf is valid writable memory; fd is open.
     let n = unsafe { libc::read(fd, buf.as_mut_ptr().cast(), buf.len()) };
     if n < 0 {
@@ -206,6 +211,17 @@ pub fn write_report(file: &File, report_id: u8, payload: &[u8]) -> io::Result<()
     if n < 0 {
         return Err(io::Error::last_os_error());
     }
+    // Partial writes on hidraw should not happen in practice (the kernel
+    // either accepts the full report or returns -EINVAL), but treat any
+    // short write as an error rather than silently truncating the report —
+    // silent truncation would corrupt the device's receive stream and
+    // surface as a CRC mismatch on the device side.
+    if (n as usize) < buf.len() {
+        return Err(io::Error::new(
+            io::ErrorKind::WriteZero,
+            format!("short write: {} of {} bytes", n, buf.len()),
+        ));
+    }
     Ok(())
 }
 
@@ -221,14 +237,28 @@ pub fn read_feature_report(file: &File, report_id: u8) -> io::Result<Vec<u8>> {
     // The buffer format for HIDIOCGFEATURE is:
     // [report_id] [report_data...]
     // The driver fills in the report data starting after the report_id byte.
-    let mut buf = vec![0u8; 256]; // Max HID report size + 1 for report_id
+    //
+    // 4096 bytes covers every HID feature report we've seen in the wild —
+    // 256 was too small for some devices that expose large config / image
+    // buffers via feature reports.
+    let mut buf = vec![0u8; 4096];
     buf[0] = report_id;
 
-    // HIDIOCGFEATURE = _IOCGFEATURE('H', 0x07)
-    // From Linux kernel uapi/linux/hidraw.h - evaluates to 0xc0244807 on little-endian
-    let ioctl_cmd = 0xc0244807u64;
+    // HIDIOCGFEATURE(len) = _IOR('H', 0x07, len)
+    //
+    // The Linux kernel `hidraw_ioctl` handler dispatches on `_IOC_NR(cmd)`
+    // and uses `_IOC_SIZE(cmd)` as the byte count for `copy_to_user` and
+    // `hid_hw_raw_request`. Hard-coding the size (as the previous
+    // `0xc0244807` did) used a 36-byte cap AND encoded the wrong direction
+    // (_IOWR instead of _IOR). Encode the *actual* buffer length and the
+    // correct direction so the device receives the full report.
+    let len = buf.len() as libc::c_ulong;
+    let ioctl_cmd: libc::c_ulong = (2 << 30)          // _IOC_READ
+                                 | (len << 16)
+                                 | ((b'H' as libc::c_ulong) << 8)
+                                 | 0x07;
     let ret = unsafe {
-        libc::ioctl(fd, ioctl_cmd as libc::c_ulong, buf.as_mut_ptr())
+        libc::ioctl(fd, ioctl_cmd, buf.as_mut_ptr())
     };
 
     if ret < 0 {
@@ -255,12 +285,25 @@ pub fn write_feature_report(file: &File, report_id: u8, payload: &[u8]) -> io::R
     buf.push(report_id);
     buf.extend_from_slice(payload);
 
-    // HIDIOCSFEATURE = _IOCSFEATURE('H', 0x06)
-    // From Linux kernel uapi/linux/hidraw.h - evaluates to 0xc0244806 on
-    // little-endian.
-    let ioctl_cmd = 0xc0244806u64;
+    // HIDIOCSFEATURE(len) = _IOWR('H', 0x06, len)
+    //
+    // The Linux kernel `hidraw_ioctl` handler dispatches on `_IOC_NR(cmd)`
+    // and uses `_IOC_SIZE(cmd)` as the byte count for `copy_from_user` and
+    // `hid_hw_raw_request`. Hard-coding the size (as the previous
+    // `0xc0244806` = HIDIOCSFEATURE(36) did) silently truncated every
+    // feature report whose buffer was larger than 36 bytes — including
+    // every byte past the 35th payload byte. Encode the *actual* buffer
+    // length so the device receives the full report. This is the fix for
+    // the CRC32 mismatch observed on SayoDevice image uploads: each image
+    // chunk larger than 35 payload bytes was being silently truncated,
+    // so the device CRC'd only a prefix of the expected payload.
+    let len = buf.len() as libc::c_ulong;
+    let ioctl_cmd: libc::c_ulong = (3 << 30)          // _IOC_READ | _IOC_WRITE
+                                 | (len << 16)
+                                 | ((b'H' as libc::c_ulong) << 8)
+                                 | 0x06;
     let ret = unsafe {
-        libc::ioctl(fd, ioctl_cmd as libc::c_ulong, buf.as_mut_ptr())
+        libc::ioctl(fd, ioctl_cmd, buf.as_mut_ptr())
     };
 
     if ret < 0 {

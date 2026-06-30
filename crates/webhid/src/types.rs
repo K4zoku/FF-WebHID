@@ -193,6 +193,19 @@ impl IpcRequest {
             | Self::SendFeatureReport { id, .. } => *id,
         }
     }
+
+    /// Short string identifying the request action for log/timing output.
+    pub fn action_label(&self) -> &'static str {
+        match self {
+            Self::Enumerate { .. } => "enumerate",
+            Self::Open { .. } => "open",
+            Self::Close { .. } => "close",
+            Self::Read { .. } => "read",
+            Self::SendReport { .. } => "sendreport",
+            Self::ReceiveFeatureReport { .. } => "receivefeaturereport",
+            Self::SendFeatureReport { .. } => "sendfeaturereport",
+        }
+    }
 }
 
 /// A response or unsolicited event sent from the daemon to the native-messaging process.
@@ -303,6 +316,19 @@ impl NmRequest {
             | Self::SendReport { id, .. }
             | Self::ReceiveFeatureReport { id, .. }
             | Self::SendFeatureReport { id, .. } => *id,
+        }
+    }
+
+    /// Short string identifying the request action for log/timing output.
+    pub fn action_label(&self) -> &'static str {
+        match self {
+            Self::Enumerate { .. } => "enumerate",
+            Self::Open { .. } => "open",
+            Self::Close { .. } => "close",
+            Self::Read { .. } => "read",
+            Self::SendReport { .. } => "sendreport",
+            Self::ReceiveFeatureReport { .. } => "receivefeaturereport",
+            Self::SendFeatureReport { .. } => "sendfeaturereport",
         }
     }
 }
