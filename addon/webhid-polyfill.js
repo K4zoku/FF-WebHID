@@ -267,6 +267,25 @@
     // over the WebSocket (page → Worker → WS → daemon → hidraw), reducing
     // roundtrip latency from ~10–20ms to ~1–3ms.
     #hotPath = false;
+    #sabListener = null;
+
+    #installSabListener() {
+      if (this.#sabListener) return;
+      const listener = (event) => {
+        if (!event.data || event.data.__webhid_bridge !== "evt") return;
+        const detail = event.data.event;
+        if (!detail || detail.event_type !== "webhid-sab") return;
+        const evDeviceId = detail.device_id ? String.fromCharCode(...detail.device_id) : null;
+        if (!evDeviceId || !this.deviceId || evDeviceId !== this.deviceId) return;
+        this.#hotPath = true;
+        console.info('[webhid] hotPath ON for', this.deviceId);
+        startInputReportLoop(this, detail.sab, detail.reportSize);
+        window.removeEventListener("message", listener);
+        this.#sabListener = null;
+      };
+      this.#sabListener = listener;
+      window.addEventListener("message", listener);
+    }
 
     constructor(deviceInfo) {
       super();
@@ -440,6 +459,8 @@
         if (response.success) {
           this.#opened = true;
           this.deviceId = String.fromCharCode(...response.data);
+          console.log('[webhid] open ok, installing sab listener for', this.deviceId);
+          this.#installSabListener();
           this.dispatchEvent(new Event("open"));
           return true;
         }
@@ -458,6 +479,10 @@
         if (response.success) {
           this.#opened = false;
           this.#hotPath = false;
+          if (this.#sabListener) {
+            window.removeEventListener("message", this.#sabListener);
+            this.#sabListener = null;
+          }
           this.deviceId = null;
           this.dispatchEvent(new Event("close"));
         } else {

@@ -487,6 +487,7 @@
   //                           postMessage({ __webhid_bridge: 'evt', event })
   // ---------------------------------------------------------------------------
   const _workers = new Map(); // deviceId (string) -> Worker
+  const _workerCallbacks = new Map(); // worker -> Map<reqId, callback>
 
   window.addEventListener("message", async (event) => {
     if (!event.data || event.data.__webhid_bridge !== "req") return;
@@ -502,43 +503,27 @@
       const deviceId = String.fromCharCode(...(payload.device_id || []));
       const worker = _workers.get(deviceId);
       if (worker) {
-        // Pick worker message type and forward.
         const wType =
           action === "worker-send" ? "send" :
           action === "worker-sendFeature" ? "sendFeature" :
           "receiveFeature";
-        // Set up response forwarding.
-        const onWorkerMsg = ({ data }) => {
-          if ((data.type === 'sendResult' || data.type === 'featureResult') && data.reqId === id) {
-            worker.removeEventListener('message', onWorkerMsg);
-            let result;
-            if (data.type === 'featureResult') {
-              if (data.error) {
-                result = { success: false, error: data.error };
-              } else {
-                result = { success: true, data: Array.from(data.data) };
-              }
-            } else {
-              if (data.error) {
-                result = { success: false, error: data.error };
-              } else {
-                result = { success: true };
-              }
-            }
-            window.postMessage({ __webhid_bridge: "res", id, result }, "*");
+        let cbMap = _workerCallbacks.get(worker);
+        if (!cbMap) { cbMap = new Map(); _workerCallbacks.set(worker, cbMap); }
+        cbMap.set(id, (data) => {
+          let result;
+          if (data.type === 'featureResult') {
+            result = data.error ? { success: false, error: data.error } : { success: true, data: Array.from(data.data) };
+          } else {
+            result = data.error ? { success: false, error: data.error } : { success: true };
           }
-        };
-        worker.addEventListener('message', onWorkerMsg);
-
+          window.postMessage({ __webhid_bridge: "res", id, result }, "*");
+        });
         const wMsg = { type: wType, reqId: id, reportId: payload.report_id };
-        if (action === "worker-send" || action === "worker-sendFeature") {
-          wMsg.data = payload.data;
-        }
+        if (action === "worker-send" || action === "worker-sendFeature") wMsg.data = payload.data;
         worker.postMessage(wMsg);
         return;
       }
-      // No worker — fall back to NM control plane.
-      // Translate to the standard action so background.js handles it.
+      console.warn('[bridge] no worker for', deviceId, '— falling back to NM');
       const fallbackAction =
         action === "worker-send" ? "sendreport" :
         action === "worker-sendFeature" ? "sendfeaturereport" :
@@ -548,11 +533,7 @@
         const response = await browser.runtime.sendMessage(msg);
         window.postMessage({ __webhid_bridge: "res", id, result: response }, "*");
       } catch (error) {
-        window.postMessage({
-          __webhid_bridge: "res",
-          id,
-          result: { success: false, error: error.message },
-        }, "*");
+        window.postMessage({ __webhid_bridge: "res", id, result: { success: false, error: error.message } }, "*");
       }
       return;
     }
@@ -599,22 +580,27 @@
 
       if (action === "open" && response.success && response.session_token) {
         const deviceId = String.fromCharCode(...response.data);
-        const worker = new Worker(browser.runtime.getURL('hid-worker.js'));
+        console.log('[bridge] open: spawning worker for', deviceId, 'wsPort=', response.ws_port);
+        let worker;
+        try {
+          const workerUrl = browser.runtime.getURL('hid-worker.js');
+          const resp = await fetch(workerUrl);
+          const code = await resp.text();
+          const blob = new Blob([code], { type: 'application/javascript' });
+          worker = new Worker(URL.createObjectURL(blob));
+        } catch (e) {
+          console.error('[bridge] worker spawn failed:', e);
+          throw e;
+        }
         _workers.set(deviceId, worker);
 
-        worker.postMessage({
-          type: 'connect',
-          token: response.session_token,
-          wsPort: response.ws_port,
-          // SayoDevice and similar keypads send input reports up to 511
-          // bytes (image chunk ACKs, index tables, config dumps). The
-          // standard USB HID 64-byte max is too small. 1024 covers every
-          // report we've seen, with headroom for future devices.
-          reportSize: payload.reportSize || 1024,
-        });
+        worker.onerror = (e) => {
+          console.error('[bridge] worker.onerror:', e.message || '(no msg)', 'file=', e.filename, 'line=', e.lineno);
+        };
 
         worker.onmessage = ({ data }) => {
           if (data.type === 'ready') {
+            console.log('[bridge] worker ready for', deviceId);
             window.postMessage({
               __webhid_bridge: 'evt',
               event: {
@@ -624,8 +610,37 @@
                 reportSize: payload.reportSize || 1024
               }
             }, '*');
+            return;
+          }
+          if (data.type === 'error') {
+            console.error('[bridge] worker error:', data.error);
+            return;
+          }
+          if (data.type === 'closed') {
+            console.warn('[bridge] worker WS closed for', deviceId);
+            const cbMap = _workerCallbacks.get(worker);
+            if (cbMap) {
+              for (const [reqId, cb] of cbMap) cb({ type: 'sendResult', reqId, error: 'ws closed' });
+              cbMap.clear();
+            }
+            return;
+          }
+          if (data.type === 'sendResult' || data.type === 'featureResult') {
+            const cbMap = _workerCallbacks.get(worker);
+            if (cbMap) {
+              const cb = cbMap.get(data.reqId);
+              if (cb) { cbMap.delete(data.reqId); cb(data); }
+              else console.warn('[bridge] worker response for unknown reqId=', data.reqId, 'cbMap size=', cbMap.size);
+            }
           }
         };
+
+        worker.postMessage({
+          type: 'connect',
+          token: response.session_token,
+          wsPort: response.ws_port,
+          reportSize: payload.reportSize || 1024,
+        });
       }
 
       if (action === "close") {
