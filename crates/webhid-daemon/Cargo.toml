@@ -16,3 +16,4 @@ tokio-tungstenite = "0.26"
 futures = "0.3"
 hex = "0.4"
 rand = "0.10.1"
+hidapi = { version = "2.6", default-features = false, features = ["linux-static-hidraw"] }

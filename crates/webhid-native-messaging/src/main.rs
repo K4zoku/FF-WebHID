@@ -273,8 +273,8 @@ fn nm_to_ipc(req: NmRequest, id: u32) -> IpcRequest {
         NmRequest::Enumerate { .. } => IpcRequest::Enumerate { id },
 
         NmRequest::Open { device_id, .. } => {
-            let device_path = String::from_utf8_lossy(&device_id).into_owned();
-            IpcRequest::Open { id, device_path }
+            let device_id = String::from_utf8_lossy(&device_id).into_owned();
+            IpcRequest::Open { id, device_id }
         }
 
         NmRequest::Close { data, .. } => {
@@ -341,15 +341,15 @@ fn ipc_event_to_nm(resp: IpcResponse) -> Option<NmResponse> {
         }
 
         IpcResponse::InputReport { device_id, report_id, data, .. } => {
-            // Encode device_id as bytes so the addon can compare with its
-            // stored deviceId string.
-            log::debug!(
-                "[ipc_event_to_nm] InputReport: device_id='{}', report_id={}, data_len={}",
-                device_id,
-                report_id,
-                data.len()
-            );
             Some(NmResponse::event_input_report(device_id.into_bytes(), report_id, data))
+        }
+
+        IpcResponse::Hello { ws_port, .. } => {
+            Some(NmResponse {
+                event_type: Some("hello".into()),
+                ws_port: Some(ws_port),
+                ..Default::default()
+            })
         }
 
         _ => None,

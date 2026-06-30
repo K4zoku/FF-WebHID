@@ -35,8 +35,8 @@
     const vendorId = String(device.vendor_id || 0);
     const productId = String(device.product_id || 0);
     const serialNumber = String(device.serial_number || "");
-    const path = String(device.path || "");
-    const identifier = vendorId + ":" + productId + ":" + serialNumber + ":" + path;
+    const deviceId = String(device.device_id || "");
+    const identifier = vendorId + ":" + productId + ":" + serialNumber + ":" + deviceId;
 
     // Simple DJB2 hash algorithm
     let hash = 5381;
@@ -310,7 +310,7 @@
       // what the daemon expects on `open`.  A composite USB device
       // exposes several interfaces — each gets its own HIDDevice
       // instance with a distinct path, even when vid/pid are identical.
-      this.path = deviceInfo.path || null;
+      this.path = deviceInfo.device_id || null;
 
       // If the daemon provided parsed `collections`, prefer them. The
       // daemon-side collection objects may use snake_case field names; we

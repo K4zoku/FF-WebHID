@@ -284,7 +284,7 @@ async fn handle_client_binary(
             let payload = frame[6..].to_vec();
             let payload_len = payload.len();
 
-            let file_arc = match device_mgr.get_file_by_device_id(device_id) {
+            let dev_arc = match device_mgr.get_file_by_device_id(device_id) {
                 Ok(f) => f,
                 Err(e) => {
                     log::warn!("[ws] get_file_by_device_id '{device_id}': {e}");
@@ -296,11 +296,11 @@ async fn handle_client_binary(
 
             let t_op_start = Instant::now();
             let result = tokio::task::spawn_blocking(move || {
-                let file = file_arc.lock().unwrap();
+                let dev = dev_arc.lock().unwrap();
                 if msg_type == MSG_SEND_REPORT {
-                    hid::write_report(&file, report_id, &payload)
+                    hid::write_report(&dev, report_id, &payload)
                 } else {
-                    hid::write_feature_report(&file, report_id, &payload)
+                    hid::write_feature_report(&dev, report_id, &payload)
                 }
             })
             .await;
@@ -329,7 +329,7 @@ async fn handle_client_binary(
             }
             let report_id = frame[5];
 
-            let file_arc = match device_mgr.get_file_by_device_id(device_id) {
+            let dev_arc = match device_mgr.get_file_by_device_id(device_id) {
                 Ok(f) => f,
                 Err(e) => {
                     log::warn!("[ws] get_file_by_device_id '{device_id}': {e}");
@@ -339,8 +339,8 @@ async fn handle_client_binary(
             };
 
             let result = tokio::task::spawn_blocking(move || {
-                let file = file_arc.lock().unwrap();
-                hid::read_feature_report(&file, report_id)
+                let dev = dev_arc.lock().unwrap();
+                hid::read_feature_report(&dev, report_id)
             })
             .await;
 
