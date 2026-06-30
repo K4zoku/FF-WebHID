@@ -1,4 +1,4 @@
-const CAPACITY = 512;
+const CAPACITY = 2048;
 
 let sab = null, meta = null, data = null, reportSize = 64, ws = null;
 const _pending = new Map();

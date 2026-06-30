@@ -120,9 +120,8 @@ async fn handle_websocket(
     log::info!("[ws] authenticated token for device_id={device_id}");
 
     let (mut ws_sender, mut ws_receiver) = ws_stream.split();
-    let (tx, mut rx) = mpsc::channel::<Message>(128);
+    let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
 
-    // --- Outgoing task: single owner of the ws_sender ---
     let outgoing_task = tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
             if let Err(e) = ws_sender.send(msg).await {
@@ -150,21 +149,18 @@ async fn handle_websocket(
         while let Some(msg) = ws_receiver.next().await {
             match msg {
                 Ok(Message::Ping(data)) => {
-                    if let Err(_) = tx_for_receiver.send(Message::Pong(data)).await {
+                    if tx_for_receiver.send(Message::Pong(data)).is_err() {
                         break;
                     }
                 }
                 Ok(Message::Close(_)) => break,
                 Ok(Message::Binary(frame)) => {
-                    // Hot path: dispatch binary frame to hidraw.
-                    handle_client_binary(
-                        &frame,
-                        &device_mgr_for_receiver,
-                        client_id_for_receiver,
-                        &device_id_for_receiver,
-                        &tx_for_receiver,
-                    )
-                    .await;
+                    let tx_clone = tx_for_receiver.clone();
+                    let mgr = Arc::clone(&device_mgr_for_receiver);
+                    let dev_id = device_id_for_receiver.clone();
+                    tokio::spawn(async move {
+                        handle_client_binary(&frame, &mgr, client_id_for_receiver, &dev_id, tx_clone).await;
+                    });
                 }
                 Err(e) => {
                     log::warn!("[ws] read error: {e}");
@@ -193,7 +189,7 @@ async fn handle_websocket(
                 _ = flush_interval.tick() => {
                     if !batch.is_empty() {
                         let frame = create_batch_frame(&batch);
-                        if let Err(_) = tx_for_sender.send(Message::Binary(frame.into())).await {
+                        if tx_for_sender.send(Message::Binary(frame.into())).is_err() {
                             break;
                         }
                         batch.clear();
@@ -258,7 +254,7 @@ async fn handle_client_binary(
     device_mgr: &Arc<DeviceManager>,
     _client_id: u64,
     device_id: &str,
-    tx: &mpsc::Sender<Message>,
+    tx: mpsc::UnboundedSender<Message>,
 ) {
     if frame.is_empty() {
         log::warn!("[ws] empty binary frame from client");
@@ -279,7 +275,7 @@ async fn handle_client_binary(
             // [type][req_id_u32 LE][report_id_u8][...payload]
             if frame.len() < 6 {
                 let resp_type = if msg_type == MSG_SEND_REPORT { RESP_SEND_REPORT } else { RESP_SEND_FEATURE_REPORT };
-                let _ = tx.send(make_status_resp(resp_type, req_id, 1)).await;
+                let _ = tx.send(make_status_resp(resp_type, req_id, 1));
                 return;
             }
             let report_id = frame[5];
@@ -291,7 +287,7 @@ async fn handle_client_binary(
                 Err(e) => {
                     log::warn!("[ws] get_file_by_device_id '{device_id}': {e}");
                     let resp_type = if msg_type == MSG_SEND_REPORT { RESP_SEND_REPORT } else { RESP_SEND_FEATURE_REPORT };
-                    let _ = tx.send(make_status_resp(resp_type, req_id, 1)).await;
+                    let _ = tx.send(make_status_resp(resp_type, req_id, 1));
                     return;
                 }
             };
@@ -320,13 +316,13 @@ async fn handle_client_binary(
                 );
             }
             let resp_type = if msg_type == MSG_SEND_REPORT { RESP_SEND_REPORT } else { RESP_SEND_FEATURE_REPORT };
-            let _ = tx.send(make_status_resp(resp_type, req_id, status)).await;
+            let _ = tx.send(make_status_resp(resp_type, req_id, status));
         }
 
         MSG_RECEIVE_FEATURE_REPORT => {
             // [type][req_id_u32 LE][report_id_u8]
             if frame.len() < 6 {
-                let _ = tx.send(make_feature_read_resp(req_id, 1, &[])).await;
+                let _ = tx.send(make_feature_read_resp(req_id, 1, &[]));
                 return;
             }
             let report_id = frame[5];
@@ -335,7 +331,7 @@ async fn handle_client_binary(
                 Ok(f) => f,
                 Err(e) => {
                     log::warn!("[ws] get_file_by_device_id '{device_id}': {e}");
-                    let _ = tx.send(make_feature_read_resp(req_id, 1, &[])).await;
+                    let _ = tx.send(make_feature_read_resp(req_id, 1, &[]));
                     return;
                 }
             };
@@ -348,10 +344,10 @@ async fn handle_client_binary(
 
             match result {
                 Ok(Ok(data)) => {
-                    let _ = tx.send(make_feature_read_resp(req_id, 0, &data)).await;
+                    let _ = tx.send(make_feature_read_resp(req_id, 0, &data));
                 }
                 _ => {
-                    let _ = tx.send(make_feature_read_resp(req_id, 1, &[])).await;
+                    let _ = tx.send(make_feature_read_resp(req_id, 1, &[]));
                 }
             }
         }
