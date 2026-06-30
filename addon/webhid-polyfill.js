@@ -696,10 +696,19 @@
     const cap     = (sab.byteLength - 12) / reportSize;
     let   tail    = Atomics.load(meta, 1);
 
+    // 0-delay yield via MessageChannel (setTimeout has 4ms minimum clamp).
+    // Critical for animation frame delivery: 4ms × hundreds of frames = seconds
+    // of accumulated latency, which shows up as stale/mismatched frames when
+    // SayoDevice stacks transparent image layers.
+    const _yieldChan = new MessageChannel();
+    let _yieldCb = null;
+    _yieldChan.port1.onmessage = () => { if (_yieldCb) { const cb = _yieldCb; _yieldCb = null; cb(); } };
+    const scheduleYield = (cb) => { _yieldCb = cb; _yieldChan.port2.postMessage(0); };
+
     function drain() {
       let head = Atomics.load(meta, 0);
       let n = 0;
-      const BATCH = 32;
+      const BATCH = 64;
       while (tail !== head && n < BATCH) {
         const slotOffset = tail * reportSize;
         const storedLen  = reports[slotOffset] | (reports[slotOffset + 1] << 8);
@@ -724,7 +733,7 @@
         n++;
       }
       if (tail !== head) {
-        setTimeout(drain, 0);
+        scheduleYield(drain);
       }
     }
 
