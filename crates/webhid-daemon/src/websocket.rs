@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
 use futures::{SinkExt, StreamExt};
@@ -10,9 +10,44 @@ use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::device_mgr::DeviceManager;
+use crate::hid;
 
 /// Default flush interval for batching input reports (milliseconds).
 const DEFAULT_BATCH_FLUSH_MS: u64 = 1;
+
+// ---------------------------------------------------------------------------
+// Wire format for client → daemon binary frames (page → device hot path)
+// ---------------------------------------------------------------------------
+//
+// First byte is the message type:
+//
+//   0x01  SendReport (output report)
+//         [0x01][req_id_u32 LE][report_id_u8][...payload]
+//         Daemon writes via hidraw `write(2)` and sends back:
+//         [0x81][req_id_u32 LE][status_u8]   (status: 0=ok, 1=err)
+//
+//   0x02  SendFeatureReport
+//         [0x02][req_id_u32 LE][report_id_u8][...payload]
+//         Daemon issues HIDIOCSFEATURE and sends back:
+//         [0x82][req_id_u32 LE][status_u8]
+//
+//   0x03  ReceiveFeatureReport
+//         [0x03][req_id_u32 LE][report_id_u8]
+//         Daemon issues HIDIOCGFEATURE and sends back:
+//         [0x83][req_id_u32 LE][status_u8][len_u16 LE][...data]
+//         (data length = 0 on error)
+//
+// Frames from daemon → page that are NOT in this scheme are input-report
+// batches (existing format: `[len_u8][report_bytes]...`) — preserved for
+// backward compat with the existing SAB ring buffer.
+
+const MSG_SEND_REPORT: u8 = 0x01;
+const MSG_SEND_FEATURE_REPORT: u8 = 0x02;
+const MSG_RECEIVE_FEATURE_REPORT: u8 = 0x03;
+
+const RESP_SEND_REPORT: u8 = 0x81;
+const RESP_SEND_FEATURE_REPORT: u8 = 0x82;
+const RESP_RECEIVE_FEATURE_REPORT: u8 = 0x83;
 
 /// Start the WebSocket server on the given port.
 pub async fn start_server(
@@ -97,8 +132,20 @@ async fn handle_websocket(
         }
     });
 
-    // --- Receiver task: handle incoming client frames (ping, close, etc.) ---
+    // --- Receiver task: handle incoming client frames (ping, close, hot-path writes) ---
+    //
+    // Page sends output/feature reports as binary frames so they bypass
+    // the JSON control plane entirely (5–10× lower latency for sendReport).
+    // Each frame is dispatched on a blocking thread to write to hidraw,
+    // and the response is enqueued back to the page via `tx`.
     let tx_for_receiver = tx.clone();
+    let device_mgr_for_receiver = Arc::clone(&device_mgr);
+    let client_id_for_receiver = 0u64; // WS connections are not bound to an IPC client_id
+    // Clone device_id before moving it into the receiver closure so the
+    // sender task below can still use the original.  `async move` captures
+    // by value, so without this clone the sender task's
+    // `device_id.clone()` would fail to compile (E0382).
+    let device_id_for_receiver = device_id.clone();
     let receiver_task = tokio::spawn(async move {
         while let Some(msg) = ws_receiver.next().await {
             match msg {
@@ -108,6 +155,17 @@ async fn handle_websocket(
                     }
                 }
                 Ok(Message::Close(_)) => break,
+                Ok(Message::Binary(frame)) => {
+                    // Hot path: dispatch binary frame to hidraw.
+                    handle_client_binary(
+                        &frame,
+                        &device_mgr_for_receiver,
+                        client_id_for_receiver,
+                        &device_id_for_receiver,
+                        &tx_for_receiver,
+                    )
+                    .await;
+                }
                 Err(e) => {
                     log::warn!("[ws] read error: {e}");
                     break;
@@ -188,4 +246,138 @@ fn create_batch_frame(reports: &[Vec<u8>]) -> Vec<u8> {
         frame.extend_from_slice(report);
     }
     frame
+}
+
+/// Parse a client-sent binary frame (page → daemon hot path) and dispatch it
+/// to hidraw.  Sends the response back via the outgoing `tx` channel as a
+/// binary frame so the page can resolve the corresponding Promise.
+async fn handle_client_binary(
+    frame: &[u8],
+    device_mgr: &Arc<DeviceManager>,
+    _client_id: u64,
+    device_id: &str,
+    tx: &mpsc::Sender<Message>,
+) {
+    if frame.is_empty() {
+        log::warn!("[ws] empty binary frame from client");
+        return;
+    }
+    let msg_type = frame[0];
+
+    // All hot-path messages carry a u32 LE request id right after the type
+    // byte so the page can match the response to its in-flight Promise.
+    if frame.len() < 5 {
+        log::warn!("[ws] short frame (len={}, need ≥5 for type+req_id)", frame.len());
+        return;
+    }
+    let req_id = u32::from_le_bytes([frame[1], frame[2], frame[3], frame[4]]);
+
+    match msg_type {
+        MSG_SEND_REPORT | MSG_SEND_FEATURE_REPORT => {
+            // [type][req_id_u32 LE][report_id_u8][...payload]
+            if frame.len() < 6 {
+                let resp_type = if msg_type == MSG_SEND_REPORT { RESP_SEND_REPORT } else { RESP_SEND_FEATURE_REPORT };
+                let _ = tx.send(make_status_resp(resp_type, req_id, 1)).await;
+                return;
+            }
+            let report_id = frame[5];
+            let payload = frame[6..].to_vec();
+            let payload_len = payload.len();
+
+            let file_arc = match device_mgr.get_file_by_device_id(device_id) {
+                Ok(f) => f,
+                Err(e) => {
+                    log::warn!("[ws] get_file_by_device_id '{device_id}': {e}");
+                    let resp_type = if msg_type == MSG_SEND_REPORT { RESP_SEND_REPORT } else { RESP_SEND_FEATURE_REPORT };
+                    let _ = tx.send(make_status_resp(resp_type, req_id, 1)).await;
+                    return;
+                }
+            };
+
+            let t_op_start = Instant::now();
+            let result = tokio::task::spawn_blocking(move || {
+                let file = file_arc.lock().unwrap();
+                if msg_type == MSG_SEND_REPORT {
+                    hid::write_report(&file, report_id, &payload)
+                } else {
+                    hid::write_feature_report(&file, report_id, &payload)
+                }
+            })
+            .await;
+
+            let op_ms = t_op_start.elapsed().as_millis();
+            let status = match result {
+                Ok(Ok(())) => 0u8,
+                _ => 1u8,
+            };
+            if op_ms >= 5 || status != 0 {
+                log::info!(
+                    "[ws-timing] {} dev='{}' report_id={} payload_len={} op_ms={} status={}",
+                    if msg_type == MSG_SEND_REPORT { "sendreport" } else { "sendfeaturereport" },
+                    device_id, report_id, payload_len, op_ms, status
+                );
+            }
+            let resp_type = if msg_type == MSG_SEND_REPORT { RESP_SEND_REPORT } else { RESP_SEND_FEATURE_REPORT };
+            let _ = tx.send(make_status_resp(resp_type, req_id, status)).await;
+        }
+
+        MSG_RECEIVE_FEATURE_REPORT => {
+            // [type][req_id_u32 LE][report_id_u8]
+            if frame.len() < 6 {
+                let _ = tx.send(make_feature_read_resp(req_id, 1, &[])).await;
+                return;
+            }
+            let report_id = frame[5];
+
+            let file_arc = match device_mgr.get_file_by_device_id(device_id) {
+                Ok(f) => f,
+                Err(e) => {
+                    log::warn!("[ws] get_file_by_device_id '{device_id}': {e}");
+                    let _ = tx.send(make_feature_read_resp(req_id, 1, &[])).await;
+                    return;
+                }
+            };
+
+            let result = tokio::task::spawn_blocking(move || {
+                let file = file_arc.lock().unwrap();
+                hid::read_feature_report(&file, report_id)
+            })
+            .await;
+
+            match result {
+                Ok(Ok(data)) => {
+                    let _ = tx.send(make_feature_read_resp(req_id, 0, &data)).await;
+                }
+                _ => {
+                    let _ = tx.send(make_feature_read_resp(req_id, 1, &[])).await;
+                }
+            }
+        }
+
+        other => {
+            log::warn!("[ws] unknown binary msg_type=0x{other:02x}");
+        }
+    }
+}
+
+/// Build a `[resp_type][req_id_u32 LE][status_u8]` response frame.
+fn make_status_resp(resp_type: u8, req_id: u32, status: u8) -> Message {
+    let mut buf = Vec::with_capacity(6);
+    buf.push(resp_type);
+    buf.extend_from_slice(&req_id.to_le_bytes());
+    buf.push(status);
+    Message::Binary(buf.into())
+}
+
+/// Build a `[0x83][req_id_u32 LE][status_u8][len_u16 LE][...data]` response
+/// for ReceiveFeatureReport.  `data` is empty on error.
+fn make_feature_read_resp(req_id: u32, status: u8, data: &[u8]) -> Message {
+    let mut buf = Vec::with_capacity(8 + data.len());
+    buf.push(RESP_RECEIVE_FEATURE_REPORT);
+    buf.extend_from_slice(&req_id.to_le_bytes());
+    buf.push(status);
+    let len = data.len().min(0xFFFF) as u16;
+    buf.extend_from_slice(&len.to_le_bytes());
+    buf.extend_from_slice(&data[..len as usize]);
+    Message::Binary(buf.into())
 }

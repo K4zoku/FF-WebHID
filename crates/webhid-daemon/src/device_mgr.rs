@@ -278,6 +278,16 @@ impl DeviceManager {
         Ok(Arc::clone(&entry.file))
     }
 
+    /// Return a cloned `Arc` to the file handle for a device authenticated
+    /// by session token (used by the WebSocket hot path).  Bypasses the
+    /// `client_id` ownership check because the WS connection was already
+    /// authenticated by `get_device_by_token` during the HTTP upgrade.
+    pub fn get_file_by_device_id(&self, device_id: &str) -> anyhow::Result<Arc<Mutex<File>>> {
+        let map = self.devices.lock().unwrap();
+        let entry = map.get(device_id).ok_or_else(|| anyhow!("'{device_id}' not open"))?;
+        Ok(Arc::clone(&entry.file))
+    }
+
     /// Remove every device opened by `client_id` (called on disconnect).
     pub fn close_client_devices(&self, client_id: u64) {
         let mut map = self.devices.lock().unwrap();

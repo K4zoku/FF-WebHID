@@ -20,6 +20,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CRATES_DIR="$SCRIPT_DIR/../crates"
+MANIFEST_DIR="$SCRIPT_DIR/../manifests"
 
 # ---------------------------------------------------------------------------
 # 1. Build
@@ -39,7 +40,7 @@ install -m 0755 "$RELEASE/webhid-native-messaging"    /usr/local/bin/webhid-nati
 # ---------------------------------------------------------------------------
 # 3. Install native-messaging manifest
 # ---------------------------------------------------------------------------
-NM_MANIFEST="$SCRIPT_DIR/webhid_server.json"
+NM_MANIFEST="$MANIFEST_DIR/webhid_server.json"
 
 # System-wide location (requires Firefox >= 85 with system-wide NM hosts)
 SYSTEM_NM_DIR="/usr/lib/mozilla/native-messaging-hosts"

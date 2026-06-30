@@ -493,6 +493,70 @@
 
     const { id, action, payload } = event.data;
 
+    // Hot-path actions: forward to the Worker (WebSocket) when one is
+    // available for this device.  The polyfill only sends these after the
+    // SAB/Worker has been established via `open`.  If no Worker exists we
+    // fall through to the regular NM path so behavior is preserved on
+    // devices that haven't been opened yet (or if the WS connection died).
+    if (action === "worker-send" || action === "worker-sendFeature" || action === "worker-receiveFeature") {
+      const deviceId = String.fromCharCode(...(payload.device_id || []));
+      const worker = _workers.get(deviceId);
+      if (worker) {
+        // Pick worker message type and forward.
+        const wType =
+          action === "worker-send" ? "send" :
+          action === "worker-sendFeature" ? "sendFeature" :
+          "receiveFeature";
+        // Set up response forwarding.
+        const onWorkerMsg = ({ data }) => {
+          if ((data.type === 'sendResult' || data.type === 'featureResult') && data.reqId === id) {
+            worker.removeEventListener('message', onWorkerMsg);
+            let result;
+            if (data.type === 'featureResult') {
+              if (data.error) {
+                result = { success: false, error: data.error };
+              } else {
+                result = { success: true, data: Array.from(data.data) };
+              }
+            } else {
+              if (data.error) {
+                result = { success: false, error: data.error };
+              } else {
+                result = { success: true };
+              }
+            }
+            window.postMessage({ __webhid_bridge: "res", id, result }, "*");
+          }
+        };
+        worker.addEventListener('message', onWorkerMsg);
+
+        const wMsg = { type: wType, reqId: id, reportId: payload.report_id };
+        if (action === "worker-send" || action === "worker-sendFeature") {
+          wMsg.data = payload.data;
+        }
+        worker.postMessage(wMsg);
+        return;
+      }
+      // No worker — fall back to NM control plane.
+      // Translate to the standard action so background.js handles it.
+      const fallbackAction =
+        action === "worker-send" ? "sendreport" :
+        action === "worker-sendFeature" ? "sendfeaturereport" :
+        "receivefeaturereport";
+      try {
+        const msg = Object.assign({ action: fallbackAction }, payload || {});
+        const response = await browser.runtime.sendMessage(msg);
+        window.postMessage({ __webhid_bridge: "res", id, result: response }, "*");
+      } catch (error) {
+        window.postMessage({
+          __webhid_bridge: "res",
+          id,
+          result: { success: false, error: error.message },
+        }, "*");
+      }
+      return;
+    }
+
     // requestDevice is special: we show the content-script-side picker modal
     // and resolve via the webhid-device-selected / webhid-device-cancelled
     // custom events it dispatches.
