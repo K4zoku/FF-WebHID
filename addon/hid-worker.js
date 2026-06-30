@@ -25,7 +25,6 @@ let _reconnectTimer = null;
 let _reconnectDelay = 500;
 
 function connect(msg) {
-  console.log('[worker] connect wsPort=' + msg.wsPort + ' reportSize=' + (msg.reportSize || 64));
   _connectMsg = msg;
   reportSize = msg.reportSize || 64;
   if (!sab) {
@@ -46,7 +45,6 @@ function _doConnect() {
   }
   ws.binaryType = 'arraybuffer';
   ws.onopen = () => {
-    console.log('[worker] WS OPEN');
     _reconnectDelay = 500;
     self.postMessage({ type: 'ready', sab });
   };
@@ -69,7 +67,6 @@ function _doConnect() {
 
 function _scheduleReconnect() {
   if (_reconnectTimer) return;
-  console.log('[worker] reconnect in', _reconnectDelay, 'ms');
   _reconnectTimer = setTimeout(() => {
     _reconnectTimer = null;
     if (!_connectMsg) return;
@@ -117,12 +114,10 @@ function handleSend(msg, msgType) {
   const t0 = performance.now();
   if (_fireAndForget) {
     ws.send(frame);
-    if (_perfLogging) console.log('[worker] send reqId=' + reqId + ' ff ' + (performance.now() - t0).toFixed(1) + 'ms');
     self.postMessage({ type: 'sendResult', reqId: msg.reqId, success: true });
     return;
   }
   _pending.set(reqId, {
-    resolve: () => { if (_perfLogging) console.log('[worker] send reqId=' + reqId + ' ok ' + (performance.now() - t0).toFixed(1) + 'ms'); self.postMessage({ type: 'sendResult', reqId: msg.reqId, success: true }); },
     reject: (e) => { console.warn('[worker] send reqId=' + reqId + ' FAIL:', e.message); self.postMessage({ type: 'sendResult', reqId: msg.reqId, error: String(e.message || e) }); },
   });
   ws.send(frame);
@@ -140,7 +135,6 @@ function handleReceiveFeature(msg) {
   frame[5] = msg.reportId;
   const t0 = performance.now();
   _pending.set(reqId, {
-    resolve: (data) => { console.log('[worker] recvFeature reqId=' + reqId + ' ok ' + (performance.now() - t0).toFixed(1) + 'ms len=' + data.length); self.postMessage({ type: 'featureResult', reqId: msg.reqId, data }); },
     reject: (e) => { console.warn('[worker] recvFeature reqId=' + reqId + ' FAIL:', e.message); self.postMessage({ type: 'featureResult', reqId: msg.reqId, error: String(e.message || e) }); },
   });
   ws.send(frame);

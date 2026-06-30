@@ -29,7 +29,6 @@
 use std::collections::HashMap;
 use tokio::io::{AsyncWriteExt, BufReader, BufWriter};
 use std::sync::Arc;
-use std::time::Instant;
 
 
 use tokio::net::UnixStream;
@@ -41,7 +40,6 @@ const DEFAULT_SOCKET: &str = "/run/webhid/webhid.sock";
 /// Threshold below which we don't log timing (avoid noise).  Anything above
 /// this is logged at `info` so you can spot the slow stage without digging
 /// through debug logs.
-const SLOW_THRESHOLD_MS: u128 = 5;
 
 // ---------------------------------------------------------------------------
 // Entry point
@@ -185,7 +183,6 @@ async fn main() -> anyhow::Result<()> {
         };
         log::debug!("← Firefox: {nm_req:?}");
         let firefox_id = nm_req.id();
-        let action_label = nm_req.action_label();
 
         let id = next_id;
         next_id = next_id.wrapping_add(1).max(1);
@@ -213,34 +210,13 @@ async fn main() -> anyhow::Result<()> {
         // it to the stdout channel.  This decouples reading the next
         // stdin message from waiting for the current response.
         let stdout_tx_clone = stdout_tx.clone();
-        let t_loop_start = Instant::now();
         tokio::spawn(async move {
-            let t_daemon_resp_start = Instant::now();
             let mut nm_resp = match resp_rx.await {
-                Ok(ipc_resp) => {
-                    log::debug!("→ daemon: {ipc_resp:?}");
-                    ipc_to_nm(ipc_resp)
-                }
+                Ok(ipc_resp) => ipc_to_nm(ipc_resp),
                 Err(_) => NmResponse::err("daemon disconnected"),
             };
-            let t_daemon_resp = t_daemon_resp_start.elapsed();
             nm_resp.id = firefox_id;
-
             let _ = stdout_tx_clone.send(nm_resp).await;
-
-            let total = t_loop_start.elapsed();
-            let total_ms = total.as_millis();
-            let log_msg = format!(
-                "[nm-timing] action={:<20} total={:>5}ms  daemon_resp={:>5}ms",
-                action_label,
-                total_ms,
-                t_daemon_resp.as_millis(),
-            );
-            if total_ms >= SLOW_THRESHOLD_MS {
-                log::info!("{}", log_msg);
-            } else {
-                log::debug!("{}", log_msg);
-            }
         });
     }
 

@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::Context as _;
 use futures::{SinkExt, StreamExt};
@@ -282,7 +282,6 @@ async fn handle_client_binary(
             }
             let report_id = frame[5];
             let payload = frame[6..].to_vec();
-            let payload_len = payload.len();
 
             let dev_arc = match device_mgr.get_file_by_device_id(device_id) {
                 Ok(f) => f,
@@ -294,7 +293,6 @@ async fn handle_client_binary(
                 }
             };
 
-            let t_op_start = Instant::now();
             let result = tokio::task::spawn_blocking(move || {
                 let dev = dev_arc.lock().unwrap();
                 if msg_type == MSG_SEND_REPORT {
@@ -305,18 +303,7 @@ async fn handle_client_binary(
             })
             .await;
 
-            let op_ms = t_op_start.elapsed().as_millis();
-            let status = match result {
-                Ok(Ok(())) => 0u8,
-                _ => 1u8,
-            };
-            if op_ms >= 5 || status != 0 {
-                log::info!(
-                    "[ws-timing] {} dev='{}' report_id={} payload_len={} op_ms={} status={}",
-                    if msg_type == MSG_SEND_REPORT { "sendreport" } else { "sendfeaturereport" },
-                    device_id, report_id, payload_len, op_ms, status
-                );
-            }
+            let status = match result { Ok(Ok(())) => 0u8, _ => 1u8 };
             let resp_type = if msg_type == MSG_SEND_REPORT { RESP_SEND_REPORT } else { RESP_SEND_FEATURE_REPORT };
             let _ = tx.send(make_status_resp(resp_type, req_id, status));
         }
