@@ -58,9 +58,25 @@ async fn main() -> anyhow::Result<()> {
     let socket_path = std::env::var("WEBHID_SOCKET")
         .unwrap_or_else(|_| DEFAULT_SOCKET.to_string());
 
-    let stream = UnixStream::connect(&socket_path).await.map_err(|e| {
-        anyhow::anyhow!("cannot connect to webhid-daemon at '{socket_path}': {e}")
-    })?;
+    // Connect with retry — daemon may be restarting.  Backoff: 100ms, 200ms,
+    // 400ms, ... up to 2s.  Total wait up to ~30s before giving up.
+    let stream = {
+        let mut delay = 100u64;
+        loop {
+            match UnixStream::connect(&socket_path).await {
+                Ok(s) => break s,
+                Err(e) => {
+                    if delay > 30000 {
+                        return Err(anyhow::anyhow!("cannot connect to webhid-daemon at '{socket_path}' after retries: {e}"));
+                    }
+                    log::warn!("daemon connect failed ({e}), retry in {delay}ms");
+                    tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
+                    delay *= 2;
+                    if delay > 2000 { delay = 2000; }
+                }
+            }
+        }
+    };
     log::info!("connected to daemon at {socket_path}");
 
     let (daemon_read, daemon_write) = stream.into_split();
@@ -108,13 +124,11 @@ async fn main() -> anyhow::Result<()> {
                 Ok(response) => {
                     log::debug!("[daemon_reader] received response: {:?}", response);
                     if response.id() == 0 {
-                        // Unsolicited event → convert and forward to Firefox.
                         if let Some(nm) = ipc_event_to_nm(response) {
                             log::debug!("[daemon_reader] forwarding event: {:?}", nm);
                             let _ = stdout_tx_ev.send(nm).await;
                         }
                     } else {
-                        // Response to a pending request → wake the waiter.
                         let sender = pending_rx.lock().await.remove(&response.id());
                         if let Some(tx) = sender {
                             let _ = tx.send(response);
@@ -122,7 +136,17 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
                 Err(e) => {
-                    log::info!("daemon disconnected: {e}");
+                    log::warn!("daemon disconnected: {e}");
+                    // Reject all pending requests so page callers don't hang.
+                    let mut pending = pending_rx.lock().await;
+                    let count = pending.len();
+                    for (_, tx) in pending.drain() {
+                        let _ = tx.send(IpcResponse::Error {
+                            id: 0,
+                            message: "daemon disconnected".to_string(),
+                        });
+                    }
+                    log::info!("rejected {count} pending requests due to daemon disconnect");
                     break;
                 }
             }
@@ -176,9 +200,9 @@ async fn main() -> anyhow::Result<()> {
         {
             let mut w = daemon_writer.lock().await;
             if let Err(e) = protocol::write_message(&mut *w, &ipc_req).await {
-                log::error!("daemon write: {e}");
+                log::warn!("daemon write failed: {e}");
                 pending.lock().await.remove(&id);
-                let mut err_resp = NmResponse::err("daemon communication error");
+                let mut err_resp = NmResponse::err("daemon disconnected, please reload page");
                 err_resp.id = firefox_id;
                 let _ = stdout_tx.send(err_resp).await;
                 continue;

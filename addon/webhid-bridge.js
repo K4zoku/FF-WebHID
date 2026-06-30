@@ -617,12 +617,24 @@
             return;
           }
           if (data.type === 'closed') {
-            console.warn('[bridge] worker WS closed for', deviceId);
+            console.warn('[bridge] worker WS closed for', deviceId, '— worker will auto-reconnect');
             const cbMap = _workerCallbacks.get(worker);
             if (cbMap) {
               for (const [reqId, cb] of cbMap) cb({ type: 'sendResult', reqId, error: 'ws closed' });
               cbMap.clear();
             }
+            window.postMessage({
+              __webhid_bridge: 'evt',
+              event: { event_type: 'disconnect', device_id: response.data }
+            }, '*');
+            return;
+          }
+          if (data.type === 'ready' && _workers.has(deviceId)) {
+            console.log('[bridge] worker reconnected for', deviceId);
+            window.postMessage({
+              __webhid_bridge: 'evt',
+              event: { event_type: 'connect', device_id: response.data }
+            }, '*');
             return;
           }
           if (data.type === 'sendResult' || data.type === 'featureResult') {

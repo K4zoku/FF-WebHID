@@ -1,59 +1,56 @@
 const NativeMessaging = {
   port: null,
   _nextId: 1,
-  // Map of requestId -> { resolve, reject } for in-flight requests.
   _pending: new Map(),
+  _reconnectTimer: null,
+  _reconnectDelay: 1000,
 
   connect() {
+    if (this.port) return Promise.resolve();
     try {
       this.port = browser.runtime.connectNative("webhid_server");
+      this._reconnectDelay = 1000;
 
       this.port.onMessage.addListener((message) => {
-        // Events are pushed by the daemon (id=0) and identified by an
-        // `event_type` field.  They are routed to `onMessage` regardless
-        // of any in-flight request.
-        if (message.event_type) {
-          this.onMessage(message);
-          return;
-        }
-
-        // Otherwise it's a response: use the ID to find the waiter.
+        if (message.event_type) { this.onMessage(message); return; }
         if (message.id) {
           const p = this._pending.get(message.id);
-          if (p) {
-            this._pending.delete(message.id);
-            p.resolve(message);
-            return;
-          }
+          if (p) { this._pending.delete(message.id); p.resolve(message); return; }
         }
-
-        console.warn(
-          "webhid: received NM response with no matching pending request:",
-          message,
-        );
+        console.warn("webhid: NM response no matching pending:", message);
       });
 
       this.port.onDisconnect.addListener(() => {
-        console.log("Native messaging disconnected");
-        // Fail every still-pending request so callers don't hang forever.
+        console.warn("[nm] disconnected — will retry in", this._reconnectDelay, "ms");
         this.port = null;
-        for (const [id, p] of this._pending) {
-          p.resolve({ success: false, error: "Native messaging disconnected" });
-        }
+        for (const [id, p] of this._pending) p.resolve({ success: false, error: "NM disconnected" });
         this._pending.clear();
+        this._scheduleReconnect();
       });
 
       return Promise.resolve();
     } catch (error) {
-      console.error("Failed to connect to native messaging:", error);
+      console.error("[nm] connect failed:", error);
+      this._scheduleReconnect();
       return Promise.reject(error);
     }
+  },
+
+  _scheduleReconnect() {
+    if (this._reconnectTimer) return;
+    this._reconnectTimer = setTimeout(() => {
+      this._reconnectTimer = null;
+      console.log("[nm] reconnecting...");
+      this.connect().catch(() => {});
+    }, this._reconnectDelay);
+    this._reconnectDelay = Math.min(this._reconnectDelay * 2, 10000);
   },
 
   sendRequest(request) {
     return new Promise((resolve, reject) => {
       if (!this.port) {
-        reject(new Error("Not connected to native messaging"));
+        this.connect().catch(() => {});
+        reject(new Error("NM disconnected, reconnecting — please retry"));
         return;
       }
 
