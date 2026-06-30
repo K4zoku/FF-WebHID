@@ -46,11 +46,28 @@ pub fn make_device_id(info: &HidDeviceInfo) -> String {
 // ---------------------------------------------------------------------------
 
 /// Return every currently connected HID device via hidapi.
+///
+/// Composite USB devices expose multiple HID interfaces — hidapi lists each
+/// one separately.  We group interfaces by (vid, pid, serial) and pick the
+/// "primary" interface: the first vendor-defined one (usage_page >= 0xFF00),
+/// or failing that the first non-boot interface, else the first.  This
+/// matches what most WebHID-consuming pages expect (one entry per physical
+/// device, like Chromium's picker).
 pub fn enumerate() -> anyhow::Result<Vec<DeviceInfo>> {
     let api = HidApi::new()?;
-    let mut devices = Vec::new();
+    let mut groups: std::collections::HashMap<(u16, u16, String), Vec<&HidDeviceInfo>> = std::collections::HashMap::new();
     for info in api.device_list() {
-        if let Some(d) = info_from_hidapi(info) {
+        let serial = info.serial_number().unwrap_or("").to_string();
+        groups.entry((info.vendor_id(), info.product_id(), serial)).or_default().push(info);
+    }
+    let mut devices = Vec::new();
+    for ifaces in groups.values() {
+        let primary = ifaces.iter()
+            .find(|i| i.usage_page() >= 0xFF00)
+            .or_else(|| ifaces.iter().find(|i| i.usage_page() != 0x01))
+            .copied()
+            .unwrap_or(ifaces[0]);
+        if let Some(d) = info_from_hidapi(primary) {
             devices.push(d);
         }
     }
