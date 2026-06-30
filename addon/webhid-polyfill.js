@@ -17,13 +17,6 @@
 
   let _savedDevices = null;
   let _deviceInfoCache = null;
-  let _perfLogging = false;
-
-  window.addEventListener("message", (event) => {
-    if (event.data && event.data.__webhid_bridge === "settings" && typeof event.data.perfLogging === 'boolean') {
-      _perfLogging = event.data.perfLogging;
-    }
-  });
 
   /**
    * Creates a hash from device identifiers for effective unique device identification.
@@ -142,15 +135,7 @@
   function sendRequest(action, payload) {
     return new Promise((resolve) => {
       const id = ++_reqId;
-      const t0 = performance.now();
-      _pending[id] = (result) => {
-        if (_perfLogging) {
-          const dt = performance.now() - t0;
-          if (dt > 5) console.info(`[webhid-timing] ${action} id=${id} roundtrip=${dt.toFixed(1)}ms`);
-          else console.debug(`[webhid-timing] ${action} id=${id} roundtrip=${dt.toFixed(1)}ms`);
-        }
-        resolve(result);
-      };
+      _pending[id] = resolve;
       window.postMessage(
         { __webhid_bridge: "req", id, action, payload: payload || {} },
         "*",

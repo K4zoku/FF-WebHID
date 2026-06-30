@@ -486,8 +486,9 @@
   // Content script  →  page:  postMessage({ __webhid_bridge: 'res', id, result })
   //                           postMessage({ __webhid_bridge: 'evt', event })
   // ---------------------------------------------------------------------------
-  const _workers = new Map(); // deviceId (string) -> Worker
-  const _workerCallbacks = new Map(); // worker -> Map<reqId, callback>
+  const _workers = new Map();
+  const _workerCallbacks = new Map();
+  let _wsPort = null;
 
   window.addEventListener("message", async (event) => {
     if (!event.data || event.data.__webhid_bridge !== "req") return;
@@ -650,7 +651,7 @@
         worker.postMessage({
           type: 'connect',
           token: response.session_token,
-          wsPort: response.ws_port,
+          wsPort: response.ws_port || _wsPort,
           reportSize: payload.reportSize || 2048,
         });
 
@@ -682,16 +683,16 @@
     }
   });
 
-  // Forward InputReport / connect / disconnect events pushed by background.js
-  // into the page world as postMessage so the page-side HIDDevice can fire them.
+  // Forward events pushed by background.js into the page world.
   browser.runtime.onMessage.addListener((message) => {
     if (message.action === "webhid-device-event" && message.event) {
-      window.postMessage(
-        { __webhid_bridge: "evt", event: message.event },
-        "*",
-      );
-    } else {
-      console.debug("[content] skipping non-event message or missing event", message);
+      const evt = message.event;
+      if (evt.event_type === "hello") {
+        _wsPort = evt.ws_port;
+        console.log('[bridge] hello: ws_port=' + _wsPort);
+        return;
+      }
+      window.postMessage({ __webhid_bridge: "evt", event: evt }, "*");
     }
   });
 
@@ -703,13 +704,5 @@
     for (const worker of _workers.values()) {
       worker.postMessage({ type: 'settings', fireAndForget: ff, perfLogging: pl });
     }
-    if (pl !== undefined) {
-      window.postMessage({ __webhid_bridge: "settings", perfLogging: pl }, "*");
-    }
   });
-
-  (async () => {
-    const s = await browser.storage.local.get({ perfLogging: false });
-    window.postMessage({ __webhid_bridge: "settings", perfLogging: s.perfLogging }, "*");
-  })();
 })();

@@ -1,16 +1,13 @@
-//! Watches udev for hidraw add/remove events and broadcasts them to all
-//! connected clients via a [`tokio::sync::broadcast`] channel.
-//!
-//! The `udev::MonitorSocket` wraps a raw pointer and is therefore not `Send`.
-//! We work around this by creating it *inside* the background OS thread, so
-//! no cross-thread transfer ever happens.
-
+use std::collections::HashMap;
 use std::os::unix::io::AsRawFd;
+use std::sync::Mutex;
 
 use tokio::sync::broadcast;
 use webhid::IpcResponse;
 
 use crate::hid;
+
+static DEVICE_CACHE: Mutex<Option<HashMap<String, webhid::DeviceInfo>>> = Mutex::new(None);
 
 pub fn start(event_tx: broadcast::Sender<IpcResponse>) -> anyhow::Result<()> {
     std::thread::Builder::new()
@@ -47,20 +44,24 @@ fn run(socket: udev::MonitorSocket, event_tx: broadcast::Sender<IpcResponse>) {
                 udev::EventType::Add => {
                     let Some(info) = hid::info_by_raw_path(&devnode) else { continue };
                     log::info!("device connected: {:04x}:{:04x} ({})", info.vendor_id, info.product_id, info.device_id);
+                    let mut cache = DEVICE_CACHE.lock().unwrap();
+                    let cache = cache.get_or_insert_with(HashMap::new);
+                    cache.insert(devnode, info.clone());
                     IpcResponse::DeviceConnected { id: 0, device: info }
                 }
                 udev::EventType::Remove => {
-                    // For remove, we can't query hidapi (device gone).
-                    // Build a minimal DeviceInfo with just the path-derived device_id.
-                    log::info!("device disconnected: {}", devnode);
-                    let info = webhid::DeviceInfo {
-                        vendor_id: 0, product_id: 0,
-                        product_name: None, manufacturer: None, serial_number: None,
-                        usage_page: None, usage: None,
-                        device_id: devnode,
-                        report_descriptor: None, collections: None,
-                    };
-                    IpcResponse::DeviceDisconnected { id: 0, device: info }
+                    let mut cache = DEVICE_CACHE.lock().unwrap();
+                    let info = cache.as_mut().and_then(|c| c.remove(&devnode));
+                    match info {
+                        Some(i) => {
+                            log::info!("device disconnected: {:04x}:{:04x} ({})", i.vendor_id, i.product_id, i.device_id);
+                            IpcResponse::DeviceDisconnected { id: 0, device: i }
+                        }
+                        None => {
+                            log::warn!("device disconnected (unknown, no cached info): {}", devnode);
+                            continue;
+                        }
+                    }
                 }
                 _ => continue,
             };

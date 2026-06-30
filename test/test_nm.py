@@ -137,7 +137,7 @@ def main():
     head(f"3 · Open  (path={dev['path']})")
     resp = client.request({
         "action":    "open",
-        "device_id": list(dev["path"].encode()),
+        "device_id": list(dev["device_id"].encode()),
     })
 
     if not resp.get("success"):
