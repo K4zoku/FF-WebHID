@@ -118,6 +118,7 @@ async fn handle_websocket(
     };
 
     log::info!("[ws] authenticated token for device_id={device_id}");
+    device_mgr.set_ws_active(&device_id, true);
 
     let (mut ws_sender, mut ws_receiver) = ws_stream.split();
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
@@ -224,6 +225,7 @@ async fn handle_websocket(
     };
 
     log::info!("[ws] connection for {device_id} closed");
+    device_mgr.set_ws_active(&device_id, false);
     Ok(())
 }
 
