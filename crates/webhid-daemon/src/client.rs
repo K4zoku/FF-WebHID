@@ -34,9 +34,11 @@ pub async fn handle(
     let (reader, writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
 
-    // All outbound messages go through this channel so the writer task owns
-    // the socket write half exclusively.
     let (tx, mut rx) = mpsc::channel::<IpcResponse>(1024);
+
+    // Announce capabilities (WS port) to the client immediately so the
+    // addon can connect its data-plane Worker before opening any device.
+    let _ = tx.send(IpcResponse::Hello { id: 0, ws_port }).await;
 
     // --- Writer task ---
     let writer_task = tokio::spawn(async move {
@@ -141,9 +143,9 @@ async fn dispatch(device_mgr: &DeviceManager, client_id: u64, req: IpcRequest, w
             Err(e) => IpcResponse::Error { id, message: e.to_string() },
         },
 
-        IpcRequest::Open { device_path, .. } => {
-            match device_mgr.open(&device_path, client_id) {
-                Ok((device_id, session_token)) => IpcResponse::Opened { id, device_id, session_token, ws_port: Some(ws_port) },
+        IpcRequest::Open { device_id, .. } => {
+            match device_mgr.open(&device_id, client_id) {
+                Ok((dev_id, session_token)) => IpcResponse::Opened { id, device_id: dev_id, session_token, ws_port: Some(ws_port) },
                 Err(e) => IpcResponse::Error { id, message: e.to_string() },
             }
         }
@@ -156,13 +158,12 @@ async fn dispatch(device_mgr: &DeviceManager, client_id: u64, req: IpcRequest, w
         IpcRequest::Read { device_id, timeout_ms, .. } => {
             match device_mgr.get_file(&device_id, client_id) {
                 Err(e) => IpcResponse::Error { id, message: e.to_string() },
-                Ok(file_arc) => {
+                Ok(dev_arc) => {
                     let result = tokio::task::spawn_blocking(move || {
-                        let file = file_arc.lock().unwrap();
-                        hid::read_with_timeout(&file, timeout_ms)
+                        let dev = dev_arc.lock().unwrap();
+                        hid::read_with_timeout(&dev, timeout_ms as i32)
                     })
                     .await;
-
                     match result {
                         Ok(Ok(data)) => IpcResponse::Data { id, data },
                         Ok(Err(e)) => IpcResponse::Error { id, message: e.to_string() },
@@ -175,25 +176,12 @@ async fn dispatch(device_mgr: &DeviceManager, client_id: u64, req: IpcRequest, w
         IpcRequest::SendReport { device_id, report_id, data, .. } => {
             match device_mgr.get_file(&device_id, client_id) {
                 Err(e) => IpcResponse::Error { id, message: e.to_string() },
-                Ok(file_arc) => {
-                    let data_len = data.len();
+                Ok(dev_arc) => {
                     let result = tokio::task::spawn_blocking(move || {
-                        let t_lock_start = Instant::now();
-                        let file = file_arc.lock().unwrap();
-                        let t_locked = t_lock_start.elapsed();
-                        let t_op_start = Instant::now();
-                        let r = hid::write_report(&file, report_id, &data);
-                        let t_op = t_op_start.elapsed();
-                        log::info!(
-                            "[hid-timing] sendreport dev='{}' data_len={} lock_wait_ms={} op_ms={}",
-                            device_id, data_len,
-                            t_locked.as_millis(),
-                            t_op.as_millis(),
-                        );
-                        r
+                        let dev = dev_arc.lock().unwrap();
+                        hid::write_report(&dev, report_id, &data)
                     })
                     .await;
-
                     match result {
                         Ok(Ok(())) => IpcResponse::Ok { id },
                         Ok(Err(e)) => IpcResponse::Error { id, message: e.to_string() },
@@ -206,13 +194,12 @@ async fn dispatch(device_mgr: &DeviceManager, client_id: u64, req: IpcRequest, w
         IpcRequest::ReceiveFeatureReport { device_id, report_id, .. } => {
             match device_mgr.get_file(&device_id, client_id) {
                 Err(e) => IpcResponse::Error { id, message: e.to_string() },
-                Ok(file_arc) => {
+                Ok(dev_arc) => {
                     let result = tokio::task::spawn_blocking(move || {
-                        let file = file_arc.lock().unwrap();
-                        hid::read_feature_report(&file, report_id)
+                        let dev = dev_arc.lock().unwrap();
+                        hid::read_feature_report(&dev, report_id)
                     })
                     .await;
-
                     match result {
                         Ok(Ok(data)) => IpcResponse::Data { id, data },
                         Ok(Err(e)) => IpcResponse::Error { id, message: e.to_string() },
@@ -225,25 +212,12 @@ async fn dispatch(device_mgr: &DeviceManager, client_id: u64, req: IpcRequest, w
         IpcRequest::SendFeatureReport { device_id, report_id, data, .. } => {
             match device_mgr.get_file(&device_id, client_id) {
                 Err(e) => IpcResponse::Error { id, message: e.to_string() },
-                Ok(file_arc) => {
-                    let data_len = data.len();
+                Ok(dev_arc) => {
                     let result = tokio::task::spawn_blocking(move || {
-                        let t_lock_start = Instant::now();
-                        let file = file_arc.lock().unwrap();
-                        let t_locked = t_lock_start.elapsed();
-                        let t_op_start = Instant::now();
-                        let r = hid::write_feature_report(&file, report_id, &data);
-                        let t_op = t_op_start.elapsed();
-                        log::info!(
-                            "[hid-timing] sendfeaturereport dev='{}' report_id={} data_len={} lock_wait_ms={} op_ms={}",
-                            device_id, report_id, data_len,
-                            t_locked.as_millis(),
-                            t_op.as_millis(),
-                        );
-                        r
+                        let dev = dev_arc.lock().unwrap();
+                        hid::write_feature_report(&dev, report_id, &data)
                     })
                     .await;
-
                     match result {
                         Ok(Ok(())) => IpcResponse::Ok { id },
                         Ok(Err(e)) => IpcResponse::Error { id, message: e.to_string() },

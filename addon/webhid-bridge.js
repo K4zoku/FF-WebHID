@@ -206,7 +206,7 @@
       const vendorId = String(device.vendor_id || 0);
       const productId = String(device.product_id || 0);
       const serialNumber = String(device.serial_number || "");
-      const path = String(device.path || "");
+      const path = String(device.device_id || "");
       const identifier = vendorId + ":" + productId + ":" + serialNumber + ":" + path;
 
       // Simple DJB2 hash algorithm
@@ -290,13 +290,13 @@
           // Find index of this device in filteredDevices to read pairedStatuses
           const idx = filteredDevices.indexOf(d);
           if (idx >= 0 && pairedStatuses[idx]) isPaired = true;
-          deviceIds.push(d.path);
+          deviceIds.push(d.device_id);
         }
 
         // Create a stable group id. For single-device groups use the path so
         // external code relying on unique paths continues to work; for multi-
         // interface groups use a generated id prefixed with 'group:'.
-        const groupId = devices.length === 1 ? devices[0].path : `group:${this.createDeviceHash(devices[0])}`;
+        const groupId = devices.length === 1 ? devices[0].device_id : `group:${this.createDeviceHash(devices[0])}`;
         this._deviceGroups[groupId] = devices.slice(); // store copy
 
         // Use the first device to determine icon/type/manufacturer
@@ -376,7 +376,7 @@
       // Use the hidraw path as the stable, per-interface unique ID for
       // single-interface items. For grouped items the id is generated during
       // render and stored in _deviceGroups.
-      return device.path;
+      return device.device_id;
     }
 
     // Guess a generic device category from HID usage page (when the daemon
@@ -416,7 +416,7 @@
       const ambiguous = new Set();
       for (const d of devices) {
         if (nameCount[d.product_name || "Unknown Device"] > 1) {
-          ambiguous.add(d.path);
+          ambiguous.add(d.device_id);
         }
       }
       return ambiguous;

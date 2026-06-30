@@ -113,7 +113,7 @@ pub struct Report {
     pub fields: Vec<Field>,
 }
 
-/// Information about a connected HID device, derived from udev/sysfs.
+/// Information about a connected HID device, derived from hidapi + sysfs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceInfo {
     pub vendor_id: u16,
@@ -128,18 +128,16 @@ pub struct DeviceInfo {
     pub usage_page: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<u16>,
-    /// Raw HID report descriptor bytes, when available (from sysfs). This is
-    /// provided so the addon can parse full `collections` metadata without
-    /// requiring the daemon to implement descriptor parsing.  (Daemon may
-    /// also populate `collections` directly.)
+    /// Stable, platform-independent device identifier.
+    /// Format: hash of (vid, pid, serial, interface_number, usage_page, usage, physical_location).
+    /// This is what the page sees as `deviceId` and what `open()` takes.
+    pub device_id: String,
+    /// Raw HID report descriptor bytes, when available (from hidapi/sysfs).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub report_descriptor: Option<Vec<u8>>,
     /// Parsed collection metadata (populated by daemon when possible).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub collections: Option<Vec<Collection>>,
-    /// Absolute path to the hidraw node, e.g. `/dev/hidraw0`.
-    /// This doubles as the stable device ID sent to the addon.
-    pub path: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -156,14 +154,9 @@ pub struct DeviceInfo {
 pub enum IpcRequest {
     /// List every connected HID device.
     Enumerate { id: u32 },
-    /// Open a specific hidraw node by absolute path (e.g. `/dev/hidraw3`).
-    ///
-    /// A single logical USB device may expose several HID interfaces, each
-    /// surfacing as a separate hidraw node.  The addon receives one
-    /// `DeviceInfo` (and therefore one path) per interface from
-    /// `Enumerate`, and must open each one it cares about individually so
-    /// every interface gets its own reader task.
-    Open { id: u32, device_path: String },
+    /// Open a device by its stable `device_id` (returned by `Enumerate`).
+    /// The daemon maps this to the platform-specific raw path internally.
+    Open { id: u32, device_id: String },
     /// Release an open device.
     Close { id: u32, device_id: String },
     /// Block until a HID input report arrives or `timeout_ms` elapses.
@@ -222,6 +215,9 @@ pub enum IpcResponse {
     DeviceConnected { id: u32, device: DeviceInfo },
     DeviceDisconnected { id: u32, device: DeviceInfo },
     InputReport { id: u32, device_id: String, report_id: u8, data: Vec<u8> },
+    /// Sent once when a client connects, announcing daemon capabilities
+    /// (currently just the WebSocket data-plane port).
+    Hello { id: u32, ws_port: u16 },
 }
 
 impl IpcResponse {
@@ -234,7 +230,8 @@ impl IpcResponse {
             | Self::Error { id, .. }
             | Self::DeviceConnected { id, .. }
             | Self::DeviceDisconnected { id, .. }
-            | Self::InputReport { id, .. } => *id,
+            | Self::InputReport { id, .. }
+            | Self::Hello { id, .. } => *id,
         }
     }
 }
@@ -255,8 +252,9 @@ pub enum NmRequest {
         #[serde(default)]
         id: Option<u32>,
     },
-    /// `device_id` is the absolute hidraw path encoded as a byte array,
-    /// matching the same convention used by Close / Read / SendReport.
+    /// `device_id` is the stable device ID (hex string) encoded as a byte
+    /// array (char codes), matching the convention used by all other
+    /// device-referencing messages.
     Open {
         #[serde(default)]
         id: Option<u32>,
