@@ -20,32 +20,62 @@ self.onmessage = ({ data: msg }) => {
   console.warn('[worker] unknown msg type:', msg.type);
 };
 
+let _connectMsg = null;
+let _reconnectTimer = null;
+let _reconnectDelay = 500;
+
 function connect(msg) {
   console.log('[worker] connect wsPort=' + msg.wsPort + ' reportSize=' + (msg.reportSize || 64));
+  _connectMsg = msg;
   reportSize = msg.reportSize || 64;
-  sab = new SharedArrayBuffer(12 + CAPACITY * reportSize);
-  meta = new Int32Array(sab, 0, 3);
-  data = new Uint8Array(sab, 12);
+  if (!sab) {
+    sab = new SharedArrayBuffer(12 + CAPACITY * reportSize);
+    meta = new Int32Array(sab, 0, 3);
+    data = new Uint8Array(sab, 12);
+  }
+  _doConnect();
+}
+
+function _doConnect() {
   try {
-    ws = new WebSocket(`ws://127.0.0.1:${msg.wsPort}?token=${msg.token}`);
+    ws = new WebSocket(`ws://127.0.0.1:${_connectMsg.wsPort}?token=${_connectMsg.token}`);
   } catch (e) {
     console.error('[worker] WebSocket() threw:', e);
+    _scheduleReconnect();
     return;
   }
   ws.binaryType = 'arraybuffer';
-  ws.onopen = () => { console.log('[worker] WS OPEN'); self.postMessage({ type: 'ready', sab }); };
-  ws.onerror = (e) => { console.error('[worker] WS ERROR:', e.message || e, 'state=' + (ws ? ws.readyState : 'null')); self.postMessage({ type: 'error', error: e.message || 'ws error' }); };
+  ws.onopen = () => {
+    console.log('[worker] WS OPEN');
+    _reconnectDelay = 500;
+    self.postMessage({ type: 'ready', sab });
+  };
+  ws.onerror = (e) => {
+    console.error('[worker] WS ERROR:', e.message || e, 'state=' + (ws ? ws.readyState : 'null'));
+  };
   ws.onclose = (e) => {
     console.warn('[worker] WS CLOSED code=' + e.code + ' clean=' + e.wasClean + ' pending=' + _pending.size);
     for (const [, p] of _pending) p.reject(new Error('ws closed'));
     _pending.clear();
     self.postMessage({ type: 'closed' });
+    _scheduleReconnect();
   };
   ws.onmessage = ({ data: frame }) => {
     const batch = new Uint8Array(frame);
     if (batch.length > 0 && batch[0] >= 0x80) return handleControlResponse(batch);
     pushInputBatch(batch);
   };
+}
+
+function _scheduleReconnect() {
+  if (_reconnectTimer) return;
+  console.log('[worker] reconnect in', _reconnectDelay, 'ms');
+  _reconnectTimer = setTimeout(() => {
+    _reconnectTimer = null;
+    if (!_connectMsg) return;
+    _doConnect();
+  }, _reconnectDelay);
+  _reconnectDelay = Math.min(_reconnectDelay * 2, 5000);
 }
 
 function pushInputBatch(batch) {
