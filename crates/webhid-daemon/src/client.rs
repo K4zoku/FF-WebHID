@@ -12,6 +12,7 @@
 //! message to the socket, ensuring frames are never interleaved.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use tokio::io::BufReader;
 use tokio::net::UnixStream;
@@ -19,6 +20,9 @@ use tokio::sync::{broadcast, mpsc};
 use webhid::{protocol, IpcRequest, IpcResponse};
 
 use crate::{device_mgr::DeviceManager, hid};
+
+/// Threshold below which we don't log timing per-request.
+const SLOW_THRESHOLD_MS: u128 = 5;
 
 pub async fn handle(
     stream: UnixStream,
@@ -65,6 +69,7 @@ pub async fn handle(
 
     // --- Request loop ---
     loop {
+        let t_loop_start = Instant::now();
         let request: IpcRequest = match protocol::read_message(&mut reader).await {
             Ok(r) => r,
             Err(e) => {
@@ -75,13 +80,37 @@ pub async fn handle(
                 break;
             }
         };
+        let t_read_ipc = t_loop_start.elapsed();
+        let req_label = request.action_label();
+        let req_id = request.id();
 
         log::debug!("[client {client_id}] request: {request:?}");
+        let t_dispatch_start = Instant::now();
         let response = dispatch(&device_mgr, client_id, request, ws_port).await;
+        let t_dispatch = t_dispatch_start.elapsed();
         log::debug!("[client {client_id}] response: {response:?}");
 
+        let t_send_start = Instant::now();
         if tx.send(response).await.is_err() {
             break; // writer task already gone
+        }
+        let t_send = t_send_start.elapsed();
+
+        let total = t_loop_start.elapsed();
+        let total_ms = total.as_millis();
+        let log_msg = format!(
+            "[client-timing {client_id}] id={:<5} action={:<20} total={:>5}ms  read_ipc={:>4}ms  dispatch={:>5}ms  enqueue={:>4}ms",
+            req_id,
+            req_label,
+            total_ms,
+            t_read_ipc.as_millis(),
+            t_dispatch.as_millis(),
+            t_send.as_millis(),
+        );
+        if total_ms >= SLOW_THRESHOLD_MS {
+            log::info!("{}", log_msg);
+        } else {
+            log::debug!("{}", log_msg);
         }
     }
 
@@ -141,9 +170,21 @@ async fn dispatch(device_mgr: &DeviceManager, client_id: u64, req: IpcRequest, w
             match device_mgr.get_file(&device_id, client_id) {
                 Err(e) => IpcResponse::Error { id, message: e.to_string() },
                 Ok(file_arc) => {
+                    let data_len = data.len();
                     let result = tokio::task::spawn_blocking(move || {
+                        let t_lock_start = Instant::now();
                         let file = file_arc.lock().unwrap();
-                        hid::write_report(&file, report_id, &data)
+                        let t_locked = t_lock_start.elapsed();
+                        let t_op_start = Instant::now();
+                        let r = hid::write_report(&file, report_id, &data);
+                        let t_op = t_op_start.elapsed();
+                        log::info!(
+                            "[hid-timing] sendreport dev='{}' data_len={} lock_wait_ms={} op_ms={}",
+                            device_id, data_len,
+                            t_locked.as_millis(),
+                            t_op.as_millis(),
+                        );
+                        r
                     })
                     .await;
 
@@ -179,9 +220,21 @@ async fn dispatch(device_mgr: &DeviceManager, client_id: u64, req: IpcRequest, w
             match device_mgr.get_file(&device_id, client_id) {
                 Err(e) => IpcResponse::Error { id, message: e.to_string() },
                 Ok(file_arc) => {
+                    let data_len = data.len();
                     let result = tokio::task::spawn_blocking(move || {
+                        let t_lock_start = Instant::now();
                         let file = file_arc.lock().unwrap();
-                        hid::write_feature_report(&file, report_id, &data)
+                        let t_locked = t_lock_start.elapsed();
+                        let t_op_start = Instant::now();
+                        let r = hid::write_feature_report(&file, report_id, &data);
+                        let t_op = t_op_start.elapsed();
+                        log::info!(
+                            "[hid-timing] sendfeaturereport dev='{}' report_id={} data_len={} lock_wait_ms={} op_ms={}",
+                            device_id, report_id, data_len,
+                            t_locked.as_millis(),
+                            t_op.as_millis(),
+                        );
+                        r
                     })
                     .await;
 

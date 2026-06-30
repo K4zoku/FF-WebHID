@@ -542,7 +542,11 @@
           type: 'connect',
           token: response.session_token,
           wsPort: response.ws_port,
-          reportSize: payload.reportSize || 64,
+          // SayoDevice and similar keypads send input reports up to 511
+          // bytes (image chunk ACKs, index tables, config dumps). The
+          // standard USB HID 64-byte max is too small. 1024 covers every
+          // report we've seen, with headroom for future devices.
+          reportSize: payload.reportSize || 1024,
         });
 
         worker.onmessage = ({ data }) => {
@@ -553,7 +557,7 @@
                 event_type: 'webhid-sab',
                 device_id: response.data,
                 sab: data.sab,
-                reportSize: payload.reportSize || 64
+                reportSize: payload.reportSize || 1024
               }
             }, '*');
           }

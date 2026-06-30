@@ -135,7 +135,16 @@
   function sendRequest(action, payload) {
     return new Promise((resolve) => {
       const id = ++_reqId;
-      _pending[id] = resolve;
+      const t0 = performance.now();
+      _pending[id] = (result) => {
+        const dt = performance.now() - t0;
+        if (dt > 5) {
+          console.info(`[webhid-timing] ${action} id=${id} roundtrip=${dt.toFixed(1)}ms`);
+        } else {
+          console.debug(`[webhid-timing] ${action} id=${id} roundtrip=${dt.toFixed(1)}ms`);
+        }
+        resolve(result);
+      };
       window.postMessage(
         { __webhid_bridge: "req", id, action, payload: payload || {} },
         "*",
@@ -458,7 +467,7 @@
         throw new DOMException("Device is not open", "InvalidStateError");
       const buffer =
         data instanceof DataView
-          ? new Uint8Array(data.buffer)
+          ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
           : new Uint8Array(data);
       try {
         // The daemon prepends `report_id` to `data` before calling
@@ -498,7 +507,7 @@
         throw new DOMException("Device is not open", "InvalidStateError");
       const buffer =
         data instanceof DataView
-          ? new Uint8Array(data.buffer)
+          ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
           : new Uint8Array(data);
       try {
         const response = await sendRequest("sendfeaturereport", {
@@ -542,15 +551,40 @@
             return;
           }
 
+          // Handle input_report events (IPC fallback path).
+          //
+          // The daemon's reader task reads input reports from hidraw and
+          // broadcasts them via the IPC control plane as `input_report`
+          // events.  The SAB/WebSocket data plane is the intended fast path,
+          // but when it is not operational (worker failed to connect, WS
+          // server unreachable, etc.) these IPC events are the only way
+          // input reports reach the page.  Without this handler the page
+          // never sees device responses that arrive as input reports,
+          // causing protocols that expect ACKs to stall.
+          if (event_type === "input_report") {
+            if (evDeviceId && this.deviceId && evDeviceId !== this.deviceId) {
+              return; // event for a different device
+            }
+            const dataBytes = detail.data
+              ? new Uint8Array(detail.data)
+              : new Uint8Array(0);
+            this.dispatchEvent(new HIDInputReportEvent('inputreport', {
+              device: this,
+              reportId: detail.report_id || 0,
+              data: new DataView(dataBytes.buffer, dataBytes.byteOffset, dataBytes.byteLength),
+            }));
+            return;
+          }
+
           // Handle connection events
-          if (event_type === "connected") {
-            this.dispatchEvent(new HIDConnectionEvent("connected", this));
+          if (event_type === "connect" || event_type === "connected") {
+            this.dispatchEvent(new HIDConnectionEvent("connect", this));
             return;
           }
 
           // Handle disconnection events
-          if (event_type === "disconnected") {
-            this.dispatchEvent(new HIDConnectionEvent("disconnected", this));
+          if (event_type === "disconnect" || event_type === "disconnected") {
+            this.dispatchEvent(new HIDConnectionEvent("disconnect", this));
             return;
           }
 
@@ -632,13 +666,30 @@
       // consume every report that has arrived since last wake
       let head = Atomics.load(meta, 0);
       while (tail !== head) {
-        // use subarray (no allocation) — copy only what dispatchEvent needs
-        const offset = tail * reportSize;
-        const slice  = reports.slice(offset, offset + reportSize);
+        // Slot layout: [len_u8][report_id_u8][...payload]
+        // (matches hid-worker.js + websocket.rs batch frame format)
+        const slotOffset = tail * reportSize;
+        const storedLen  = reports[slotOffset];        // actual report length
+        if (storedLen === 0) {
+          // Empty slot — skip defensively (shouldn't happen)
+          tail = (tail + 1) % cap;
+          Atomics.store(meta, 1, tail);
+          head = Atomics.load(meta, 0);
+          continue;
+        }
+        // Report ID is the first byte of the report; payload follows.
+        const reportId  = reports[slotOffset + 1];
+        // `data` is the report payload *excluding* the report_id byte,
+        // matching the WebHID spec for HIDInputReportEvent.data.
+        const payloadLen = storedLen - 1;
+        // Copy to a fresh ArrayBuffer so the DataView is detached from SAB
+        // (page code may hold onto it long after the slot is reused).
+        const payload = new Uint8Array(payloadLen);
+        payload.set(reports.subarray(slotOffset + 2, slotOffset + 2 + payloadLen));
         device.dispatchEvent(new HIDInputReportEvent('inputreport', {
           device,
-          reportId: slice[0],
-          data: new DataView(slice.buffer, slice.byteOffset + 1, reportSize - 1),
+          reportId,
+          data: new DataView(payload.buffer, 0, payloadLen),
         }));
         tail = (tail + 1) % cap;
         Atomics.store(meta, 1, tail); // advance consumer index
