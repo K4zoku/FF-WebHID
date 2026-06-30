@@ -13,16 +13,20 @@
 //!  Firefox addon                                    IpcResponse
 //!    ▲  stdout (NmResponse, length-prefixed JSON)           │
 //!    │                                                      │
+//!  [stdout writer]◄──[per-request waiter task]◄──[daemon reader]
+//!                     id>0 → ipc_to_nm (response)
 //!  [stdout writer]◄──────────────────────────────[daemon reader]
-//!                   id>0 → ipc_to_nm (response)
-//!                   id=0 → ipc_event_to_nm (event)
+//!                     id=0 → ipc_event_to_nm (event)
 //! ```
 //!
-//! The main task processes one NM request at a time.  A parallel daemon-reader
-//! task routes incoming IPC messages: responses go to the pending `oneshot`
-//! channel; events are forwarded directly to the stdout channel.
+//! The main loop reads one NM request at a time from stdin and forwards it
+//! to the daemon, then spawns a per-request task that waits for the
+//! matching daemon response and forwards it to the stdout writer.  This
+//! decouples stdin reads from response waits, so a slow response never
+//! blocks the next request.  A parallel daemon-reader task routes
+//! unsolicited events (id=0) directly to the stdout channel.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use tokio::io::{AsyncWriteExt, BufReader, BufWriter};
 use std::sync::Arc;
 use std::time::Instant;
@@ -61,55 +65,32 @@ async fn main() -> anyhow::Result<()> {
 
     let (daemon_read, daemon_write) = stream.into_split();
 
-    // Serialise all writes to stdout through one task with batching.
-    const BATCH_SIZE: usize = 16;
-    const BATCH_FLUSH_MS: u64 = 5;
-
-    let (stdout_tx, mut stdout_rx) = mpsc::channel::<NmResponse>(64);
+    // Serialise all writes to stdout through one task.  We previously
+    // batched up to 16 messages / 5ms before flushing, but that introduced
+    // up to 5ms of latency per response under load — and when combined
+    // with the old sequential main loop it caused the roundtrip latency
+    // to climb monotonically as the page sent requests faster than the
+    // NM loop could drain them.  The stdout writer now flushes every
+    // message as soon as it arrives (the BufWriter still coalesces
+    // small writes at the kernel level via writev-style buffering).
+    let (stdout_tx, mut stdout_rx) = mpsc::channel::<NmResponse>(1024);
     #[allow(unused_must_use)]
     let _stdout_writer = tokio::spawn(async move {
         let mut out = BufWriter::with_capacity(256 * 1024, tokio::io::stdout());
-        let mut batch: VecDeque<NmResponse> = VecDeque::with_capacity(BATCH_SIZE);
-
-        loop {
-            // Collect messages until batch is full or flush timeout
-            let mut got_first = false;
-            while batch.len() < BATCH_SIZE {
-                let timeout = tokio::time::sleep(tokio::time::Duration::from_millis(BATCH_FLUSH_MS));
-                tokio::select! {
-                    msg = stdout_rx.recv() => {
-                        match msg {
-                            Some(m) => {
-                                batch.push_back(m);
-                                got_first = true;
-                            },
-                            None => {
-                                // Channel closed, flush and exit
-                                flush_batch(&mut out, &mut batch).await;
-                                return Ok::<(), anyhow::Error>(());
-                            }
-                        }
-                    }
-                    _ = timeout => {
-                        if got_first {
-                            break; // Timeout reached after getting first message
-                        }
-                        // No messages received yet, continue waiting
-                    }
-                }
-            }
-
-            // Flush the batch
-            if let Err(e) = flush_batch(&mut out, &mut batch).await {
+        while let Some(msg) = stdout_rx.recv().await {
+            if let Err(e) = protocol::write_message(&mut out, &msg).await {
                 log::error!("stdout write: {e}");
                 break;
             }
-
-            // If channel is closed, exit
-            if stdout_rx.is_closed() {
+            // Flush immediately so Firefox sees the response without
+            // waiting for a batch timer.  BufWriter still amortises
+            // the underlying write(2) syscalls.
+            if let Err(e) = out.flush().await {
+                log::error!("stdout flush: {e}");
                 break;
             }
         }
+        let _ = out.flush().await;
         Ok::<(), anyhow::Error>(())
     });
 
@@ -152,27 +133,37 @@ async fn main() -> anyhow::Result<()> {
     // (in the future) any concurrent task can send without races.
     let daemon_writer = Arc::new(Mutex::new(BufWriter::new(daemon_write)));
 
-    // Main loop: one NM request at a time.
+    // Concurrent main loop.
+    //
+    // The previous implementation processed one request at a time:
+    //   read stdin → send to daemon → await response → enqueue stdout → repeat
+    // This blocked the loop while waiting for each response, so requests
+    // piled up in the stdin buffer whenever the page sent them faster than
+    // the daemon could reply (e.g. image upload with rapid sendReport
+    // packets interleaved with input_report events).  The roundtrip latency
+    // climbed monotonically as the queue grew.
+    //
+    // The new loop spawns a task per request so reads from stdin and
+    // daemon writes are never blocked by an outstanding response.  The
+    // `pending` map plus the daemon reader task demultiplex responses
+    // back to the correct waiter.  The `stdout_tx` channel serialises
+    // all writes to Firefox.
     let mut next_id: u32 = 1;
     let mut stdin = BufReader::with_capacity(64 * 1024, tokio::io::stdin());
 
     loop {
-        let t_loop_start = Instant::now();
         let nm_req: NmRequest = match protocol::read_message(&mut stdin).await {
             Ok(r) => r,
             Err(e) => {
-                // Firefox closed the port (normal shutdown).
                 log::info!("Firefox disconnected: {e}");
                 break;
             }
         };
-        let t_read_stdin = t_loop_start.elapsed();
         log::debug!("← Firefox: {nm_req:?}");
         let firefox_id = nm_req.id();
         let action_label = nm_req.action_label();
 
         let id = next_id;
-        // Reserve id=0 for events; wrap around skipping 0.
         next_id = next_id.wrapping_add(1).max(1);
 
         let ipc_req = nm_to_ipc(nm_req, id);
@@ -182,7 +173,6 @@ async fn main() -> anyhow::Result<()> {
         pending.lock().await.insert(id, resp_tx);
 
         // Send request to daemon.
-        let t_send_daemon_start = Instant::now();
         {
             let mut w = daemon_writer.lock().await;
             if let Err(e) = protocol::write_message(&mut *w, &ipc_req).await {
@@ -194,48 +184,51 @@ async fn main() -> anyhow::Result<()> {
                 continue;
             }
         }
-        let t_sent_daemon = t_send_daemon_start.elapsed();
 
-        // Await the matching response (the daemon reader task will deliver it).
-        let t_daemon_resp_start = Instant::now();
-        let mut nm_resp = match resp_rx.await {
-            Ok(ipc_resp) => {
-                log::debug!("→ daemon: {ipc_resp:?}");
-                ipc_to_nm(ipc_resp)
+        // Spawn a task that waits for the matching response and forwards
+        // it to the stdout channel.  This decouples reading the next
+        // stdin message from waiting for the current response.
+        let stdout_tx_clone = stdout_tx.clone();
+        let t_loop_start = Instant::now();
+        tokio::spawn(async move {
+            let t_daemon_resp_start = Instant::now();
+            let mut nm_resp = match resp_rx.await {
+                Ok(ipc_resp) => {
+                    log::debug!("→ daemon: {ipc_resp:?}");
+                    ipc_to_nm(ipc_resp)
+                }
+                Err(_) => NmResponse::err("daemon disconnected"),
+            };
+            let t_daemon_resp = t_daemon_resp_start.elapsed();
+            nm_resp.id = firefox_id;
+
+            let _ = stdout_tx_clone.send(nm_resp).await;
+
+            let total = t_loop_start.elapsed();
+            let total_ms = total.as_millis();
+            let log_msg = format!(
+                "[nm-timing] action={:<20} total={:>5}ms  daemon_resp={:>5}ms",
+                action_label,
+                total_ms,
+                t_daemon_resp.as_millis(),
+            );
+            if total_ms >= SLOW_THRESHOLD_MS {
+                log::info!("{}", log_msg);
+            } else {
+                log::debug!("{}", log_msg);
             }
-            Err(_) => NmResponse::err("daemon disconnected"),
-        };
-        let t_daemon_resp = t_daemon_resp_start.elapsed();
-        nm_resp.id = firefox_id;
+        });
+    }
 
-        log::debug!("→ Firefox: {nm_resp:?}");
-        let t_stdout_send_start = Instant::now();
-        let _ = stdout_tx.send(nm_resp).await;
-        // NOTE: `stdout_tx.send` only enqueues into the channel; the actual
-        // write to stdout happens in the writer task (batched up to 5ms / 16
-        // msgs). The `t_stdout_send` here therefore measures only the
-        // enqueue cost, NOT the full trip-to-Firefox cost. The 5ms batch
-        // window shows up as added latency on the *next* read of stdin.
-        let t_stdout_send = t_stdout_send_start.elapsed();
-
-        let total = t_loop_start.elapsed();
-        // Log every request with full stage timing at debug, or at info when
-        // the total exceeds the slow threshold so spikes are easy to spot.
-        let total_ms = total.as_millis();
-        let log_msg = format!(
-            "[nm-timing] action={:<20} total={:>5}ms  read_stdin={:>4}ms  send_daemon={:>4}ms  daemon_resp={:>5}ms  stdout_enqueue={:>4}ms",
-            action_label,
-            total_ms,
-            t_read_stdin.as_millis(),
-            t_sent_daemon.as_millis(),
-            t_daemon_resp.as_millis(),
-            t_stdout_send.as_millis(),
-        );
-        if total_ms >= SLOW_THRESHOLD_MS {
-            log::info!("{}", log_msg);
-        } else {
-            log::debug!("{}", log_msg);
+    // Wait for in-flight requests to drain so we don't drop responses
+    // the page is still waiting for.  Give them up to 5 seconds.
+    let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(5);
+    while pending.lock().await.len() > 0 {
+        if tokio::time::Instant::now() >= deadline {
+            log::warn!("drain timeout: {} requests still pending", pending.lock().await.len());
+            break;
         }
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
     }
 
     daemon_reader.abort();
@@ -244,29 +237,6 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-
-// ---------------------------------------------------------------------------
-// Batching helpers
-// ---------------------------------------------------------------------------
-
-async fn flush_batch<W: tokio::io::AsyncWrite + Unpin>(
-    out: &mut W,
-    batch: &mut VecDeque<NmResponse>,
-) -> std::io::Result<()> {
-    if batch.is_empty() {
-        return Ok(());
-    }
-
-    // Write all messages in batch
-    for msg in batch.drain(..) {
-        protocol::write_message(out, &msg).await?;
-    }
-
-    // Flush the buffer
-    out.flush().await?;
-
-    Ok(())
-}
 
 // ---------------------------------------------------------------------------
 // Protocol translation helpers
