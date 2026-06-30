@@ -192,9 +192,7 @@ async fn handle_websocket(
             tokio::select! {
                 _ = flush_interval.tick() => {
                     if !batch.is_empty() {
-                        let n = batch.len();
                         let frame = create_batch_frame(&batch);
-                        log::info!("[ws-sender] flushing {n} input reports, frame_len={}", frame.len());
                         if let Err(_) = tx_for_sender.send(Message::Binary(frame.into())).await {
                             break;
                         }
@@ -209,7 +207,6 @@ async fn handle_websocket(
                                 full_report.push(report_id);
                                 full_report.extend_from_slice(&data);
                                 batch.push(full_report);
-                                log::info!("[ws-sender] batched input report id={report_id} len={} batch_size={}", data.len(), batch.len());
                             }
                         }
                         Ok(_) => {}
@@ -242,10 +239,12 @@ fn extract_token(query: &str) -> Option<String> {
 }
 
 fn create_batch_frame(reports: &[Vec<u8>]) -> Vec<u8> {
-    let total_size: usize = reports.iter().map(|r| 1 + r.len()).sum();
+    let total_size: usize = reports.iter().map(|r| 2 + r.len()).sum();
     let mut frame = Vec::with_capacity(total_size);
     for report in reports {
-        frame.push(report.len() as u8);
+        let len = report.len() as u16;
+        frame.push((len & 0xFF) as u8);
+        frame.push(((len >> 8) & 0xFF) as u8);
         frame.extend_from_slice(report);
     }
     frame

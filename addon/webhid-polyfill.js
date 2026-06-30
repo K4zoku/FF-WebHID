@@ -397,7 +397,7 @@
     }
 
     #calculateMaxInputReportSize() {
-      let max = 1024;
+      let max = 2048;
       const visit = (c) => {
         if (c.inputReports) {
           for (const r of c.inputReports) {
@@ -699,19 +699,20 @@
     function drain() {
       let head = Atomics.load(meta, 0);
       let n = 0;
-      while (tail !== head) {
+      const BATCH = 32;
+      while (tail !== head && n < BATCH) {
         const slotOffset = tail * reportSize;
-        const storedLen  = reports[slotOffset];
+        const storedLen  = reports[slotOffset] | (reports[slotOffset + 1] << 8);
         if (storedLen === 0) {
           tail = (tail + 1) % cap;
           Atomics.store(meta, 1, tail);
           head = Atomics.load(meta, 0);
           continue;
         }
-        const reportId  = reports[slotOffset + 1];
+        const reportId  = reports[slotOffset + 2];
         const payloadLen = storedLen - 1;
         const payload = new Uint8Array(payloadLen);
-        payload.set(reports.subarray(slotOffset + 2, slotOffset + 2 + payloadLen));
+        payload.set(reports.subarray(slotOffset + 3, slotOffset + 3 + payloadLen));
         device.dispatchEvent(new HIDInputReportEvent('inputreport', {
           device,
           reportId,
@@ -722,7 +723,9 @@
         head = Atomics.load(meta, 0);
         n++;
       }
-      if (n > 0) console.log('[webhid] drained ' + n + ' input reports from SAB');
+      if (tail !== head) {
+        setTimeout(drain, 0);
+      }
     }
 
     function wait() {
