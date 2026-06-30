@@ -200,15 +200,6 @@ impl DeviceManager {
 
                 match read_result {
                     Ok(Ok(buf)) => {
-                        // Frame the buffer according to whether this
-                        // interface uses numbered reports:
-                        //   numbered   → [report_id, ...data]
-                        //   unnumbered → [...data]  (report_id is implicit 0)
-                        //
-                        // Stripping `buf[0]` unconditionally would lose the
-                        // first byte of every report on unnumbered
-                        // interfaces (e.g. the modifier byte of a boot
-                        // keyboard).
                         let (report_id, data) = if uses_numbered_reports {
                             if !buf.is_empty() {
                                 (buf[0], buf[1..].to_vec())
@@ -218,7 +209,7 @@ impl DeviceManager {
                         } else {
                             (0u8, buf)
                         };
-
+                        log::info!("[reader {device_id}] input report id={report_id} len={}", data.len());
                         let _ = tx.send(IpcResponse::InputReport { id: 0, device_id: device_id.clone(), report_id, data });
                     }
                     Ok(Err(e)) => {
