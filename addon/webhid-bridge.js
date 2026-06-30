@@ -641,6 +641,11 @@
           wsPort: response.ws_port,
           reportSize: payload.reportSize || 2048,
         });
+
+        (async () => {
+          const s = await browser.storage.local.get({ fireAndForget: true, perfLogging: false });
+          worker.postMessage({ type: 'settings', fireAndForget: s.fireAndForget, perfLogging: s.perfLogging });
+        })();
       }
 
       if (action === "close") {
@@ -677,4 +682,22 @@
       console.debug("[content] skipping non-event message or missing event", message);
     }
   });
+
+  browser.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return;
+    const ff = changes.fireAndForget?.newValue;
+    const pl = changes.perfLogging?.newValue;
+    if (ff === undefined && pl === undefined) return;
+    for (const worker of _workers.values()) {
+      worker.postMessage({ type: 'settings', fireAndForget: ff, perfLogging: pl });
+    }
+    if (pl !== undefined) {
+      window.postMessage({ __webhid_bridge: "settings", perfLogging: pl }, "*");
+    }
+  });
+
+  (async () => {
+    const s = await browser.storage.local.get({ perfLogging: false });
+    window.postMessage({ __webhid_bridge: "settings", perfLogging: s.perfLogging }, "*");
+  })();
 })();
