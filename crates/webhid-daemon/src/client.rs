@@ -51,10 +51,16 @@ pub async fn handle(
 
     // --- Event-forwarder task ---
     let tx_events = tx.clone();
+    let device_mgr_for_events = Arc::clone(&device_mgr);
     let event_task = tokio::spawn(async move {
         loop {
             match event_rx.recv().await {
                 Ok(ev) => {
+                    if let webhid::IpcResponse::InputReport { ref device_id, .. } = ev {
+                        if device_mgr_for_events.is_ws_active(device_id) {
+                            continue;
+                        }
+                    }
                     if tx_events.send(ev).await.is_err() {
                         break;
                     }

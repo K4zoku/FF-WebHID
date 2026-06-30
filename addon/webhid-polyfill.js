@@ -596,9 +596,8 @@
           // never sees device responses that arrive as input reports,
           // causing protocols that expect ACKs to stall.
           if (event_type === "input_report") {
-            if (evDeviceId && this.deviceId && evDeviceId !== this.deviceId) {
-              return; // event for a different device
-            }
+            if (this.#hotPath) return;
+            if (evDeviceId && this.deviceId && evDeviceId !== this.deviceId) return;
             const dataBytes = detail.data
               ? new Uint8Array(detail.data)
               : new Uint8Array(0);

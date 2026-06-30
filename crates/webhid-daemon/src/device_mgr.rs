@@ -20,27 +20,14 @@ use crate::hid;
 // ---------------------------------------------------------------------------
 
 struct Entry {
-    /// The parsed device information (kept so `enumerate` doesn't need to
-    /// re-query udev for already-open devices).
     #[allow(dead_code)]
     info: DeviceInfo,
-    /// Writer file handle – used by `sendReport` / `sendFeatureReport`.
-    /// Cloned out to blocking tasks for I/O. Has its own `Mutex` so writer
-    /// tasks never block on the reader task's `poll(2)` window.
-    ///
-    /// The background reader task holds its *own* `Arc<Mutex<File>>` over
-    /// a separately-`dup(2)`'d fd (see `open()`), so reader and writer
-    /// never contend on the same userspace lock.
     file: Arc<Mutex<File>>,
-    /// The client that performed the `open`; only that client may use or
-    /// close the device.
     client_id: u64,
-    /// Signal the background reader to stop.
     stop_flag: Arc<AtomicBool>,
-    /// Join handle for the reader task so we can abort it on close.
     handle: Option<JoinHandle<()>>,
-    /// Session token for WebSocket authentication (optional)
     session_token: Option<String>,
+    ws_active: Arc<AtomicBool>,
 }
 
 // ---------------------------------------------------------------------------
@@ -154,6 +141,7 @@ impl DeviceManager {
         })?;
         let reader_arc = Arc::new(Mutex::new(reader_file));
         let writer_arc = Arc::new(Mutex::new(file));
+        let ws_active = Arc::new(AtomicBool::new(false));
         let entry = Entry {
             info: info.clone(),
             file: Arc::clone(&writer_arc),
@@ -161,6 +149,7 @@ impl DeviceManager {
             stop_flag: Arc::clone(&stop_flag),
             handle: None,
             session_token: Some(session_token.clone()),
+            ws_active: Arc::clone(&ws_active),
         };
 
         map.insert(path.clone(), entry);
@@ -276,6 +265,18 @@ impl DeviceManager {
         let map = self.devices.lock().unwrap();
         let entry = map.get(device_id).ok_or_else(|| anyhow!("'{device_id}' not open"))?;
         Ok(Arc::clone(&entry.file))
+    }
+
+    pub fn set_ws_active(&self, device_id: &str, active: bool) {
+        let map = self.devices.lock().unwrap();
+        if let Some(entry) = map.get(device_id) {
+            entry.ws_active.store(active, Ordering::SeqCst);
+        }
+    }
+
+    pub fn is_ws_active(&self, device_id: &str) -> bool {
+        let map = self.devices.lock().unwrap();
+        map.get(device_id).map(|e| e.ws_active.load(Ordering::SeqCst)).unwrap_or(false)
     }
 
     /// Remove every device opened by `client_id` (called on disconnect).
