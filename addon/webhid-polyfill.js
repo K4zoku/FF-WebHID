@@ -397,15 +397,10 @@
     }
 
     #calculateMaxInputReportSize() {
-      let max = 64; // default
+      let max = 1024;
       const visit = (c) => {
         if (c.inputReports) {
           for (const r of c.inputReports) {
-            // size_bits / 8, rounded up.
-            // Note: `r.items` contains individual fields; the total report size
-            // is often provided by the daemon in the parent report object.
-            // If not, we'll have to sum up items or use a safe default.
-            // For now, look for the daemon-provided bit size.
             const size = Math.ceil((r.size_bits || 0) / 8);
             if (size > max) max = size;
           }
@@ -702,27 +697,19 @@
     let   tail    = Atomics.load(meta, 1);
 
     function drain() {
-      // consume every report that has arrived since last wake
       let head = Atomics.load(meta, 0);
+      let n = 0;
       while (tail !== head) {
-        // Slot layout: [len_u8][report_id_u8][...payload]
-        // (matches hid-worker.js + websocket.rs batch frame format)
         const slotOffset = tail * reportSize;
-        const storedLen  = reports[slotOffset];        // actual report length
+        const storedLen  = reports[slotOffset];
         if (storedLen === 0) {
-          // Empty slot — skip defensively (shouldn't happen)
           tail = (tail + 1) % cap;
           Atomics.store(meta, 1, tail);
           head = Atomics.load(meta, 0);
           continue;
         }
-        // Report ID is the first byte of the report; payload follows.
         const reportId  = reports[slotOffset + 1];
-        // `data` is the report payload *excluding* the report_id byte,
-        // matching the WebHID spec for HIDInputReportEvent.data.
         const payloadLen = storedLen - 1;
-        // Copy to a fresh ArrayBuffer so the DataView is detached from SAB
-        // (page code may hold onto it long after the slot is reused).
         const payload = new Uint8Array(payloadLen);
         payload.set(reports.subarray(slotOffset + 2, slotOffset + 2 + payloadLen));
         device.dispatchEvent(new HIDInputReportEvent('inputreport', {
@@ -731,9 +718,11 @@
           data: new DataView(payload.buffer, 0, payloadLen),
         }));
         tail = (tail + 1) % cap;
-        Atomics.store(meta, 1, tail); // advance consumer index
-        head = Atomics.load(meta, 0); // re-read head in case worker advanced it
+        Atomics.store(meta, 1, tail);
+        head = Atomics.load(meta, 0);
+        n++;
       }
+      if (n > 0) console.log('[webhid] drained ' + n + ' input reports from SAB');
     }
 
     function wait() {

@@ -41,6 +41,7 @@ function connect(msg) {
   ws.onmessage = ({ data: frame }) => {
     const batch = new Uint8Array(frame);
     if (batch.length > 0 && batch[0] >= 0x80) return handleControlResponse(batch);
+    console.log('[worker] WS frame received, len=' + batch.length + ' reportSize=' + reportSize);
     pushInputBatch(batch);
   };
 }
@@ -56,12 +57,14 @@ function pushInputBatch(batch) {
     const slotStart = head * reportSize;
     data.fill(0, slotStart, slotStart + reportSize);
     const storedLen = Math.min(len, reportSize - 1);
+    if (len > reportSize - 1) console.warn('[worker] TRUNCATING report len=' + len + ' to ' + (reportSize - 1) + ' (reportSize=' + reportSize + ')');
     data[slotStart] = storedLen;
     data.set(batch.subarray(offset, offset + storedLen), slotStart + 1);
     Atomics.store(meta, 0, next);
     offset += len;
     count++;
   }
+  console.log('[worker] pushed ' + count + ' reports to SAB, notify');
   if (count > 0) Atomics.notify(meta, 0);
 }
 
