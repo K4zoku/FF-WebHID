@@ -209,7 +209,6 @@ impl DeviceManager {
                         } else {
                             (0u8, buf)
                         };
-                        log::info!("[reader {device_id}] input report id={report_id} len={}", data.len());
                         let _ = tx.send(IpcResponse::InputReport { id: 0, device_id: device_id.clone(), report_id, data });
                     }
                     Ok(Err(e)) => {

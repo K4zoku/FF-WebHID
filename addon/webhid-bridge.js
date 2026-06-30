@@ -607,7 +607,7 @@
                 event_type: 'webhid-sab',
                 device_id: response.data,
                 sab: data.sab,
-                reportSize: payload.reportSize || 1024
+                reportSize: payload.reportSize || 2048
               }
             }, '*');
             return;
@@ -639,7 +639,7 @@
           type: 'connect',
           token: response.session_token,
           wsPort: response.ws_port,
-          reportSize: payload.reportSize || 1024,
+          reportSize: payload.reportSize || 2048,
         });
       }
 
