@@ -33,8 +33,10 @@ use std::sync::Arc;
 use tokio::sync::{Mutex, mpsc, oneshot};
 use webhid::{IpcRequest, IpcResponse, NmRequest, NmResponse, protocol};
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 const DEFAULT_SOCKET: &str = "/run/webhid/webhid.sock";
+#[cfg(target_os = "macos")]
+const DEFAULT_SOCKET: &str = "/tmp/webhid.sock";
 #[cfg(not(unix))]
 const DEFAULT_SOCKET: &str = "";
 

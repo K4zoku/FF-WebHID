@@ -57,6 +57,7 @@ pub fn enumerate() -> anyhow::Result<Vec<DeviceInfo>> {
     let api = HidApi::new()?;
     let mut groups: std::collections::HashMap<(u16, u16, String), Vec<&HidDeviceInfo>> = std::collections::HashMap::new();
     for info in api.device_list() {
+        if is_blocked(info) { continue; }
         let serial = info.serial_number().unwrap_or("").to_string();
         groups.entry((info.vendor_id(), info.product_id(), serial)).or_default().push(info);
     }
@@ -115,6 +116,37 @@ fn read_report_descriptor(info: &HidDeviceInfo) -> (Option<Vec<u8>>, Option<Vec<
 }
 
 // ---------------------------------------------------------------------------
+// Blocklist — security keys that must never be exposed to web pages
+// ---------------------------------------------------------------------------
+
+/// Known FIDO/U2F security key vendor IDs.  These devices can be used to
+/// exfiltrate credentials if a malicious page gains raw HID access, so we
+/// block them entirely — matching Chromium's `hid_blocklist.cc`.
+const BLOCKED_VIDS: &[u16] = &[
+    0x1050, // YubiKey
+    0x096E, // Feitian
+    0x0973, // OnlyKey
+    0x413C, // Dell (fido)
+    0x17EF, // Lenovo (fido)
+    0x2CCF, // Nitrokey
+    0x20A0, // Nitrokey (old)
+    0x1EA8, // Google Titan
+    0x32A3, // Somu
+    0xC2BF, // HyperSecu
+];
+
+/// FIDO usage page (Alliance Auth).
+const FIDO_USAGE_PAGE: u16 = 0xF1D0;
+
+/// Returns true if a device should be blocked from WebHID access.
+fn is_blocked(info: &HidDeviceInfo) -> bool {
+    let vid = info.vendor_id();
+    if BLOCKED_VIDS.contains(&vid) { return true; }
+    if info.usage_page() == FIDO_USAGE_PAGE { return true; }
+    false
+}
+
+// ---------------------------------------------------------------------------
 // Open
 // ---------------------------------------------------------------------------
 
@@ -123,6 +155,7 @@ fn read_report_descriptor(info: &HidDeviceInfo) -> (Option<Vec<u8>>, Option<Vec<
 pub fn open_by_device_id(device_id: &str) -> anyhow::Result<(DeviceInfo, HidDevice)> {
     let api = HidApi::new()?;
     for info in api.device_list() {
+        if is_blocked(info) { continue; }
         if make_device_id(info) == device_id {
             let dev = api.open_path(info.path())?;
             let device_info = info_from_hidapi(info)
