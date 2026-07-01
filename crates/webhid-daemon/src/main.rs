@@ -15,8 +15,10 @@ use device_mgr::DeviceManager;
 const DEFAULT_WS_PORT: u16 = 31337;
 const EVENT_CAPACITY: usize = 8192;
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 const DEFAULT_SOCKET: &str = "/run/webhid/webhid.sock";
+#[cfg(target_os = "macos")]
+const DEFAULT_SOCKET: &str = "/tmp/webhid.sock";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

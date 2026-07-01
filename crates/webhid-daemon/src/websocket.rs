@@ -91,13 +91,28 @@ async fn handle_websocket(
     let token_ref = Arc::clone(&token_holder);
 
     let ws_stream = tokio_tungstenite::accept_hdr_async(stream, move |req: &Request, res: Response| {
+        let host = req.uri().host().unwrap_or("");
+        if !host.is_empty() && host != "127.0.0.1" && host != "localhost" {
+            log::warn!("[ws] rejected connection from host: {host}");
+            return Err(tokio_tungstenite::tungstenite::Error::Protocol(
+                tokio_tungstenite::tungstenite::error::ProtocolError::HandshakeError,
+            ));
+        }
         let query = req.uri().query().unwrap_or("");
         let token = extract_token(query);
         let mut holder = token_ref.lock().unwrap();
         *holder = token;
         Ok(res)
     })
-    .await?;
+    .await;
+
+    let ws_stream = match ws_stream {
+        Ok(s) => s,
+        Err(e) => {
+            log::warn!("[ws] handshake failed: {e}");
+            return Ok(());
+        }
+    };
 
     let token = token_holder.lock().unwrap().take();
     let token = match token {

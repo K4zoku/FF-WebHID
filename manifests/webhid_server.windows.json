@@ -1,0 +1,7 @@
+{
+  "name": "webhid_server",
+  "description": "WebHID native messaging host",
+  "path": "C:\\Program Files\\WebHID\\webhid-native-messaging.exe",
+  "type": "stdio",
+  "allowed_extensions": ["webhid@firefox.org"]
+}

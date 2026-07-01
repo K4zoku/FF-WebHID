@@ -15,9 +15,9 @@ pkgdesc='WebHID implementation for Firefox via a native-messaging bridge and hid
 arch=('x86_64' 'aarch64')
 url='https://github.com/k4zoku/FF-WebHID'
 license=('MIT')
-# libudev is provided by systemd on Arch Linux
+# libudev is provided by systemd on Arch Linux; hidapi is built from source
 depends=('libudev.so')
-makedepends=('cargo')
+makedepends=('cargo' 'pkgconf')
 optdepends=('webhid-addon: Firefox browser extension (system-wide install)')
 install=webhid.install
 # No source array – we build directly from the repository tree via startdir.
