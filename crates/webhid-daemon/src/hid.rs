@@ -59,7 +59,12 @@ pub fn enumerate() -> anyhow::Result<Vec<DeviceInfo>> {
     for info in api.device_list() {
         if is_blocked(info) { continue; }
         let serial = info.serial_number().unwrap_or("").to_string();
-        groups.entry((info.vendor_id(), info.product_id(), serial)).or_default().push(info);
+        let key = if serial.is_empty() {
+            make_device_id(info)
+        } else {
+            format!("{}:{}:{}", info.vendor_id(), info.product_id(), serial)
+        };
+        groups.entry((info.vendor_id(), info.product_id(), key)).or_default().push(info);
     }
     let mut devices = Vec::new();
     for ifaces in groups.values() {

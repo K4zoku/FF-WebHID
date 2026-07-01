@@ -259,6 +259,7 @@
     // roundtrip latency from ~10–20ms to ~1–3ms.
     #hotPath = false;
     #sabListener = null;
+    #inputLoopStarted = false;
 
     #installSabListener() {
       if (this.#sabListener) return;
@@ -270,7 +271,10 @@
         if (!evDeviceId || !this.deviceId || evDeviceId !== this.deviceId) return;
         this.#hotPath = true;
         console.info('[webhid] hotPath ON for', this.deviceId);
-        startInputReportLoop(this, detail.sab, detail.reportSize);
+        if (!this.#inputLoopStarted) {
+          this.#inputLoopStarted = true;
+          startInputReportLoop(this, detail.sab, detail.reportSize);
+        }
         window.removeEventListener("message", listener);
         this.#sabListener = null;
       };
@@ -392,7 +396,7 @@
       const visit = (c) => {
         if (c.inputReports) {
           for (const r of c.inputReports) {
-            const size = Math.ceil((r.size_bits || 0) / 8);
+            const size = Math.ceil((r.size_bits || r.reportSize || r.size || 0) / 8);
             if (size > max) max = size;
           }
         }
@@ -571,7 +575,10 @@
           if (event_type === "webhid-sab") {
             if (evDeviceId && this.deviceId && evDeviceId === this.deviceId) {
               this.#hotPath = true;
-              startInputReportLoop(this, detail.sab, detail.reportSize);
+              if (!this.#inputLoopStarted) {
+                this.#inputLoopStarted = true;
+                startInputReportLoop(this, detail.sab, detail.reportSize);
+              }
             }
             return;
           }
@@ -669,6 +676,7 @@
 
       // Set the new listener
       if (listener !== null) {
+        this.#oninputreportListener = listener;
         this.addEventListener("inputreport", listener);
       } else {
         this.#oninputreportListener = null;

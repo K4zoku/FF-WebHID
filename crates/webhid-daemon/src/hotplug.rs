@@ -50,6 +50,15 @@ fn start_udev(event_tx: broadcast::Sender<IpcResponse>) -> anyhow::Result<()> {
                     return;
                 }
             };
+
+            if let Ok(devices) = crate::hid::enumerate() {
+                let mut cache = DEVICE_CACHE.lock().unwrap();
+                let cache = cache.get_or_insert_with(HashMap::new);
+                for d in devices {
+                    cache.insert(d.device_id.clone(), d);
+                }
+            }
+
             let fd = socket.as_raw_fd();
             loop {
                 let mut pfd = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };

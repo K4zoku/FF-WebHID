@@ -13,7 +13,7 @@ const RESP_RECEIVE_FEATURE_REPORT = 0x83;
 
 self.onmessage = ({ data: msg }) => {
   if (msg.type === 'connect') return connect(msg);
-  if (msg.type === 'settings') { _fireAndForget = msg.fireAndForget !== false; _perfLogging = msg.perfLogging === true; return; }
+  if (msg.type === 'settings') { if (msg.fireAndForget !== undefined) _fireAndForget = msg.fireAndForget !== false; if (msg.perfLogging !== undefined) _perfLogging = msg.perfLogging === true; return; }
   if (msg.type === 'send') return handleSend(msg, MSG_SEND_REPORT);
   if (msg.type === 'sendFeature') return handleSend(msg, MSG_SEND_FEATURE_REPORT);
   if (msg.type === 'receiveFeature') return handleReceiveFeature(msg);
@@ -111,13 +111,13 @@ function handleSend(msg, msgType) {
   frame[1] = reqId & 0xFF; frame[2] = (reqId >> 8) & 0xFF; frame[3] = (reqId >> 16) & 0xFF; frame[4] = (reqId >> 24) & 0xFF;
   frame[5] = msg.reportId;
   frame.set(payload, 6);
-  const t0 = performance.now();
   if (_fireAndForget) {
     ws.send(frame);
     self.postMessage({ type: 'sendResult', reqId: msg.reqId, success: true });
     return;
   }
   _pending.set(reqId, {
+    resolve: () => { self.postMessage({ type: 'sendResult', reqId: msg.reqId, success: true }); },
     reject: (e) => { console.warn('[worker] send reqId=' + reqId + ' FAIL:', e.message); self.postMessage({ type: 'sendResult', reqId: msg.reqId, error: String(e.message || e) }); },
   });
   ws.send(frame);
@@ -133,8 +133,8 @@ function handleReceiveFeature(msg) {
   frame[0] = MSG_RECEIVE_FEATURE_REPORT;
   frame[1] = reqId & 0xFF; frame[2] = (reqId >> 8) & 0xFF; frame[3] = (reqId >> 16) & 0xFF; frame[4] = (reqId >> 24) & 0xFF;
   frame[5] = msg.reportId;
-  const t0 = performance.now();
   _pending.set(reqId, {
+    resolve: (data) => { self.postMessage({ type: 'featureResult', reqId: msg.reqId, data }); },
     reject: (e) => { console.warn('[worker] recvFeature reqId=' + reqId + ' FAIL:', e.message); self.postMessage({ type: 'featureResult', reqId: msg.reqId, error: String(e.message || e) }); },
   });
   ws.send(frame);
