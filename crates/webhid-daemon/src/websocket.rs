@@ -7,6 +7,7 @@ use tokio::net::TcpListener;
 use tokio::sync::{broadcast, mpsc};
 use tokio::time::interval;
 use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
+use tokio_tungstenite::tungstenite::http::StatusCode;
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::device_mgr::DeviceManager;
@@ -94,9 +95,11 @@ async fn handle_websocket(
         let host = req.uri().host().unwrap_or("");
         if !host.is_empty() && host != "127.0.0.1" && host != "localhost" {
             log::warn!("[ws] rejected connection from host: {host}");
-            return Err(tokio_tungstenite::tungstenite::Error::Protocol(
-                tokio_tungstenite::tungstenite::error::ProtocolError::HandshakeError,
-            ));
+            let resp = Response::builder()
+                .status(StatusCode::FORBIDDEN)
+                .body(Some("Access denied".into()))
+                .unwrap();
+            return Err(resp);
         }
         let query = req.uri().query().unwrap_or("");
         let token = extract_token(query);
