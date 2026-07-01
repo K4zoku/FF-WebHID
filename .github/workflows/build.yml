@@ -9,16 +9,31 @@ on:
 
 jobs:
   build:
-    name: Build WebHID Components
-    runs-on: ubuntu-latest
+    name: Build (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact_name: webhid-linux-x86_64
+            apt_deps: libudev-dev zip
+          - os: windows-latest
+            artifact_name: webhid-windows-x86_64
+            apt_deps: ""
+          - os: macos-latest
+            artifact_name: webhid-macos-universal
+            apt_deps: ""
+
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libudev-dev zip
+          sudo apt-get install -y ${{ matrix.apt_deps }}
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -32,20 +47,31 @@ jobs:
         run: cargo build --release --manifest-path crates/Cargo.toml
 
       - name: Build Addon XPI
+        if: runner.os == 'Linux'
         run: ./scripts/build-addon.sh
 
-      - name: Prepare Artifacts
+      - name: Prepare Artifacts (Unix)
+        if: runner.os != 'Windows'
         run: |
-          mkdir -p artifacts/bin
-          mkdir -p artifacts/manifests
+          mkdir -p artifacts/bin artifacts/manifests
           cp crates/target/release/webhid-daemon artifacts/bin/
           cp crates/target/release/webhid-native-messaging artifacts/bin/
-          cp manifests/webhid_server.json artifacts/manifests/
-          cp manifests/webhid-daemon.service artifacts/manifests/
-          cp dist/webhid-addon.xpi artifacts/
+          cp manifests/webhid_server.json artifacts/manifests/ || true
+          cp manifests/webhid-daemon.service artifacts/manifests/ || true
+          cp dist/webhid-addon.xpi artifacts/ || true
+
+      - name: Prepare Artifacts (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts/bin, artifacts/manifests
+          Copy-Item crates/target/release/webhid-daemon.exe artifacts/bin/
+          Copy-Item crates/target/release/webhid-native-messaging.exe artifacts/bin/
+          Copy-Item manifests/webhid_server.json artifacts/manifests/ -ErrorAction SilentlyContinue
+          Copy-Item manifests/webhid-daemon.service artifacts/manifests/ -ErrorAction SilentlyContinue
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: webhid-linux-x86_64
+          name: ${{ matrix.artifact_name }}
           path: artifacts/
