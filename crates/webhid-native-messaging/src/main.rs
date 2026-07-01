@@ -37,8 +37,9 @@ use webhid::{IpcRequest, IpcResponse, NmRequest, NmResponse, protocol};
 const DEFAULT_SOCKET: &str = "/run/webhid/webhid.sock";
 #[cfg(target_os = "macos")]
 const DEFAULT_SOCKET: &str = "/tmp/webhid.sock";
-#[cfg(not(unix))]
-const DEFAULT_SOCKET: &str = "";
+
+#[cfg(target_os = "windows")]
+const DEFAULT_PIPE: &str = r"\\.\pipe\webhid";
 
 // ---------------------------------------------------------------------------
 // Entry point
@@ -77,19 +78,18 @@ async fn main() -> anyhow::Result<()> {
         stream.into_split()
     };
 
-    #[cfg(not(unix))]
+    #[cfg(windows)]
     let (daemon_read, daemon_write) = {
-        let port: u16 = std::env::var("WEBHID_IPC_PORT")
-            .ok().and_then(|s| s.parse().ok())
-            .unwrap_or(31338);
-        use tokio::net::TcpStream;
+        use tokio::net::windows::named_pipe::ClientOptions;
+        let pipe_name = std::env::var("WEBHID_PIPE")
+            .unwrap_or_else(|_| DEFAULT_PIPE.to_string());
         let mut delay = 100u64;
         let stream = loop {
-            match TcpStream::connect(("127.0.0.1", port)).await {
+            match ClientOptions::new().open(&pipe_name).await {
                 Ok(s) => break s,
                 Err(e) => {
                     if delay > 30000 {
-                        return Err(anyhow::anyhow!("cannot connect to daemon at 127.0.0.1:{port} after retries: {e}"));
+                        return Err(anyhow::anyhow!("cannot connect to daemon pipe '{pipe_name}' after retries: {e}"));
                     }
                     log::warn!("daemon connect failed ({e}), retry in {delay}ms");
                     tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
@@ -98,8 +98,13 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         };
-        log::info!("connected to daemon at 127.0.0.1:{port}");
+        log::info!("connected to daemon at {pipe_name}");
         stream.into_split()
+    };
+
+    #[cfg(not(any(unix, windows)))]
+    let (daemon_read, daemon_write) = {
+        return Err(anyhow::anyhow!("IPC not supported on this platform"));
     };
 
     // Serialise all writes to stdout through one task.  We previously
