@@ -30,9 +30,6 @@ use std::collections::HashMap;
 use tokio::io::{AsyncWriteExt, BufReader, BufWriter};
 use std::sync::Arc;
 
-#[cfg(unix)]
-use tokio::net::UnixStream;
-
 use tokio::sync::{Mutex, mpsc, oneshot};
 use webhid::{IpcRequest, IpcResponse, NmRequest, NmResponse, protocol};
 
