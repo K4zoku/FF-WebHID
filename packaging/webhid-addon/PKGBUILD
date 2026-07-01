@@ -34,7 +34,7 @@ sha256sums=()
 # Firefox / Gecko application GUID (shared by Firefox, Zen, Librewolf, etc.)
 _ff_guid='{ec8030f7-c20a-464f-9b0e-13a3a9e97384}'
 # Must match browser_specific_settings.gecko.id in addon/manifest.json
-_ext_id='webhid@firefox.org'
+_ext_id='webhid@k4zoku.dev'
 
 _addon_dir() { echo "$startdir/../../addon"; }
 

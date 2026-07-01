@@ -3,5 +3,5 @@
   "description": "WebHID native messaging host",
   "path": "C:\\Program Files\\WebHID\\webhid-native-messaging.exe",
   "type": "stdio",
-  "allowed_extensions": ["webhid@firefox.org"]
+  "allowed_extensions": ["webhid@k4zoku.dev"]
 }

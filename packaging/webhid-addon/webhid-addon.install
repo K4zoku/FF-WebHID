@@ -8,7 +8,7 @@ post_install() {
     echo "  Restart Firefox to activate it."
     echo ""
     echo "  Firefox will pick it up automatically from:"
-    echo "    /usr/lib/mozilla/extensions/{ec8030f7-…}/webhid@firefox.org.xpi"
+    echo "    /usr/lib/mozilla/extensions/{ec8030f7-…}/webhid@k4zoku.dev.xpi"
     echo ""
     echo "  If the extension does not appear after restarting, verify that"
     echo "  xpinstall.signatures.required is not overriding system extensions:"
