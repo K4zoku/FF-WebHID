@@ -156,7 +156,7 @@ fn run_windows(event_tx: broadcast::Sender<IpcResponse>) {
     type HMODULE = isize;
     type HWND = isize;
     type HINSTANCE = isize;
-    type LONG_PTR = isize;
+    
     type UINT = u32;
     type WPARAM = usize;
     type LPARAM = isize;
@@ -209,7 +209,7 @@ fn run_windows(event_tx: broadcast::Sender<IpcResponse>) {
         0x88, 0xCB, 0x00, 0x11, 0x11, 0x00, 0x00, 0x30,
     ];
 
-    extern "system" {
+    unsafe extern "system" {
         fn GetModuleHandleW(lpModuleName: *const u16) -> HMODULE;
         fn RegisterClassW(lpWndClass: *const WNDCLASSW) -> WORD;
         fn CreateWindowExW(
