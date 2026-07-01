@@ -22,7 +22,7 @@ libc = "0.2"
 hidapi = { version = "2.6", default-features = false, features = ["linux-static-hidraw"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-hidapi = { version = "2.6", default-features = false, features = ["macos-shared"] }
+hidapi = { version = "2.6", default-features = false, features = ["macos-shared-device"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 hidapi = { version = "2.6", default-features = false, features = ["windows-native"] }
