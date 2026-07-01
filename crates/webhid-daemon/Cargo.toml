@@ -23,6 +23,9 @@ hidapi = { version = "2.6", default-features = false, features = ["linux-static-
 
 [target.'cfg(target_os = "macos")'.dependencies]
 hidapi = { version = "2.6", default-features = false, features = ["macos-shared-device"] }
+core-foundation = "0.10"
+core-foundation-sys = "0.8"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 hidapi = { version = "2.6", default-features = false, features = ["windows-native"] }
+windows = { version = "0.58", features = ["Win32_Devices_DeviceAndDriverInstallation", "Win32_Foundation", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
