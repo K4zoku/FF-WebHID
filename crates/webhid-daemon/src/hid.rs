@@ -57,7 +57,7 @@ pub fn enumerate() -> anyhow::Result<Vec<DeviceInfo>> {
     let api = HidApi::new()?;
     let mut groups: std::collections::HashMap<(u16, u16, String), Vec<&HidDeviceInfo>> = std::collections::HashMap::new();
     for info in api.device_list() {
-        if is_blocked(info) { continue; }
+        if is_blocked_pub(info) { continue; }
         let serial = info.serial_number().unwrap_or("").to_string();
         let key = if serial.is_empty() {
             make_device_id(info)
@@ -73,7 +73,7 @@ pub fn enumerate() -> anyhow::Result<Vec<DeviceInfo>> {
             .or_else(|| ifaces.iter().find(|i| i.usage_page() != 0x01))
             .copied()
             .unwrap_or(ifaces[0]);
-        if let Some(d) = info_from_hidapi(primary) {
+        if let Some(d) = info_from_hidapi_pub(primary) {
             devices.push(d);
         }
     }
@@ -81,7 +81,7 @@ pub fn enumerate() -> anyhow::Result<Vec<DeviceInfo>> {
 }
 
 /// Build a `DeviceInfo` from a hidapi `DeviceInfo`.
-fn info_from_hidapi(info: &HidDeviceInfo) -> Option<DeviceInfo> {
+pub fn info_from_hidapi_pub(info: &HidDeviceInfo) -> Option<DeviceInfo> {
     let device_id = make_device_id(info);
     let (report_descriptor, collections) = read_report_descriptor(info);
     Some(DeviceInfo {
@@ -144,7 +144,7 @@ const BLOCKED_VIDS: &[u16] = &[
 const FIDO_USAGE_PAGE: u16 = 0xF1D0;
 
 /// Returns true if a device should be blocked from WebHID access.
-fn is_blocked(info: &HidDeviceInfo) -> bool {
+pub fn is_blocked_pub(info: &HidDeviceInfo) -> bool {
     let vid = info.vendor_id();
     if BLOCKED_VIDS.contains(&vid) { return true; }
     if info.usage_page() == FIDO_USAGE_PAGE { return true; }
@@ -160,10 +160,10 @@ fn is_blocked(info: &HidDeviceInfo) -> bool {
 pub fn open_by_device_id(device_id: &str) -> anyhow::Result<(DeviceInfo, HidDevice)> {
     let api = HidApi::new()?;
     for info in api.device_list() {
-        if is_blocked(info) { continue; }
+        if is_blocked_pub(info) { continue; }
         if make_device_id(info) == device_id {
             let dev = api.open_path(info.path())?;
-            let device_info = info_from_hidapi(info)
+            let device_info = info_from_hidapi_pub(info)
                 .ok_or_else(|| anyhow::anyhow!("failed to build DeviceInfo"))?;
             return Ok((device_info, dev));
         }
@@ -253,7 +253,7 @@ pub fn info_by_raw_path(raw_path: &str) -> Option<DeviceInfo> {
     let api = HidApi::new().ok()?;
     for info in api.device_list() {
         if info.path().to_string_lossy() == raw_path {
-            return info_from_hidapi(info);
+            return info_from_hidapi_pub(info);
         }
     }
     None

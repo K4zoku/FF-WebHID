@@ -238,10 +238,13 @@ async fn handle_websocket(
 
     // Wait for tasks to complete.
     tokio::select! {
-        _ = outgoing_task => {},
-        _ = receiver_task => {},
-        _ = sender_task => {},
-    };
+        _ = &mut outgoing_task => {},
+        _ = &mut receiver_task => {},
+        _ = &mut sender_task => {},
+    }
+    outgoing_task.abort();
+    receiver_task.abort();
+    sender_task.abort();
 
     log::info!("[ws] connection for {device_id} closed");
     device_mgr.set_ws_active(&device_id, false);

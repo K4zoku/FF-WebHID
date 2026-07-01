@@ -55,11 +55,15 @@ fn start_udev(event_tx: broadcast::Sender<IpcResponse>) -> anyhow::Result<()> {
                 }
             };
 
-            if let Ok(devices) = crate::hid::enumerate() {
+            if let Ok(api) = hidapi::HidApi::new() {
                 let mut cache = DEVICE_CACHE.lock().unwrap();
                 let cache = cache.get_or_insert_with(HashMap::new);
-                for d in devices {
-                    cache.insert(d.device_id.clone(), d);
+                for info in api.device_list() {
+                    if crate::hid::is_blocked_pub(info) { continue; }
+                    let devnode = info.path().to_string_lossy().to_string();
+                    if let Some(d) = crate::hid::info_from_hidapi_pub(info) {
+                        cache.insert(devnode, d);
+                    }
                 }
             }
 

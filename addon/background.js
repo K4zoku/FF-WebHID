@@ -122,8 +122,7 @@ const NativeMessaging = {
 
   onMessage(message) {
     if (message.event_type) {
-      // Forward device events to every content script so HIDDevice instances
-      // can fire inputreport / connect / disconnect events.
+      if (message.event_type === "input_report") return;
       browser.tabs.query({}).then((tabs) => {
         for (const tab of tabs) {
           browser.tabs
@@ -131,9 +130,7 @@ const NativeMessaging = {
               action: "webhid-device-event",
               event: message,
             })
-            .catch(() => {
-              // Tab may not have the content script injected – ignore.
-            });
+            .catch(() => {});
         }
       });
     }
@@ -192,7 +189,8 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
       browser.scripting.insertCSS({
         target: { tabId: sender.tab.id },
         files: ['webhid.css']
-      });
+      }).then(() => sendResponse({ success: true }))
+        .catch((e) => sendResponse({ success: false, error: e.message }));
       return true;
     case "enumerate":
       NativeMessaging.enumerateDevices()
