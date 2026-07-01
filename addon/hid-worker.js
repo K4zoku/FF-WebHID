@@ -37,7 +37,7 @@ function connect(msg) {
 
 function _doConnect() {
   try {
-    ws = new WebSocket(`ws://127.0.0.1:${_connectMsg.wsPort}?token=${_connectMsg.token}`);
+    ws = new WebSocket(`ws://127.0.0.1:${_connectMsg.wsPort}`, [`webhid.${_connectMsg.token}`]);
   } catch (e) {
     console.error('[worker] WebSocket() threw:', e);
     _scheduleReconnect();

@@ -101,10 +101,21 @@ async fn handle_websocket(
                 .unwrap();
             return Err(resp);
         }
-        let query = req.uri().query().unwrap_or("");
-        let token = extract_token(query);
+        // Read token from Sec-WebSocket-Protocol header (subprotocol).
+        // Browser WebSocket API doesn't support custom headers, so we use
+        // the subprotocol mechanism: client sends `webhid.<token>` as
+        // the subprotocol. This avoids exposing the token in the URL.
+        let token = req.headers().get("sec-websocket-protocol")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.strip_prefix("webhid."))
+            .map(String::from);
         let mut holder = token_ref.lock().unwrap();
         *holder = token;
+        // Echo back the subprotocol so the browser accepts the handshake
+        let mut res = res;
+        if let Some(proto) = req.headers().get("sec-websocket-protocol") {
+            res.headers_mut().insert("sec-websocket-protocol", proto.clone());
+        }
         Ok(res)
     })
     .await;
@@ -119,9 +130,13 @@ async fn handle_websocket(
 
     let token = token_holder.lock().unwrap().take();
     let token = match token {
-        Some(t) => t,
+        Some(t) if t.len() == 32 && t.chars().all(|c| c.is_ascii_hexdigit()) => t,
+        Some(_) => {
+            log::warn!("[ws] invalid session token format — closing");
+            return Ok(());
+        }
         None => {
-            log::warn!("[ws] no session token in query params — closing");
+            log::warn!("[ws] no session token provided — closing");
             return Ok(());
         }
     };
@@ -198,7 +213,7 @@ async fn handle_websocket(
         .and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_BATCH_FLUSH_MS)
         .max(1);
-    
+
     let mut event_rx = event_tx.subscribe();
     let mut sender_task = tokio::spawn(async move {
         let mut batch: Vec<Vec<u8>> = Vec::with_capacity(64);
@@ -227,7 +242,12 @@ async fn handle_websocket(
                         }
                         Ok(_) => {}
                         Err(broadcast::error::RecvError::Lagged(n)) => {
-                            log::warn!("[ws] broadcast lagged by {n} events");
+                            log::warn!("[ws] broadcast lagged by {n} events, flushing batch");
+                            if !batch.is_empty() {
+                                let frame = create_batch_frame(&batch);
+                                if tx_for_sender.send(Message::Binary(frame.into())).is_err() { break; }
+                                batch.clear();
+                            }
                         }
                         Err(broadcast::error::RecvError::Closed) => break,
                     }
@@ -249,13 +269,6 @@ async fn handle_websocket(
     log::info!("[ws] connection for {device_id} closed");
     device_mgr.set_ws_active(&device_id, false);
     Ok(())
-}
-
-fn extract_token(query: &str) -> Option<String> {
-    query.split('&')
-        .find(|p| p.starts_with("token="))
-        .and_then(|p| p.split_once('='))
-        .map(|(_, v)| v.to_string())
 }
 
 fn create_batch_frame(reports: &[Vec<u8>]) -> Vec<u8> {
@@ -364,7 +377,8 @@ async fn handle_client_binary(
         }
 
         other => {
-            log::warn!("[ws] unknown binary msg_type=0x{other:02x}");
+            log::warn!("[ws] rejecting unknown binary msg_type=0x{other:02x}");
+            let _ = tx.send(make_status_resp(0xFF, req_id, 1));
         }
     }
 }
