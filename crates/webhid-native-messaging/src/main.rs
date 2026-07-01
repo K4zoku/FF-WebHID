@@ -30,12 +30,16 @@ use std::collections::HashMap;
 use tokio::io::{AsyncWriteExt, BufReader, BufWriter};
 use std::sync::Arc;
 
-
+#[cfg(unix)]
 use tokio::net::UnixStream;
+
 use tokio::sync::{Mutex, mpsc, oneshot};
 use webhid::{IpcRequest, IpcResponse, NmRequest, NmResponse, protocol};
 
+#[cfg(unix)]
 const DEFAULT_SOCKET: &str = "/run/webhid/webhid.sock";
+#[cfg(not(unix))]
+const DEFAULT_SOCKET: &str = "";
 
 /// Threshold below which we don't log timing (avoid noise).  Anything above
 /// this is logged at `info` so you can spot the slow stage without digging
@@ -56,11 +60,11 @@ async fn main() -> anyhow::Result<()> {
     let socket_path = std::env::var("WEBHID_SOCKET")
         .unwrap_or_else(|_| DEFAULT_SOCKET.to_string());
 
-    // Connect with retry — daemon may be restarting.  Backoff: 100ms, 200ms,
-    // 400ms, ... up to 2s.  Total wait up to ~30s before giving up.
-    let stream = {
+    #[cfg(unix)]
+    let (daemon_read, daemon_write) = {
+        use tokio::net::UnixStream;
         let mut delay = 100u64;
-        loop {
+        let stream = loop {
             match UnixStream::connect(&socket_path).await {
                 Ok(s) => break s,
                 Err(e) => {
@@ -73,11 +77,35 @@ async fn main() -> anyhow::Result<()> {
                     if delay > 2000 { delay = 2000; }
                 }
             }
-        }
+        };
+        log::info!("connected to daemon at {socket_path}");
+        stream.into_split()
     };
-    log::info!("connected to daemon at {socket_path}");
 
-    let (daemon_read, daemon_write) = stream.into_split();
+    #[cfg(not(unix))]
+    let (daemon_read, daemon_write) = {
+        let port: u16 = std::env::var("WEBHID_IPC_PORT")
+            .ok().and_then(|s| s.parse().ok())
+            .unwrap_or(31338);
+        use tokio::net::TcpStream;
+        let mut delay = 100u64;
+        let stream = loop {
+            match TcpStream::connect(("127.0.0.1", port)).await {
+                Ok(s) => break s,
+                Err(e) => {
+                    if delay > 30000 {
+                        return Err(anyhow::anyhow!("cannot connect to daemon at 127.0.0.1:{port} after retries: {e}"));
+                    }
+                    log::warn!("daemon connect failed ({e}), retry in {delay}ms");
+                    tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
+                    delay *= 2;
+                    if delay > 2000 { delay = 2000; }
+                }
+            }
+        };
+        log::info!("connected to daemon at 127.0.0.1:{port}");
+        stream.into_split()
+    };
 
     // Serialise all writes to stdout through one task.  We previously
     // batched up to 16 messages / 5ms before flushing, but that introduced

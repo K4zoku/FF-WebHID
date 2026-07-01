@@ -13,21 +13,20 @@
 
 use std::sync::Arc;
 
-use tokio::io::BufReader;
-use tokio::net::UnixStream;
+use tokio::io::{AsyncRead, AsyncWrite, BufReader};
 use tokio::sync::{broadcast, mpsc};
 use webhid::{protocol, IpcRequest, IpcResponse};
 
 use crate::{device_mgr::DeviceManager, hid};
 
 pub async fn handle(
-    stream: UnixStream,
+    stream: impl AsyncRead + AsyncWrite + Unpin,
     client_id: u64,
     device_mgr: Arc<DeviceManager>,
     mut event_rx: broadcast::Receiver<IpcResponse>,
     ws_port: u16,
 ) -> anyhow::Result<()> {
-    let (reader, writer) = stream.into_split();
+    let (reader, writer) = tokio::io::split(stream);
     let mut reader = BufReader::new(reader);
 
     let (tx, mut rx) = mpsc::channel::<IpcResponse>(1024);
