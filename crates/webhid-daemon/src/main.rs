@@ -20,6 +20,9 @@ const DEFAULT_SOCKET: &str = "/run/webhid/webhid.sock";
 #[cfg(target_os = "macos")]
 const DEFAULT_SOCKET: &str = "/tmp/webhid.sock";
 
+#[cfg(target_os = "windows")]
+const DEFAULT_PIPE: &str = r"\\.\pipe\webhid";
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_default_env()
@@ -91,10 +94,40 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        use tokio::net::windows::named_pipe::ServerOptions;
+        let pipe_name = std::env::var("WEBHID_PIPE")
+            .unwrap_or_else(|_| DEFAULT_PIPE.to_string());
+
+        log::info!("webhid-daemon listening on {pipe_name}");
+        log::info!("WebSocket server on port {ws_port}");
+
+        let mut next_client_id: u64 = 0;
+        loop {
+            let server = ServerOptions::new()
+                .first_pipe_instance(false)
+                .create(&pipe_name)?;
+
+            server.connect().await?;
+            next_client_id += 1;
+            let cid = next_client_id;
+            let mgr = Arc::clone(&device_mgr);
+            let rx = event_tx.subscribe();
+            tokio::spawn(async move {
+                log::info!("[client {cid}] connected");
+                if let Err(e) = client::handle(server, cid, mgr, rx, ws_port).await {
+                    log::warn!("[client {cid}] error: {e:#}");
+                }
+                log::info!("[client {cid}] disconnected");
+            });
+        }
+    }
+
+    #[cfg(not(any(unix, windows)))]
     {
         log::info!("WebSocket server on port {ws_port}");
-        log::info!("Unix socket not available on this platform — using TCP for IPC on port {ws_port}");
+        log::info!("IPC not supported on this platform");
         tokio::signal::ctrl_c().await?;
         Ok(())
     }
