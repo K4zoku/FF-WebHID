@@ -1,5 +1,5 @@
 (async () => {
-  const DEFAULTS = { perfLogging: false, fireAndForget: true };
+  const DEFAULTS = { perfLogging: false, fireAndForget: true, sabEnabled: true };
   const current = await browser.storage.local.get(DEFAULTS);
 
   for (const [key, val] of Object.entries(current)) {

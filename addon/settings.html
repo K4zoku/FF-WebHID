@@ -40,6 +40,16 @@ input:checked + .slider:before { transform: translateX(20px); }
     <span class="slider"></span>
   </label>
 </div>
+<div class="setting">
+  <div class="setting-info">
+    <h3>SharedArrayBuffer data plane</h3>
+    <p>Use WebSocket + SharedArrayBuffer for high-performance input/output reports. Injects COOP/COEP headers which may break some sites. Disable for maximum site compatibility (falls back to slower postMessage path)</p>
+  </div>
+  <label class="toggle">
+    <input type="checkbox" id="sabEnabled">
+    <span class="slider"></span>
+  </label>
+</div>
 <div class="status" id="status"></div>
 <script src="settings.js"></script>
 </body>
