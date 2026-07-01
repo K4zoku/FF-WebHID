@@ -110,6 +110,7 @@ fn start_udev(event_tx: broadcast::Sender<IpcResponse>) -> anyhow::Result<()> {
 // =====================================================================
 
 #[cfg(target_os = "windows")]
+#[allow(non_snake_case, non_upper_case_globals)]
 fn run_windows(event_tx: broadcast::Sender<IpcResponse>) {
     use std::collections::HashMap;
     use std::sync::Mutex;
@@ -209,6 +210,7 @@ fn run_windows(event_tx: broadcast::Sender<IpcResponse>) {
         0x88, 0xCB, 0x00, 0x11, 0x11, 0x00, 0x00, 0x30,
     ];
 
+    #[link(name = "user32")]
     unsafe extern "system" {
         fn GetModuleHandleW(lpModuleName: *const u16) -> HMODULE;
         fn RegisterClassW(lpWndClass: *const WNDCLASSW) -> WORD;
@@ -319,7 +321,7 @@ fn run_macos(event_tx: broadcast::Sender<IpcResponse>) {
 
     type IOReturn = i32;
     type IOOptionBits = u32;
-    const kIOHIDOptionsTypeNone: IOOptionBits = 0;
+    const KIO_HID_OPTIONS_TYPE_NONE: IOOptionBits = 0;
 
     // We can't easily get DeviceInfo from the raw IOHIDDeviceRef in the callback
     // without linking against IOKit framework properly.  Instead, we do a full
@@ -361,7 +363,7 @@ fn run_macos(event_tx: broadcast::Sender<IpcResponse>) {
         }
     }
 
-    let manager = unsafe { IOHIDManagerCreate(std::ptr::null(), kIOHIDOptionsTypeNone) };
+    let manager = unsafe { IOHIDManagerCreate(std::ptr::null(), KIO_HID_OPTIONS_TYPE_NONE) };
     if manager.is_null() {
         log::error!("IOHIDManagerCreate failed");
         return;
@@ -373,7 +375,7 @@ fn run_macos(event_tx: broadcast::Sender<IpcResponse>) {
 
     unsafe {
         IOHIDManagerSetDeviceMatching(manager, std::ptr::null());
-        let ret = IOHIDManagerOpen(manager, kIOHIDOptionsTypeNone);
+        let ret = IOHIDManagerOpen(manager, KIO_HID_OPTIONS_TYPE_NONE);
         if ret != 0 {
             log::error!("IOHIDManagerOpen failed: {ret}");
             return;
