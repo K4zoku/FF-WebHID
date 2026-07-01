@@ -3,5 +3,5 @@
   "description": "WebHID native messaging host – bridges the Firefox addon to webhid-daemon",
   "path": "/usr/local/bin/webhid-native-messaging",
   "type": "stdio",
-  "allowed_extensions": ["webhid@firefox.org"]
+  "allowed_extensions": ["webhid@k4zoku.dev"]
 }

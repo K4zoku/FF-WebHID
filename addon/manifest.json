@@ -50,7 +50,7 @@
 
   "browser_specific_settings": {
     "gecko": {
-      "id": "webhid@firefox.org",
+      "id": "webhid@k4zoku.dev",
       "strict_min_version": "142.0",
       "data_collection_permissions": {
         "required": ["websiteContent"],
