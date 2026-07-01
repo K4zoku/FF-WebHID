@@ -141,7 +141,7 @@ async fn handle_websocket(
     let (mut ws_sender, mut ws_receiver) = ws_stream.split();
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
 
-    let outgoing_task = tokio::spawn(async move {
+    let mut outgoing_task = tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
             if let Err(e) = ws_sender.send(msg).await {
                 log::warn!("[ws] send error: {e}");
@@ -164,7 +164,7 @@ async fn handle_websocket(
     // by value, so without this clone the sender task's
     // `device_id.clone()` would fail to compile (E0382).
     let device_id_for_receiver = device_id.clone();
-    let receiver_task = tokio::spawn(async move {
+    let mut receiver_task = tokio::spawn(async move {
         while let Some(msg) = ws_receiver.next().await {
             match msg {
                 Ok(Message::Ping(data)) => {
@@ -200,7 +200,7 @@ async fn handle_websocket(
         .max(1);
     
     let mut event_rx = event_tx.subscribe();
-    let sender_task = tokio::spawn(async move {
+    let mut sender_task = tokio::spawn(async move {
         let mut batch: Vec<Vec<u8>> = Vec::with_capacity(64);
         let mut flush_interval = interval(Duration::from_millis(batch_ms));
 
