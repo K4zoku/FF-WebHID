@@ -20,7 +20,7 @@ use webhid::{protocol, IpcRequest, IpcResponse};
 use crate::{device_mgr::DeviceManager, hid};
 
 pub async fn handle(
-    stream: impl AsyncRead + AsyncWrite + Unpin,
+    stream: impl AsyncRead + AsyncWrite + Unpin + Send,
     client_id: u64,
     device_mgr: Arc<DeviceManager>,
     mut event_rx: broadcast::Receiver<IpcResponse>,
