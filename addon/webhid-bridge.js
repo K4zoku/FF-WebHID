@@ -581,7 +581,11 @@
 
       if (action === "open" && response.success && response.session_token) {
         const deviceId = String.fromCharCode(...response.data);
-        console.log('[bridge] open: spawning worker for', deviceId, 'wsPort=', response.ws_port);
+        const sabSetting = await browser.storage.local.get({ sabEnabled: true });
+        if (!sabSetting.sabEnabled) {
+          console.log('[bridge] SAB disabled — skipping worker spawn for', deviceId);
+        } else
+        {
         let worker;
         try {
           const workerUrl = browser.runtime.getURL('hid-worker.js');
@@ -659,6 +663,7 @@
           const s = await browser.storage.local.get({ fireAndForget: true, perfLogging: false });
           worker.postMessage({ type: 'settings', fireAndForget: s.fireAndForget, perfLogging: s.perfLogging });
         })();
+        }
       }
 
       if (action === "close") {

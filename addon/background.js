@@ -153,13 +153,21 @@ browser.runtime.onInstalled.addListener(() => {
 });
 
 // ---------------------------------------------------------------------------
-// Security Headers (COOP/COEP)
+// Security Headers (COOP/COEP) — only when SAB data plane is enabled
 // ---------------------------------------------------------------------------
 
-// To enable SharedArrayBuffer support in the browser, the addon injects
-// security headers into all http:// and https:// responses.
+let _sabEnabled = true;
+browser.storage.local.get({ sabEnabled: true }).then(s => { _sabEnabled = s.sabEnabled; });
+browser.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.sabEnabled) {
+    _sabEnabled = changes.sabEnabled.newValue;
+    console.log('[bg] SAB data plane:', _sabEnabled);
+  }
+});
+
 browser.webRequest.onHeadersReceived.addListener(
   (details) => {
+    if (!_sabEnabled) return {};
     const headers = details.responseHeaders.filter(h =>
       !['cross-origin-opener-policy',
         'cross-origin-embedder-policy'].includes(h.name.toLowerCase())
