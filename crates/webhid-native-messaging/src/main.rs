@@ -47,18 +47,16 @@ const DEFAULT_PIPE: &str = r"\\.\pipe\webhid";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Always log to stderr; stdout is reserved for the native-messaging protocol.
     env_logger::Builder::from_default_env()
         .target(env_logger::Target::Stderr)
         .filter_level(log::LevelFilter::Info)
         .init();
 
-    let socket_path = std::env::var("WEBHID_SOCKET")
-        .unwrap_or_else(|_| DEFAULT_SOCKET.to_string());
-
     #[cfg(unix)]
     let (daemon_read, daemon_write) = {
         use tokio::net::UnixStream;
+        let socket_path = std::env::var("WEBHID_SOCKET")
+            .unwrap_or_else(|_| DEFAULT_SOCKET.to_string());
         let mut delay = 100u64;
         let stream = loop {
             match UnixStream::connect(&socket_path).await {
@@ -85,7 +83,7 @@ async fn main() -> anyhow::Result<()> {
             .unwrap_or_else(|_| DEFAULT_PIPE.to_string());
         let mut delay = 100u64;
         let stream = loop {
-            match ClientOptions::new().open(&pipe_name).await {
+            match ClientOptions::new().open(&pipe_name) {
                 Ok(s) => break s,
                 Err(e) => {
                     if delay > 30000 {

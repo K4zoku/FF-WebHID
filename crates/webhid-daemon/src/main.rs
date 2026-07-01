@@ -6,6 +6,7 @@ mod websocket;
 
 use std::sync::Arc;
 
+#[cfg(unix)]
 use anyhow::Context as _;
 use tokio::sync::broadcast;
 use webhid::IpcResponse;

@@ -248,6 +248,7 @@ pub fn write_feature_report(dev: &HidDevice, report_id: u8, payload: &[u8]) -> s
 }
 
 /// Look up a DeviceInfo by raw platform path (used by hot-plug monitor).
+#[cfg(target_os = "linux")]
 pub fn info_by_raw_path(raw_path: &str) -> Option<DeviceInfo> {
     let api = HidApi::new().ok()?;
     for info in api.device_list() {
@@ -262,6 +263,7 @@ pub fn info_by_raw_path(raw_path: &str) -> Option<DeviceInfo> {
 // Report descriptor parser (kept from original; used for collections metadata)
 // ---------------------------------------------------------------------------
 
+#[cfg(target_os = "linux")]
 fn parse_report_descriptor(buf: &[u8]) -> Vec<Collection> {
     let mut flat: Vec<Collection> = Vec::new();
     let mut parents: Vec<Option<usize>> = Vec::new();
