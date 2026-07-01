@@ -311,7 +311,7 @@
         const out = {
           type: c.type !== undefined ? c.type : (c.collection_type !== undefined ? c.collection_type : null),
           usagePage: c.usagePage !== undefined ? c.usagePage : (c.usage_page !== undefined ? c.usage_page : null),
-          usage: c.usage !== undefined ? c.usage : (c.usage !== undefined ? c.usage : null),
+          usage: c.usage !== undefined ? c.usage : null,
           children: [],
           // Always initialize report arrays to prevent "items is undefined" errors
           // when iterating over collections - WebHID spec expects these arrays
@@ -430,7 +430,7 @@
 
     async open() {
       if (this.opened) {
-        throw new DOMException("InvalidStateError");
+        throw new DOMException("Device is already open", "InvalidStateError");
       }
       if (!this.path) {
         throw new DOMException(
@@ -469,6 +469,7 @@
         if (response.success) {
           this.#opened = false;
           this.#hotPath = false;
+          this.#inputLoopStarted = false;
           if (this.#sabListener) {
             window.removeEventListener("message", this.#sabListener);
             this.#sabListener = null;
@@ -645,7 +646,7 @@
           // Clear all listeners when removing oninputreport
           this.#inputReportListeners.clear();
           this.#inputReportEventWrappers.forEach((fn, wrapperKey) => {
-            window.removeEventListener("message", fn);
+            window.removeEventListener("message", wrapperKey);
           });
           this.#inputReportEventWrappers.clear();
         } else {

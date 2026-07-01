@@ -107,7 +107,7 @@ async fn main() -> anyhow::Result<()> {
         let mut next_client_id: u64 = 0;
         loop {
             let server = ServerOptions::new()
-                .first_pipe_instance(false)
+                .first_pipe_instance(true)
                 .create(&pipe_name)?;
 
             server.connect().await?;
