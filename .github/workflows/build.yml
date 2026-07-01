@@ -50,6 +50,13 @@ jobs:
         if: runner.os == 'Linux'
         run: ./scripts/build-addon.sh
 
+      - name: Upload XPI
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: webhid-addon
+          path: dist/webhid-addon.xpi
+
       - name: Prepare Artifacts (Unix)
         if: runner.os != 'Windows'
         run: |
@@ -58,7 +65,6 @@ jobs:
           cp crates/target/release/webhid-native-messaging artifacts/bin/
           cp manifests/webhid_server.json artifacts/manifests/ || true
           cp manifests/webhid-daemon.service artifacts/manifests/ || true
-          cp dist/webhid-addon.xpi artifacts/ || true
 
       - name: Prepare Artifacts (Windows)
         if: runner.os == 'Windows'
@@ -68,7 +74,6 @@ jobs:
           Copy-Item crates/target/release/webhid-daemon.exe artifacts/bin/
           Copy-Item crates/target/release/webhid-native-messaging.exe artifacts/bin/
           Copy-Item manifests/webhid_server.json artifacts/manifests/ -ErrorAction SilentlyContinue
-          Copy-Item manifests/webhid-daemon.service artifacts/manifests/ -ErrorAction SilentlyContinue
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
