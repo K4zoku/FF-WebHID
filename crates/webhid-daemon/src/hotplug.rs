@@ -213,9 +213,11 @@ fn run_macos(event_tx: broadcast::Sender<IpcResponse>) {
     use core_foundation_sys::runloop::*;
     use core_foundation_sys::string::*;
 
+    type CFDictionaryRef = *const std::ffi::c_void;
+
     static DEVICE_CACHE: Mutex<Option<HashMap<String, webhid::DeviceInfo>>> = Mutex::new(None);
 
-    extern "C" {
+    unsafe extern "C" {
         fn IOHIDManagerCreate(allocator: CFAllocatorRef, options: IOOptionBits) -> *mut std::ffi::c_void;
         fn IOHIDManagerOpen(manager: *mut std::ffi::c_void, options: IOOptionBits) -> IOReturn;
         fn IOHIDManagerSetDeviceMatching(manager: *mut std::ffi::c_void, matching: CFDictionaryRef);

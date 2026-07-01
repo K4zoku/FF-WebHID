@@ -97,7 +97,8 @@ async fn main() -> anyhow::Result<()> {
             }
         };
         log::info!("connected to daemon at {pipe_name}");
-        stream.into_split()
+        let (daemon_read, daemon_write) = tokio::io::split(stream);
+        (daemon_read, daemon_write)
     };
 
     #[cfg(not(any(unix, windows)))]
