@@ -196,7 +196,8 @@ async fn handle_websocket(
     let batch_ms = std::env::var("WEBHID_WS_BATCH_MS")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(DEFAULT_BATCH_FLUSH_MS);
+        .unwrap_or(DEFAULT_BATCH_FLUSH_MS)
+        .max(1);
     
     let mut event_rx = event_tx.subscribe();
     let sender_task = tokio::spawn(async move {

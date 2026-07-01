@@ -40,10 +40,6 @@ const DEFAULT_SOCKET: &str = "/tmp/webhid.sock";
 #[cfg(not(unix))]
 const DEFAULT_SOCKET: &str = "";
 
-/// Threshold below which we don't log timing (avoid noise).  Anything above
-/// this is logged at `info` so you can spot the slow stage without digging
-/// through debug logs.
-
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
