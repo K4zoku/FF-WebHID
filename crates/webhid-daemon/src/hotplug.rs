@@ -113,9 +113,6 @@ fn start_udev(event_tx: broadcast::Sender<IpcResponse>) -> anyhow::Result<()> {
 fn run_windows(event_tx: broadcast::Sender<IpcResponse>) {
     use std::collections::HashMap;
     use std::sync::Mutex;
-    use windows::Win32::UI::WindowsAndMessaging::*;
-    use windows::Win32::Foundation::*;
-    use windows::core::*;
 
     static DEVICE_CACHE: Mutex<Option<HashMap<String, webhid::DeviceInfo>>> = Mutex::new(None);
 
@@ -155,45 +152,131 @@ fn run_windows(event_tx: broadcast::Sender<IpcResponse>) {
         }
     }
 
+    // Raw Win32 FFI — avoids windows crate API version mismatches
+    type HMODULE = isize;
+    type HWND = isize;
+    type HINSTANCE = isize;
+    type LONG_PTR = isize;
+    type UINT = u32;
+    type WPARAM = usize;
+    type LPARAM = isize;
+    type LRESULT = isize;
+    type DWORD = u32;
+    type WORD = u16;
+    type HANDLE = isize;
+
+    const WM_DEVICECHANGE: UINT = 0x0219;
+    const DBT_DEVTYP_DEVICEINTERFACE: DWORD = 0x00000005;
+    const DEVICE_NOTIFY_WINDOW_HANDLE: DWORD = 0x00000000;
+
+    #[repr(C)]
+    struct WNDCLASSW {
+        style: UINT,
+        lpfnWndProc: Option<unsafe extern "system" fn(HWND, UINT, WPARAM, LPARAM) -> LRESULT>,
+        cbClsExtra: i32,
+        cbWndExtra: i32,
+        hInstance: HINSTANCE,
+        hIcon: isize,
+        hCursor: isize,
+        hbrBackground: isize,
+        lpszMenuName: *const u16,
+        lpszClassName: *const u16,
+    }
+
+    #[repr(C)]
+    struct MSG {
+        hwnd: HWND,
+        message: UINT,
+        wParam: WPARAM,
+        lParam: LPARAM,
+        time: DWORD,
+        pt_x: i32,
+        pt_y: i32,
+    }
+
+    #[repr(C)]
+    struct DEV_BROADCAST_DEVICEINTERFACE_W {
+        dbcc_size: DWORD,
+        dbcc_devicetype: DWORD,
+        dbcc_reserved: DWORD,
+        dbcc_classguid: [u8; 16], // GUID
+        dbcc_name: [u16; 1], // variable-length, we don't use it
+    }
+
+    // GUID_DEVINTERFACE_HID: {4D1E55B2-F16F-11CF-88CB-001111000030}
+    const GUID_DEVINTERFACE_HID: [u8; 16] = [
+        0xB2, 0x55, 0x1E, 0x4D, 0x6F, 0xF1, 0xCF, 0x11,
+        0x88, 0xCB, 0x00, 0x11, 0x11, 0x00, 0x00, 0x30,
+    ];
+
+    extern "system" {
+        fn GetModuleHandleW(lpModuleName: *const u16) -> HMODULE;
+        fn RegisterClassW(lpWndClass: *const WNDCLASSW) -> WORD;
+        fn CreateWindowExW(
+            dwExStyle: DWORD, lpClassName: *const u16, lpWindowName: *const u16,
+            dwStyle: DWORD, x: i32, y: i32, nWidth: i32, nHeight: i32,
+            hWndParent: HWND, hMenu: isize, hInstance: HINSTANCE, lpParam: *mut std::ffi::c_void,
+        ) -> HWND;
+        fn GetMessageW(lpMsg: *mut MSG, hWnd: HWND, wMsgFilterMin: UINT, wMsgFilterMax: UINT) -> BOOL;
+        fn DefWindowProcW(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRESULT;
+        fn RegisterDeviceNotificationW(
+            hRecipient: HANDLE, NotificationFilter: *const std::ffi::c_void, Flags: DWORD,
+        ) -> HANDLE;
+    }
+
+    type BOOL = i32;
+
+    fn to_wide(s: &str) -> Vec<u16> {
+        s.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
     unsafe {
-        let class_name = w!("WebHIDHiddenWindow");
-        let hinst = GetModuleHandleW(None).unwrap();
+        let class_name: Vec<u16> = to_wide("WebHIDHiddenWindow");
+        let hinst = GetModuleHandleW(std::ptr::null());
+
         let wc = WNDCLASSW {
-            lpfnWndProc: Some(def_window_proc),
-            hInstance: hinst.into(),
-            lpszClassName: class_name,
-            ..Default::default()
+            style: 0,
+            lpfnWndProc: Some(DefWindowProcW),
+            cbClsExtra: 0,
+            cbWndExtra: 0,
+            hInstance: hinst,
+            hIcon: 0,
+            hCursor: 0,
+            hbrBackground: 0,
+            lpszMenuName: std::ptr::null(),
+            lpszClassName: class_name.as_ptr(),
         };
         RegisterClassW(&wc);
 
         let hwnd = CreateWindowExW(
-            WINDOW_EX_STYLE::default(),
-            class_name,
-            w!(""),
-            WINDOW_STYLE::default(),
-            0, 0, 0, 0,
-            None, None, hinst, None,
-        ).unwrap();
+            0, class_name.as_ptr(), std::ptr::null(), 0,
+            0, 0, 0, 0, 0, 0, hinst, std::ptr::null_mut(),
+        );
 
-        let mut notify_filter = DEV_BROADCAST_DEVICEINTERFACE_W {
-            dbcc_size: std::mem::size_of::<DEV_BROADCAST_DEVICEINTERFACE_W>() as u32,
+        if hwnd == 0 {
+            log::error!("CreateWindowExW failed");
+            return;
+        }
+
+        let notify_filter = DEV_BROADCAST_DEVICEINTERFACE_W {
+            dbcc_size: std::mem::size_of::<DEV_BROADCAST_DEVICEINTERFACE_W>() as DWORD,
             dbcc_devicetype: DBT_DEVTYP_DEVICEINTERFACE,
             dbcc_reserved: 0,
-            dbcc_classguid: windows::Win32::Devices::DeviceAndDriverInstallation::GUID_DEVINTERFACE_HID,
-            dbcc_name: [0; 512],
+            dbcc_classguid: GUID_DEVINTERFACE_HID,
+            dbcc_name: [0],
         };
 
         let _hnotify = RegisterDeviceNotificationW(
             hwnd,
-            &notify_filter as *const _ as *const _,
+            &notify_filter as *const _ as *const std::ffi::c_void,
             DEVICE_NOTIFY_WINDOW_HANDLE,
         );
 
-        let tx = event_tx.clone();
-        let mut msg = MSG::default();
+        let tx = event_tx;
+        let mut msg: MSG = std::mem::zeroed();
         loop {
-            let ret = GetMessageW(&mut msg, None, 0, 0);
-            if ret.0 <= 0 { break; }
+            let ret = GetMessageW(&mut msg, 0, 0, 0);
+            if ret <= 0 { break; }
             if msg.message == WM_DEVICECHANGE {
                 refresh_and_diff(&tx);
             }
