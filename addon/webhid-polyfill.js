@@ -273,10 +273,26 @@
     return collections;
   }
 
+  // ── Global device registry ────────────────────────────────────────────────
+  // All HIDDevice instances are tracked globally so that getDevices() and
+  // requestDevice() return references to the SAME objects (not clones).
+  // Open state is shared — if one tab opens a device, console getDevices()
+  // sees opened: true. This matches Chromium's behavior.
+  const _deviceRegistry = new Map(); // internalId -> HIDDevice
+
+  function getOrCreateDevice(deviceInfo) {
+    const id = deviceInfo.device_id;
+    if (id && _deviceRegistry.has(id)) {
+      return _deviceRegistry.get(id);
+    }
+    const dev = new HIDDevice(deviceInfo);
+    if (id) _deviceRegistry.set(id, dev);
+    return dev;
+  }
+
   // ── HIDDevice ─────────────────────────────────────────────────────────────
 
   class HIDDevice extends EventTarget {
-    // Private fields for internal bookkeeping
     #inputReportListeners = new Map();
     #inputReportEventWrappers = new Map();
     #oninputreportListener = null;
@@ -801,9 +817,6 @@
 
   class HID extends EventTarget {
     async getDevices() {
-      // Returns a Promise that resolves with an array of connected HID devices
-      // that the user has previously been granted access to in response to a
-      // requestDevice() call.
       try {
         const savedHashes = await getSavedDevices();
         const deviceCache = await getDeviceCache();
@@ -811,7 +824,7 @@
         for (const hash of savedHashes) {
           const device = deviceCache.get(hash);
           if (device) {
-            grantedDevices.push(new HIDDevice(device));
+            grantedDevices.push(getOrCreateDevice(device));
           }
         }
         return grantedDevices;
@@ -842,7 +855,7 @@
             }
 
             // Resolve with an array of HIDDevice instances per spec
-            resolve(devices.map((d) => new HIDDevice(d)));
+            resolve(devices.map((d) => getOrCreateDevice(d)));
           }
         };
         window.postMessage(
