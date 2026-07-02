@@ -181,6 +181,9 @@
     let i = 0;
     let currentUsagePage = null;
     let currentUsage = null;
+    let reportSize = 0;
+    let reportCount = 0;
+    let reportId = 0;
 
     const readData = (size) => {
       if (i + size > bytes.length) return null;
@@ -192,47 +195,77 @@
       return val;
     };
 
+    function ensureReports(col) {
+      if (!col.inputReports) col.inputReports = [];
+      if (!col.outputReports) col.outputReports = [];
+      if (!col.featureReports) col.featureReports = [];
+    }
+
+    function addReport(col, type) {
+      ensureReports(col);
+      const arr = type === 'input' ? col.inputReports : type === 'output' ? col.outputReports : col.featureReports;
+      const id = reportId || 0;
+      let rep = arr.find(r => r.reportId === id);
+      if (!rep) {
+        rep = { reportId: id, items: [] };
+        arr.push(rep);
+      }
+      rep.items.push({
+        reportId: id,
+        reportType: type,
+        reportSize: reportSize,
+        reportCount: reportCount,
+        usagePage: currentUsagePage,
+        usage: currentUsage,
+      });
+    }
+
     while (i < bytes.length) {
       const b = bytes[i++];
       if (b === 0x05) {
-        // Usage Page (1 byte or 2)
         const v = readData(1);
         if (v !== null) currentUsagePage = v;
       } else if (b === 0x06) {
-        // Usage Page (16-bit)
         const v = readData(2);
         if (v !== null) currentUsagePage = v;
       } else if (b === 0x09) {
-        // Usage (1 byte)
         const v = readData(1);
         if (v !== null) currentUsage = v;
       } else if (b === 0x29) {
-        // Usage (1 byte) (usage minimum/maximum - ignore)
+        readData(1);
+      } else if (b === 0x75) {
         const v = readData(1);
+        if (v !== null) reportSize = v;
+      } else if (b === 0x95) {
+        const v = readData(1);
+        if (v !== null) reportCount = v;
+      } else if (b === 0x85) {
+        const v = readData(1);
+        if (v !== null) reportId = v;
       } else if (b === 0xA1) {
-        // Collection, next byte is collection type
         const colType = readData(1);
-        const col = { type: colType, usagePage: currentUsagePage, usage: currentUsage, children: [] };
+        const col = { type: colType, usagePage: currentUsagePage, usage: currentUsage, children: [], inputReports: [], outputReports: [], featureReports: [] };
         if (stack.length === 0) {
           collections.push(col);
         } else {
           stack[stack.length - 1].children.push(col);
         }
         stack.push(col);
-        // After creating a collection, reset currentUsage to avoid leaking to subsequent siblings
         currentUsage = null;
       } else if (b === 0xC0) {
-        // End Collection
         stack.pop();
-      } else {
-        // For other items interpret the short-item size encoded in low 2 bits
+      } else if ((b & 0xF0) === 0x80 || (b & 0xF0) === 0x90 || (b & 0xF0) === 0xB0) {
         const sizeCode = b & 0x03;
-        let size = 0;
-        if (sizeCode === 0) size = 0;
-        else if (sizeCode === 1) size = 1;
-        else if (sizeCode === 2) size = 2;
-        else if (sizeCode === 3) size = 4;
-        // consume that many bytes
+        const size = sizeCode === 0 ? 0 : sizeCode === 1 ? 1 : sizeCode === 2 ? 2 : 4;
+        i += size;
+        if (stack.length > 0) {
+          const type = (b & 0xF0) === 0x80 ? 'input' : (b & 0xF0) === 0x90 ? 'output' : 'feature';
+          addReport(stack[stack.length - 1], type);
+        }
+        currentUsage = null;
+      } else {
+        const sizeCode = b & 0x03;
+        const size = sizeCode === 0 ? 0 : sizeCode === 1 ? 1 : sizeCode === 2 ? 2 : 4;
         i += size;
       }
     }
