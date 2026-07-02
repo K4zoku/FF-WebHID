@@ -328,6 +328,8 @@
       this.#internalId = deviceInfo.device_id || null;
       this.#reportDescriptor = null;
 
+      // ... normalize collections ...
+
       function normalizeCollection(c) {
         const out = {
           type: c.type !== undefined ? c.type : (c.collection_type !== undefined ? c.collection_type : null),

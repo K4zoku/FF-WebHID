@@ -47,19 +47,39 @@ pub fn make_device_id(info: &HidDeviceInfo) -> String {
 
 /// Return every currently connected HID device via hidapi.
 ///
-/// Composite USB devices expose multiple HID interfaces — hidapi lists each
-/// one separately.  We group interfaces by (vid, pid, serial) and pick the
-/// "primary" interface: the first vendor-defined one (usage_page >= 0xFF00),
-/// or failing that the first non-boot interface, else the first.  This
-/// matches what most WebHID-consuming pages expect (one entry per physical
-/// device, like Chromium's picker).
+/// Chromium groups HID interfaces by (vid, pid, serial) and exposes
+/// only the **top-level Application collections** — one HIDDevice per
+/// top-level Application collection, not one per hidraw node.  We
+/// replicate this: enumerate all hidapi entries, group by
+/// (vid, pid, serial), then within each group select only interfaces
+/// whose top-level collection is an Application collection (type 0x01).
+/// Interfaces that share the same top-level Application collection
+/// (same report descriptor) are deduplicated.
 pub fn enumerate() -> anyhow::Result<Vec<DeviceInfo>> {
     let api = HidApi::new()?;
-    let mut devices = Vec::new();
+
+    // Group by (vid, pid, serial) — each group = 1 physical device
+    let mut groups: std::collections::HashMap<(u16, u16, String), Vec<&HidDeviceInfo>> = std::collections::HashMap::new();
     for info in api.device_list() {
         if is_blocked_pub(info) { continue; }
-        if let Some(d) = info_from_hidapi_pub(info) {
-            devices.push(d);
+        let serial = info.serial_number().unwrap_or("").to_string();
+        groups.entry((info.vendor_id(), info.product_id(), serial)).or_default().push(info);
+    }
+
+    let mut devices = Vec::new();
+    for ifaces in groups.values() {
+        // Deduplicate by report descriptor bytes — multiple hidraw nodes
+        // may expose the same descriptor (e.g. /dev/hidraw0 and /dev/hidraw1
+        // both being the same interface on some kernels).
+        let mut seen_descriptors: std::collections::HashSet<Vec<u8>> = std::collections::HashSet::new();
+        for info in ifaces {
+            let desc = read_report_descriptor_bytes(info);
+            if !seen_descriptors.insert(desc.clone()) {
+                continue; // duplicate interface — skip
+            }
+            if let Some(d) = info_from_hidapi_pub(info) {
+                devices.push(d);
+            }
         }
     }
     Ok(devices)
@@ -85,6 +105,20 @@ pub fn info_from_hidapi_pub(info: &HidDeviceInfo) -> Option<DeviceInfo> {
 
 /// Try to read the raw HID report descriptor from sysfs (Linux) so the
 /// addon can parse full `collections` metadata.  Returns (descriptor, parsed_collections).
+fn read_report_descriptor_bytes(info: &HidDeviceInfo) -> Vec<u8> {
+    let path = info.path().to_string_lossy();
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(devname) = path.rsplit('/').next() {
+            let sys_path = format!("/sys/class/hidraw/{}/device/report_descriptor", devname);
+            if let Ok(bytes) = std::fs::read(&sys_path) {
+                return bytes;
+            }
+        }
+    }
+    Vec::new()
+}
+
 fn read_report_descriptor(info: &HidDeviceInfo) -> (Option<Vec<u8>>, Option<Vec<Collection>>) {
     let path = info.path().to_string_lossy();
     #[cfg(target_os = "linux")]
