@@ -67,7 +67,7 @@ async fn main() -> anyhow::Result<()> {
 
         {
             use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(0o660))
+            std::fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(0o666))
                 .context("set socket permissions")?;
         }
 
