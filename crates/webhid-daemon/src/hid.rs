@@ -102,14 +102,12 @@ pub fn info_from_hidapi_pub(info: &HidDeviceInfo) -> Option<DeviceInfo> {
 /// addon can parse full `collections` metadata.  Returns (descriptor, parsed_collections).
 fn read_report_descriptor(info: &HidDeviceInfo) -> (Option<Vec<u8>>, Option<Vec<Collection>>) {
     let path = info.path().to_string_lossy();
-    // Linux: path is like "/dev/hidraw0" — sysfs at /sys/class/hidraw/hidrawN/device/report_descriptor
     #[cfg(target_os = "linux")]
     {
         if let Some(devname) = path.rsplit('/').next() {
             let sys_path = format!("/sys/class/hidraw/{}/device/report_descriptor", devname);
             if let Ok(bytes) = std::fs::read(&sys_path) {
-                let cols = parse_report_descriptor(&bytes);
-                return (Some(bytes), if cols.is_empty() { None } else { Some(cols) });
+                return (Some(bytes), None);
             }
         }
     }
@@ -257,138 +255,4 @@ pub fn info_by_raw_path(raw_path: &str) -> Option<DeviceInfo> {
         }
     }
     None
-}
-
-// ---------------------------------------------------------------------------
-// Report descriptor parser (kept from original; used for collections metadata)
-// ---------------------------------------------------------------------------
-
-#[cfg(target_os = "linux")]
-fn parse_report_descriptor(buf: &[u8]) -> Vec<Collection> {
-    let mut flat: Vec<Collection> = Vec::new();
-    let mut parents: Vec<Option<usize>> = Vec::new();
-    let mut stack_parents: Vec<usize> = Vec::new();
-    let mut i: usize = 0;
-    let mut usage_page: Option<u16> = None;
-    let mut report_size: u32 = 0;
-    let mut report_count: u32 = 0;
-    let mut report_id: u8 = 0;
-    let mut usages: Vec<u16> = Vec::new();
-    let mut usage_min: Option<u16> = None;
-    let mut usage_max: Option<u16> = None;
-
-    while i < buf.len() {
-        let b = buf[i];
-        i += 1;
-        if b == 0xFE {
-            if i >= buf.len() { break; }
-            let len = buf[i] as usize;
-            i += 1;
-            if i >= buf.len() { break; }
-            i += 1;
-            i = i.saturating_add(len);
-            continue;
-        }
-        match b {
-            0x05 => { if i < buf.len() { usage_page = Some(buf[i] as u16); i += 1; } }
-            0x06 => { if i + 1 < buf.len() { let v = (buf[i] as u16) | ((buf[i + 1] as u16) << 8); usage_page = Some(v); i += 2; } }
-            0x09 => { if i < buf.len() { usages.push(buf[i] as u16); i += 1; } }
-            0x0A => { if i + 1 < buf.len() { let v = (buf[i] as u16) | ((buf[i + 1] as u16) << 8); usages.push(v); i += 2; } }
-            0x19 => { if i < buf.len() { usage_min = Some(buf[i] as u16); i += 1; } }
-            0x29 => { if i < buf.len() { usage_max = Some(buf[i] as u16); i += 1; } }
-            0x2A => { if i + 1 < buf.len() { let v = (buf[i] as u16) | ((buf[i + 1] as u16) << 8); usages.push(v); i += 2; } }
-            0x75 => { if i < buf.len() { report_size = buf[i] as u32; i += 1; } }
-            0x95 => { if i < buf.len() { report_count = buf[i] as u32; i += 1; } }
-            0x85 => { if i < buf.len() { report_id = buf[i]; i += 1; } }
-            0xA1 => {
-                if i < buf.len() {
-                    let col_type = buf[i];
-                    i += 1;
-                    let col = Collection { collection_type: col_type, usage_page, usage: usages.last().cloned(), children: Vec::new(), reports: None };
-                    let parent = stack_parents.last().cloned().map(|v| v);
-                    flat.push(col);
-                    parents.push(parent);
-                    let new_idx = flat.len() - 1;
-                    stack_parents.push(new_idx);
-                    usages.clear();
-                    usage_min = None;
-                    usage_max = None;
-                }
-            }
-            0xC0 => { stack_parents.pop(); }
-            other if (other & 0xF0) == 0x80 || (other & 0xF0) == 0x90 || (other & 0xF0) == 0xB0 => {
-                let size_code = (other & 0x03) as usize;
-                let payload_size = match size_code { 0 => 0, 1 => 1, 2 => 2, 3 => 4, _ => 0 };
-                i = i.saturating_add(payload_size);
-                let report_id_opt = if report_id == 0 { None } else { Some(report_id) };
-                let report_type = if (other & 0xF0) == 0x80 { "input" } else if (other & 0xF0) == 0x90 { "output" } else { "feature" };
-                let mut field_usages: Option<Vec<u16>> = None;
-                if !usages.is_empty() {
-                    field_usages = Some(usages.clone());
-                } else if usage_min.is_some() && usage_max.is_some() {
-                    let min = usage_min.unwrap();
-                    let max = usage_max.unwrap();
-                    if max >= min {
-                        let mut v = Vec::new();
-                        for u in min..=max { v.push(u); }
-                        field_usages = Some(v);
-                    }
-                }
-                let field = webhid::Field {
-                    report_id: report_id_opt,
-                    report_type: report_type.to_string(),
-                    size: report_size,
-                    count: report_count,
-                    usage_page,
-                    usage: usages.last().cloned(),
-                    usages: field_usages,
-                    ..Default::default()
-                };
-                if let Some(&col_idx) = stack_parents.last() {
-                    if let Some(col) = flat.get_mut(col_idx) {
-                        if col.reports.is_none() { col.reports = Some(Vec::new()); }
-                        let reports = col.reports.as_mut().unwrap();
-                        let mut found = false;
-                        for r in reports.iter_mut() {
-                            if r.id == field.report_id && r.report_type == field.report_type {
-                                r.fields.push(field.clone());
-                                found = true;
-                                break;
-                            }
-                        }
-                        if !found {
-                            let rep = webhid::Report { id: field.report_id, report_type: field.report_type.clone(), size_bits: field.size * field.count, fields: vec![field] };
-                            reports.push(rep);
-                        }
-                    }
-                } else {
-                    let mut col = Collection { collection_type: 0, usage_page, usage: None, children: Vec::new(), reports: None };
-                    let rep = webhid::Report { id: field.report_id, report_type: field.report_type.clone(), size_bits: field.size * field.count, fields: vec![field] };
-                    col.reports = Some(vec![rep]);
-                    flat.push(col);
-                    parents.push(None);
-                }
-                usages.clear();
-                usage_min = None;
-                usage_max = None;
-            }
-            _ => {
-                let size_code = (b & 0x03) as usize;
-                let size = match size_code { 0 => 0, 1 => 1, 2 => 2, 3 => 4, _ => 0 };
-                i = i.saturating_add(size);
-            }
-        }
-    }
-
-    let mut nodes: Vec<Collection> = flat.iter().map(|c| Collection { collection_type: c.collection_type, usage_page: c.usage_page, usage: c.usage, children: Vec::new(), reports: c.reports.clone() }).collect();
-    let mut roots: Vec<Collection> = Vec::new();
-    let clones = nodes.clone();
-    for (idx, parent_opt) in parents.into_iter().enumerate() {
-        if let Some(p) = parent_opt {
-            nodes[p].children.push(clones[idx].clone());
-        } else {
-            roots.push(clones[idx].clone());
-        }
-    }
-    roots
 }
