@@ -277,22 +277,22 @@
 
   class HIDDevice extends EventTarget {
     // Private fields for internal bookkeeping
-    #inputReportListeners = new Map();  // Maps wrapper -> original listener
-    #inputReportEventWrappers = new Map();  // Maps wrapper -> event wrapper function
-    #oninputreportListener = null;  // The current oninputreport listener
+    #inputReportListeners = new Map();
+    #inputReportEventWrappers = new Map();
+    #oninputreportListener = null;
     #parsedCollections = null;
-    // Backing store for the read-only `opened` attribute.  The WebHID
-    // spec mandates that `HIDDevice.opened` is a read-only boolean;
-    // page code must not be able to flip it directly.
     #opened = false;
-    // Hot-path active flag: set to true once the SAB/Worker is established
-    // for this device.  When true, sendReport / sendFeatureReport /
-    // receiveFeatureReport bypass the JSON control plane and go directly
-    // over the WebSocket (page → Worker → WS → daemon → hidraw), reducing
-    // roundtrip latency from ~10–20ms to ~1–3ms.
     #hotPath = false;
     #sabListener = null;
     #inputLoopStarted = false;
+    #deviceId = null;
+    #internalId = null;
+    #manufacturer = null;
+    #serialNumber = null;
+    #usagePage = null;
+    #usage = null;
+    #reportDescriptor = null;
+    #maxInputReportSize = 2048;
 
     #installSabListener() {
       if (this.#sabListener) return;
@@ -301,9 +301,9 @@
         const detail = event.data.event;
         if (!detail || detail.event_type !== "webhid-sab") return;
         const evDeviceId = detail.device_id ? String.fromCharCode(...detail.device_id) : null;
-        if (!evDeviceId || !this.deviceId || evDeviceId !== this.deviceId) return;
+        if (!evDeviceId || !this.#deviceId || evDeviceId !== this.#deviceId) return;
         this.#hotPath = true;
-        console.info('[webhid] hotPath ON for', this.deviceId);
+        console.info('[webhid] hotPath ON for', this.#deviceId);
         if (!this.#inputLoopStarted) {
           this.#inputLoopStarted = true;
           startInputReportLoop(this, detail.sab, detail.reportSize);
@@ -320,25 +320,13 @@
       this.vendorId = deviceInfo.vendor_id;
       this.productId = deviceInfo.product_id;
       this.productName = deviceInfo.product_name;
-      this.manufacturer = deviceInfo.manufacturer;
-      this.serialNumber = deviceInfo.serial_number;
-      this.usbVendorId = deviceInfo.vendor_id;
-      this.usbProductId = deviceInfo.product_id;
-      // HID usage information (may be null/undefined if daemon didn't provide it)
-      this.usagePage = deviceInfo.usage_page !== undefined ? deviceInfo.usage_page : null;
-      this.usage = deviceInfo.usage !== undefined ? deviceInfo.usage : null;
-      this.deviceId = null;
-      // The hidraw path uniquely identifies this HID interface and is
-      // what the daemon expects on `open`.  A composite USB device
-      // exposes several interfaces — each gets its own HIDDevice
-      // instance with a distinct path, even when vid/pid are identical.
-      this.path = deviceInfo.device_id || null;
-
-      // If the daemon provided parsed `collections`, prefer them. The
-      // daemon-side collection objects may use snake_case field names; we
-      // normalise them to the page API shape (camelCase + `type` instead
-      // of `collection_type`).
-      this.reportDescriptor = null;
+      this.#manufacturer = deviceInfo.manufacturer || null;
+      this.#serialNumber = deviceInfo.serial_number || null;
+      this.#usagePage = deviceInfo.usage_page !== undefined ? deviceInfo.usage_page : null;
+      this.#usage = deviceInfo.usage !== undefined ? deviceInfo.usage : null;
+      this.#deviceId = null;
+      this.#internalId = deviceInfo.device_id || null;
+      this.#reportDescriptor = null;
 
       function normalizeCollection(c) {
         const out = {
@@ -413,7 +401,7 @@
       } else if (deviceInfo.report_descriptor && Array.isArray(deviceInfo.report_descriptor)) {
         try {
           const arr = new Uint8Array(deviceInfo.report_descriptor);
-          this.reportDescriptor = arr;
+          this.#reportDescriptor = arr;
           // JS parser runs immediately (sync fallback)
           this.#parsedCollections = parseReportDescriptor(arr);
           // Ask bridge (isolated world, CSP-free) for WASM parse — richer output
@@ -426,18 +414,18 @@
             if (event.data.collections) {
               try {
                 this.#parsedCollections = Array.from(event.data.collections).map(normalizeCollection);
-                this.maxInputReportSize = this.#calculateMaxInputReportSize();
+                this.#maxInputReportSize = this.#calculateMaxInputReportSize();
               } catch (e) {}
             }
           };
           window.addEventListener("message", wasmListener);
         } catch (e) {
-          this.reportDescriptor = null;
+          this.#reportDescriptor = null;
           this.#parsedCollections = null;
         }
       }
 
-      this.maxInputReportSize = this.#calculateMaxInputReportSize();
+      this.#maxInputReportSize = this.#calculateMaxInputReportSize();
     }
 
     #calculateMaxInputReportSize() {
@@ -455,12 +443,8 @@
       return max;
     }
 
-    // Read-only `opened` attribute (WebHID spec compliant).  Page code
-    // cannot assign to this; only `open()` / `close()` flip the
-    // underlying private field.
-    get opened() {
-      return this.#opened;
-    }
+    get opened() { return this.#opened; }
+    get deviceId() { return this.#deviceId; }
 
     // Return parsed collections (if available) or fallback to usage info.
     get collections() {
@@ -468,7 +452,7 @@
       // Return a properly structured collection with empty report arrays
       // to match the WebHID spec and prevent "items is undefined" errors
       return [{
-        usagePage: this.usagePage,
+        usagePage: this.#usagePage,
         usage: this.usage,
         inputReports: [],
         outputReports: [],
@@ -481,24 +465,18 @@
       if (this.opened) {
         throw new DOMException("Device is already open", "InvalidStateError");
       }
-      if (!this.path) {
-        throw new DOMException(
-          "HIDDevice has no underlying hidraw path",
-          "InvalidStateError",
-        );
+      if (!this.#internalId) {
+        throw new DOMException("No device ID", "InvalidStateError");
       }
       try {
-        // Address the specific hidraw interface by path — sending only
-        // vid/pid would let the daemon pick any one of several matching
-        // interfaces and silently ignore the rest.
         const response = await sendRequest("open", {
-          device_id: this.path.split("").map((c) => c.charCodeAt(0)),
-          reportSize: this.maxInputReportSize,
+          device_id: this.#internalId.split("").map((c) => c.charCodeAt(0)),
+          reportSize: this.#maxInputReportSize,
         });
         if (response.success) {
           this.#opened = true;
-          this.deviceId = String.fromCharCode(...response.data);
-          console.log('[webhid] open ok, installing sab listener for', this.deviceId);
+          this.#deviceId = String.fromCharCode(...response.data);
+          console.log('[webhid] open ok, installing sab listener for', this.#deviceId);
           this.#installSabListener();
           this.dispatchEvent(new Event("open"));
           return true;
@@ -510,10 +488,10 @@
     }
 
     async close() {
-      if (!this.opened || !this.deviceId) return;
+      if (!this.opened || !this.#deviceId) return;
       try {
         const response = await sendRequest("close", {
-          data: this.deviceId.split("").map((c) => c.charCodeAt(0)),
+          data: this.#deviceId.split("").map((c) => c.charCodeAt(0)),
         });
         if (response.success) {
           this.#opened = false;
@@ -523,7 +501,7 @@
             window.removeEventListener("message", this.#sabListener);
             this.#sabListener = null;
           }
-          this.deviceId = null;
+          this.#deviceId = null;
           this.dispatchEvent(new Event("close"));
         } else {
           throw new Error("Failed to close device");
@@ -550,7 +528,7 @@
         // roundtrip latency by ~5–10×.
         const action = this.#hotPath ? "worker-send" : "sendreport";
         const response = await sendRequest(action, {
-          device_id: this.deviceId.split("").map((c) => c.charCodeAt(0)),
+          device_id: this.#deviceId.split("").map((c) => c.charCodeAt(0)),
           report_id: reportId,
           data: Array.from(buffer),
         });
@@ -567,7 +545,7 @@
       try {
         const action = this.#hotPath ? "worker-receiveFeature" : "receivefeaturereport";
         const response = await sendRequest(action, {
-          device_id: this.deviceId.split("").map((c) => c.charCodeAt(0)),
+          device_id: this.#deviceId.split("").map((c) => c.charCodeAt(0)),
           report_id: reportId,
         });
         if (response.success && response.data) {
@@ -589,7 +567,7 @@
       try {
         const action = this.#hotPath ? "worker-sendFeature" : "sendfeaturereport";
         const response = await sendRequest(action, {
-          device_id: this.deviceId.split("").map((c) => c.charCodeAt(0)),
+          device_id: this.#deviceId.split("").map((c) => c.charCodeAt(0)),
           report_id: reportId,
           data: Array.from(buffer),
         });
@@ -600,6 +578,13 @@
       } catch (error) {
         throw new DOMException(error.message, "NetworkError");
       }
+    }
+
+    async forget() {
+      if (this.opened) await this.close();
+      await sendRequest("forgetDevice", {
+        device_id: this.#internalId.split("").map((c) => c.charCodeAt(0)),
+      });
     }
 
     addEventListener(type, listener) {
@@ -623,7 +608,7 @@
 
           // Handle SharedArrayBuffer loop initiation
           if (event_type === "webhid-sab") {
-            if (evDeviceId && this.deviceId && evDeviceId === this.deviceId) {
+            if (evDeviceId && this.#deviceId && evDeviceId === this.#deviceId) {
               this.#hotPath = true;
               if (!this.#inputLoopStarted) {
                 this.#inputLoopStarted = true;
@@ -645,7 +630,7 @@
           // causing protocols that expect ACKs to stall.
           if (event_type === "input_report") {
             if (this.#hotPath) return;
-            if (evDeviceId && this.deviceId && evDeviceId !== this.deviceId) return;
+            if (evDeviceId && this.#deviceId && evDeviceId !== this.#deviceId) return;
             const dataBytes = detail.data
               ? new Uint8Array(detail.data)
               : new Uint8Array(0);
