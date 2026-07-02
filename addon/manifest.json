@@ -24,6 +24,11 @@
     "scripts": ["background.js"]
   },
 
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": "icons/icon.svg"
+  },
+
   "options_ui": {
     "page": "settings.html",
     "browser_style": false
@@ -43,7 +48,7 @@
 
   "web_accessible_resources": [
     {
-      "resources": ["res/*.svg", "webhid.css", "hid-worker.js"],
+      "resources": ["res/*.svg", "webhid.css", "hid-worker.js", "popup.html", "popup.js", "popup.css"],
       "matches": ["<all_urls>"]
     }
   ],

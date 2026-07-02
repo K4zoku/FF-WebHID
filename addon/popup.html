@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="popup.css">
+</head>
+<body>
+<div id="header">
+  <h1>FF-WebHID</h1>
+  <span id="site-name" class="muted"></span>
+</div>
+<div id="devices-section">
+  <h2>Connected Devices</h2>
+  <div id="device-list"></div>
+  <div id="no-devices" class="muted">No devices saved for this site.</div>
+</div>
+<div id="settings-section">
+  <h2>Settings</h2>
+  <div class="setting">
+    <div class="setting-info">
+      <h3>Fire-and-forget sendReport</h3>
+      <p>Resolve immediately without daemon ack</p>
+    </div>
+    <label class="toggle">
+      <input type="checkbox" id="fireAndForget">
+      <span class="slider"></span>
+    </label>
+  </div>
+  <div class="setting">
+    <div class="setting-info">
+      <h3>SAB Data Plane</h3>
+      <p>WebSocket + SharedArrayBuffer (injects COOP/COEP)</p>
+    </div>
+    <label class="toggle">
+      <input type="checkbox" id="sabEnabled">
+      <span class="slider"></span>
+    </label>
+  </div>
+</div>
+<div id="default-note" class="muted">Changes here override defaults for this site.</div>
+<a id="open-settings" href="#">Global settings →</a>
+<script src="popup.js"></script>
+</body>
+</html>

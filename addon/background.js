@@ -1,3 +1,5 @@
+let _deviceCache = [];
+
 const NativeMessaging = {
   port: null,
   _nextId: 1,
@@ -154,10 +156,19 @@ browser.runtime.onInstalled.addListener(() => {
 // ---------------------------------------------------------------------------
 
 let _sabEnabled = true;
-browser.storage.local.get({ sabEnabled: true }).then(s => { _sabEnabled = s.sabEnabled; });
+async function loadSabSetting() {
+  const global = await browser.storage.local.get({ sabEnabled: true });
+  _sabEnabled = global.sabEnabled;
+}
+loadSabSetting();
+
 browser.storage.onChanged.addListener((changes, area) => {
-  if (area === 'local' && changes.sabEnabled) {
-    _sabEnabled = changes.sabEnabled.newValue;
+  if (area === 'local') {
+    if (changes.sabEnabled) {
+      _sabEnabled = changes.sabEnabled.newValue;
+    }
+    // Reload from storage to pick up per-site overrides
+    loadSabSetting();
     console.log('[bg] SAB data plane:', _sabEnabled);
   }
 });
@@ -194,7 +205,12 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true;
     case "enumerate":
       NativeMessaging.enumerateDevices()
-        .then(sendResponse)
+        .then((response) => {
+          if (response.success && response.devices) {
+            _deviceCache = response.devices;
+          }
+          sendResponse(response);
+        })
         .catch((e) => {
           sendResponse({ success: false, error: e.message });
         });
@@ -278,6 +294,10 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
       })();
       return true;
+
+    case "getDeviceCache":
+      sendResponse({ devices: _deviceCache });
+      return false;
 
     default:
       return false;
