@@ -48,7 +48,7 @@
 
   "web_accessible_resources": [
     {
-      "resources": ["res/*.svg", "webhid.css", "hid-worker.js", "popup.html", "popup.js", "popup.css"],
+      "resources": ["res/*.svg", "webhid.css", "hid-worker.js", "popup.html", "popup.js", "popup.css", "wasm-parser.js", "wasm-parser.wasm"],
       "matches": ["<all_urls>"]
     }
   ],

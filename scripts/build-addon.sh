@@ -6,6 +6,11 @@ ADDON_DIR="$ROOT/addon"
 OUT="$ROOT/dist"
 TARGET="$OUT/webhid-addon.xpi"
 
+# Build WASM first
+if [ -f "$ROOT/scripts/build-wasm.sh" ]; then
+    "$ROOT/scripts/build-wasm.sh"
+fi
+
 mkdir -p "$OUT"
 cd "$ADDON_DIR"
 
@@ -20,7 +25,6 @@ if [ -f "$TARGET" ]; then
 fi
 
 echo "Building addon XPI into $OUT/webhid-addon.xpi..."
-# Create a zip of the addon directory contents. Run from inside the addon dir so paths in the XPI are relative.
 zip -r -X "$TARGET" . -x "*.DS_Store" "*/.git/*" >/dev/null
 
 echo "Created $TARGET"
