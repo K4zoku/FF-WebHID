@@ -414,7 +414,23 @@
         try {
           const arr = new Uint8Array(deviceInfo.report_descriptor);
           this.reportDescriptor = arr;
+          // JS parser runs immediately (sync fallback)
           this.#parsedCollections = parseReportDescriptor(arr);
+          // Ask bridge (isolated world, CSP-free) for WASM parse — richer output
+          const parseId = ++_reqId;
+          window.postMessage({ __webhid_bridge: "parse-descriptor", id: parseId, bytes: Array.from(arr) }, "*");
+          const wasmListener = (event) => {
+            if (!event.data || event.data.__webhid_bridge !== "parse-descriptor-result") return;
+            if (event.data.id !== parseId) return;
+            window.removeEventListener("message", wasmListener);
+            if (event.data.collections) {
+              try {
+                this.#parsedCollections = Array.from(event.data.collections).map(normalizeCollection);
+                this.maxInputReportSize = this.#calculateMaxInputReportSize();
+              } catch (e) {}
+            }
+          };
+          window.addEventListener("message", wasmListener);
         } catch (e) {
           this.reportDescriptor = null;
           this.#parsedCollections = null;

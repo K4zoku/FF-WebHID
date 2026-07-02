@@ -688,6 +688,38 @@
     }
   });
 
+  // WASM descriptor parser — runs in isolated world (CSP-free)
+  let _wasmReady = false;
+  let _wasmParser = null;
+
+  async function initWasm() {
+    if (_wasmReady) return;
+    _wasmReady = true;
+    try {
+      const jsUrl = browser.runtime.getURL('wasm-parser.js');
+      const wasmUrl = browser.runtime.getURL('wasm-parser.wasm');
+      const mod = await import(jsUrl);
+      await mod.default(wasmUrl);
+      _wasmParser = mod.parse_descriptor;
+      console.log('[bridge] WASM descriptor parser ready');
+    } catch (e) {
+      console.warn('[bridge] WASM init failed, JS fallback:', e);
+    }
+  }
+
+  initWasm();
+
+  window.addEventListener("message", async (event) => {
+    if (!event.data || event.data.__webhid_bridge !== "parse-descriptor") return;
+    const { id, bytes } = event.data;
+    await initWasm();
+    let collections = null;
+    if (_wasmParser) {
+      try { collections = _wasmParser(new Uint8Array(bytes)); } catch (e) {}
+    }
+    window.postMessage({ __webhid_bridge: "parse-descriptor-result", id, collections }, "*");
+  });
+
   // Forward events pushed by background.js into the page world.
   browser.runtime.onMessage.addListener((message) => {
     if (message.action === "webhid-device-event" && message.event) {

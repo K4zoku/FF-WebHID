@@ -3,5 +3,6 @@ members = [
     "webhid",
     "webhid-daemon",
     "webhid-native-messaging",
+    "webhid-descriptor-wasm",
 ]
 resolver = "2"
