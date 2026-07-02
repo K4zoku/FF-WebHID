@@ -46,6 +46,10 @@ jobs:
       - name: Build Rust binaries
         run: cargo build --release --manifest-path crates/Cargo.toml
 
+      - name: Install wasm-pack
+        if: runner.os == 'Linux'
+        run: cargo install wasm-pack && rustup target add wasm32-unknown-unknown
+
       - name: Build Addon XPI
         if: runner.os == 'Linux'
         run: ./scripts/build-addon.sh
