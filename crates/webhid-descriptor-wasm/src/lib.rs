@@ -1,42 +1,140 @@
+//! WebHID report-descriptor parser → Chromium-shaped collections tree.
+//!
+//! Output mirrors Chromium's `HIDDevice.collections` exactly:
+//!   - Collection: { type, usagePage, usage, children, inputReports,
+//!                    outputReports, featureReports }
+//!   - Report:     { reportId, items[] }
+//!   - Item:       { usages[], reportSize, reportCount, logicalMinimum,
+//!                    logicalMaximum, physicalMinimum, physicalMaximum,
+//!                    unitExponent, unitSystem, unitFactor*Exponent,
+//!                    isAbsolute, isArray, isRange, isConstant, isLinear,
+//!                    isVolatile, isBufferedBytes, hasNull,
+//!                    hasPreferredState, wrap }
+//!
+//! Two non-obvious behaviours required to match Chromium:
+//!
+//! 1. **Variable-field aggregation.** A single HID Input main item with
+//!    `ReportCount = N` produces N `VariableField` instances in hidreport
+//!    (one per usage). Chromium exposes them as ONE item with
+//!    `usages: [u1, u2, ..., uN]` and `reportCount: N`. We walk the field
+//!    list and merge consecutive Variable instances that share the same
+//!    signature (everything except `usage` and `bits`) and have contiguous
+//!    bit offsets.
+//!
+//! 2. **Constant-field elision.** Chromium drops padding/constant items
+//!    entirely from `items[]`. We do the same.
+//!
+//! 3. **Report attachment.** Reports are attached to the leaf collection of
+//!    the first non-Constant field's chain. Constant-only reports are
+//!    dropped (matching Chromium).
+
 use wasm_bindgen::prelude::*;
-use hidreport::{ReportDescriptor, Field, FieldAttributes, Report};
+use hidreport::{
+    ReportDescriptor, Report, Field, FieldAttributes,
+    Collection, UnitSystem, Units, Usage, VariableField,
+};
 use serde::Serialize;
 use std::collections::HashMap;
+
+// ── Output types (camelCase, mirrors Chromium spec) ─────────────────────────
 
 #[derive(Serialize, Clone)]
 struct WebHidCollection {
     #[serde(rename = "type")]
     collection_type: u8,
+    #[serde(skip_serializing_if = "Option::is_none")]
     usage_page: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     usage: Option<u16>,
+    #[serde(default)]
     children: Vec<WebHidCollection>,
+    #[serde(default, rename = "inputReports")]
     input_reports: Vec<WebHidReport>,
+    #[serde(default, rename = "outputReports")]
     output_reports: Vec<WebHidReport>,
+    #[serde(default, rename = "featureReports")]
     feature_reports: Vec<WebHidReport>,
 }
 
 #[derive(Serialize, Clone)]
 struct WebHidReport {
+    #[serde(skip_serializing_if = "Option::is_none")]
     report_id: Option<u8>,
+    #[serde(default)]
     items: Vec<WebHidField>,
 }
 
-#[derive(Serialize, Clone)]
+/// Item shape — exactly matches Chromium's `HIDReportItem`.
+/// No extra fields, no snake_case aliases.
+/// NOTE: does not `derive(Serialize)` — we provide a manual `Serialize`
+/// impl below to control the camelCase output names precisely.
+#[derive(Clone)]
 struct WebHidField {
-    usage_page: Option<u16>,
-    usages: Vec<u16>,
-    logical_minimum: Option<i32>,
-    logical_maximum: Option<i32>,
-    physical_minimum: Option<i32>,
-    physical_maximum: Option<i32>,
-    unit_exponent: Option<i32>,
-    unit: Option<u32>,
+    usages: Vec<u32>,
+    report_size: u32,
+    report_count: u32,
+    logical_minimum: i32,
+    logical_maximum: i32,
+    physical_minimum: i32,
+    physical_maximum: i32,
+    unit_exponent: i32,
+    unit_system: String,
+    unit_factor_length_exponent: i32,
+    unit_factor_mass_exponent: i32,
+    unit_factor_time_exponent: i32,
+    unit_factor_temperature_exponent: i32,
+    unit_factor_current_exponent: i32,
+    unit_factor_luminous_intensity_exponent: i32,
     is_absolute: bool,
     is_array: bool,
     is_range: bool,
-    report_id: Option<u8>,
-    report_type: String,
+    is_constant: bool,
+    is_linear: bool,
+    is_volatile: bool,
+    is_buffered_bytes: bool,
+    has_null: bool,
+    has_preferred_state: bool,
+    wrap: bool,
 }
+
+// serde field names default to snake_case; we override the output names in
+// the manual `Serialize` impl below to emit camelCase exactly matching
+// Chromium's `HIDReportItem`.
+
+impl serde::Serialize for WebHidField {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut st = s.serialize_struct("WebHidField", 25)?;
+        st.serialize_field("usages", &self.usages)?;
+        st.serialize_field("reportSize", &self.report_size)?;
+        st.serialize_field("reportCount", &self.report_count)?;
+        st.serialize_field("logicalMinimum", &self.logical_minimum)?;
+        st.serialize_field("logicalMaximum", &self.logical_maximum)?;
+        st.serialize_field("physicalMinimum", &self.physical_minimum)?;
+        st.serialize_field("physicalMaximum", &self.physical_maximum)?;
+        st.serialize_field("unitExponent", &self.unit_exponent)?;
+        st.serialize_field("unitSystem", &self.unit_system)?;
+        st.serialize_field("unitFactorLengthExponent", &self.unit_factor_length_exponent)?;
+        st.serialize_field("unitFactorMassExponent", &self.unit_factor_mass_exponent)?;
+        st.serialize_field("unitFactorTimeExponent", &self.unit_factor_time_exponent)?;
+        st.serialize_field("unitFactorTemperatureExponent", &self.unit_factor_temperature_exponent)?;
+        st.serialize_field("unitFactorCurrentExponent", &self.unit_factor_current_exponent)?;
+        st.serialize_field("unitFactorLuminousIntensityExponent", &self.unit_factor_luminous_intensity_exponent)?;
+        st.serialize_field("isAbsolute", &self.is_absolute)?;
+        st.serialize_field("isArray", &self.is_array)?;
+        st.serialize_field("isRange", &self.is_range)?;
+        st.serialize_field("isConstant", &self.is_constant)?;
+        st.serialize_field("isLinear", &self.is_linear)?;
+        st.serialize_field("isVolatile", &self.is_volatile)?;
+        st.serialize_field("isBufferedBytes", &self.is_buffered_bytes)?;
+        st.serialize_field("hasNull", &self.has_null)?;
+        st.serialize_field("hasPreferredState", &self.has_preferred_state)?;
+        st.serialize_field("wrap", &self.wrap)?;
+        st.end()
+    }
+}
+
+// ── Entry point ─────────────────────────────────────────────────────────────
 
 #[wasm_bindgen]
 pub fn parse_descriptor(bytes: &[u8]) -> JsValue {
@@ -46,82 +144,274 @@ pub fn parse_descriptor(bytes: &[u8]) -> JsValue {
     };
 
     let mut tree = CollectionTreeBuilder::new();
-
     for report in rdesc.input_reports() {
-        let rid = report.report_id().map(|id| id.into());
-        let items: Vec<WebHidField> = report.fields().iter().map(|f| convert_field(f, rid, "input")).collect();
-        tree.add_report(report, "input", WebHidReport { report_id: rid, items });
+        tree.add_report(report, "input");
     }
     for report in rdesc.output_reports() {
-        let rid = report.report_id().map(|id| id.into());
-        let items: Vec<WebHidField> = report.fields().iter().map(|f| convert_field(f, rid, "output")).collect();
-        tree.add_report(report, "output", WebHidReport { report_id: rid, items });
+        tree.add_report(report, "output");
     }
     for report in rdesc.feature_reports() {
-        let rid = report.report_id().map(|id| id.into());
-        let items: Vec<WebHidField> = report.fields().iter().map(|f| convert_field(f, rid, "feature")).collect();
-        tree.add_report(report, "feature", WebHidReport { report_id: rid, items });
+        tree.add_report(report, "feature");
     }
 
     let collections = tree.build();
     serde_wasm_bindgen::to_value(&collections).unwrap_or(JsValue::NULL)
 }
 
-fn convert_field(field: &Field, report_id: Option<u8>, report_type: &str) -> WebHidField {
-    match field {
-        Field::Variable(v) => {
-            let page: u16 = v.usage.usage_page.into();
-            let uid: u16 = v.usage.usage_id.into();
-            WebHidField {
-                usage_page: Some(page),
-                usages: vec![uid],
-                logical_minimum: Some(v.logical_minimum.into()),
-                logical_maximum: Some(v.logical_maximum.into()),
-                physical_minimum: v.physical_minimum.map(|x| x.into()),
-                physical_maximum: v.physical_maximum.map(|x| x.into()),
-                unit_exponent: v.unit_exponent.map(|x| x.into()),
-                unit: v.unit.map(|x| x.into()),
-                is_absolute: v.is_absolute(),
-                is_array: false,
-                is_range: false,
-                report_id,
-                report_type: report_type.to_string(),
-            }
-        }
-        Field::Array(a) => {
-            let usages: Vec<u16> = if a.is_usage_range() {
-                a.usage_range().map(|r| {
-                    let lo: u16 = r.minimum().usage_id().into();
-                    let hi: u16 = r.maximum().usage_id().into();
-                    (lo..=hi).collect()
-                }).unwrap_or_default()
-            } else {
-                a.usages().iter().map(|u| u.usage_id.into()).collect()
-            };
-            WebHidField {
-                usage_page: a.usages().first().map(|u| u.usage_page.into()),
-                usages,
-                logical_minimum: Some(a.logical_minimum.into()),
-                logical_maximum: Some(a.logical_maximum.into()),
-                physical_minimum: a.physical_minimum.map(|x| x.into()),
-                physical_maximum: a.physical_maximum.map(|x| x.into()),
-                unit_exponent: a.unit_exponent.map(|x| x.into()),
-                unit: a.unit.map(|x| x.into()),
-                is_absolute: true,
-                is_array: true,
-                is_range: a.is_usage_range(),
-                report_id,
-                report_type: report_type.to_string(),
-            }
-        }
-        Field::Constant(_) => WebHidField {
-            usage_page: None, usages: vec![], logical_minimum: None, logical_maximum: None,
-            physical_minimum: None, physical_maximum: None, unit_exponent: None, unit: None,
-            is_absolute: false, is_array: false, is_range: false,
-            report_id, report_type: report_type.to_string(),
-        },
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+fn pack_usage(u: &Usage) -> u32 {
+    let page: u16 = u.usage_page.into();
+    let id: u16 = u.usage_id.into();
+    ((page as u32) << 16) | (id as u32)
+}
+
+fn unit_system_string(sys: UnitSystem) -> &'static str {
+    match sys {
+        UnitSystem::None => "none",
+        UnitSystem::SILinear => "si-linear",
+        UnitSystem::SIRotation => "si-rotation",
+        UnitSystem::EnglishLinear => "english-linear",
+        UnitSystem::EnglishRotation => "english-rotation",
     }
 }
+
+fn units_exponent(u: &Units) -> i32 {
+    match u {
+        Units::None => 0,
+        Units::Centimeter { exponent }
+        | Units::Radians { exponent }
+        | Units::Inch { exponent }
+        | Units::Degrees { exponent }
+        | Units::Gram { exponent }
+        | Units::Slug { exponent }
+        | Units::Seconds { exponent }
+        | Units::Kelvin { exponent }
+        | Units::Fahrenheit { exponent }
+        | Units::Ampere { exponent }
+        | Units::Candela { exponent } => *exponent as i32,
+    }
+}
+
+fn decode_unit(unit: Option<&hidreport::Unit>) -> (UnitSystem, i32, i32, i32, i32, i32, i32) {
+    if let Some(u) = unit {
+        let sys = u.system();
+        (
+            sys,
+            units_exponent(&u.length()),
+            units_exponent(&u.mass()),
+            units_exponent(&u.time()),
+            units_exponent(&u.temperature()),
+            units_exponent(&u.current()),
+            units_exponent(&u.luminosity()),
+        )
+    } else {
+        (UnitSystem::None, 0, 0, 0, 0, 0, 0)
+    }
+}
+
+// ── Variable-field signature for aggregation ────────────────────────────────
+//
+// Two VariableField instances are considered part of the same HID Input item
+// (and thus the same Chromium report item) iff their signatures match and
+// their bit ranges are contiguous.
+
+#[derive(PartialEq)]
+struct VarSig {
+    report_size: u32,           // per-item bit size
+    logical_min: i32,
+    logical_max: i32,
+    physical_min: i32,
+    physical_max: i32,
+    unit_exponent: i32,
+    /// UnitSystem doesn't implement PartialEq in hidreport 0.6, so we
+    /// store the string form (which does compare) instead.
+    unit_system: &'static str,
+    unit_len: i32,
+    unit_mass: i32,
+    unit_time: i32,
+    unit_temp: i32,
+    unit_cur: i32,
+    unit_lum: i32,
+    is_absolute: bool,
+    is_linear: bool,
+    is_volatile: bool,
+    is_buffered_bytes: bool,
+    has_null: bool,
+    has_preferred_state: bool,
+    wrap: bool,
+}
+
+fn var_signature(v: &VariableField) -> VarSig {
+    let (sys, len, mass, time, temp, cur, lum) = decode_unit(v.unit.as_ref());
+    VarSig {
+        report_size: (v.bits.end - v.bits.start) as u32,
+        logical_min: v.logical_minimum.into(),
+        logical_max: v.logical_maximum.into(),
+        physical_min: v.physical_minimum.map(|x| x.into()).unwrap_or(0),
+        physical_max: v.physical_maximum.map(|x| x.into()).unwrap_or(0),
+        unit_exponent: v.unit_exponent.map(|x| x.into()).unwrap_or(0),
+        unit_system: unit_system_string(sys),
+        unit_len: len,
+        unit_mass: mass,
+        unit_time: time,
+        unit_temp: temp,
+        unit_cur: cur,
+        unit_lum: lum,
+        is_absolute: v.is_absolute(),
+        is_linear: v.is_linear(),
+        is_volatile: v.is_volatile().unwrap_or(false),
+        is_buffered_bytes: v.is_buffered_bytes(),
+        has_null: v.has_null_state(),
+        has_preferred_state: v.has_preferred_state(),
+        wrap: v.wraps(),
+    }
+}
+
+fn make_aggregated_variable(
+    first: &VariableField,
+    usages: Vec<u32>,
+    count: u32,
+) -> WebHidField {
+    let sig = var_signature(first);
+    WebHidField {
+        usages,
+        report_size: sig.report_size,
+        report_count: count,
+        logical_minimum: sig.logical_min,
+        logical_maximum: sig.logical_max,
+        physical_minimum: sig.physical_min,
+        physical_maximum: sig.physical_max,
+        unit_exponent: sig.unit_exponent,
+        unit_system: sig.unit_system.to_string(),
+        unit_factor_length_exponent: sig.unit_len,
+        unit_factor_mass_exponent: sig.unit_mass,
+        unit_factor_time_exponent: sig.unit_time,
+        unit_factor_temperature_exponent: sig.unit_temp,
+        unit_factor_current_exponent: sig.unit_cur,
+        unit_factor_luminous_intensity_exponent: sig.unit_lum,
+        is_absolute: sig.is_absolute,
+        is_array: false,
+        is_range: false,
+        is_constant: false,
+        is_linear: sig.is_linear,
+        is_volatile: sig.is_volatile,
+        is_buffered_bytes: sig.is_buffered_bytes,
+        has_null: sig.has_null,
+        has_preferred_state: sig.has_preferred_state,
+        wrap: sig.wrap,
+    }
+}
+
+fn make_array_field(a: &hidreport::ArrayField) -> WebHidField {
+    let (usages, is_range, usage_min, usage_max) = if a.is_usage_range() {
+        if let Some(r) = a.usage_range() {
+            let lo_page: u16 = r.minimum().usage_page().into();
+            let lo_id: u16 = r.minimum().usage_id().into();
+            let hi_id: u16 = r.maximum().usage_id().into();
+            let count = (hi_id as i32).saturating_sub(lo_id as i32).max(0) as usize + 1;
+            let mut v = Vec::with_capacity(count);
+            for uid in lo_id..=hi_id {
+                v.push(((lo_page as u32) << 16) | (uid as u32));
+            }
+            let lo_packed = ((lo_page as u32) << 16) | (lo_id as u32);
+            let hi_packed = ((lo_page as u32) << 16) | (hi_id as u32);
+            (v, true, Some(lo_packed), Some(hi_packed))
+        } else {
+            (vec![], true, None, None)
+        }
+    } else {
+        let usages: Vec<u32> = a.usages().iter().map(pack_usage).collect();
+        (usages, false, None, None)
+    };
+
+    let (sys, len, mass, time, temp, cur, lum) = decode_unit(a.unit.as_ref());
+
+    // per-item bit size = total bits / report count
+    let count: usize = a.report_count.into();
+    let count_u32 = count as u32;
+    let total_bits = (a.bits.end - a.bits.start) as u32;
+    let per_item_bits = if count > 0 { total_bits / count_u32 } else { total_bits };
+
+    let field = WebHidField {
+        usages,
+        report_size: per_item_bits,
+        report_count: count_u32,
+        logical_minimum: a.logical_minimum.into(),
+        logical_maximum: a.logical_maximum.into(),
+        physical_minimum: a.physical_minimum.map(|x| x.into()).unwrap_or(0),
+        physical_maximum: a.physical_maximum.map(|x| x.into()).unwrap_or(0),
+        unit_exponent: a.unit_exponent.map(|x| x.into()).unwrap_or(0),
+        unit_system: unit_system_string(sys).to_string(),
+        unit_factor_length_exponent: len,
+        unit_factor_mass_exponent: mass,
+        unit_factor_time_exponent: time,
+        unit_factor_temperature_exponent: temp,
+        unit_factor_current_exponent: cur,
+        unit_factor_luminous_intensity_exponent: lum,
+        is_absolute: a.is_absolute(),
+        is_array: true,
+        is_range,
+        is_constant: false,
+        is_linear: a.is_linear(),
+        is_volatile: a.is_volatile().unwrap_or(false),
+        is_buffered_bytes: a.is_buffered_bytes(),
+        has_null: a.has_null_state(),
+        has_preferred_state: a.has_preferred_state(),
+        wrap: a.wraps(),
+    };
+
+    // suppress unused-variable warnings on usage_min/max (kept for future use)
+    let _ = (usage_min, usage_max);
+    field
+}
+
+/// Convert a slice of hidreport `Field`s into the Chromium-shaped item list.
+///
+/// Walks the fields left-to-right; aggregates consecutive `Variable` fields
+/// that came from the same HID Input main item (same signature + contiguous
+/// bit offsets) into a single item. Constant fields are dropped, matching
+/// Chromium.
+fn convert_fields_aggregate(fields: &[Field]) -> Vec<WebHidField> {
+    let mut out: Vec<WebHidField> = Vec::new();
+    let mut i = 0;
+    while i < fields.len() {
+        match &fields[i] {
+            Field::Variable(v) => {
+                let sig = var_signature(v);
+                let mut usages = vec![pack_usage(&v.usage)];
+                let mut count: u32 = 1;
+                let mut prev_end = v.bits.end;
+                let mut j = i + 1;
+                while j < fields.len() {
+                    if let Field::Variable(v2) = &fields[j] {
+                        if v2.bits.start == prev_end && var_signature(v2) == sig {
+                            usages.push(pack_usage(&v2.usage));
+                            count += 1;
+                            prev_end = v2.bits.end;
+                            j += 1;
+                            continue;
+                        }
+                    }
+                    break;
+                }
+                out.push(make_aggregated_variable(v, usages, count));
+                i = j;
+            }
+            Field::Array(a) => {
+                out.push(make_array_field(a));
+                i += 1;
+            }
+            Field::Constant(_) => {
+                // Chromium drops padding/constant items.
+                i += 1;
+            }
+        }
+    }
+    out
+}
+
+// ── Collection tree builder ─────────────────────────────────────────────────
 
 struct ColNode {
     collection_type: u8,
@@ -139,36 +429,86 @@ struct CollectionTreeBuilder {
 }
 
 impl CollectionTreeBuilder {
-    fn new() -> Self { Self { nodes: HashMap::new(), root_ids: Vec::new() } }
+    fn new() -> Self {
+        Self {
+            nodes: HashMap::new(),
+            root_ids: Vec::new(),
+        }
+    }
 
-    fn add_report(&mut self, report: &impl Report, rtype: &str, web_report: WebHidReport) {
-        if let Some(first_field) = report.fields().first() {
-            let chain = first_field.collections();
-            for (i, col) in chain.iter().enumerate() {
-                let id_str = format!("{:?}", col.id());
-                if !self.nodes.contains_key(&id_str) {
-                    if i == 0 { self.root_ids.push(id_str.clone()); }
-                    if i > 0 {
-                        let pid = format!("{:?}", chain[i-1].id());
-                        self.nodes.entry(pid).and_modify(|p| {
-                            if !p.children.contains(&id_str) { p.children.push(id_str.clone()); }
-                        });
-                    }
-                    self.nodes.insert(id_str.clone(), ColNode {
-                        collection_type: col.collection_type().into(),
-                        usage_page: col.usages().first().map(|u| u.usage_page.into()),
-                        usage: col.usages().first().map(|u| u.usage_id.into()),
-                        children: Vec::new(),
-                        input_reports: Vec::new(),
-                        output_reports: Vec::new(),
-                        feature_reports: Vec::new(),
-                    });
+    fn col_key(c: &Collection) -> String {
+        format!("{:?}", c.id())
+    }
+
+    fn ensure_chain(&mut self, chain: &[Collection]) {
+        for (i, col) in chain.iter().enumerate() {
+            let id_str = Self::col_key(col);
+            if !self.nodes.contains_key(&id_str) {
+                if i == 0 {
+                    self.root_ids.push(id_str.clone());
                 }
+                if i > 0 {
+                    let pid = Self::col_key(&chain[i - 1]);
+                    if let Some(p) = self.nodes.get_mut(&pid) {
+                        if !p.children.contains(&id_str) {
+                            p.children.push(id_str.clone());
+                        }
+                    }
+                }
+                let collection_type: u8 = col.collection_type().into();
+                let usage_page = col.usages().first().map(|u| u.usage_page.into());
+                let usage = col.usages().first().map(|u| u.usage_id.into());
+                self.nodes.insert(id_str, ColNode {
+                    collection_type,
+                    usage_page,
+                    usage,
+                    children: Vec::new(),
+                    input_reports: Vec::new(),
+                    output_reports: Vec::new(),
+                    feature_reports: Vec::new(),
+                });
             }
-            if let Some(last) = chain.last() {
-                let lid = format!("{:?}", last.id());
-                if let Some(n) = self.nodes.get_mut(&lid) {
-                    match rtype { "input" => n.input_reports.push(web_report), "output" => n.output_reports.push(web_report), "feature" => n.feature_reports.push(web_report), _ => {} }
+        }
+    }
+
+    fn add_report(&mut self, report: &impl Report, rtype: &str) {
+        let rid: Option<u8> = report.report_id().as_ref().map(|id| (*id).into());
+
+        let items = convert_fields_aggregate(report.fields());
+
+        // Drop the report entirely if it has no non-Constant fields — matches
+        // Chromium (padding-only reports aren't exposed).
+        if items.is_empty() {
+            return;
+        }
+
+        let web_report = WebHidReport { report_id: rid, items };
+
+        // Pick the first Variable/Array field's collection chain — Constant
+        // fields return an empty chain.
+        let chain: &[Collection] = report
+            .fields()
+            .iter()
+            .find_map(|f| match f {
+                Field::Variable(_) | Field::Array(_) => Some(f.collections()),
+                _ => None,
+            })
+            .unwrap_or(&[]);
+
+        if chain.is_empty() {
+            return;
+        }
+
+        self.ensure_chain(chain);
+
+        if let Some(last) = chain.last() {
+            let lid = Self::col_key(last);
+            if let Some(n) = self.nodes.get_mut(&lid) {
+                match rtype {
+                    "input" => n.input_reports.push(web_report),
+                    "output" => n.output_reports.push(web_report),
+                    "feature" => n.feature_reports.push(web_report),
+                    _ => {}
                 }
             }
         }
@@ -177,10 +517,20 @@ impl CollectionTreeBuilder {
     fn build(self) -> Vec<WebHidCollection> {
         let mut result = Vec::new();
         for rid in &self.root_ids {
-            if let Some(r) = self.build_node(rid) { result.push(r); }
+            if let Some(r) = self.build_node(rid) {
+                result.push(r);
+            }
         }
         if result.is_empty() {
-            result.push(WebHidCollection { collection_type: 1, usage_page: None, usage: None, children: vec![], input_reports: vec![], output_reports: vec![], feature_reports: vec![] });
+            result.push(WebHidCollection {
+                collection_type: 1,
+                usage_page: None,
+                usage: None,
+                children: vec![],
+                input_reports: vec![],
+                output_reports: vec![],
+                feature_reports: vec![],
+            });
         }
         result
     }
@@ -188,9 +538,13 @@ impl CollectionTreeBuilder {
     fn build_node(&self, id: &str) -> Option<WebHidCollection> {
         let n = self.nodes.get(id)?;
         Some(WebHidCollection {
-            collection_type: n.collection_type, usage_page: n.usage_page, usage: n.usage,
+            collection_type: n.collection_type,
+            usage_page: n.usage_page,
+            usage: n.usage,
             children: n.children.iter().filter_map(|c| self.build_node(c)).collect(),
-            input_reports: n.input_reports.clone(), output_reports: n.output_reports.clone(), feature_reports: n.feature_reports.clone(),
+            input_reports: n.input_reports.clone(),
+            output_reports: n.output_reports.clone(),
+            feature_reports: n.feature_reports.clone(),
         })
     }
 }
