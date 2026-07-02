@@ -42,7 +42,7 @@ use std::collections::HashMap;
 struct WebHidCollection {
     #[serde(rename = "type")]
     collection_type: u8,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", rename = "usagePage")]
     usage_page: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
     usage: Option<u16>,
@@ -58,19 +58,24 @@ struct WebHidCollection {
 
 #[derive(Serialize, Clone)]
 struct WebHidReport {
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", rename = "reportId")]
     report_id: Option<u8>,
     #[serde(default)]
     items: Vec<WebHidField>,
 }
 
 /// Item shape — exactly matches Chromium's `HIDReportItem`.
-/// No extra fields, no snake_case aliases.
+/// `usages` and `usage_minimum`/`usage_maximum` are mutually exclusive:
+/// when `is_range == true`, `usages` is empty and `usage_minimum`/`usage_maximum`
+/// are set; when `is_range == false`, `usages` is populated and the min/max
+/// are `None`.
 /// NOTE: does not `derive(Serialize)` — we provide a manual `Serialize`
 /// impl below to control the camelCase output names precisely.
 #[derive(Clone)]
 struct WebHidField {
     usages: Vec<u32>,
+    usage_minimum: Option<u32>,
+    usage_maximum: Option<u32>,
     report_size: u32,
     report_count: u32,
     logical_minimum: i32,
@@ -104,8 +109,14 @@ struct WebHidField {
 impl serde::Serialize for WebHidField {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeStruct;
-        let mut st = s.serialize_struct("WebHidField", 25)?;
-        st.serialize_field("usages", &self.usages)?;
+        // Chromium uses `usages` XOR (`usageMinimum` + `usageMaximum`):
+        //   - is_range == false  → emit `usages`, skip min/max
+        //   - is_range == true   → emit `usageMinimum` + `usageMaximum`, skip `usages`
+        let field_count = if self.is_range { 26 } else { 25 };
+        let mut st = s.serialize_struct("WebHidField", field_count)?;
+        if !self.is_range {
+            st.serialize_field("usages", &self.usages)?;
+        }
         st.serialize_field("reportSize", &self.report_size)?;
         st.serialize_field("reportCount", &self.report_count)?;
         st.serialize_field("logicalMinimum", &self.logical_minimum)?;
@@ -130,6 +141,10 @@ impl serde::Serialize for WebHidField {
         st.serialize_field("hasNull", &self.has_null)?;
         st.serialize_field("hasPreferredState", &self.has_preferred_state)?;
         st.serialize_field("wrap", &self.wrap)?;
+        if self.is_range {
+            st.serialize_field("usageMinimum", &self.usage_minimum)?;
+            st.serialize_field("usageMaximum", &self.usage_maximum)?;
+        }
         st.end()
     }
 }
@@ -274,8 +289,17 @@ fn make_aggregated_variable(
     count: u32,
 ) -> WebHidField {
     let sig = var_signature(first);
+
+    // Detect if the aggregated usages form a contiguous range (same usage
+    // page, sequential usage IDs). If so, emit as a range (matching
+    // Chromium's behaviour for Usage Min/Max). Otherwise emit as a list.
+    let (final_usages, is_range, usage_min, usage_max) =
+        detect_contiguous_range(usages);
+
     WebHidField {
-        usages,
+        usages: final_usages,
+        usage_minimum: usage_min,
+        usage_maximum: usage_max,
         report_size: sig.report_size,
         report_count: count,
         logical_minimum: sig.logical_min,
@@ -292,7 +316,7 @@ fn make_aggregated_variable(
         unit_factor_luminous_intensity_exponent: sig.unit_lum,
         is_absolute: sig.is_absolute,
         is_array: false,
-        is_range: false,
+        is_range,
         is_constant: false,
         is_linear: sig.is_linear,
         is_volatile: sig.is_volatile,
@@ -303,20 +327,41 @@ fn make_aggregated_variable(
     }
 }
 
+/// Detect if a list of packed u32 usages forms a contiguous range.
+/// Returns `(usages_for_output, is_range, usage_min, usage_max)`.
+/// When `is_range == true`, `usages_for_output` is empty and min/max are set.
+/// When `is_range == false`, `usages_for_output` is the original list and
+/// min/max are `None`.
+fn detect_contiguous_range(
+    usages: Vec<u32>,
+) -> (Vec<u32>, bool, Option<u32>, Option<u32>) {
+    if usages.len() > 1 {
+        let page = (usages[0] >> 16) as u16;
+        let lo = (usages[0] & 0xFFFF) as u16;
+        let same_page = usages.iter().all(|u| ((*u >> 16) as u16) == page);
+        let sequential = usages.iter().enumerate().all(|(i, u)| {
+            ((*u & 0xFFFF) as u16) == lo.saturating_add(i as u16)
+        });
+        if same_page && sequential {
+            let hi = lo + (usages.len() as u16) - 1;
+            let lo_packed = ((page as u32) << 16) | (lo as u32);
+            let hi_packed = ((page as u32) << 16) | (hi as u32);
+            return (vec![], true, Some(lo_packed), Some(hi_packed));
+        }
+    }
+    (usages, false, None, None)
+}
+
 fn make_array_field(a: &hidreport::ArrayField) -> WebHidField {
     let (usages, is_range, usage_min, usage_max) = if a.is_usage_range() {
         if let Some(r) = a.usage_range() {
             let lo_page: u16 = r.minimum().usage_page().into();
             let lo_id: u16 = r.minimum().usage_id().into();
             let hi_id: u16 = r.maximum().usage_id().into();
-            let count = (hi_id as i32).saturating_sub(lo_id as i32).max(0) as usize + 1;
-            let mut v = Vec::with_capacity(count);
-            for uid in lo_id..=hi_id {
-                v.push(((lo_page as u32) << 16) | (uid as u32));
-            }
             let lo_packed = ((lo_page as u32) << 16) | (lo_id as u32);
             let hi_packed = ((lo_page as u32) << 16) | (hi_id as u32);
-            (v, true, Some(lo_packed), Some(hi_packed))
+            // Array with usage range → emit as range, no usages list.
+            (vec![], true, Some(lo_packed), Some(hi_packed))
         } else {
             (vec![], true, None, None)
         }
@@ -333,8 +378,10 @@ fn make_array_field(a: &hidreport::ArrayField) -> WebHidField {
     let total_bits = (a.bits.end - a.bits.start) as u32;
     let per_item_bits = if count > 0 { total_bits / count_u32 } else { total_bits };
 
-    let field = WebHidField {
+    WebHidField {
         usages,
+        usage_minimum: usage_min,
+        usage_maximum: usage_max,
         report_size: per_item_bits,
         report_count: count_u32,
         logical_minimum: a.logical_minimum.into(),
@@ -359,11 +406,7 @@ fn make_array_field(a: &hidreport::ArrayField) -> WebHidField {
         has_null: a.has_null_state(),
         has_preferred_state: a.has_preferred_state(),
         wrap: a.wraps(),
-    };
-
-    // suppress unused-variable warnings on usage_min/max (kept for future use)
-    let _ = (usage_min, usage_max);
-    field
+    }
 }
 
 /// Convert a slice of hidreport `Field`s into the Chromium-shaped item list.

@@ -348,80 +348,88 @@
 
       // Field-level normalizer that accepts both snake_case (from daemon /
       // WASM parser) and camelCase (already-spec-compliant) keys. Returns a
-      // spec-compliant item object.
+      // spec-compliant item object that exactly matches Chromium's
+      // `HIDReportItem` shape.
+      //
+      // Chromium uses `usages` XOR (`usageMinimum` + `usageMaximum`):
+      //   - isRange == false → emit `usages`, omit min/max
+      //   - isRange == true  → emit `usageMinimum` + `usageMaximum`, omit `usages`
+      // No `reportId`, `reportType`, `usagePage`, `usage`, or `bitOffset` at
+      // the item level — those live on the report or are not in the spec.
       function normalizeField(f, fallbackReportId, fallbackReportType) {
-        const rid = f.reportId !== undefined ? f.reportId
-                  : f.report_id !== undefined ? f.report_id
-                  : fallbackReportId;
-        const rtype = f.reportType !== undefined ? f.reportType
-                    : f.report_type !== undefined ? f.report_type
-                    : fallbackReportType;
-        const uPage = f.usagePage !== undefined ? f.usagePage
-                    : f.usage_page !== undefined ? f.usage_page
-                    : null;
+        const pick = (camel, snake) =>
+          f[camel] !== undefined ? f[camel] :
+          f[snake] !== undefined ? f[snake] : undefined;
+
+        const isRange = pick("isRange", "is_range") === true;
+        let usageMinimum = pick("usageMinimum", "usage_minimum");
+        let usageMaximum = pick("usageMaximum", "usage_maximum");
+
         // usages: prefer spec camelCase, then snake_case, then packed_usages (u32).
         // If usages look like u16 values and we have a usagePage, pack them into
         // the Chromium-style u32 form (page<<16 | id).
+        const uPage = f.usagePage !== undefined ? f.usagePage
+                    : f.usage_page !== undefined ? f.usage_page
+                    : null;
         let usages = null;
         if (Array.isArray(f.usages)) usages = f.usages.slice();
         else if (Array.isArray(f.packed_usages)) usages = f.packed_usages.slice();
         if (usages && usages.length && typeof usages[0] === "number" && usages[0] < 0x10000 && uPage != null) {
           usages = usages.map(u => ((uPage << 16) | (u & 0xFFFF)) >>> 0);
         }
-        const pick = (camel, snake) =>
-          f[camel] !== undefined ? f[camel] :
-          f[snake] !== undefined ? f[snake] : undefined;
-        return {
-          reportId: rid !== undefined && rid !== null ? rid : 0,
-          reportType: rtype,
+
+        // If isRange is true but usageMinimum/usageMaximum are missing
+        // (e.g. from the JS parser fallback), try to derive them from the
+        // usages list.
+        if (isRange && usageMinimum == null && usageMaximum == null && usages && usages.length > 1) {
+          const page = (usages[0] >> 16) & 0xFFFF;
+          const lo = usages[0] & 0xFFFF;
+          const hi = usages[usages.length - 1] & 0xFFFF;
+          usageMinimum = ((page << 16) | lo) >>> 0;
+          usageMaximum = ((page << 16) | hi) >>> 0;
+        }
+
+        const item = {
           reportSize: f.reportSize !== undefined ? f.reportSize
                     : f.size !== undefined ? f.size
                     : f.size_bits !== undefined ? f.size_bits
-                    : null,
+                    : 0,
           reportCount: f.reportCount !== undefined ? f.reportCount
                      : f.count !== undefined ? f.count
-                     : null,
-          usagePage: uPage,
-          usage: f.usage !== undefined ? f.usage : null,
-          usages,
-          isArray: pick("isArray", "is_array"),
-          isRange: pick("isRange", "is_range"),
-          isAbsolute: pick("isAbsolute", "is_absolute"),
-          isConstant: pick("isConstant", "is_constant"),
-          isLinear: pick("isLinear", "is_linear"),
-          isVolatile: pick("isVolatile", "is_volatile"),
-          isBufferedBytes: pick("isBufferedBytes", "is_buffered_bytes"),
-          hasNull: pick("hasNull", "has_null"),
-          hasPreferredState: pick("hasPreferredState", "has_preferred_state"),
-          wrap: f.wrap !== undefined ? f.wrap : undefined,
-          logicalMinimum: pick("logicalMinimum", "logical_minimum"),
-          logicalMaximum: pick("logicalMaximum", "logical_maximum"),
-          physicalMinimum: pick("physicalMinimum", "physical_minimum"),
-          physicalMaximum: pick("physicalMaximum", "physical_maximum"),
-          unitExponent: pick("unitExponent", "unit_exponent"),
-          unitSystem: pick("unitSystem", "unit_system"),
-          unitFactorLengthExponent: f.unitFactorLengthExponent !== undefined ? f.unitFactorLengthExponent
-                                  : f.unit_factor_length_exponent !== undefined ? f.unit_factor_length_exponent
-                                  : 0,
-          unitFactorMassExponent: f.unitFactorMassExponent !== undefined ? f.unitFactorMassExponent
-                                : f.unit_factor_mass_exponent !== undefined ? f.unit_factor_mass_exponent
-                                : 0,
-          unitFactorTimeExponent: f.unitFactorTimeExponent !== undefined ? f.unitFactorTimeExponent
-                                : f.unit_factor_time_exponent !== undefined ? f.unit_factor_time_exponent
-                                : 0,
-          unitFactorTemperatureExponent: f.unitFactorTemperatureExponent !== undefined ? f.unitFactorTemperatureExponent
-                                       : f.unit_factor_temperature_exponent !== undefined ? f.unit_factor_temperature_exponent
-                                       : 0,
-          unitFactorCurrentExponent: f.unitFactorCurrentExponent !== undefined ? f.unitFactorCurrentExponent
-                                  : f.unit_factor_current_exponent !== undefined ? f.unit_factor_current_exponent
-                                  : 0,
-          unitFactorLuminousIntensityExponent: f.unitFactorLuminousIntensityExponent !== undefined ? f.unitFactorLuminousIntensityExponent
-                                            : f.unit_factor_luminous_intensity_exponent !== undefined ? f.unit_factor_luminous_intensity_exponent
-                                            : 0,
-          usageMinimum: pick("usageMinimum", "usage_minimum"),
-          usageMaximum: pick("usageMaximum", "usage_maximum"),
-          bitOffset: pick("bitOffset", "bit_offset"),
+                     : 0,
+          isArray: pick("isArray", "is_array") === true,
+          isRange,
+          isAbsolute: pick("isAbsolute", "is_absolute") === true,
+          isConstant: pick("isConstant", "is_constant") === true,
+          isLinear: pick("isLinear", "is_linear") === true,
+          isVolatile: pick("isVolatile", "is_volatile") === true,
+          isBufferedBytes: pick("isBufferedBytes", "is_buffered_bytes") === true,
+          hasNull: pick("hasNull", "has_null") === true,
+          hasPreferredState: pick("hasPreferredState", "has_preferred_state") === true,
+          wrap: pick("wrap", "wrap") === true,
+          logicalMinimum: pick("logicalMinimum", "logical_minimum") ?? 0,
+          logicalMaximum: pick("logicalMaximum", "logical_maximum") ?? 0,
+          physicalMinimum: pick("physicalMinimum", "physical_minimum") ?? 0,
+          physicalMaximum: pick("physicalMaximum", "physical_maximum") ?? 0,
+          unitExponent: pick("unitExponent", "unit_exponent") ?? 0,
+          unitSystem: pick("unitSystem", "unit_system") ?? "none",
+          unitFactorLengthExponent: pick("unitFactorLengthExponent", "unit_factor_length_exponent") ?? 0,
+          unitFactorMassExponent: pick("unitFactorMassExponent", "unit_factor_mass_exponent") ?? 0,
+          unitFactorTimeExponent: pick("unitFactorTimeExponent", "unit_factor_time_exponent") ?? 0,
+          unitFactorTemperatureExponent: pick("unitFactorTemperatureExponent", "unit_factor_temperature_exponent") ?? 0,
+          unitFactorCurrentExponent: pick("unitFactorCurrentExponent", "unit_factor_current_exponent") ?? 0,
+          unitFactorLuminousIntensityExponent: pick("unitFactorLuminousIntensityExponent", "unit_factor_luminous_intensity_exponent") ?? 0,
         };
+
+        // Emit `usages` XOR `usageMinimum`+`usageMaximum`, matching Chromium.
+        if (isRange) {
+          item.usageMinimum = usageMinimum ?? 0;
+          item.usageMaximum = usageMaximum ?? 0;
+        } else {
+          item.usages = usages || [];
+        }
+
+        return item;
       }
 
       // Convert a single report object to spec shape.
