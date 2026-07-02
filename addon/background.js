@@ -295,6 +295,27 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
       })();
       return true;
 
+    case "forgetDevice":
+      (async () => {
+        try {
+          const key = encodeURIComponent(request.origin || sender.tab?.url || "");
+          const origin = new URL(sender.tab?.url || "http://localhost").origin;
+          const storageKey = encodeURIComponent(origin);
+          const result = await browser.storage.local.get(storageKey);
+          let hashes = result[storageKey] || [];
+          // Remove matching hash
+          if (request.device_id) {
+            const devIdStr = String.fromCharCode(...request.device_id);
+            hashes = hashes.filter(h => h !== devIdStr);
+            await browser.storage.local.set({ [storageKey]: hashes });
+          }
+          sendResponse({ success: true, hashes });
+        } catch (e) {
+          sendResponse({ success: false, error: e.message });
+        }
+      })();
+      return true;
+
     case "getDeviceCache":
       sendResponse({ devices: _deviceCache });
       return false;

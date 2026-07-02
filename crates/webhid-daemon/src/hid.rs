@@ -55,25 +55,10 @@ pub fn make_device_id(info: &HidDeviceInfo) -> String {
 /// device, like Chromium's picker).
 pub fn enumerate() -> anyhow::Result<Vec<DeviceInfo>> {
     let api = HidApi::new()?;
-    let mut groups: std::collections::HashMap<(u16, u16, String), Vec<&HidDeviceInfo>> = std::collections::HashMap::new();
+    let mut devices = Vec::new();
     for info in api.device_list() {
         if is_blocked_pub(info) { continue; }
-        let serial = info.serial_number().unwrap_or("").to_string();
-        let key = if serial.is_empty() {
-            make_device_id(info)
-        } else {
-            format!("{}:{}:{}", info.vendor_id(), info.product_id(), serial)
-        };
-        groups.entry((info.vendor_id(), info.product_id(), key)).or_default().push(info);
-    }
-    let mut devices = Vec::new();
-    for ifaces in groups.values() {
-        let primary = ifaces.iter()
-            .find(|i| i.usage_page() >= 0xFF00)
-            .or_else(|| ifaces.iter().find(|i| i.usage_page() != 0x01))
-            .copied()
-            .unwrap_or(ifaces[0]);
-        if let Some(d) = info_from_hidapi_pub(primary) {
+        if let Some(d) = info_from_hidapi_pub(info) {
             devices.push(d);
         }
     }
