@@ -198,7 +198,7 @@
         }
       } catch (error) {
         this.showError("Failed to connect to server");
-        console.debug("[WebHID]", "Failed to connect to server", error);
+        logger.debug("[WebHID]", "Failed to connect to server", error);
       }
     }
 
@@ -495,11 +495,8 @@
 
     const { id, action, payload } = event.data;
 
-    // Hot-path actions: forward to the Worker (WebSocket) when one is
-    // available for this device.  The polyfill only sends these after the
-    // SAB/Worker has been established via `open`.  If no Worker exists we
-    // fall through to the regular NM path so behavior is preserved on
-    // devices that haven't been opened yet (or if the WS connection died).
+    // Hot-path actions: forward to the Worker (WebSocket) when available.
+    // Falls back to NM path if no worker exists (device not opened or WS died).
     if (action === "worker-send" || action === "worker-sendFeature" || action === "worker-receiveFeature") {
       const deviceId = String.fromCharCode(...(payload.device_id || []));
       const worker = _workers.get(deviceId);
@@ -524,7 +521,7 @@
         worker.postMessage(wMsg);
         return;
       }
-      console.warn('[bridge] no worker for', deviceId, '— falling back to NM');
+      logger.warn('[bridge] no worker for', deviceId, '— falling back to NM');
       const fallbackAction =
         action === "worker-send" ? "sendreport" :
         action === "worker-sendFeature" ? "sendfeaturereport" :
@@ -586,9 +583,11 @@
 
         let sabEnabled = true;
         let sabCapacity = 8192;
-        const globalDefaults = await browser.storage.local.get({ sabEnabled: true, sabCapacity: 8192 });
+        let logLevel = 1;
+        const globalDefaults = await browser.storage.local.get({ sabEnabled: true, sabCapacity: 8192, logLevel: 1 });
         sabEnabled = globalDefaults.sabEnabled;
         sabCapacity = globalDefaults.sabCapacity;
+        logLevel = globalDefaults.logLevel;
         if (siteKey) {
           const siteResult = await browser.storage.local.get(siteKey);
           const ss = siteResult[siteKey] || {};
@@ -597,7 +596,7 @@
         }
 
         if (!sabEnabled) {
-          console.log('[bridge] SAB disabled for', deviceId);
+          logger.info('[bridge] SAB disabled for', deviceId);
         } else
         {
         let worker;
@@ -608,18 +607,18 @@
           const blob = new Blob([code], { type: 'application/javascript' });
           worker = new Worker(URL.createObjectURL(blob));
         } catch (e) {
-          console.error('[bridge] worker spawn failed:', e);
+          logger.error('[bridge] worker spawn failed:', e);
           throw e;
         }
         _workers.set(deviceId, worker);
 
         worker.onerror = (e) => {
-          console.error('[bridge] worker.onerror:', e.message || '(no msg)', 'file=', e.filename, 'line=', e.lineno);
+          logger.error('[bridge] worker.onerror:', e.message || '(no msg)', 'file=', e.filename, 'line=', e.lineno);
         };
 
         worker.onmessage = ({ data }) => {
           if (data.type === 'ready') {
-            console.log('[bridge] worker ready for', deviceId);
+            logger.info('[bridge] worker ready for', deviceId);
             window.postMessage({
               __webhid_bridge: 'evt',
               event: {
@@ -632,11 +631,11 @@
             return;
           }
           if (data.type === 'error') {
-            console.error('[bridge] worker error:', data.error);
+            logger.error('[bridge] worker error:', data.error);
             return;
           }
           if (data.type === 'closed') {
-            console.warn('[bridge] worker WS closed for', deviceId, '— worker will auto-reconnect');
+            logger.warn('[bridge] worker WS closed for', deviceId, '— worker will auto-reconnect');
             const cbMap = _workerCallbacks.get(worker);
             if (cbMap) {
               for (const [reqId, cb] of cbMap) cb({ type: 'sendResult', reqId, error: 'ws closed' });
@@ -649,7 +648,7 @@
             return;
           }
           if (data.type === 'ready' && _workers.has(deviceId)) {
-            console.log('[bridge] worker reconnected for', deviceId);
+            logger.info('[bridge] worker reconnected for', deviceId);
             window.postMessage({
               __webhid_bridge: 'evt',
               event: { event_type: 'connect', device_id: response.data }
@@ -661,7 +660,7 @@
             if (cbMap) {
               const cb = cbMap.get(data.reqId);
               if (cb) { cbMap.delete(data.reqId); cb(data); }
-              else console.warn('[bridge] worker response for unknown reqId=', data.reqId, 'cbMap size=', cbMap.size);
+              else logger.warn('[bridge] worker response for unknown reqId=', data.reqId, 'cbMap size=', cbMap.size);
             }
           }
         };
@@ -672,11 +671,12 @@
           wsPort: response.ws_port || _wsPort,
           reportSize: payload.reportSize || 2048,
           capacity: sabCapacity,
+          logLevel: logLevel,
         });
 
         (async () => {
-          const s = await browser.storage.local.get({ fireAndForget: true, perfLogging: false });
-          worker.postMessage({ type: 'settings', fireAndForget: s.fireAndForget, perfLogging: s.perfLogging });
+          const s = await browser.storage.local.get({ fireAndForget: true, perfLogging: false, logLevel: 1 });
+          worker.postMessage({ type: 'settings', fireAndForget: s.fireAndForget, perfLogging: s.perfLogging, logLevel: s.logLevel });
         })();
         }
       }
@@ -703,7 +703,7 @@
     }
   });
 
-  // WASM descriptor parser — runs in isolated world (CSP-free)
+  // WASM descriptor parser — runs in isolated world (CSP-free).
   let _wasmReady = false;
   let _wasmParser = null;
 
@@ -716,9 +716,9 @@
       const mod = await import(jsUrl);
       await mod.default(wasmUrl);
       _wasmParser = mod.parse_descriptor;
-      console.log('[bridge] WASM descriptor parser ready');
+      logger.info('[bridge] WASM descriptor parser ready');
     } catch (e) {
-      console.warn('[bridge] WASM init failed, JS fallback:', e);
+      logger.warn('[bridge] WASM init failed, JS fallback:', e);
     }
   }
 
@@ -741,7 +741,7 @@
       const evt = message.event;
       if (evt.event_type === "hello") {
         _wsPort = evt.ws_port;
-        console.log('[bridge] hello: ws_port=' + _wsPort);
+        logger.info('[bridge] hello: ws_port=' + _wsPort);
         return;
       }
       window.postMessage({ __webhid_bridge: "evt", event: evt }, "*");
@@ -752,9 +752,10 @@
     if (area !== 'local') return;
     const ff = changes.fireAndForget?.newValue;
     const pl = changes.perfLogging?.newValue;
-    if (ff === undefined && pl === undefined) return;
+    const ll = changes.logLevel?.newValue;
+    if (ff === undefined && pl === undefined && ll === undefined) return;
     for (const worker of _workers.values()) {
-      worker.postMessage({ type: 'settings', fireAndForget: ff, perfLogging: pl });
+      worker.postMessage({ type: 'settings', fireAndForget: ff, perfLogging: pl, logLevel: ll });
     }
   });
 })();

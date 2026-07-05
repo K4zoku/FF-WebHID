@@ -19,11 +19,11 @@ const NativeMessaging = {
           const p = this._pending.get(message.id);
           if (p) { this._pending.delete(message.id); p.resolve(message); return; }
         }
-        console.warn("webhid: NM response no matching pending:", message);
+        logger.warn("webhid: NM response no matching pending:", message);
       });
 
       this.port.onDisconnect.addListener(() => {
-        console.warn("[nm] disconnected — will retry in", this._reconnectDelay, "ms");
+        logger.warn("[nm] disconnected — will retry in", this._reconnectDelay, "ms");
         this.port = null;
         for (const [id, p] of this._pending) p.resolve({ success: false, error: "NM disconnected" });
         this._pending.clear();
@@ -32,7 +32,7 @@ const NativeMessaging = {
 
       return Promise.resolve();
     } catch (error) {
-      console.error("[nm] connect failed:", error);
+      logger.error("[nm] connect failed:", error);
       this._scheduleReconnect();
       return Promise.reject(error);
     }
@@ -42,7 +42,7 @@ const NativeMessaging = {
     if (this._reconnectTimer) return;
     this._reconnectTimer = setTimeout(() => {
       this._reconnectTimer = null;
-      console.log("[nm] reconnecting...");
+      logger.info("[nm] reconnecting...");
       this.connect().catch(() => {});
     }, this._reconnectDelay);
     this._reconnectDelay = Math.min(this._reconnectDelay * 2, 10000);
@@ -169,7 +169,7 @@ browser.storage.onChanged.addListener((changes, area) => {
     }
     // Reload from storage to pick up per-site overrides
     loadSabSetting();
-    console.log('[bg] SAB data plane:', _sabEnabled);
+    logger.info('[bg] SAB data plane:', _sabEnabled);
   }
 });
 

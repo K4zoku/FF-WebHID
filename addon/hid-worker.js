@@ -1,7 +1,16 @@
-// Default ring-buffer capacity (number of report slots). Overridden by
-// the `capacity` field in the `connect` message from the bridge.
-let CAPACITY = 8192;
+// Inline logger — same level scheme as logger.js (0=error,1=warn,2=info,3=debug).
+// Worker is spawned from a blob URL so it can't importScripts the addon's
+// logger.js directly. The bridge sends the current logLevel in the `connect`
+// message; default to warn until that arrives.
+const logger = {
+  _level: 1,
+  error: (...a) => { if (logger._level >= 0) console.error(...a); },
+  warn: (...a) => { if (logger._level >= 1) console.warn(...a); },
+  info: (...a) => { if (logger._level >= 2) console.info(...a); },
+  debug: (...a) => { if (logger._level >= 3) console.debug(...a); },
+};
 
+let CAPACITY = 8192;
 let sab = null, meta = null, data = null, reportSize = 64, ws = null;
 const _pending = new Map();
 let _nextReqId = 1;
@@ -15,7 +24,12 @@ const RESP_RECEIVE_FEATURE_REPORT = 0x83;
 
 self.onmessage = ({ data: msg }) => {
   if (msg.type === 'connect') return connect(msg);
-  if (msg.type === 'settings') { if (msg.fireAndForget !== undefined) _fireAndForget = msg.fireAndForget !== false; if (msg.perfLogging !== undefined) _perfLogging = msg.perfLogging === true; return; }
+  if (msg.type === 'settings') {
+    if (msg.fireAndForget !== undefined) _fireAndForget = msg.fireAndForget !== false;
+    if (msg.perfLogging !== undefined) _perfLogging = msg.perfLogging === true;
+    if (msg.logLevel !== undefined) logger._level = msg.logLevel;
+    return;
+  }
   if (msg.type === 'send') return handleSend(msg, MSG_SEND_REPORT);
   if (msg.type === 'sendFeature') return handleSend(msg, MSG_SEND_FEATURE_REPORT);
   if (msg.type === 'receiveFeature') return handleReceiveFeature(msg);
@@ -29,9 +43,7 @@ function connect(msg) {
   _connectMsg = msg;
   reportSize = msg.reportSize || 64;
   CAPACITY = msg.capacity || 8192;
-  // Always allocate a fresh SAB on connect so the page's drain loop can
-  // swap to it. Reusing the old SAB after a WS reconnect would cause the
-  // page to read stale data from before the disconnect.
+  if (msg.logLevel !== undefined) logger._level = msg.logLevel;
   sab = new SharedArrayBuffer(12 + CAPACITY * reportSize);
   meta = new Int32Array(sab, 0, 3);
   data = new Uint8Array(sab, 12);
@@ -50,10 +62,8 @@ function _doConnect() {
     _reconnectDelay = 500;
     self.postMessage({ type: 'ready', sab });
   };
-  ws.onerror = (e) => {
-    console.error('[worker] WS ERROR:', e.message || e);
-  };
-  ws.onclose = (e) => {
+  ws.onerror = (e) => logger.error('[worker] WS ERROR:', e.message || e);
+  ws.onclose = () => {
     for (const [, p] of _pending) p.reject(new Error('ws closed'));
     _pending.clear();
     self.postMessage({ type: 'closed' });
@@ -61,8 +71,6 @@ function _doConnect() {
   };
   ws.onmessage = ({ data: frame }) => {
     const batch = new Uint8Array(frame);
-    // Control responses start with 0x81/0x82/0x83 and are small (≤10 bytes).
-    // Input batches start with a u16 LE length prefix and are larger.
     if (batch.length > 0 && batch[0] >= 0x80 && batch.length <= 10) return handleControlResponse(batch);
     pushInputBatch(batch);
   };
@@ -94,7 +102,7 @@ function pushInputBatch(batch) {
     const slotStart = head * reportSize;
     data.fill(0, slotStart, slotStart + reportSize);
     const storedLen = Math.min(len, reportSize - 2);
-    if (len > reportSize - 2) console.warn('[worker] TRUNCATING report len=' + len + ' to ' + (reportSize - 2));
+    if (len > reportSize - 2) logger.warn('[worker] TRUNCATING report len=' + len + ' to ' + (reportSize - 2));
     data[slotStart] = storedLen & 0xFF;
     data[slotStart + 1] = (storedLen >> 8) & 0xFF;
     data.set(batch.subarray(offset, offset + storedLen), slotStart + 2);
@@ -123,8 +131,8 @@ function handleSend(msg, msgType) {
     return;
   }
   _pending.set(reqId, {
-    resolve: () => { self.postMessage({ type: 'sendResult', reqId: msg.reqId, success: true }); },
-    reject: (e) => { self.postMessage({ type: 'sendResult', reqId: msg.reqId, error: String(e.message || e) }); },
+    resolve: () => self.postMessage({ type: 'sendResult', reqId: msg.reqId, success: true }),
+    reject: (e) => self.postMessage({ type: 'sendResult', reqId: msg.reqId, error: String(e.message || e) }),
   });
   ws.send(frame);
 }
@@ -140,8 +148,8 @@ function handleReceiveFeature(msg) {
   frame[1] = reqId & 0xFF; frame[2] = (reqId >> 8) & 0xFF; frame[3] = (reqId >> 16) & 0xFF; frame[4] = (reqId >> 24) & 0xFF;
   frame[5] = msg.reportId;
   _pending.set(reqId, {
-    resolve: (data) => { self.postMessage({ type: 'featureResult', reqId: msg.reqId, data }); },
-    reject: (e) => { self.postMessage({ type: 'featureResult', reqId: msg.reqId, error: String(e.message || e) }); },
+    resolve: (data) => self.postMessage({ type: 'featureResult', reqId: msg.reqId, data }),
+    reject: (e) => self.postMessage({ type: 'featureResult', reqId: msg.reqId, error: String(e.message || e) }),
   });
   ws.send(frame);
 }

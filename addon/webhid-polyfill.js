@@ -5,15 +5,7 @@
   const _pending = {};
 
   // ── Device persistence helpers ────────────────────────────────────────────
-  // Store and retrieve device permissions from addon storage (browser.storage.local)
-  // Device permissions are stored per site origin on the addon side
-  // Communication happens via sendRequest
-  //
-  // Device identification hash includes:
-  // - vendor_id & product_id (USB IDs)
-  // - serial_number (device serial, may be empty)
-  // - path (device path, may be empty)
-  // Hash is created from these fields to uniquely identify physical devices
+  // Device permissions stored per site origin. Hash from vid/pid/serial/path.
 
   let _savedDevices = null;
   let _deviceInfoCache = null;
@@ -168,13 +160,9 @@
     }
   }
 
-  // Very small, forgiving HID report-descriptor parser that extracts a
-  // shallow collection tree (usage page / usage per Collection). This is
-  // intentionally minimal: it looks for common opcodes (Usage Page = 0x05,
-  // Usage = 0x09, Collection = 0xA1, End Collection = 0xC0) and associates
-  // the most-recent usage/page with the following Collection. This will
-  // cover many USB HID descriptors and provides immediate `collections`
-  // data for pages; it is not a fully-compliant HID parser.
+  // Minimal HID report-descriptor parser (JS fallback). WASM parser in
+  // bridge.js produces richer output; this only extracts usage page/usage
+  // per collection for immediate sync availability.
   function parseReportDescriptor(bytes) {
     const collections = [];
     const stack = [];
@@ -274,16 +262,12 @@
   }
 
   // ── Global device registry ────────────────────────────────────────────────
-  // All HIDDevice instances are tracked globally so that getDevices() and
-  // requestDevice() return references to the SAME objects (not clones).
-  // Open state is shared — if one tab opens a device, console getDevices()
-  // sees opened: true. This matches Chromium's behavior.
+  // Tracks all HIDDevice instances so getDevices()/requestDevice() return
+  // the SAME objects. Open state is shared across tabs (matches Chromium).
   const _deviceRegistry = new Map(); // internalId -> HIDDevice
 
-  // WeakMap storing the SAB-swap callback for each HIDDevice. We can't use a
-  // private field because `startInputReportLoop` is a standalone function
-  // (not a class method) and JS private fields can only be accessed from
-  // inside the class body.
+  // WeakMap for SAB-swap callback (can't use private field since
+  // startInputReportLoop is a standalone function, not a class method).
   const _sabUpdateFns = new WeakMap();
 
   function getOrCreateDevice(deviceInfo) {
@@ -352,16 +336,9 @@
 
       // ... normalize collections ...
 
-      // Field-level normalizer that accepts both snake_case (from daemon /
-      // WASM parser) and camelCase (already-spec-compliant) keys. Returns a
-      // spec-compliant item object that exactly matches Chromium's
-      // `HIDReportItem` shape.
-      //
-      // Chromium uses `usages` XOR (`usageMinimum` + `usageMaximum`):
-      //   - isRange == false → emit `usages`, omit min/max
-      //   - isRange == true  → emit `usageMinimum` + `usageMaximum`, omit `usages`
-      // No `reportId`, `reportType`, `usagePage`, `usage`, or `bitOffset` at
-      // the item level — those live on the report or are not in the spec.
+      // Normalizes a field to Chromium's HIDReportItem shape.
+      // Accepts both snake_case (daemon/WASM) and camelCase keys.
+      // Emits `usages` XOR (`usageMinimum` + `usageMaximum`) per isRange.
       function normalizeField(f, fallbackReportId, fallbackReportType) {
         const pick = (camel, snake) =>
           f[camel] !== undefined ? f[camel] :
@@ -608,7 +585,7 @@
         if (response.success) {
           this.#opened = true;
           this.#deviceId = String.fromCharCode(...response.data);
-          console.log('[webhid] open ok, installing sab listener for', this.#deviceId);
+          logger.info('[webhid] open ok, installing sab listener for', this.#deviceId);
           this.#installSabListener();
           this.dispatchEvent(new Event("open"));
           return true;
@@ -741,7 +718,7 @@
           const detail = event.data.event;
 
           if (!detail) {
-            console.debug("[WebHID] wrapper: no detail, skipping");
+            logger.debug("[WebHID] wrapper: no detail, skipping");
             return;
           }
 
@@ -764,16 +741,8 @@
             return;
           }
 
-          // Handle input_report events (IPC fallback path).
-          //
-          // The daemon's reader task reads input reports from hidraw and
-          // broadcasts them via the IPC control plane as `input_report`
-          // events.  The SAB/WebSocket data plane is the intended fast path,
-          // but when it is not operational (worker failed to connect, WS
-          // server unreachable, etc.) these IPC events are the only way
-          // input reports reach the page.  Without this handler the page
-          // never sees device responses that arrive as input reports,
-          // causing protocols that expect ACKs to stall.
+          // IPC fallback for input reports (when WS data plane is down).
+          // Skipped when hotPath active to avoid duplicates.
           if (event_type === "input_report") {
             if (this.#hotPath) return;
             if (evDeviceId && this.#deviceId && evDeviceId !== this.#deviceId) return;
@@ -800,7 +769,7 @@
             return;
           }
 
-          console.debug("[WebHID] wrapper: unknown event_type:", event_type);
+          logger.debug("[WebHID] wrapper: unknown event_type:", event_type);
         };
 
         // Register this wrapper for the original listener
@@ -865,10 +834,7 @@
     }
   }
 
-  /**
-   * High-frequency input loop that drains the SharedArrayBuffer ring buffer.
-   * Uses Atomics.waitAsync to sleep until the Worker notifies us of new data.
-   */
+  // SAB drain loop. Uses Atomics.waitAsync + generation counter for SAB swaps.
   function startInputReportLoop(device, sab, reportSize) {
     let meta    = new Int32Array(sab, 0, 3);
     let reports = new Uint8Array(sab, 12);
@@ -913,7 +879,7 @@
       if (dropped !== lastDropped) {
         const delta = dropped - lastDropped;
         lastDropped = dropped;
-        console.warn('[webhid] SAB DROPPED ' + delta + ' input reports (total=' + dropped + ')');
+        logger.warn('[webhid] SAB DROPPED ' + delta + ' input reports (total=' + dropped + ')');
       }
       if (tail !== head) scheduleYield(drain);
     }

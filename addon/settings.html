@@ -65,7 +65,20 @@ select:hover { border-color: #4a9; }
     <option value="32768">32768</option>
   </select>
 </div>
+<div class="setting">
+  <div class="setting-info">
+    <h3>Log Level</h3>
+    <p>Controls console output verbosity. Error = errors only, Warn = +warnings, Info = +info, Debug = +debug. Reload pages after changing.</p>
+  </div>
+  <select id="logLevel">
+    <option value="0">Error</option>
+    <option value="1">Warn</option>
+    <option value="2">Info</option>
+    <option value="3">Debug</option>
+  </select>
+</div>
 <div class="status" id="status"></div>
+<script src="logger.js"></script>
 <script src="settings.js"></script>
 </body>
 </html>

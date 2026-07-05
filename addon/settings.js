@@ -1,11 +1,12 @@
 (async () => {
-  const DEFAULTS = { perfLogging: false, fireAndForget: true, sabEnabled: true, sabCapacity: 8192 };
+  const DEFAULTS = { perfLogging: false, fireAndForget: true, sabEnabled: true, sabCapacity: 8192, logLevel: 1 };
   const current = await browser.storage.local.get(DEFAULTS);
 
   for (const key of ['perfLogging', 'fireAndForget', 'sabEnabled']) {
     document.getElementById(key).checked = current[key];
   }
   document.getElementById('sabCapacity').value = String(current.sabCapacity);
+  document.getElementById('logLevel').value = String(current.logLevel);
 
   function showStatus(msg) {
     const el = document.getElementById('status');
@@ -23,5 +24,9 @@
   document.getElementById('sabCapacity').addEventListener('change', async (e) => {
     await browser.storage.local.set({ sabCapacity: parseInt(e.target.value, 10) });
     showStatus(`sabCapacity = ${e.target.value}`);
+  });
+  document.getElementById('logLevel').addEventListener('change', async (e) => {
+    await browser.storage.local.set({ logLevel: parseInt(e.target.value, 10) });
+    showStatus(`logLevel = ${e.target.value}`);
   });
 })();

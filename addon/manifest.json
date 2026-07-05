@@ -21,7 +21,7 @@
   ],
 
   "background": {
-    "scripts": ["background.js"]
+    "scripts": ["logger.js", "background.js"]
   },
 
   "action": {
@@ -37,18 +37,18 @@
   "content_scripts": [
     {
         "matches": ["<all_urls>"],
-        "js": ["webhid-polyfill.js"],
+        "js": ["logger.js", "webhid-polyfill.js"],
         "world": "MAIN"
       },
       {
         "matches": ["<all_urls>"],
-        "js": ["webhid-bridge.js"]
+        "js": ["logger.js", "webhid-bridge.js"]
       }
   ],
 
   "web_accessible_resources": [
     {
-      "resources": ["res/*.svg", "webhid.css", "hid-worker.js", "popup.html", "popup.js", "popup.css", "wasm-parser.js", "wasm-parser.wasm"],
+      "resources": ["res/*.svg", "webhid.css", "hid-worker.js", "logger.js", "popup.html", "popup.js", "popup.css", "wasm-parser.js", "wasm-parser.wasm"],
       "matches": ["<all_urls>"]
     }
   ],
