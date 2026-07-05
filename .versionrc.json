@@ -3,6 +3,10 @@
     {
       "filename": "addon/manifest.json",
       "type": "json"
+    },
+    {
+      "filename": "package.json",
+      "type": "json"
     }
   ],
   "types": [
