@@ -122,18 +122,19 @@ jobs:
           name: webhid-macos-universal
           path: artifacts-macos/
 
+      - name: Package artifacts per platform
+        run: |
+          cd artifacts-linux   && zip -r ../webhid-linux-x86_64.zip   . && cd ..
+          cd artifacts-windows && zip -r ../webhid-windows-x86_64.zip . && cd ..
+          cd artifacts-macos   && zip -r ../webhid-macos-universal.zip . && cd ..
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           files: |
             dist/webhid-addon.xpi
-            artifacts-linux/bin/*
-            artifacts-linux/manifests/*
-            artifacts-windows/bin/*
-            artifacts-windows/manifests/*
-            artifacts-macos/bin/*
-            artifacts-macos/manifests/*
+            webhid-*.zip
 
       - name: Upload to AMO
         uses: kewisch/action-web-ext@v2
