@@ -2,7 +2,7 @@
   "bumpFiles": [
     {
       "filename": "addon/manifest.json",
-      "updater": "npm update version from package.json"
+      "type": "json"
     }
   ],
   "types": [
@@ -14,5 +14,5 @@
     { "type": "ci", "section": "CI/CD" },
     { "type": "chore", "section": "Chores" }
   ],
-  "releaseCommitMessageFormat": "chore: release v{{version}}"
+  "releaseCommitMessageFormat": "chore: release v{{currentTag}}"
 }
