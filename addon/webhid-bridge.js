@@ -711,11 +711,9 @@
     if (_wasmReady) return;
     _wasmReady = true;
     try {
-      const jsUrl = browser.runtime.getURL('wasm-parser.js');
       const wasmUrl = browser.runtime.getURL('wasm-parser.wasm');
-      const mod = await import(jsUrl);
-      await mod.default(wasmUrl);
-      _wasmParser = mod.parse_descriptor;
+      await wasm_bindgen(wasmUrl);
+      _wasmParser = wasm_bindgen.parse_descriptor;
       logger.info('[bridge] WASM descriptor parser ready');
     } catch (e) {
       logger.warn('[bridge] WASM init failed, JS fallback:', e);
