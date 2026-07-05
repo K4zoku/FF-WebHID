@@ -22,6 +22,10 @@ __pycache__/
 /test/tmp/
 /test/output/
 
+# Auto-built by scripts/build-addon.sh
+addon/wasm-parser.js
+addon/wasm-parser.wasm
+
 # Ignore by convention
 *.local
 *.secret
