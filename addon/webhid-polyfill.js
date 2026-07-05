@@ -273,10 +273,26 @@
     return collections;
   }
 
+  // ── Global device registry ────────────────────────────────────────────────
+  // All HIDDevice instances are tracked globally so that getDevices() and
+  // requestDevice() return references to the SAME objects (not clones).
+  // Open state is shared — if one tab opens a device, console getDevices()
+  // sees opened: true. This matches Chromium's behavior.
+  const _deviceRegistry = new Map(); // internalId -> HIDDevice
+
+  function getOrCreateDevice(deviceInfo) {
+    const id = deviceInfo.device_id;
+    if (id && _deviceRegistry.has(id)) {
+      return _deviceRegistry.get(id);
+    }
+    const dev = new HIDDevice(deviceInfo);
+    if (id) _deviceRegistry.set(id, dev);
+    return dev;
+  }
+
   // ── HIDDevice ─────────────────────────────────────────────────────────────
 
   class HIDDevice extends EventTarget {
-    // Private fields for internal bookkeeping
     #inputReportListeners = new Map();
     #inputReportEventWrappers = new Map();
     #oninputreportListener = null;
@@ -330,6 +346,111 @@
 
       // ... normalize collections ...
 
+      // Field-level normalizer that accepts both snake_case (from daemon /
+      // WASM parser) and camelCase (already-spec-compliant) keys. Returns a
+      // spec-compliant item object that exactly matches Chromium's
+      // `HIDReportItem` shape.
+      //
+      // Chromium uses `usages` XOR (`usageMinimum` + `usageMaximum`):
+      //   - isRange == false → emit `usages`, omit min/max
+      //   - isRange == true  → emit `usageMinimum` + `usageMaximum`, omit `usages`
+      // No `reportId`, `reportType`, `usagePage`, `usage`, or `bitOffset` at
+      // the item level — those live on the report or are not in the spec.
+      function normalizeField(f, fallbackReportId, fallbackReportType) {
+        const pick = (camel, snake) =>
+          f[camel] !== undefined ? f[camel] :
+          f[snake] !== undefined ? f[snake] : undefined;
+
+        const isRange = pick("isRange", "is_range") === true;
+        let usageMinimum = pick("usageMinimum", "usage_minimum");
+        let usageMaximum = pick("usageMaximum", "usage_maximum");
+
+        // usages: prefer spec camelCase, then snake_case, then packed_usages (u32).
+        // If usages look like u16 values and we have a usagePage, pack them into
+        // the Chromium-style u32 form (page<<16 | id).
+        const uPage = f.usagePage !== undefined ? f.usagePage
+                    : f.usage_page !== undefined ? f.usage_page
+                    : null;
+        let usages = null;
+        if (Array.isArray(f.usages)) usages = f.usages.slice();
+        else if (Array.isArray(f.packed_usages)) usages = f.packed_usages.slice();
+        if (usages && usages.length && typeof usages[0] === "number" && usages[0] < 0x10000 && uPage != null) {
+          usages = usages.map(u => ((uPage << 16) | (u & 0xFFFF)) >>> 0);
+        }
+
+        // If isRange is true but usageMinimum/usageMaximum are missing
+        // (e.g. from the JS parser fallback), try to derive them from the
+        // usages list.
+        if (isRange && usageMinimum == null && usageMaximum == null && usages && usages.length > 1) {
+          const page = (usages[0] >> 16) & 0xFFFF;
+          const lo = usages[0] & 0xFFFF;
+          const hi = usages[usages.length - 1] & 0xFFFF;
+          usageMinimum = ((page << 16) | lo) >>> 0;
+          usageMaximum = ((page << 16) | hi) >>> 0;
+        }
+
+        const item = {
+          reportSize: f.reportSize !== undefined ? f.reportSize
+                    : f.size !== undefined ? f.size
+                    : f.size_bits !== undefined ? f.size_bits
+                    : 0,
+          reportCount: f.reportCount !== undefined ? f.reportCount
+                     : f.count !== undefined ? f.count
+                     : 0,
+          isArray: pick("isArray", "is_array") === true,
+          isRange,
+          isAbsolute: pick("isAbsolute", "is_absolute") === true,
+          isConstant: pick("isConstant", "is_constant") === true,
+          isLinear: pick("isLinear", "is_linear") === true,
+          isVolatile: pick("isVolatile", "is_volatile") === true,
+          isBufferedBytes: pick("isBufferedBytes", "is_buffered_bytes") === true,
+          hasNull: pick("hasNull", "has_null") === true,
+          hasPreferredState: pick("hasPreferredState", "has_preferred_state") === true,
+          wrap: pick("wrap", "wrap") === true,
+          logicalMinimum: pick("logicalMinimum", "logical_minimum") ?? 0,
+          logicalMaximum: pick("logicalMaximum", "logical_maximum") ?? 0,
+          physicalMinimum: pick("physicalMinimum", "physical_minimum") ?? 0,
+          physicalMaximum: pick("physicalMaximum", "physical_maximum") ?? 0,
+          unitExponent: pick("unitExponent", "unit_exponent") ?? 0,
+          unitSystem: pick("unitSystem", "unit_system") ?? "none",
+          unitFactorLengthExponent: pick("unitFactorLengthExponent", "unit_factor_length_exponent") ?? 0,
+          unitFactorMassExponent: pick("unitFactorMassExponent", "unit_factor_mass_exponent") ?? 0,
+          unitFactorTimeExponent: pick("unitFactorTimeExponent", "unit_factor_time_exponent") ?? 0,
+          unitFactorTemperatureExponent: pick("unitFactorTemperatureExponent", "unit_factor_temperature_exponent") ?? 0,
+          unitFactorCurrentExponent: pick("unitFactorCurrentExponent", "unit_factor_current_exponent") ?? 0,
+          unitFactorLuminousIntensityExponent: pick("unitFactorLuminousIntensityExponent", "unit_factor_luminous_intensity_exponent") ?? 0,
+        };
+
+        // Emit `usages` XOR `usageMinimum`+`usageMaximum`, matching Chromium.
+        if (isRange) {
+          item.usageMinimum = usageMinimum ?? 0;
+          item.usageMaximum = usageMaximum ?? 0;
+        } else {
+          item.usages = usages || [];
+        }
+
+        return item;
+      }
+
+      // Convert a single report object to spec shape.
+      // Accepts both { reportId, items[] } (WASM/JS) and
+      // { id, fields[], report_type } (daemon).
+      function normalizeReport(r, fallbackType) {
+        const rid = r.reportId !== undefined ? r.reportId
+                  : r.id !== undefined && r.id !== null ? r.id
+                  : 0;
+        const rtype = r.reportType !== undefined ? r.reportType
+                    : r.report_type !== undefined ? r.report_type
+                    : fallbackType;
+        const items = Array.isArray(r.items) ? r.items
+                    : Array.isArray(r.fields) ? r.fields
+                    : [];
+        return {
+          reportId: rid,
+          items: items.map(f => normalizeField(f, rid, rtype)),
+        };
+      }
+
       function normalizeCollection(c) {
         const out = {
           type: c.type !== undefined ? c.type : (c.collection_type !== undefined ? c.collection_type : null),
@@ -349,42 +470,31 @@
           out.children = c.children.map(normalizeCollection);
         }
 
-        // If the daemon provided richer report metadata, populate the report arrays
-        // Each report contains `reportId` and an `items` array with field-level metadata.
+        // Path A — WASM / JS parser format: inputReports/outputReports/
+        // featureReports are already split arrays on the collection object.
+        const hasSplitReports =
+          (Array.isArray(c.inputReports) && c.inputReports.length > 0) ||
+          (Array.isArray(c.outputReports) && c.outputReports.length > 0) ||
+          (Array.isArray(c.featureReports) && c.featureReports.length > 0);
+
+        if (hasSplitReports) {
+          if (Array.isArray(c.inputReports)) {
+            out.inputReports = c.inputReports.map(r => normalizeReport(r, "input"));
+          }
+          if (Array.isArray(c.outputReports)) {
+            out.outputReports = c.outputReports.map(r => normalizeReport(r, "output"));
+          }
+          if (Array.isArray(c.featureReports)) {
+            out.featureReports = c.featureReports.map(r => normalizeReport(r, "feature"));
+          }
+          return out;
+        }
+
+        // Path B — legacy daemon format: flat `reports` array with per-report
+        // `report_type` field.
         if (Array.isArray(c.reports) && c.reports.length > 0) {
           c.reports.forEach((r) => {
-            const rep = {
-              reportId: r.id !== undefined && r.id !== null ? r.id : 0,
-              items: Array.isArray(r.fields)
-                ? r.fields.map((f) => ({
-                  reportId: f.report_id !== undefined && f.report_id !== null ? f.report_id : (r.id !== undefined && r.id !== null ? r.id : 0),
-                  reportType: f.report_type !== undefined ? f.report_type : (r.report_type !== undefined ? r.report_type : null),
-                  reportSize: f.size !== undefined ? f.size : (r.size_bits !== undefined ? r.size_bits : null),
-                  reportCount: f.count !== undefined ? f.count : null,
-                  usagePage: f.usage_page !== undefined ? f.usage_page : (f.usagePage !== undefined ? f.usagePage : null),
-                  usage: f.usage !== undefined ? f.usage : null,
-                  // Accept either legacy small `usages` (u16) or packed `packed_usages` (u32)
-                  usages: Array.isArray(f.usages) ? f.usages : (Array.isArray(f.packed_usages) ? f.packed_usages : null),
-                  // Forward additional optional attributes if present so pages can
-                  // inspect them when available (preserve both snake_case and
-                  // camelCase names from daemon-side serialization).
-                  isArray: f.is_array !== undefined ? f.is_array : f.isArray !== undefined ? f.isArray : undefined,
-                  isRange: f.is_range !== undefined ? f.is_range : f.isRange !== undefined ? f.isRange : undefined,
-                  isAbsolute: f.is_absolute !== undefined ? f.is_absolute : f.isAbsolute !== undefined ? f.isAbsolute : undefined,
-                  hasNull: f.has_null !== undefined ? f.has_null : f.hasNull !== undefined ? f.hasNull : undefined,
-                  logicalMinimum: f.logical_minimum !== undefined ? f.logical_minimum : f.logicalMinimum !== undefined ? f.logicalMinimum : undefined,
-                  logicalMaximum: f.logical_maximum !== undefined ? f.logical_maximum : f.logicalMaximum !== undefined ? f.logicalMaximum : undefined,
-                  physicalMinimum: f.physical_minimum !== undefined ? f.physical_minimum : f.physicalMinimum !== undefined ? f.physicalMinimum : undefined,
-                  physicalMaximum: f.physical_maximum !== undefined ? f.physical_maximum : f.physicalMaximum !== undefined ? f.physicalMaximum : undefined,
-                  unitExponent: f.unit_exponent !== undefined ? f.unit_exponent : f.unitExponent !== undefined ? f.unitExponent : undefined,
-                  unitSystem: f.unit_system !== undefined ? f.unit_system : f.unitSystem !== undefined ? f.unitSystem : undefined,
-                  usageMinimum: f.usage_minimum !== undefined ? f.usage_minimum : f.usageMinimum !== undefined ? f.usageMinimum : undefined,
-                  usageMaximum: f.usage_maximum !== undefined ? f.usage_maximum : f.usageMaximum !== undefined ? f.usageMaximum : undefined,
-                  bitOffset: f.bit_offset !== undefined ? f.bit_offset : f.bitOffset !== undefined ? f.bitOffset : undefined,
-                }))
-                : [],
-            };
-
+            const rep = normalizeReport(r, null);
             if (r.report_type === "input") out.inputReports.push(rep);
             else if (r.report_type === "output") out.outputReports.push(rep);
             else if (r.report_type === "feature") out.featureReports.push(rep);
@@ -435,7 +545,21 @@
       const visit = (c) => {
         if (c.inputReports) {
           for (const r of c.inputReports) {
-            const size = Math.ceil((r.size_bits || r.reportSize || r.size || 0) / 8);
+            // Sum the bit size of every item in the report (reportSize *
+            // reportCount for each item) to compute the total report payload
+            // size in bytes. Falls back to per-report legacy fields if no
+            // items are present.
+            let bits = 0;
+            if (Array.isArray(r.items) && r.items.length > 0) {
+              for (const it of r.items) {
+                const sz = it.reportSize || it.size || it.size_bits || 0;
+                const cnt = it.reportCount || it.count || 1;
+                bits += sz * cnt;
+              }
+            } else {
+              bits = (r.size_bits || r.reportSize || r.size || 0) * 8;
+            }
+            const size = Math.ceil(bits / 8);
             if (size > max) max = size;
           }
         }
@@ -801,9 +925,6 @@
 
   class HID extends EventTarget {
     async getDevices() {
-      // Returns a Promise that resolves with an array of connected HID devices
-      // that the user has previously been granted access to in response to a
-      // requestDevice() call.
       try {
         const savedHashes = await getSavedDevices();
         const deviceCache = await getDeviceCache();
@@ -811,7 +932,7 @@
         for (const hash of savedHashes) {
           const device = deviceCache.get(hash);
           if (device) {
-            grantedDevices.push(new HIDDevice(device));
+            grantedDevices.push(getOrCreateDevice(device));
           }
         }
         return grantedDevices;
@@ -842,7 +963,7 @@
             }
 
             // Resolve with an array of HIDDevice instances per spec
-            resolve(devices.map((d) => new HIDDevice(d)));
+            resolve(devices.map((d) => getOrCreateDevice(d)));
           }
         };
         window.postMessage(
