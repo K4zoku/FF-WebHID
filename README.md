@@ -54,7 +54,7 @@ Open `about:addons → FF WebHID → Options`:
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md) — system design, data plane, security, reconnect
-- [Development Guide](DEVELOPMENT.md) — building, testing, debugging, packaging
+- [Development Guide](docs/DEVELOPMENT.md) — building, testing, debugging, packaging
 
 ## License
 
