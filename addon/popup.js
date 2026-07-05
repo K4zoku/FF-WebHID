@@ -1,5 +1,5 @@
 (async () => {
-  const DEFAULTS = { fireAndForget: true, sabEnabled: true };
+  const DEFAULTS = { fireAndForget: true, sabEnabled: true, sabCapacity: 8192 };
 
   // Get current tab URL
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
@@ -39,12 +39,20 @@
   const settings = await loadSettings();
   document.getElementById('fireAndForget').checked = settings.fireAndForget;
   document.getElementById('sabEnabled').checked = settings.sabEnabled;
+  document.getElementById('sabCapacity').value = String(settings.sabCapacity);
+
+  const sabCapacityRow = document.getElementById('sab-capacity-row');
+  sabCapacityRow.style.display = settings.sabEnabled ? 'flex' : 'none';
 
   document.getElementById('fireAndForget').addEventListener('change', (e) => {
     saveSetting('fireAndForget', e.target.checked);
   });
   document.getElementById('sabEnabled').addEventListener('change', (e) => {
     saveSetting('sabEnabled', e.target.checked);
+    sabCapacityRow.style.display = e.target.checked ? 'flex' : 'none';
+  });
+  document.getElementById('sabCapacity').addEventListener('change', (e) => {
+    saveSetting('sabCapacity', parseInt(e.target.value, 10));
   });
 
   // Load saved devices for this site

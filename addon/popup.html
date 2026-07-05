@@ -36,6 +36,19 @@
       <span class="slider"></span>
     </label>
   </div>
+  <div class="setting" id="sab-capacity-row">
+    <div class="setting-info">
+      <h3>SAB Buffer Capacity</h3>
+      <p>Ring-buffer slots (higher = fewer drops under load)</p>
+    </div>
+    <select id="sabCapacity">
+      <option value="2048">2048</option>
+      <option value="4096">4096</option>
+      <option value="8192">8192</option>
+      <option value="16384">16384</option>
+      <option value="32768">32768</option>
+    </select>
+  </div>
 </div>
 <div id="default-note" class="muted">Changes here override defaults for this site.</div>
 <a id="open-settings" href="#">Global settings →</a>

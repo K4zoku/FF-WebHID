@@ -151,6 +151,13 @@ async fn handle_websocket(
     };
 
     log::info!("[ws] authenticated token for device_id={device_id}");
+
+    // Subscribe to the broadcast channel BEFORE calling set_ws_active(true).
+    // If we set ws_active first, the client.rs event-forwarder starts skipping
+    // InputReport events (because is_ws_active == true). But the WS sender
+    // task hasn't subscribed yet, so those reports are lost forever.
+    let mut event_rx = event_tx.subscribe();
+
     device_mgr.set_ws_active(&device_id, true);
 
     let (mut ws_sender, mut ws_receiver) = ws_stream.split();
@@ -214,7 +221,8 @@ async fn handle_websocket(
         .unwrap_or(DEFAULT_BATCH_FLUSH_MS)
         .max(1);
 
-    let mut event_rx = event_tx.subscribe();
+    // event_rx was already subscribed above (before set_ws_active) to avoid
+    // losing reports between set_ws_active(true) and the sender task start.
     let mut sender_task = tokio::spawn(async move {
         let mut batch: Vec<Vec<u8>> = Vec::with_capacity(64);
         let mut flush_interval = interval(Duration::from_millis(batch_ms));

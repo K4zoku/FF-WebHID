@@ -23,3 +23,5 @@ input:checked + .slider:before { transform: translateX(16px); }
 #default-note { margin-top: 12px; }
 #open-settings { display: block; margin-top: 8px; text-align: center; color: #4a9; text-decoration: none; font-size: 0.85em; }
 #open-settings:hover { text-decoration: underline; }
+select { background: #2a2a3e; color: #e0e0e0; border: 1px solid #444; border-radius: 4px; padding: 4px 8px; font-size: 0.85em; cursor: pointer; }
+select:hover { border-color: #4a9; }

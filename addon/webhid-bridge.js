@@ -581,9 +581,23 @@
 
       if (action === "open" && response.success && response.session_token) {
         const deviceId = String.fromCharCode(...response.data);
-        const sabSetting = await browser.storage.local.get({ sabEnabled: true });
-        if (!sabSetting.sabEnabled) {
-          console.log('[bridge] SAB disabled — skipping worker spawn for', deviceId);
+        const origin = window.location.origin;
+        const siteKey = origin ? `site:${origin}` : null;
+
+        let sabEnabled = true;
+        let sabCapacity = 8192;
+        const globalDefaults = await browser.storage.local.get({ sabEnabled: true, sabCapacity: 8192 });
+        sabEnabled = globalDefaults.sabEnabled;
+        sabCapacity = globalDefaults.sabCapacity;
+        if (siteKey) {
+          const siteResult = await browser.storage.local.get(siteKey);
+          const ss = siteResult[siteKey] || {};
+          if (ss.sabEnabled !== undefined) sabEnabled = ss.sabEnabled;
+          if (ss.sabCapacity !== undefined) sabCapacity = ss.sabCapacity;
+        }
+
+        if (!sabEnabled) {
+          console.log('[bridge] SAB disabled for', deviceId);
         } else
         {
         let worker;
@@ -657,6 +671,7 @@
           token: response.session_token,
           wsPort: response.ws_port || _wsPort,
           reportSize: payload.reportSize || 2048,
+          capacity: sabCapacity,
         });
 
         (async () => {

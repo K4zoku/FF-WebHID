@@ -1,4 +1,6 @@
-const CAPACITY = 2048;
+// Default ring-buffer capacity (number of report slots). Overridden by
+// the `capacity` field in the `connect` message from the bridge.
+let CAPACITY = 8192;
 
 let sab = null, meta = null, data = null, reportSize = 64, ws = null;
 const _pending = new Map();
@@ -17,7 +19,6 @@ self.onmessage = ({ data: msg }) => {
   if (msg.type === 'send') return handleSend(msg, MSG_SEND_REPORT);
   if (msg.type === 'sendFeature') return handleSend(msg, MSG_SEND_FEATURE_REPORT);
   if (msg.type === 'receiveFeature') return handleReceiveFeature(msg);
-  console.warn('[worker] unknown msg type:', msg.type);
 };
 
 let _connectMsg = null;
@@ -27,11 +28,13 @@ let _reconnectDelay = 500;
 function connect(msg) {
   _connectMsg = msg;
   reportSize = msg.reportSize || 64;
-  if (!sab) {
-    sab = new SharedArrayBuffer(12 + CAPACITY * reportSize);
-    meta = new Int32Array(sab, 0, 3);
-    data = new Uint8Array(sab, 12);
-  }
+  CAPACITY = msg.capacity || 8192;
+  // Always allocate a fresh SAB on connect so the page's drain loop can
+  // swap to it. Reusing the old SAB after a WS reconnect would cause the
+  // page to read stale data from before the disconnect.
+  sab = new SharedArrayBuffer(12 + CAPACITY * reportSize);
+  meta = new Int32Array(sab, 0, 3);
+  data = new Uint8Array(sab, 12);
   _doConnect();
 }
 
@@ -39,7 +42,6 @@ function _doConnect() {
   try {
     ws = new WebSocket(`ws://127.0.0.1:${_connectMsg.wsPort}`, [`webhid.${_connectMsg.token}`]);
   } catch (e) {
-    console.error('[worker] WebSocket() threw:', e);
     _scheduleReconnect();
     return;
   }
@@ -49,10 +51,9 @@ function _doConnect() {
     self.postMessage({ type: 'ready', sab });
   };
   ws.onerror = (e) => {
-    console.error('[worker] WS ERROR:', e.message || e, 'state=' + (ws ? ws.readyState : 'null'));
+    console.error('[worker] WS ERROR:', e.message || e);
   };
   ws.onclose = (e) => {
-    console.warn('[worker] WS CLOSED code=' + e.code + ' clean=' + e.wasClean + ' pending=' + _pending.size);
     for (const [, p] of _pending) p.reject(new Error('ws closed'));
     _pending.clear();
     self.postMessage({ type: 'closed' });
@@ -60,7 +61,9 @@ function _doConnect() {
   };
   ws.onmessage = ({ data: frame }) => {
     const batch = new Uint8Array(frame);
-    if (batch.length > 0 && batch[0] >= 0x80) return handleControlResponse(batch);
+    // Control responses start with 0x81/0x82/0x83 and are small (≤10 bytes).
+    // Input batches start with a u16 LE length prefix and are larger.
+    if (batch.length > 0 && batch[0] >= 0x80 && batch.length <= 10) return handleControlResponse(batch);
     pushInputBatch(batch);
   };
 }
@@ -83,7 +86,11 @@ function pushInputBatch(batch) {
     if (len === 0 || offset + len > batch.length) break;
     const head = Atomics.load(meta, 0);
     const next = (head + 1) % CAPACITY;
-    if (next === Atomics.load(meta, 1)) { Atomics.add(meta, 2, 1); offset += len; continue; }
+    if (next === Atomics.load(meta, 1)) {
+      Atomics.add(meta, 2, 1);
+      offset += len;
+      continue;
+    }
     const slotStart = head * reportSize;
     data.fill(0, slotStart, slotStart + reportSize);
     const storedLen = Math.min(len, reportSize - 2);
@@ -100,7 +107,6 @@ function pushInputBatch(batch) {
 
 function handleSend(msg, msgType) {
   if (!ws || ws.readyState !== WebSocket.OPEN) {
-    console.warn('[worker] send: WS not open (state=' + (ws ? ws.readyState : 'null') + ')');
     self.postMessage({ type: 'sendResult', reqId: msg.reqId, error: 'ws not open' });
     return;
   }
@@ -118,7 +124,7 @@ function handleSend(msg, msgType) {
   }
   _pending.set(reqId, {
     resolve: () => { self.postMessage({ type: 'sendResult', reqId: msg.reqId, success: true }); },
-    reject: (e) => { console.warn('[worker] send reqId=' + reqId + ' FAIL:', e.message); self.postMessage({ type: 'sendResult', reqId: msg.reqId, error: String(e.message || e) }); },
+    reject: (e) => { self.postMessage({ type: 'sendResult', reqId: msg.reqId, error: String(e.message || e) }); },
   });
   ws.send(frame);
 }
@@ -135,7 +141,7 @@ function handleReceiveFeature(msg) {
   frame[5] = msg.reportId;
   _pending.set(reqId, {
     resolve: (data) => { self.postMessage({ type: 'featureResult', reqId: msg.reqId, data }); },
-    reject: (e) => { console.warn('[worker] recvFeature reqId=' + reqId + ' FAIL:', e.message); self.postMessage({ type: 'featureResult', reqId: msg.reqId, error: String(e.message || e) }); },
+    reject: (e) => { self.postMessage({ type: 'featureResult', reqId: msg.reqId, error: String(e.message || e) }); },
   });
   ws.send(frame);
 }
@@ -146,7 +152,7 @@ function handleControlResponse(batch) {
   const reqId = batch[1] | (batch[2] << 8) | (batch[3] << 16) | (batch[4] << 24);
   const status = batch[5];
   const p = _pending.get(reqId);
-  if (!p) return; // fire-and-forget: send/sendFeature responses are silently dropped
+  if (!p) return;
   _pending.delete(reqId);
   if (respType === RESP_RECEIVE_FEATURE_REPORT) {
     if (status !== 0) return p.reject(new Error('feature read failed'));

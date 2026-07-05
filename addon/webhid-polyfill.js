@@ -280,6 +280,12 @@
   // sees opened: true. This matches Chromium's behavior.
   const _deviceRegistry = new Map(); // internalId -> HIDDevice
 
+  // WeakMap storing the SAB-swap callback for each HIDDevice. We can't use a
+  // private field because `startInputReportLoop` is a standalone function
+  // (not a class method) and JS private fields can only be accessed from
+  // inside the class body.
+  const _sabUpdateFns = new WeakMap();
+
   function getOrCreateDevice(deviceInfo) {
     const id = deviceInfo.device_id;
     if (id && _deviceRegistry.has(id)) {
@@ -319,13 +325,13 @@
         const evDeviceId = detail.device_id ? String.fromCharCode(...detail.device_id) : null;
         if (!evDeviceId || !this.#deviceId || evDeviceId !== this.#deviceId) return;
         this.#hotPath = true;
-        console.info('[webhid] hotPath ON for', this.#deviceId);
         if (!this.#inputLoopStarted) {
           this.#inputLoopStarted = true;
           startInputReportLoop(this, detail.sab, detail.reportSize);
+        } else {
+          const updateFn = _sabUpdateFns.get(this);
+          if (updateFn) updateFn(detail.sab, detail.reportSize);
         }
-        window.removeEventListener("message", listener);
-        this.#sabListener = null;
       };
       this.#sabListener = listener;
       window.addEventListener("message", listener);
@@ -638,7 +644,6 @@
     }
 
     async sendReport(reportId, data) {
-      // console.debug("[WebHID]", `sendReport(${reportId}, new Uint8Array([${data}]).buffer)`);
       if (!this.opened)
         throw new DOMException("Device is not open", "InvalidStateError");
       const buffer =
@@ -646,12 +651,14 @@
           ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
           : new Uint8Array(data);
       try {
-        // Hot path: when the Worker/WS data plane is established, route
-        // the call via `worker-send` so the bridge forwards it to the
-        // Worker, which sends a binary WS frame straight to the daemon.
-        // This bypasses the JSON control plane (page → background.js →
-        // NM host → daemon → NM host → background.js → page) and cuts
-        // roundtrip latency by ~5–10×.
+        // If the SAB/Worker data plane is not yet ready but SAB is enabled
+        // (worker is connecting), wait briefly for it. Otherwise the first
+        // sendReport goes via the slow NM path while the device response
+        // arrives via the WS path — but the WS sender may not be subscribed
+        // yet, causing the response to be lost and the page to time out.
+        if (!this.#hotPath && this.#sabListener) {
+          await this.#waitForHotPath(2000);
+        }
         const action = this.#hotPath ? "worker-send" : "sendreport";
         const response = await sendRequest(action, {
           device_id: this.#deviceId.split("").map((c) => c.charCodeAt(0)),
@@ -663,6 +670,19 @@
       } catch (error) {
         throw new DOMException(error.message, "NetworkError");
       }
+    }
+
+    #waitForHotPath(timeoutMs) {
+      return new Promise((resolve) => {
+        if (this.#hotPath) return resolve();
+        const start = Date.now();
+        const check = () => {
+          if (this.#hotPath) return resolve();
+          if (Date.now() - start >= timeoutMs) return resolve();
+          setTimeout(check, 10);
+        };
+        check();
+      });
     }
 
     async receiveFeatureReport(reportId) {
@@ -850,15 +870,13 @@
    * Uses Atomics.waitAsync to sleep until the Worker notifies us of new data.
    */
   function startInputReportLoop(device, sab, reportSize) {
-    const meta    = new Int32Array(sab, 0, 3);  // [head, tail, dropped]
-    const reports = new Uint8Array(sab, 12);
-    const cap     = (sab.byteLength - 12) / reportSize;
-    let   tail    = Atomics.load(meta, 1);
+    let meta    = new Int32Array(sab, 0, 3);
+    let reports = new Uint8Array(sab, 12);
+    let cap     = (sab.byteLength - 12) / reportSize;
+    let tail    = Atomics.load(meta, 1);
+    let lastDropped = Atomics.load(meta, 2);
+    let generation = 0;
 
-    // 0-delay yield via MessageChannel (setTimeout has 4ms minimum clamp).
-    // Critical for animation frame delivery: 4ms × hundreds of frames = seconds
-    // of accumulated latency, which shows up as stale/mismatched frames when
-    // SayoDevice stacks transparent image layers.
     const _yieldChan = new MessageChannel();
     let _yieldCb = null;
     _yieldChan.port1.onmessage = () => { if (_yieldCb) { const cb = _yieldCb; _yieldCb = null; cb(); } };
@@ -891,32 +909,44 @@
         head = Atomics.load(meta, 0);
         n++;
       }
-      if (tail !== head) {
-        scheduleYield(drain);
+      const dropped = Atomics.load(meta, 2);
+      if (dropped !== lastDropped) {
+        const delta = dropped - lastDropped;
+        lastDropped = dropped;
+        console.warn('[webhid] SAB DROPPED ' + delta + ' input reports (total=' + dropped + ')');
       }
+      if (tail !== head) scheduleYield(drain);
     }
 
     function wait() {
+      const myGen = generation;
       const head = Atomics.load(meta, 0);
-      if (head !== tail) {
-        // reports already waiting — drain without sleeping
-        drain();
-      }
-      // sleep until Worker calls Atomics.notify(meta, 0)
+      if (head !== tail) drain();
       const result = Atomics.waitAsync(meta, 0, Atomics.load(meta, 0));
       if (result.async) {
         result.value.then(() => {
+          if (myGen !== generation) return;
           drain();
-          wait(); // re-arm
+          wait();
         });
       } else {
-        // Value changed synchronously or error occurred
+        if (myGen !== generation) return;
         drain();
-        // Use requestAnimationFrame or setTimeout to avoid deep recursion if
-        // the worker is incredibly fast (unlikely but safe)
-        requestAnimationFrame(wait);
+        requestAnimationFrame(() => { if (myGen !== generation) return; wait(); });
       }
     }
+
+    _sabUpdateFns.set(device, (newSab, newReportSize) => {
+      meta = new Int32Array(newSab, 0, 3);
+      reports = new Uint8Array(newSab, 12);
+      reportSize = newReportSize;
+      cap = (newSab.byteLength - 12) / reportSize;
+      tail = Atomics.load(meta, 1);
+      lastDropped = Atomics.load(meta, 2);
+      generation++;
+      drain();
+      wait();
+    });
 
     wait();
   }
