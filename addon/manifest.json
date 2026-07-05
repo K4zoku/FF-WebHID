@@ -1,13 +1,11 @@
 {
   "manifest_version": 3,
   "name": "WebHID",
-  "version": "1.4",
+  "version": "1.5.0",
   "description": "WebHID API implementation for Firefox",
-
   "icons": {
     "48": "icons/icon.svg"
   },
-
   "permissions": [
     "nativeMessaging",
     "scripting",
@@ -15,50 +13,70 @@
     "webRequest",
     "webRequestBlocking"
   ],
-
   "host_permissions": [
     "<all_urls>"
   ],
-
   "background": {
-    "scripts": ["logger.js", "background.js"]
+    "scripts": [
+      "logger.js",
+      "background.js"
+    ]
   },
-
   "action": {
     "default_popup": "popup.html",
     "default_icon": "icons/icon.svg"
   },
-
   "options_ui": {
     "page": "settings.html",
     "browser_style": false
   },
-
   "content_scripts": [
     {
-        "matches": ["<all_urls>"],
-        "js": ["logger.js", "webhid-polyfill.js"],
-        "world": "MAIN"
-      },
-      {
-        "matches": ["<all_urls>"],
-        "js": ["logger.js", "webhid-bridge.js"]
-      }
-  ],
-
-  "web_accessible_resources": [
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "logger.js",
+        "webhid-polyfill.js"
+      ],
+      "world": "MAIN"
+    },
     {
-      "resources": ["res/*.svg", "webhid.css", "hid-worker.js", "logger.js", "popup.html", "popup.js", "popup.css", "wasm-parser.js", "wasm-parser.wasm"],
-      "matches": ["<all_urls>"]
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "logger.js",
+        "webhid-bridge.js"
+      ]
     }
   ],
-
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "res/*.svg",
+        "webhid.css",
+        "hid-worker.js",
+        "logger.js",
+        "popup.html",
+        "popup.js",
+        "popup.css",
+        "wasm-parser.js",
+        "wasm-parser.wasm"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ],
   "browser_specific_settings": {
     "gecko": {
       "id": "webhid@k4zoku.dev",
       "strict_min_version": "142.0",
       "data_collection_permissions": {
-        "required": ["websiteContent"],
+        "required": [
+          "websiteContent"
+        ],
         "optional": []
       }
     }
