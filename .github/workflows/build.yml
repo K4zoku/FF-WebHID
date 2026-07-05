@@ -39,7 +39,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
@@ -68,7 +68,7 @@ jobs:
 
       - name: Upload XPI
         if: runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: webhid-addon
           path: dist/webhid-addon.xpi
@@ -92,7 +92,7 @@ jobs:
           Copy-Item manifests/webhid_server.json artifacts/manifests/ -ErrorAction SilentlyContinue
 
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact_name }}
           path: artifacts/

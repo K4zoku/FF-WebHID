@@ -3,29 +3,57 @@ on:
   push:
     tags:
       - 'v*'
+    paths:
+      - '.github/workflows/release.yml'
 
 jobs:
-  release:
-    runs-on: ubuntu-latest
+  build:
+    name: Build (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact_name: webhid-linux-x86_64
+            apt_deps: libudev-dev zip
+          - os: windows-latest
+            artifact_name: webhid-windows-x86_64
+            apt_deps: ""
+          - os: macos-latest
+            artifact_name: webhid-macos-universal
+            apt_deps: ""
+
+    runs-on: ${{ matrix.os }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ matrix.apt_deps }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates -> target
 
       - name: Build Rust binaries
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-
-      - name: Build Rust
         run: cargo build --release --manifest-path crates/Cargo.toml
 
+      - name: Install wasm-pack
+        if: runner.os == 'Linux'
+        run: cargo install wasm-pack && rustup target add wasm32-unknown-unknown
+
       - name: Build Addon XPI
+        if: runner.os == 'Linux'
         run: ./scripts/build-addon.sh
 
       - name: Upload XPI artifact
-        uses: actions/upload-artifact@v4
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v7
         with:
           name: webhid-addon
           path: dist/webhid-addon.xpi
@@ -39,18 +67,70 @@ jobs:
           cp manifests/webhid_server.json artifacts/manifests/ || true
           cp manifests/webhid-daemon.service artifacts/manifests/ || true
 
+      - name: Prepare Artifacts (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts/bin, artifacts/manifests
+          Copy-Item crates/target/release/webhid-daemon.exe artifacts/bin/
+          Copy-Item crates/target/release/webhid-native-messaging.exe artifacts/bin/
+          Copy-Item manifests/webhid_server.json artifacts/manifests/ -ErrorAction SilentlyContinue
+
+      - name: Upload platform artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: artifacts/
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download XPI
+        uses: actions/download-artifact@v8
+        with:
+          name: webhid-addon
+          path: dist/
+
+      - name: Download Linux artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: webhid-linux-x86_64
+          path: artifacts-linux/
+
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: webhid-windows-x86_64
+          path: artifacts-windows/
+
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: webhid-macos-universal
+          path: artifacts-macos/
+
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             dist/webhid-addon.xpi
-            artifacts/bin/*
-            artifacts/manifests/*
+            artifacts-linux/bin/*
+            artifacts-linux/manifests/*
+            artifacts-windows/bin/*
+            artifacts-windows/manifests/*
+            artifacts-macos/bin/*
+            artifacts-macos/manifests/*
 
       - name: Upload to AMO
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-        run: |
-          curl -sS -X POST "https://addons.mozilla.org/api/v5/addons/upload/" \
-            -H "Authorization: Bearer ${{ secrets.AMO_API_KEY }}" \
-            -F "file=@dist/webhid-addon.xpi" \
-            -F "api_key=${{ secrets.AMO_API_KEY }}"
+        uses: kewisch/action-web-ext@v2
+        with:
+          cmd: sign
+          source: dist/webhid-addon.xpi
+          channel: listed
+          apiKey: ${{ secrets.AMO_JWT_ISSUER }}
+          apiSecret: ${{ secrets.AMO_JWT_SECRET }}
+          timeout: 900000
