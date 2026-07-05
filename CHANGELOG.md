@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.5.2](https://github.com/K4zoku/FF-WebHID/compare/v1.5.1...v1.5.2) (2026-07-05)
+
+
+### Bug Fixes
+
+* AMO XSS warnings ([7220f35](https://github.com/K4zoku/FF-WebHID/commit/7220f3532a7acd92ed180ec35be892fad8b6d688))
+* wasm import ([ef415c8](https://github.com/K4zoku/FF-WebHID/commit/ef415c81a639e1d8811c13bb975a8cf2905383ac))
+
+
+### CI/CD
+
+* add manual dispatch to release flow ([1698578](https://github.com/K4zoku/FF-WebHID/commit/16985789c8135c85a90bbd3347db4191f0fdfd6b))
+* add version suffix ([362a1b3](https://github.com/K4zoku/FF-WebHID/commit/362a1b331a40569b2ad3d3ec9977795d3440c53b))
+* fix conflicting file name ([030effa](https://github.com/K4zoku/FF-WebHID/commit/030effa41064c2af323ce7ce18f0f86c8df9705a))
+* fix release manual dispatch ([0933959](https://github.com/K4zoku/FF-WebHID/commit/093395974ef43cf19b98690f155ae05ada118993))
+* fix release permission ([d984337](https://github.com/K4zoku/FF-WebHID/commit/d984337fea024ab0ea1c3b8c87117cb6dc5fa51d))
+
 ## [1.5.1](https://github.com/K4zoku/FF-WebHID/compare/v1.5.0...v1.5.1) (2026-07-05)
 
 
