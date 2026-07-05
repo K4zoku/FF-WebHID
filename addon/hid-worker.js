@@ -3,6 +3,8 @@ const CAPACITY = 2048;
 let sab = null, meta = null, data = null, reportSize = 64, ws = null;
 const _pending = new Map();
 let _nextReqId = 1;
+let _fireAndForget = true;
+let _perfLogging = false;
 
 const MSG_SEND_REPORT = 0x01;
 const MSG_SEND_FEATURE_REPORT = 0x02;
@@ -11,6 +13,7 @@ const RESP_RECEIVE_FEATURE_REPORT = 0x83;
 
 self.onmessage = ({ data: msg }) => {
   if (msg.type === 'connect') return connect(msg);
+  if (msg.type === 'settings') { _fireAndForget = msg.fireAndForget !== false; _perfLogging = msg.perfLogging === true; return; }
   if (msg.type === 'send') return handleSend(msg, MSG_SEND_REPORT);
   if (msg.type === 'sendFeature') return handleSend(msg, MSG_SEND_FEATURE_REPORT);
   if (msg.type === 'receiveFeature') return handleReceiveFeature(msg);
@@ -82,8 +85,14 @@ function handleSend(msg, msgType) {
   frame[5] = msg.reportId;
   frame.set(payload, 6);
   const t0 = performance.now();
+  if (_fireAndForget) {
+    ws.send(frame);
+    if (_perfLogging) console.log('[worker] send reqId=' + reqId + ' ff ' + (performance.now() - t0).toFixed(1) + 'ms');
+    self.postMessage({ type: 'sendResult', reqId: msg.reqId, success: true });
+    return;
+  }
   _pending.set(reqId, {
-    resolve: () => { console.log('[worker] send reqId=' + reqId + ' ok ' + (performance.now() - t0).toFixed(1) + 'ms'); self.postMessage({ type: 'sendResult', reqId: msg.reqId, success: true }); },
+    resolve: () => { if (_perfLogging) console.log('[worker] send reqId=' + reqId + ' ok ' + (performance.now() - t0).toFixed(1) + 'ms'); self.postMessage({ type: 'sendResult', reqId: msg.reqId, success: true }); },
     reject: (e) => { console.warn('[worker] send reqId=' + reqId + ' FAIL:', e.message); self.postMessage({ type: 'sendResult', reqId: msg.reqId, error: String(e.message || e) }); },
   });
   ws.send(frame);
@@ -113,7 +122,7 @@ function handleControlResponse(batch) {
   const reqId = batch[1] | (batch[2] << 8) | (batch[3] << 16) | (batch[4] << 24);
   const status = batch[5];
   const p = _pending.get(reqId);
-  if (!p) { console.warn('[worker] response for unknown reqId=' + reqId + ' pending=' + _pending.size); return; }
+  if (!p) return; // fire-and-forget: send/sendFeature responses are silently dropped
   _pending.delete(reqId);
   if (respType === RESP_RECEIVE_FEATURE_REPORT) {
     if (status !== 0) return p.reject(new Error('feature read failed'));

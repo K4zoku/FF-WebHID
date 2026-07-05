@@ -15,8 +15,15 @@
   // - path (device path, may be empty)
   // Hash is created from these fields to uniquely identify physical devices
 
-  let _savedDevices = null; // Cache for granted device hashes
-  let _deviceInfoCache = null; // Cache for device info (hash -> device) mapping
+  let _savedDevices = null;
+  let _deviceInfoCache = null;
+  let _perfLogging = false;
+
+  window.addEventListener("message", (event) => {
+    if (event.data && event.data.__webhid_bridge === "settings" && typeof event.data.perfLogging === 'boolean') {
+      _perfLogging = event.data.perfLogging;
+    }
+  });
 
   /**
    * Creates a hash from device identifiers for effective unique device identification.
@@ -137,11 +144,10 @@
       const id = ++_reqId;
       const t0 = performance.now();
       _pending[id] = (result) => {
-        const dt = performance.now() - t0;
-        if (dt > 5) {
-          console.info(`[webhid-timing] ${action} id=${id} roundtrip=${dt.toFixed(1)}ms`);
-        } else {
-          console.debug(`[webhid-timing] ${action} id=${id} roundtrip=${dt.toFixed(1)}ms`);
+        if (_perfLogging) {
+          const dt = performance.now() - t0;
+          if (dt > 5) console.info(`[webhid-timing] ${action} id=${id} roundtrip=${dt.toFixed(1)}ms`);
+          else console.debug(`[webhid-timing] ${action} id=${id} roundtrip=${dt.toFixed(1)}ms`);
         }
         resolve(result);
       };
