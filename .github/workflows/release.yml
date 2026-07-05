@@ -122,25 +122,33 @@ jobs:
           name: webhid-macos-universal
           path: artifacts-macos/
 
+      - name: Resolve tag name
+        id: tag
+        run: echo "name=${{ github.event.inputs.tag || github.ref_name }}" >> $GITHUB_OUTPUT
+
       - name: Package artifacts per platform
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          cd artifacts-linux   && zip -r ../webhid-linux-x86_64.zip   . && cd ..
-          cd artifacts-windows && zip -r ../webhid-windows-x86_64.zip . && cd ..
-          cd artifacts-macos   && zip -r ../webhid-macos-universal.zip . && cd ..
+          VER=${{ steps.tag.outputs.name }}
+          cp dist/webhid-addon.xpi "dist/webhid-addon-${VER}.xpi"
+          cd artifacts-linux   && zip -r "../webhid-linux-x86_64-${VER}.zip"   . && cd ..
+          cd artifacts-windows && zip -r "../webhid-windows-x86_64-${VER}.zip" . && cd ..
+          cd artifacts-macos   && zip -r "../webhid-macos-universal-${VER}.zip" . && cd ..
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           files: |
-            dist/webhid-addon.xpi
+            dist/webhid-addon-*.xpi
             webhid-*.zip
 
       - name: Upload to AMO
         uses: kewisch/action-web-ext@v2
         with:
           cmd: sign
-          source: dist/webhid-addon.xpi
+          source: dist/webhid-addon-${{ steps.tag.outputs.name }}.xpi
           channel: listed
           apiKey: ${{ secrets.AMO_JWT_ISSUER }}
           apiSecret: ${{ secrets.AMO_JWT_SECRET }}
