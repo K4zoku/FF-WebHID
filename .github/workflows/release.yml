@@ -3,8 +3,7 @@ on:
   push:
     tags:
       - 'v*'
-    paths:
-      - '.github/workflows/release.yml'
+  workflow_dispatch:
 
 jobs:
   build:
