@@ -3,8 +3,20 @@ name: Build
 on:
   push:
     branches: [ main ]
+    paths:
+      - 'addon/**'
+      - 'crates/**'
+      - 'scripts/**'
+      - 'manifests/**'
+      - '.github/workflows/build.yml'
   pull_request:
     branches: [ main ]
+    paths:
+      - 'addon/**'
+      - 'crates/**'
+      - 'scripts/**'
+      - 'manifests/**'
+      - '.github/workflows/build.yml'
   workflow_dispatch:
 
 jobs:
