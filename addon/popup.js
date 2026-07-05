@@ -107,12 +107,17 @@
       const name = dev ? (dev.product_name || dev.productName || 'Unknown') : 'Saved device';
       const vid = dev ? (dev.vendor_id || dev.vendorId || 0) : 0;
       const pid = dev ? (dev.product_id || dev.productId || 0) : 0;
-      card.innerHTML = `
-        <div class="device-info">
-          <div class="device-name">${name}</div>
-          <div class="device-vid">${vid.toString(16).padStart(4,'0')}:${pid.toString(16).padStart(4,'0')}</div>
-        </div>
-      `;
+      const info = document.createElement('div');
+      info.className = 'device-info';
+      const nameEl = document.createElement('div');
+      nameEl.className = 'device-name';
+      nameEl.textContent = name;
+      const vidEl = document.createElement('div');
+      vidEl.className = 'device-vid';
+      vidEl.textContent = `${vid.toString(16).padStart(4, '0')}:${pid.toString(16).padStart(4, '0')}`;
+      info.appendChild(nameEl);
+      info.appendChild(vidEl);
+      card.appendChild(info);
       const btn = document.createElement('button');
       btn.className = 'btn-revoke';
       btn.textContent = 'Revoke';
