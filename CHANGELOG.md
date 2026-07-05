@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.5.1](https://github.com/K4zoku/FF-WebHID/compare/v1.5.0...v1.5.1) (2026-07-05)
+
+
+### CI/CD
+
+* filter build paths ([b03dcfc](https://github.com/K4zoku/FF-WebHID/commit/b03dcfc2942bded6467c3b69ce63c6beb1bce63b))
+* fix release ci ([83300a3](https://github.com/K4zoku/FF-WebHID/commit/83300a3ed6b1538100d0d79113efe2934f8080bf))
+* update ci flow ([51f020c](https://github.com/K4zoku/FF-WebHID/commit/51f020cbcb409b83961d141badb6cb97c0612988))
+
+
+### Chores
+
+* fix version bump ([c57242e](https://github.com/K4zoku/FF-WebHID/commit/c57242e162e1b66c8bbe889475e18cc37f88a3df))
+
 ## 1.5.0 (2026-07-05)
 
 
