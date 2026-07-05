@@ -4,6 +4,10 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Git tag to release (e.g. v1.5.1)'
+        required: true
 
 jobs:
   build:
@@ -25,6 +29,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
 
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
@@ -89,6 +95,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
 
       - name: Download XPI
         uses: actions/download-artifact@v8
@@ -117,6 +125,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           files: |
             dist/webhid-addon.xpi
             artifacts-linux/bin/*
