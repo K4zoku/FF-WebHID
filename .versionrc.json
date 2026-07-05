@@ -1,0 +1,18 @@
+{
+  "bumpFiles": [
+    {
+      "filename": "addon/manifest.json",
+      "updater": "npm update version from package.json"
+    }
+  ],
+  "types": [
+    { "type": "feat", "section": "Features" },
+    { "type": "fix", "section": "Bug Fixes" },
+    { "type": "perf", "section": "Performance" },
+    { "type": "refactor", "section": "Code Refactoring" },
+    { "type": "docs", "section": "Documentation" },
+    { "type": "ci", "section": "CI/CD" },
+    { "type": "chore", "section": "Chores" }
+  ],
+  "releaseCommitMessageFormat": "chore: release v{{version}}"
+}
