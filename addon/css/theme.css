@@ -1,0 +1,47 @@
+:root, :host {
+  /* ── Core palette ────────────────────────── */
+  --bg: Canvas;
+  --text: CanvasText;
+  --text-muted: GrayText;
+  --accent: AccentColor;
+  --accent-text: AccentColorText;
+  --danger: #c00;
+  --overlay: rgba(0, 0, 0, 0.45);
+
+  /* ── Derived surfaces ────────────────────── */
+  --surface-raised:  color-mix(in srgb, var(--bg), var(--text) 4%);
+  --surface-hover:   color-mix(in srgb, var(--bg), var(--text) 6%);
+
+  /* ── Borders ─────────────────────────────── */
+  --border-subtle:  color-mix(in srgb, var(--text), transparent 88%);
+  --border-light:   color-mix(in srgb, var(--text), transparent 85%);
+  --border-default: color-mix(in srgb, var(--text), transparent 80%);
+  --border-strong:  color-mix(in srgb, var(--text), transparent 75%);
+
+  /* ── Accent variants ─────────────────────── */
+  --accent-hover:    color-mix(in srgb, var(--accent), black 20%);
+  --accent-surface:  color-mix(in srgb, var(--bg), var(--accent) 10%);
+  --accent-selected: color-mix(in srgb, var(--bg), var(--accent) 20%);
+  --accent-paired:   color-mix(in srgb, var(--bg), var(--accent) 15%);
+
+  /* ── Danger variants ─────────────────────── */
+  --danger-bg:      color-mix(in srgb, var(--bg), var(--danger) 10%);
+  --danger-border:  color-mix(in srgb, var(--bg), var(--danger) 20%);
+  --danger-hover-bg:color-mix(in srgb, var(--bg), var(--danger) 15%);
+
+  /* ── Effects ─────────────────────────────── */
+  --shadow:       color-mix(in srgb, var(--text), transparent 80%);
+  --shadow-drop:  drop-shadow(0 6px 20px color-mix(in srgb, var(--text), transparent 65%));
+  --toggle-off:   color-mix(in srgb, var(--text), transparent 70%);
+  --toggle-knob:  var(--text);
+
+  /* ── Border radius ───────────────────────── */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+
+  /* ── Typography ──────────────────────────── */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: monospace;
+}

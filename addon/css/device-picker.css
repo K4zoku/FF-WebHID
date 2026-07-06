@@ -1,5 +1,3 @@
-/* The <dialog> fills the viewport so clicks on the dark area
-   (e.target === dialog) can be detected to close the picker. */
 .webhid-modal {
   position: fixed;
   inset: 0;
@@ -10,37 +8,32 @@
   padding: 0;
   margin: 0;
   border: none;
-  background: rgba(0, 0, 0, 0.45);
+  background: var(--overlay);
   display: flex;
   align-items: flex-start;
   justify-content: flex-start;
   padding: 8px 0 0 10px;
   z-index: 2147483647;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--font-sans);
 }
 
 .webhid-modal::backdrop {
   display: none;
 }
 
-/* The <form> is the speech-bubble card anchored to the top-left.
-   drop-shadow (unlike box-shadow) follows the shape including the
-   ::before arrow, so the shadow wraps the whole bubble correctly. */
 .webhid-modal-form {
-  background: white;
-  border-radius: 12px;
+  background: var(--bg);
+  border-radius: var(--radius-xl);
   width: min(400px, calc(100vw - 20px));
   max-width: calc(100vw - 20px);
   max-height: 80vh;
   display: flex;
   flex-direction: column;
   position: relative;
-  filter: drop-shadow(0 6px 20px rgba(0, 0, 0, 0.35));
+  filter: var(--shadow-drop);
   animation: webhidModalSlideIn 0.2s ease-out;
 }
 
-/* Upward-pointing arrow that makes the card look like a speech bubble
-   coming from the browser toolbar area */
 .webhid-modal-form::before {
   content: '';
   position: absolute;
@@ -48,7 +41,7 @@
   left: 16px;
   border: 9px solid transparent;
   border-top: none;
-  border-bottom-color: white;
+  border-bottom-color: var(--bg);
 }
 
 @keyframes webhidModalSlideIn {
@@ -64,7 +57,7 @@
 
 .webhid-modal-header {
   padding: 24px 24px 16px;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--border-subtle);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -73,28 +66,8 @@
 .webhid-modal-header h2 {
   font-size: 18px;
   font-weight: 600;
-  color: #1a1a1a;
+  color: var(--text);
   margin: 0;
-}
-
-.webhid-close-button {
-  background: none;
-  border: none;
-  font-size: 24px;
-  color: #999;
-  cursor: pointer;
-  width: 32px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 4px;
-  transition: background-color 0.2s;
-}
-
-.webhid-close-button:hover {
-  background-color: #f5f5f5;
-  color: #666;
 }
 
 .webhid-modal-content {
@@ -113,12 +86,12 @@
 
 .webhid-device-item {
   padding: 12px 16px;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
   margin-bottom: 12px;
   cursor: pointer;
   transition: all 0.2s;
-  background: #fafafa;
+  background: var(--surface-raised);
   display: flex;
   align-items: center;
   gap: 14px;
@@ -137,21 +110,21 @@
 }
 
 .webhid-device-item:hover {
-  border-color: #4a90e2;
-  background: #f0f7ff;
+  border-color: var(--accent);
+  background: var(--accent-surface);
   transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(74, 144, 226, 0.2);
+  box-shadow: 0 2px 8px var(--shadow);
 }
 
 .webhid-device-item.selected {
-  border-color: #4a90e2;
-  background: #e3f2fd;
+  border-color: var(--accent);
+  background: var(--accent-selected);
 }
 
 .webhid-device-name {
   font-size: 16px;
   font-weight: 500;
-  color: #1a1a1a;
+  color: var(--text);
   margin-bottom: 4px;
   white-space: nowrap;
   overflow: hidden;
@@ -174,30 +147,30 @@
 
 .webhid-device-info {
   font-size: 14px;
-  color: #666;
+  color: var(--text-muted);
   margin-bottom: 2px;
 }
 
 .webhid-device-vendor {
   font-size: 12px;
-  color: #999;
+  color: var(--text-muted);
 }
 
 .webhid-device-paired {
-  background: #dcfce7;
+  background: var(--accent-paired);
   order: -1;
 }
 
 .webhid-device-iface {
   font-size: 11px;
-  color: #aaa;
-  font-family: monospace;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
   margin-top: 2px;
 }
 
 .webhid-modal-footer {
   padding: 16px 24px 24px;
-  border-top: 1px solid #eee;
+  border-top: 1px solid var(--border-subtle);
   display: flex;
   justify-content: flex-end;
   gap: 12px;
@@ -205,10 +178,10 @@
 
 .webhid-cancel-button {
   padding: 12px 24px;
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  background: white;
-  color: #666;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  color: var(--text-muted);
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
@@ -216,16 +189,16 @@
 }
 
 .webhid-cancel-button:hover {
-  background: #f5f5f5;
-  border-color: #ccc;
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
 }
 
 .webhid-connect-button {
   padding: 12px 24px;
   border: none;
-  border-radius: 6px;
-  background: #4a90e2;
-  color: white;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--accent-text);
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
@@ -233,7 +206,7 @@
 }
 
 .webhid-connect-button:hover:not(:disabled) {
-  background: #357abd;
+  background: var(--accent-hover);
 }
 
 .webhid-connect-button:disabled {

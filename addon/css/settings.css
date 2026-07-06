@@ -1,0 +1,30 @@
+body {
+  max-width: 600px;
+  margin: 40px auto;
+  padding: 0 20px;
+}
+
+.toggle {
+  width: 44px;
+  height: 24px;
+}
+
+.slider:before {
+  height: 18px;
+  width: 18px;
+  left: 3px;
+  bottom: 3px;
+}
+
+input:checked + .slider:before {
+  transform: translateX(20px);
+}
+
+.status {
+  margin-top: 20px;
+  padding: 10px;
+  background: var(--surface-hover);
+  border-radius: var(--radius-md);
+  font-size: 0.85em;
+  display: none;
+}

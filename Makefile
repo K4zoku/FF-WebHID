@@ -47,9 +47,9 @@ build-wasm:
 	@echo "==> Building WASM descriptor parser…"
 	@command -v wasm-pack >/dev/null 2>&1 || cargo install wasm-pack
 	wasm-pack build "$(WASM_CRATE)" --target no-modules --release
-	cp "$(WASM_CRATE)/pkg/webhid_descriptor_wasm.js" "$(ADDON_DIR)/wasm-parser.js"
-	cp "$(WASM_CRATE)/pkg/webhid_descriptor_wasm_bg.wasm" "$(ADDON_DIR)/wasm-parser.wasm"
-	@echo "Done: addon/wasm-parser.js + addon/wasm-parser.wasm"
+	cp "$(WASM_CRATE)/pkg/webhid_descriptor_wasm.js" "$(ADDON_DIR)/js/utils/report-descriptor-parser.js"
+	cp "$(WASM_CRATE)/pkg/webhid_descriptor_wasm_bg.wasm" "$(ADDON_DIR)/js/utils/report-descriptor-parser.wasm"
+	@echo "Done: addon/js/utils/report-descriptor-parser.js + .wasm"
 
 build-addon: build-wasm
 	@mkdir -p "$(DIST_DIR)"
@@ -122,7 +122,7 @@ uninstall-user:
 clean:
 	cargo clean --manifest-path "$(CRATES_DIR)/Cargo.toml"
 	rm -rf "$(DIST_DIR)"
-	rm -f "$(ADDON_DIR)/wasm-parser.js" "$(ADDON_DIR)/wasm-parser.wasm"
+	rm -f "$(ADDON_DIR)/js/utils/report-descriptor-parser.js" "$(ADDON_DIR)/js/utils/report-descriptor-parser.wasm"
 
 help:
 	@echo "Targets:"

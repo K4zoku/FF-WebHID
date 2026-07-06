@@ -1,0 +1,101 @@
+body {
+  width: 360px;
+  padding: 12px;
+}
+
+.setting {
+  padding: 8px 0;
+}
+
+.toggle {
+  width: 36px;
+  height: 20px;
+}
+
+.slider:before {
+  height: 14px;
+  width: 14px;
+  left: 3px;
+  bottom: 3px;
+}
+
+input:checked + .slider:before {
+  transform: translateX(16px);
+}
+
+#header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+#site-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.device-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px;
+  background: var(--surface-hover);
+  border-radius: var(--radius-md);
+  margin-bottom: 6px;
+}
+
+.device-info {
+  flex: 1;
+  overflow: hidden;
+}
+
+.device-name {
+  font-weight: 600;
+  font-size: 0.9em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.device-vid {
+  font-size: 0.75em;
+  color: var(--text-muted);
+}
+
+.btn-revoke {
+  background: var(--danger-bg);
+  color: var(--danger);
+  border: 1px solid var(--danger-border);
+  border-radius: var(--radius-sm);
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 0.8em;
+  white-space: nowrap;
+}
+
+.btn-revoke:hover {
+  background: var(--danger-hover-bg);
+}
+
+#no-devices {
+  padding: 8px 0;
+}
+
+#default-note {
+  margin-top: 12px;
+}
+
+#open-settings {
+  display: block;
+  margin-top: 8px;
+  text-align: center;
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 0.85em;
+}
+
+#open-settings:hover {
+  text-decoration: underline;
+}

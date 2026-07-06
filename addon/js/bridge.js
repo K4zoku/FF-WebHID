@@ -40,11 +40,14 @@
 
     async _loadCSS() {
       try {
-        const url = browser.runtime.getURL("webhid.css");
-        const resp = await fetch(url);
-        const css = await resp.text();
+        const [themeResp, cssResp] = await Promise.all([
+          fetch(browser.runtime.getURL("css/theme.css")),
+          fetch(browser.runtime.getURL("css/device-picker.css")),
+        ]);
+        const theme = await themeResp.text();
+        const css   = await cssResp.text();
         const style = document.createElement("style");
-        style.textContent = css;
+        style.textContent = theme + "\n" + css;
         this.shadowRoot.appendChild(style);
       } catch (e) {
         logger.warn("[WebHID] Failed to load shadow styles", e);
@@ -569,7 +572,7 @@
         {
         let worker;
         try {
-          const workerUrl = browser.runtime.getURL('hid-worker.js');
+          const workerUrl = browser.runtime.getURL('js/worker.js');
           const resp = await fetch(workerUrl);
           const code = await resp.text();
           const blob = new Blob([code], { type: 'application/javascript' });
@@ -679,7 +682,7 @@
     if (_wasmReady) return;
     _wasmReady = true;
     try {
-      const wasmUrl = browser.runtime.getURL('wasm-parser.wasm');
+      const wasmUrl = browser.runtime.getURL('js/utils/report-descriptor-parser.wasm');
       await wasm_bindgen(wasmUrl);
       _wasmParser = wasm_bindgen.parse_descriptor;
       logger.info('[bridge] WASM descriptor parser ready');

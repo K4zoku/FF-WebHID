@@ -18,16 +18,16 @@
   ],
   "background": {
     "scripts": [
-      "logger.js",
-      "background.js"
+      "js/utils/logger.js",
+      "js/background.js"
     ]
   },
   "action": {
-    "default_popup": "popup.html",
+    "default_popup": "html/popup.html",
     "default_icon": "icons/icon.svg"
   },
   "options_ui": {
-    "page": "settings.html",
+    "page": "html/settings.html",
     "browser_style": false
   },
   "content_scripts": [
@@ -36,8 +36,8 @@
         "<all_urls>"
       ],
       "js": [
-        "logger.js",
-        "webhid-polyfill.js"
+        "js/utils/logger.js",
+        "js/polyfill.js"
       ],
       "world": "MAIN"
     },
@@ -46,9 +46,9 @@
         "<all_urls>"
       ],
       "js": [
-        "logger.js",
-        "wasm-parser.js",
-        "webhid-bridge.js"
+        "js/utils/logger.js",
+        "js/utils/report-descriptor-parser.js",
+        "js/bridge.js"
       ]
     }
   ],
@@ -56,14 +56,15 @@
     {
       "resources": [
         "res/*.svg",
-        "webhid.css",
-        "hid-worker.js",
-        "logger.js",
-        "popup.html",
-        "popup.js",
-        "popup.css",
-        "wasm-parser.js",
-        "wasm-parser.wasm"
+        "css/theme.css",
+        "css/device-picker.css",
+        "js/worker.js",
+        "js/utils/logger.js",
+        "html/popup.html",
+        "js/popup.js",
+        "css/popup.css",
+        "js/utils/report-descriptor-parser.js",
+        "js/utils/report-descriptor-parser.wasm"
       ],
       "matches": [
         "<all_urls>"
