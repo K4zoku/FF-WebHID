@@ -157,7 +157,7 @@ fn run_windows(event_tx: broadcast::Sender<IpcResponse>) {
         }
     }
 
-    // Raw Win32 FFI — avoids windows crate API version mismatches
+    // Raw Win32 FFI: avoids windows crate API version mismatches
     type HMODULE = isize;
     type HWND = isize;
     type HINSTANCE = isize;
@@ -329,7 +329,7 @@ fn run_macos(event_tx: broadcast::Sender<IpcResponse>) {
 
     // We can't easily get DeviceInfo from the raw IOHIDDeviceRef in the callback
     // without linking against IOKit framework properly.  Instead, we do a full
-    // enumerate + diff on every callback — same as poll but event-driven (no
+    // enumerate + diff on every callback; same as poll but event-driven (no
     // sleep, instant response).
     fn refresh_and_diff(event_tx: &broadcast::Sender<IpcResponse>) {
         let current: HashMap<String, webhid::DeviceInfo> = match crate::hid::enumerate() {

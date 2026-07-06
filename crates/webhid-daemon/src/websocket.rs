@@ -39,7 +39,7 @@ const DEFAULT_BATCH_FLUSH_MS: u64 = 1;
 //         (data length = 0 on error)
 //
 // Frames from daemon → page that are NOT in this scheme are input-report
-// batches (existing format: `[len_u8][report_bytes]...`) — preserved for
+// batches (existing format: `[len_u8][report_bytes]...`); preserved for
 // backward compat with the existing SAB ring buffer.
 
 const MSG_SEND_REPORT: u8 = 0x01;
@@ -132,11 +132,11 @@ async fn handle_websocket(
     let token = match token {
         Some(t) if t.len() == 32 && t.chars().all(|c| c.is_ascii_hexdigit()) => t,
         Some(_) => {
-            log::warn!("[ws] invalid session token format — closing");
+            log::warn!("[ws] invalid session token format; closing");
             return Ok(());
         }
         None => {
-            log::warn!("[ws] no session token provided — closing");
+            log::warn!("[ws] no session token provided; closing");
             return Ok(());
         }
     };
@@ -145,7 +145,7 @@ async fn handle_websocket(
     let device_id = match device_mgr.get_device_by_token(&token) {
         Some(id) => id,
         None => {
-            log::warn!("[ws] unknown session token — closing");
+            log::warn!("[ws] unknown session token; closing");
             return Ok(());
         }
     };

@@ -108,7 +108,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Serialise all writes to stdout through one task.  We previously
     // batched up to 16 messages / 5ms before flushing, but that introduced
-    // up to 5ms of latency per response under load — and when combined
+    // up to 5ms of latency per response under load; when combined
     // with the old sequential main loop it caused the roundtrip latency
     // to climb monotonically as the page sent requests faster than the
     // NM loop could drain them.  The stdout writer now flushes every

@@ -1,4 +1,4 @@
-// Logger module — level-based filtering, controlled by `logLevel` in
+// Logger module: level-based filtering, controlled by `logLevel` in
 // browser.storage.local. Levels: 0=error, 1=warn, 2=info, 3=debug.
 // Default: 1 (warn + error). Higher levels include lower ones.
 //

@@ -5,7 +5,7 @@ use hidapi::{HidApi, HidDevice, DeviceInfo as HidDeviceInfo};
 use webhid::{DeviceInfo, Collection};
 
 // ---------------------------------------------------------------------------
-// device_id — stable, platform-independent identifier
+// device_id: stable, platform-independent identifier
 // ---------------------------------------------------------------------------
 
 /// Generate a stable device identifier from HID metadata.
@@ -21,7 +21,7 @@ pub fn make_device_id(info: &HidDeviceInfo) -> String {
     let usage = info.usage();
     // Physical location: on Linux, hidapi path encodes it. On Windows,
     // the instance ID contains bus/port info. We use the raw path here
-    // for disambiguation — two devices with identical vid/pid/serial but
+    // for disambiguation; two devices with identical vid/pid/serial but
     // different physical ports will have different paths.
     let path = info.path().to_string_lossy();
     let ident = format!(
@@ -48,7 +48,7 @@ pub fn make_device_id(info: &HidDeviceInfo) -> String {
 /// Return every currently connected HID device via hidapi.
 ///
 /// Chromium groups HID interfaces by (vid, pid, serial) and exposes
-/// only the **top-level Application collections** — one HIDDevice per
+/// only the **top-level Application collections**; one HIDDevice per
 /// top-level Application collection, not one per hidraw node.  We
 /// replicate this: enumerate all hidapi entries, group by
 /// (vid, pid, serial), then within each group select only interfaces
@@ -58,7 +58,7 @@ pub fn make_device_id(info: &HidDeviceInfo) -> String {
 pub fn enumerate() -> anyhow::Result<Vec<DeviceInfo>> {
     let api = HidApi::new()?;
 
-    // Group by (vid, pid, serial) — each group = 1 physical device
+    // Group by (vid, pid, serial); each group = 1 physical device
     let mut groups: std::collections::HashMap<(u16, u16, String), Vec<&HidDeviceInfo>> = std::collections::HashMap::new();
     for info in api.device_list() {
         if is_blocked_pub(info) { continue; }
@@ -68,14 +68,14 @@ pub fn enumerate() -> anyhow::Result<Vec<DeviceInfo>> {
 
     let mut devices = Vec::new();
     for ifaces in groups.values() {
-        // Deduplicate by report descriptor bytes — multiple hidraw nodes
+        // Deduplicate by report descriptor bytes; multiple hidraw nodes
         // may expose the same descriptor (e.g. /dev/hidraw0 and /dev/hidraw1
         // both being the same interface on some kernels).
         let mut seen_descriptors: std::collections::HashSet<Vec<u8>> = std::collections::HashSet::new();
         for info in ifaces {
             let desc = read_report_descriptor_bytes(info);
             if !seen_descriptors.insert(desc.clone()) {
-                continue; // duplicate interface — skip
+                continue; // duplicate interface; skip
             }
             if let Some(d) = info_from_hidapi_pub(info) {
                 devices.push(d);
@@ -138,12 +138,12 @@ fn read_report_descriptor(info: &HidDeviceInfo) -> (Option<Vec<u8>>, Option<Vec<
 }
 
 // ---------------------------------------------------------------------------
-// Blocklist — security keys that must never be exposed to web pages
+// Blocklist: security keys that must never be exposed to web pages
 // ---------------------------------------------------------------------------
 
 /// Known FIDO/U2F security key vendor IDs.  These devices can be used to
 /// exfiltrate credentials if a malicious page gains raw HID access, so we
-/// block them entirely — matching Chromium's `hid_blocklist.cc`.
+/// block them entirely, matching Chromium's `hid_blocklist.cc`.
 const BLOCKED_VIDS: &[u16] = &[
     0x1050, // YubiKey
     0x096E, // Feitian

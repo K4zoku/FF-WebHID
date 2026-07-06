@@ -1,4 +1,4 @@
-// Inline logger — same level scheme as logger.js (0=error,1=warn,2=info,3=debug).
+// Inline logger: same level scheme as logger.js (0=error,1=warn,2=info,3=debug).
 // Worker is spawned from a blob URL so it can't importScripts the addon's
 // logger.js directly. The bridge sends the current logLevel in the `connect`
 // message; default to warn until that arrives.

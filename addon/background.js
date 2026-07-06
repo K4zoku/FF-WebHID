@@ -23,7 +23,7 @@ const NativeMessaging = {
       });
 
       this.port.onDisconnect.addListener(() => {
-        logger.warn("[nm] disconnected — will retry in", this._reconnectDelay, "ms");
+        logger.warn("[nm] disconnected; will retry in", this._reconnectDelay, "ms");
         this.port = null;
         for (const [id, p] of this._pending) p.resolve({ success: false, error: "NM disconnected" });
         this._pending.clear();
@@ -52,7 +52,7 @@ const NativeMessaging = {
     return new Promise((resolve, reject) => {
       if (!this.port) {
         this.connect().catch(() => {});
-        reject(new Error("NM disconnected, reconnecting — please retry"));
+        reject(new Error("NM disconnected, reconnecting; please retry"));
         return;
       }
 
@@ -152,7 +152,7 @@ browser.runtime.onInstalled.addListener(() => {
 });
 
 // ---------------------------------------------------------------------------
-// Security Headers (COOP/COEP) — only when SAB data plane is enabled
+// Security Headers (COOP/COEP): only when SAB data plane is enabled
 // ---------------------------------------------------------------------------
 
 let _sabEnabled = true;

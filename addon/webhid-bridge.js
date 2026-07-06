@@ -135,7 +135,7 @@
         // Nothing else needed here
       };
       this._onDeviceClick = (e) => {
-        // Overlay click — user clicked the dark backdrop area outside the card
+        // Overlay click: user clicked the dark backdrop area outside the card
         if (e.target === this.dialog) {
           this.dialog.close();
           return;
@@ -383,7 +383,7 @@
     // provides it) and from the product name as a fallback.
     // Returns one of: mouse | keyboard | controller | joystick | headset | speaker | camera | unknown
     _guessDeviceType(device) {
-      // HID Usage Page 0x01 — Generic Desktop Controls (most reliable)
+      // HID Usage Page 0x01: Generic Desktop Controls (most reliable)
       if (device.usage_page === 0x01) {
         const u = device.usage;
         if (u === 0x01 || u === 0x02) return "mouse";      // Pointer, Mouse
@@ -392,7 +392,7 @@
         if (u === 0x05) return "controller";               // Gamepad
       }
 
-      // Name-based heuristics — order matters (joystick before controller)
+      // Name-based heuristics; order matters (joystick before controller)
       const name = (device.product_name || "").toLowerCase();
       if (/mouse|trackball|trackpad|touchpad/i.test(name))                         return "mouse";
       if (/keyboard|kbd/i.test(name))                                              return "keyboard";
@@ -406,7 +406,7 @@
     }
 
     // Returns a Set of path values that share a display name with at least
-    // one other device in the list — used to trigger disambiguation labels.
+    // one other device in the list; used to trigger disambiguation labels.
     _ambiguousPaths(devices) {
       const nameCount = {};
       for (const d of devices) {
@@ -474,7 +474,7 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Initialize device picker (runs in content script world — needs browser.* APIs
+  // Initialize device picker (runs in content script world; needs browser.* APIs
   // and DOM access for the modal).
   // ---------------------------------------------------------------------------
   const devicePicker = new WebHIDDevicePicker();
@@ -521,7 +521,7 @@
         worker.postMessage(wMsg);
         return;
       }
-      logger.warn('[bridge] no worker for', deviceId, '— falling back to NM');
+      logger.warn('[bridge] no worker for', deviceId, '; falling back to NM');
       const fallbackAction =
         action === "worker-send" ? "sendreport" :
         action === "worker-sendFeature" ? "sendfeaturereport" :
@@ -635,7 +635,7 @@
             return;
           }
           if (data.type === 'closed') {
-            logger.warn('[bridge] worker WS closed for', deviceId, '— worker will auto-reconnect');
+            logger.warn('[bridge] worker WS closed for', deviceId, '; worker will auto-reconnect');
             const cbMap = _workerCallbacks.get(worker);
             if (cbMap) {
               for (const [reqId, cb] of cbMap) cb({ type: 'sendResult', reqId, error: 'ws closed' });
@@ -703,7 +703,7 @@
     }
   });
 
-  // WASM descriptor parser — runs in isolated world (CSP-free).
+  // WASM descriptor parser: runs in isolated world (CSP-free).
   let _wasmReady = false;
   let _wasmParser = null;
 

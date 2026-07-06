@@ -65,7 +65,7 @@ The addon injects `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Em
 
 ### HID blocklist
 
-FIDO/U2F security keys (YubiKey, Feitian, OnlyKey, Nitrokey, Google Titan, etc.) are blocked from WebHID access — matching Chromium's `hid_blocklist.cc`.
+FIDO/U2F security keys (YubiKey, Feitian, OnlyKey, Nitrokey, Google Titan, etc.) are blocked from WebHID access, matching Chromium's `hid_blocklist.cc`.
 
 ### WebSocket origin check
 
@@ -92,7 +92,7 @@ All layers auto-reconnect with exponential backoff:
 - **Worker → daemon WS:** retry WebSocket (500ms → 5s)
 - **Daemon:** detects NM host disconnect, closes devices; page receives `disconnect` event, re-opens on `connect` event
 
-## Message flow example — `navigator.hid.getDevices()`
+## Message flow example: `navigator.hid.getDevices()`
 
 ```
 page                  background.js       native-messaging    daemon

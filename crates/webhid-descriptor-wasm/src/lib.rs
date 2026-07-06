@@ -64,12 +64,12 @@ struct WebHidReport {
     items: Vec<WebHidField>,
 }
 
-/// Item shape — exactly matches Chromium's `HIDReportItem`.
+/// Item shape: exactly matches Chromium's `HIDReportItem`.
 /// `usages` and `usage_minimum`/`usage_maximum` are mutually exclusive:
 /// when `is_range == true`, `usages` is empty and `usage_minimum`/`usage_maximum`
 /// are set; when `is_range == false`, `usages` is populated and the min/max
 /// are `None`.
-/// NOTE: does not `derive(Serialize)` — we provide a manual `Serialize`
+/// NOTE: does not `derive(Serialize)`; we provide a manual `Serialize`
 /// impl below to control the camelCase output names precisely.
 #[derive(Clone)]
 struct WebHidField {
@@ -519,7 +519,7 @@ impl CollectionTreeBuilder {
 
         let items = convert_fields_aggregate(report.fields());
 
-        // Drop the report entirely if it has no non-Constant fields — matches
+        // Drop the report entirely if it has no non-Constant fields; matches
         // Chromium (padding-only reports aren't exposed).
         if items.is_empty() {
             return;
@@ -527,7 +527,7 @@ impl CollectionTreeBuilder {
 
         let web_report = WebHidReport { report_id: rid, items };
 
-        // Pick the first Variable/Array field's collection chain — Constant
+        // Pick the first Variable/Array field's collection chain; Constant
         // fields return an empty chain.
         let chain: &[Collection] = report
             .fields()

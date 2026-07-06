@@ -41,7 +41,7 @@ Binaries: `crates/target/{debug,release}/webhid-daemon` and `webhid-native-messa
 
 Two terminals:
 
-### Terminal 1 — daemon
+### Terminal 1: daemon
 
 ```sh
 # Option A: root (simplest)
@@ -54,7 +54,7 @@ RUST_LOG=debug crates/target/debug/webhid-daemon
 
 Override socket path: `WEBHID_SOCKET=/tmp/webhid-dev.sock RUST_LOG=debug crates/target/debug/webhid-daemon`
 
-### Terminal 2 — browser
+### Terminal 2: browser
 
 1. Load addon via `about:debugging → Load Temporary Add-on → addon/manifest.json`
 2. Per-user NM manifest (if not installed system-wide):
@@ -75,7 +75,7 @@ EOF
 Restart browser after writing this file. Path must be absolute.
 
 > For a proper install (release binary + manifest + systemd user service in one
-> step), use `make install-user` instead — it substitutes the `{{NM_BIN}}`
+> step), use `make install-user` instead; it substitutes the `{{NM_BIN}}`
 > placeholder in the template manifest with the real install path.
 
 ### Environment variables
@@ -90,13 +90,13 @@ Restart browser after writing this file. Path must be absolute.
 
 ## Testing
 
-### Layer 1 — daemon IPC (no browser)
+### Layer 1: daemon IPC (no browser)
 
 ```sh
 python3 test/test_nm.py
 ```
 
-### Layer 2 — browser UI
+### Layer 2: browser UI
 
 ```sh
 cd test && python3 -m http.server 8080
@@ -124,9 +124,9 @@ FF-WebHID/
 ├── addon/                   Firefox extension (MV3)
 │   ├── manifest.json
 │   ├── background.js        NM bridge, auto-reconnect, COOP/COEP
-│   ├── webhid-polyfill.js   Content script (MAIN world) — navigator.hid polyfill
-│   ├── webhid-bridge.js     Content script (isolated world) — device picker, worker spawn
-│   ├── hid-worker.js        Web Worker — WebSocket, SAB ring buffer, fire-and-forget
+│   ├── webhid-polyfill.js   Content script (MAIN world): navigator.hid polyfill
+│   ├── webhid-bridge.js     Content script (isolated world): device picker, worker spawn
+│   ├── hid-worker.js        Web Worker: WebSocket, SAB ring buffer, fire-and-forget
 │   ├── settings.html/js     Settings page
 │   ├── webhid.css           Device picker styles
 │   ├── icons/ res/          Icons
@@ -165,4 +165,4 @@ CI builds on Linux, Windows, and macOS. Platform-specific code is gated with `#[
 | macOS | Unix socket | hidapi poll (2s) | `macos-shared-device` |
 | Windows | TCP localhost | hidapi poll (2s) | `windows-native` |
 
-No autostart — run daemon manually or set up a service/agent.
+No autostart; run the daemon manually or set up a service/agent.

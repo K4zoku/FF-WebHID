@@ -453,7 +453,7 @@
           out.children = c.children.map(normalizeCollection);
         }
 
-        // Path A — WASM / JS parser format: inputReports/outputReports/
+        // Path A: WASM / JS parser format: inputReports/outputReports/
         // featureReports are already split arrays on the collection object.
         const hasSplitReports =
           (Array.isArray(c.inputReports) && c.inputReports.length > 0) ||
@@ -473,7 +473,7 @@
           return out;
         }
 
-        // Path B — legacy daemon format: flat `reports` array with per-report
+        // Path B: legacy daemon format: flat `reports` array with per-report
         // `report_type` field.
         if (Array.isArray(c.reports) && c.reports.length > 0) {
           c.reports.forEach((r) => {
@@ -499,7 +499,7 @@
           this.#reportDescriptor = arr;
           // JS parser runs immediately (sync fallback)
           this.#parsedCollections = parseReportDescriptor(arr);
-          // Ask bridge (isolated world, CSP-free) for WASM parse — richer output
+          // Ask bridge (isolated world, CSP-free) for WASM parse: richer output
           const parseId = ++_reqId;
           window.postMessage({ __webhid_bridge: "parse-descriptor", id: parseId, bytes: Array.from(arr) }, "*");
           const wasmListener = (event) => {
@@ -631,7 +631,7 @@
         // If the SAB/Worker data plane is not yet ready but SAB is enabled
         // (worker is connecting), wait briefly for it. Otherwise the first
         // sendReport goes via the slow NM path while the device response
-        // arrives via the WS path — but the WS sender may not be subscribed
+        // arrives via the WS path, but the WS sender may not be subscribed
         // yet, causing the response to be lost and the page to time out.
         if (!this.#hotPath && this.#sabListener) {
           await this.#waitForHotPath(2000);
