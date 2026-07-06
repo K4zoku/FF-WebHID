@@ -113,6 +113,10 @@
           sendResponse({ success: true });
           return true;
         }
+        if (request.action === "getOpenDeviceIds") {
+          sendResponse({ ids: Array.from(_workers.keys()) });
+          return true;
+        }
       });
     }
 
@@ -582,6 +586,7 @@
           throw e;
         }
         _workers.set(deviceId, worker);
+        browser.runtime.sendMessage({ action: "device-count-changed", count: _workers.size }).catch(() => {});
 
         worker.onerror = (e) => {
           logger.error('[bridge] worker.onerror:', e.message || '(no msg)', 'file=', e.filename, 'line=', e.lineno);
@@ -658,6 +663,7 @@
         if (worker) {
           worker.terminate();
           _workers.delete(deviceId);
+          browser.runtime.sendMessage({ action: "device-count-changed", count: _workers.size }).catch(() => {});
         }
       }
 

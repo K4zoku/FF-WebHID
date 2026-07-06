@@ -309,6 +309,13 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
       })();
       return true;
 
+    case "device-count-changed":
+      browser.browserAction.setBadgeText({
+        text: request.count > 0 ? String(request.count) : "",
+        tabId: sender.tab?.id,
+      });
+      return false;
+
     case "getDeviceCache":
       sendResponse({ devices: _deviceCache });
       return false;

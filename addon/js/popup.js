@@ -71,6 +71,24 @@
     renderDevices();
   }
 
+  function guessDeviceType(name, usagePage, usage) {
+    if (usagePage === 0x01) {
+      if (usage === 0x01 || usage === 0x02) return 'mouse';
+      if (usage === 0x06 || usage === 0x07) return 'keyboard';
+      if (usage === 0x04 || usage === 0x08) return 'joystick';
+      if (usage === 0x05) return 'controller';
+    }
+    const n = (name || '').toLowerCase();
+    if (/mouse|trackball|trackpad|touchpad/i.test(n)) return 'mouse';
+    if (/keyboard|kbd/i.test(n)) return 'keyboard';
+    if (/joystick|flight.?stick|yoke|rudder|throttle/i.test(n)) return 'joystick';
+    if (/gamepad|controller|xbox|playstation|dualshock|dualsense|joycon|joy.con/i.test(n)) return 'controller';
+    if (/headset|headphone|earphone|\bmic(rophone)?\b|earbuds?/i.test(n)) return 'headset';
+    if (/speaker|soundbar|audio|\bdac\b|amplifier/i.test(n)) return 'speaker';
+    if (/webcam|camera|\bcam\b/i.test(n)) return 'camera';
+    return 'unknown';
+  }
+
   async function renderDevices() {
     const list = document.getElementById('device-list');
     const noDevices = document.getElementById('no-devices');
@@ -87,6 +105,13 @@
     const response = await browser.runtime.sendMessage({ action: 'getDeviceCache' });
     const cache = (response && response.devices) || [];
 
+    // Get currently open device IDs from the tab's content script
+    let openIds = new Set();
+    try {
+      const r = await browser.tabs.sendMessage(tab.id, { action: 'getOpenDeviceIds' });
+      if (r?.ids) openIds = new Set(r.ids);
+    } catch {}
+
     for (const hash of hashes) {
       const dev = cache.find(d => {
         const vid = String(d.vendor_id || d.vendorId || 0);
@@ -102,27 +127,50 @@
         return Math.abs(h).toString(16) === hash;
       });
 
-      const card = document.createElement('div');
-      card.className = 'device-card';
       const name = dev ? (dev.product_name || dev.productName || 'Unknown') : 'Saved device';
+      const type = guessDeviceType(name, dev?.usage_page, dev?.usage);
       const vid = dev ? (dev.vendor_id || dev.vendorId || 0) : 0;
       const pid = dev ? (dev.product_id || dev.productId || 0) : 0;
+      const manufacturer = dev ? (dev.manufacturer || dev.manufacturerName || '') : '';
+
+      const card = document.createElement('div');
+      card.className = 'device-card';
+      if (dev && openIds.has(dev.device_id)) card.classList.add('open');
+
+      const icon = document.createElement('img');
+      icon.className = 'device-icon';
+      icon.src = browser.runtime.getURL(`res/${type}.svg`);
+      icon.alt = type;
+      card.appendChild(icon);
+
       const info = document.createElement('div');
       info.className = 'device-info';
+
       const nameEl = document.createElement('div');
       nameEl.className = 'device-name';
       nameEl.textContent = name;
+      info.appendChild(nameEl);
+
+      if (manufacturer) {
+        const vendorEl = document.createElement('div');
+        vendorEl.className = 'device-vendor';
+        vendorEl.textContent = manufacturer;
+        info.appendChild(vendorEl);
+      }
+
       const vidEl = document.createElement('div');
       vidEl.className = 'device-vid';
       vidEl.textContent = `${vid.toString(16).padStart(4, '0')}:${pid.toString(16).padStart(4, '0')}`;
-      info.appendChild(nameEl);
       info.appendChild(vidEl);
+
       card.appendChild(info);
+
       const btn = document.createElement('button');
       btn.className = 'btn-revoke';
       btn.textContent = 'Revoke';
       btn.onclick = () => removeDevice(hash);
       card.appendChild(btn);
+
       list.appendChild(card);
     }
   }
