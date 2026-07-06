@@ -2,7 +2,7 @@
 
 
 use hidapi::{HidApi, HidDevice, DeviceInfo as HidDeviceInfo};
-use webhid::{DeviceInfo, Collection};
+use webhid::DeviceInfo;
 
 // ---------------------------------------------------------------------------
 // device_id: stable, platform-independent identifier
@@ -73,11 +73,11 @@ pub fn enumerate() -> anyhow::Result<Vec<DeviceInfo>> {
         // both being the same interface on some kernels).
         let mut seen_descriptors: std::collections::HashSet<Vec<u8>> = std::collections::HashSet::new();
         for info in ifaces {
-            let desc = read_report_descriptor_bytes(info);
+            let desc = read_raw_report_descriptor_with_api(&api, info);
             if !seen_descriptors.insert(desc.clone()) {
                 continue; // duplicate interface; skip
             }
-            if let Some(d) = info_from_hidapi_pub(info) {
+            if let Some(d) = info_from_hidapi_pub_with_desc(info, desc) {
                 devices.push(d);
             }
         }
@@ -87,8 +87,12 @@ pub fn enumerate() -> anyhow::Result<Vec<DeviceInfo>> {
 
 /// Build a `DeviceInfo` from a hidapi `DeviceInfo`.
 pub fn info_from_hidapi_pub(info: &HidDeviceInfo) -> Option<DeviceInfo> {
+    info_from_hidapi_pub_with_desc(info, read_raw_report_descriptor(info))
+}
+
+fn info_from_hidapi_pub_with_desc(info: &HidDeviceInfo, desc: Vec<u8>) -> Option<DeviceInfo> {
     let device_id = make_device_id(info);
-    let (report_descriptor, collections) = read_report_descriptor(info);
+    let report_descriptor = if desc.is_empty() { None } else { Some(desc) };
     Some(DeviceInfo {
         vendor_id: info.vendor_id(),
         product_id: info.product_id(),
@@ -99,42 +103,21 @@ pub fn info_from_hidapi_pub(info: &HidDeviceInfo) -> Option<DeviceInfo> {
         usage: Some(info.usage()),
         device_id,
         report_descriptor,
-        collections,
+        collections: None,
     })
 }
 
-/// Try to read the raw HID report descriptor from sysfs (Linux) so the
-/// addon can parse full `collections` metadata.  Returns (descriptor, parsed_collections).
-fn read_report_descriptor_bytes(info: &HidDeviceInfo) -> Vec<u8> {
-    let path = info.path().to_string_lossy();
-    #[cfg(target_os = "linux")]
-    {
-        if let Some(devname) = path.rsplit('/').next() {
-            let sys_path = format!("/sys/class/hidraw/{}/device/report_descriptor", devname);
-            if let Ok(bytes) = std::fs::read(&sys_path) {
-                return bytes;
-            }
-        }
-    }
-    Vec::new()
+fn read_raw_report_descriptor(info: &HidDeviceInfo) -> Vec<u8> {
+    let Ok(api) = HidApi::new() else { return Vec::new() };
+    read_raw_report_descriptor_with_api(&api, info)
 }
 
-fn read_report_descriptor(info: &HidDeviceInfo) -> (Option<Vec<u8>>, Option<Vec<Collection>>) {
-    let path = info.path().to_string_lossy();
-    #[cfg(target_os = "linux")]
-    {
-        if let Some(devname) = path.rsplit('/').next() {
-            let sys_path = format!("/sys/class/hidraw/{}/device/report_descriptor", devname);
-            if let Ok(bytes) = std::fs::read(&sys_path) {
-                return (Some(bytes), None);
-            }
-        }
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        let _ = path;
-    }
-    (None, None)
+fn read_raw_report_descriptor_with_api(api: &HidApi, info: &HidDeviceInfo) -> Vec<u8> {
+    let Ok(dev) = api.open_path(info.path()) else { return Vec::new() };
+    let mut buf = vec![0u8; hidapi::MAX_REPORT_DESCRIPTOR_SIZE];
+    let Ok(n) = dev.get_report_descriptor(&mut buf) else { return Vec::new() };
+    buf.truncate(n);
+    buf
 }
 
 // ---------------------------------------------------------------------------
