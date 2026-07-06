@@ -689,7 +689,7 @@
     _wasmReady = true;
     try {
       const wasmUrl = browser.runtime.getURL('js/utils/report-descriptor-parser.wasm');
-      await wasm_bindgen(wasmUrl);
+      await wasm_bindgen({ module_or_path: wasmUrl });
       _wasmParser = wasm_bindgen.parse_descriptor;
       logger.info('[bridge] WASM descriptor parser ready');
     } catch (e) {
