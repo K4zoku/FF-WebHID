@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.5.3](https://github.com/K4zoku/FF-WebHID/compare/v1.5.2...v1.5.3) (2026-07-06)
+
+
+### Chores
+
+* centralize install flow in Makefile, drop scripts/ ([38efe95](https://github.com/K4zoku/FF-WebHID/commit/38efe95889fb7a2e502139183861e87b5c19a151))
+
 ## [1.5.2](https://github.com/K4zoku/FF-WebHID/compare/v1.5.1...v1.5.2) (2026-07-05)
 
 
