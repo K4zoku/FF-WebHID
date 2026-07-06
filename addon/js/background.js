@@ -310,7 +310,7 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true;
 
     case "device-count-changed":
-      browser.browserAction.setBadgeText({
+      browser.action.setBadgeText({
         text: request.count > 0 ? String(request.count) : "",
         tabId: sender.tab?.id,
       });
