@@ -7,44 +7,60 @@
   class WebHIDDevicePicker {
     constructor() {
       this.devices = [];
-      this.selectedDevice = null;
       this.filters = [];
       this.dialog = null;
 
-      // Event handlers (kept so we can clean up on hide)
-      this._onDialogClose = null;
-      this._onDeviceClick = null;
-      this._onDialogCancel = null;
-
       this._savedDevices = null;
-      // Map from rendered deviceId -> array of device objects (1 or more)
       this._deviceGroups = {};
+
+      this.shadowHost = null;
+      this.shadowRoot = null;
+      this._cssReady = null;
 
       this.init();
     }
 
     init() {
-      this.injectStyles();
-      this.injectTemplate();
+      this.injectShadowDOM();
       this.setupEventListeners();
     }
 
-    async injectStyles() {
-      await browser.runtime.sendMessage({
-        action: "injectCSS",
-      });
+    injectShadowDOM() {
+      if (document.getElementById("webhid-shadow-host")) return;
+
+      this.shadowHost = document.createElement("div");
+      this.shadowHost.id = "webhid-shadow-host";
+      document.body.appendChild(this.shadowHost);
+
+      this.shadowRoot = this.shadowHost.attachShadow({ mode: "closed" });
+
+      this._cssReady = this._loadCSS();
+      this._createTemplates();
     }
 
-    injectTemplate() {
-      if (document.getElementById("webhid-modal-template")) return;
+    async _loadCSS() {
+      try {
+        const url = browser.runtime.getURL("webhid.css");
+        const resp = await fetch(url);
+        const css = await resp.text();
+        const style = document.createElement("style");
+        style.textContent = css;
+        this.shadowRoot.appendChild(style);
+      } catch (e) {
+        logger.warn("[WebHID] Failed to load shadow styles", e);
+      }
+    }
+
+    _createTemplates() {
+      if (this.shadowRoot.getElementById("webhid-modal-template")) return;
 
       const tpl = document.createElement("template");
       tpl.id = "webhid-modal-template";
       tpl.innerHTML = `
-        <dialog class="webhid-modal" aria-labelledby="webhid-modal-title">
+        <dialog class="webhid-modal">
           <form method="dialog" class="webhid-modal-form">
             <div class="webhid-modal-header">
-              <h2 id="webhid-modal-title">Select a HID Device</h2>
+              <h2>Select a HID Device</h2>
             </div>
             <div class="webhid-modal-content">
               <div class="webhid-device-list" id="webhidDeviceList">
@@ -52,7 +68,8 @@
               </div>
             </div>
             <div class="webhid-modal-footer">
-              <button class="webhid-cancel-button" id="webhidCancelBtn" value="cancel">Cancel</button>
+              <button type="submit" class="webhid-cancel-button" id="webhidCancelBtn" value="cancel">Cancel</button>
+              <button type="submit" class="webhid-connect-button" id="webhidConnectBtn" value="selected" disabled>Connect</button>
             </div>
           </form>
         </dialog>
@@ -60,21 +77,21 @@
       const itemTpl = document.createElement("template");
       itemTpl.id = "webhid-device-item-template";
       itemTpl.innerHTML = `
-        <div class="webhid-device-item" tabindex="0" role="button">
+        <label class="webhid-device-item" tabindex="0">
+          <input type="radio" name="webhid-device" class="webhid-device-radio">
           <img class="webhid-device-icon" draggable="false">
           <div class="webhid-device-body">
             <div class="webhid-device-name"></div>
             <div class="webhid-device-vendor"></div>
             <div class="webhid-device-iface"></div>
           </div>
-        </div>
+        </label>
       `;
-      document.body.appendChild(tpl);
-      document.body.appendChild(itemTpl);
+      this.shadowRoot.appendChild(tpl);
+      this.shadowRoot.appendChild(itemTpl);
     }
 
     setupEventListeners() {
-      // Listen for device picker requests from background script
       browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
         if (request.action === "show-device-picker") {
           this.show(request.filters || []);
@@ -97,91 +114,56 @@
     }
 
     async show(filters = []) {
-      // Prevent multiple instances
       if (this.dialog?.open) {
-        this.dialog.close("replace");
+        this.dialog.close();
       }
 
       this.filters = filters;
 
-      // Clone template content into a new <dialog>
-      const tpl = document.getElementById("webhid-modal-template");
-      this.dialog = tpl.content.lastElementChild.cloneNode(true);
+      await this._cssReady;
 
-      // Append to DOM
-      document.body.appendChild(this.dialog);
+      const tpl = this.shadowRoot.getElementById("webhid-modal-template");
+      this.dialog = tpl.content.firstElementChild.cloneNode(true);
+      this.shadowRoot.appendChild(this.dialog);
 
-      // Set up dialog event handlers
-      this._onDialogClose = (e) => {
-        // Read returnValue and selectedDevice BEFORE nullifying this.dialog.
-        // If we read this.dialog?.returnValue after setting this.dialog = null,
-        // it is always undefined and onDeviceCancelled fires on every close.
+      this.dialog.addEventListener("close", () => {
         const returnValue = this.dialog.returnValue;
-        const selectedDevice = this.selectedDevice;
-
-        this._detachDialogEventListeners();
+        const checked = this.dialog.querySelector(".webhid-device-radio:checked");
+        const deviceId = checked?.value;
         this.dialog.remove();
         this.dialog = null;
-
-        if (returnValue === "selected" && selectedDevice) {
-          this.onDeviceSelected(selectedDevice);
+        if (returnValue === "selected" && deviceId) {
+          const devices = this._deviceGroups[deviceId] || [];
+          this.onDeviceSelected(devices);
         } else {
-          // Cancelled: ESC key, X button, or any close without a selection
           this.onDeviceCancelled();
         }
-      };
-      this._onDialogCancel = (e) => {
-        // Allow default <dialog> cancel (ESC) to set returnValue = 'cancel'
-        // Nothing else needed here
-      };
-      this._onDeviceClick = (e) => {
-        // Overlay click: user clicked the dark backdrop area outside the card
-        if (e.target === this.dialog) {
-          this.dialog.close();
-          return;
-        }
-        const item = e.target.closest(".webhid-device-item");
-        if (!item || !this.dialog?.open) return;
-        this.selectDevice(item);
-      };
+      });
 
-      this._attachDialogEventListeners();
+      this.dialog.addEventListener("change", (e) => {
+        if (!e.target.matches(".webhid-device-radio")) return;
+        this.dialog.querySelectorAll(".webhid-device-item")
+          .forEach((el) => el.classList.remove("selected"));
+        e.target.closest(".webhid-device-item").classList.add("selected");
+        this.dialog.querySelector("#webhidConnectBtn").disabled = false;
+      });
 
-      // Show the dialog (with fallback)
+      this.dialog.addEventListener("click", (e) => {
+        if (e.target === this.dialog) this.dialog.close();
+      });
+
       if (typeof this.dialog.showModal === "function") {
         this.dialog.showModal();
       } else {
-        // Fallback if <dialog> showModal is not supported
         this.dialog.setAttribute("open", "");
       }
 
-      // Load devices
       await this.loadDevices();
-    }
-
-    _attachDialogEventListeners() {
-      if (!this.dialog) return;
-      this.dialog.addEventListener("close", this._onDialogClose);
-      this.dialog.addEventListener("cancel", this._onDialogCancel);
-      this.dialog.addEventListener("click", this._onDeviceClick);
-    }
-
-    _detachDialogEventListeners() {
-      if (!this.dialog) return;
-      this.dialog.removeEventListener("close", this._onDialogClose);
-      this.dialog.removeEventListener("cancel", this._onDialogCancel);
-      this.dialog.removeEventListener("click", this._onDeviceClick);
     }
 
     hide() {
       if (this.dialog?.open) {
-        // Let the 'close' handler do cleanup; this ensures cancel/selected semantics are preserved
-        this.dialog.close("user-hide");
-      } else if (this.dialog) {
-        // If not open, clean up immediately
-        this._detachDialogEventListeners();
-        this.dialog.remove();
-        this.dialog = null;
+        this.dialog.close();
       }
     }
 
@@ -280,7 +262,7 @@
       // Build device groups mapping for selection lookup
       this._deviceGroups = {};
 
-      const tpl = document.getElementById("webhid-device-item-template");
+      const tpl = this.shadowRoot.getElementById("webhid-device-item-template");
 
       for (const [name, devices] of groups.entries()) {
         // Determine if any device in this group is paired (saved)
@@ -307,10 +289,11 @@
 
         const clone = tpl.content.cloneNode(true);
         const item  = clone.querySelector(".webhid-device-item");
+        const radio = clone.querySelector(".webhid-device-radio");
 
+        radio.value = deviceId;
         item.classList.toggle("webhid-device-paired", isPaired);
         item.dataset.deviceId = deviceId;
-        item.setAttribute("aria-label", `Select device ${device.product_name || "Unknown Device"}`);
 
         const icon = clone.querySelector(".webhid-device-icon");
         icon.src = iconUrl;
@@ -351,25 +334,10 @@
     }
 
     selectDevice(item) {
-      // Remove previous selection
-      this.dialog
-        .querySelectorAll(".webhid-device-item")
-        .forEach((el) => el.classList.remove("selected"));
-      // Add selection to clicked item
-      item.classList.add("selected");
-
-      // Get device info
-      const deviceId = item.dataset.deviceId;
-      const devices = this._deviceGroups[deviceId] || [];
-
-      // Set selectedDevice to the array of devices (1 or more)
-      this.selectedDevice = devices;
-
-      // Close the dialog with returnValue "selected".
-      // _onDialogClose reads this value before cleanup and calls onDeviceSelected.
-      if (this.dialog?.open) {
-        this.dialog.close("selected");
-      }
+      const radio = item.querySelector(".webhid-device-radio");
+      if (!radio) return;
+      radio.checked = true;
+      radio.dispatchEvent(new Event("change", { bubbles: true }));
     }
 
     getDeviceId(device) {

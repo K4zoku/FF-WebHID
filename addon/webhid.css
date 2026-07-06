@@ -219,3 +219,31 @@
   background: #f5f5f5;
   border-color: #ccc;
 }
+
+.webhid-connect-button {
+  padding: 12px 24px;
+  border: none;
+  border-radius: 6px;
+  background: #4a90e2;
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.webhid-connect-button:hover:not(:disabled) {
+  background: #357abd;
+}
+
+.webhid-connect-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.webhid-device-radio {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}

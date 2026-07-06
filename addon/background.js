@@ -196,13 +196,6 @@ browser.webRequest.onHeadersReceived.addListener(
 
 browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
   switch (request.action) {
-    case "injectCSS":
-      browser.scripting.insertCSS({
-        target: { tabId: sender.tab.id },
-        files: ['webhid.css']
-      }).then(() => sendResponse({ success: true }))
-        .catch((e) => sendResponse({ success: false, error: e.message }));
-      return true;
     case "enumerate":
       NativeMessaging.enumerateDevices()
         .then((response) => {
