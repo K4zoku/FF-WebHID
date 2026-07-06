@@ -39,18 +39,29 @@
     <span class="slider"></span>
   </label>
 </div>
-<div class="setting">
+<div class="setting sab-setting">
   <div class="setting-info">
     <h3>SAB Buffer Capacity (default)</h3>
     <p>Ring-buffer slots for input reports. Higher = fewer drops under heavy traffic. Per-site overrides in popup.</p>
   </div>
-  <select id="sabCapacity">
-    <option value="2048">2048</option>
-    <option value="4096">4096</option>
-    <option value="8192">8192</option>
-    <option value="16384">16384</option>
-    <option value="32768">32768</option>
-  </select>
+  <output id="sabCapacityOutput" class="sab-value">8192</output>
+  <div class="sab-slider-wrapper">
+    <input type="range" id="sabCapacity" min="2048" max="32768" step="2048" value="8192" list="sab-markers">
+    <datalist id="sab-markers">
+      <option value="2048">
+      <option value="4096">
+      <option value="8192">
+      <option value="16384">
+      <option value="32768">
+    </datalist>
+    <div class="sab-labels">
+      <span style="left: calc((2048 - 2048) * 100% / (32768 - 2048))">2K</span>
+      <span style="left: calc((4096 - 2048) * 100% / (32768 - 2048))">4K</span>
+      <span style="left: calc((8192 - 2048) * 100% / (32768 - 2048))">8K</span>
+      <span style="left: calc((16384 - 2048) * 100% / (32768 - 2048))">16K</span>
+      <span style="left: calc((32768 - 2048) * 100% / (32768 - 2048))">32K</span>
+    </div>
+  </div>
 </div>
 <div class="setting">
   <div class="setting-info">

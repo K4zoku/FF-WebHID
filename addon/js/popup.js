@@ -39,19 +39,33 @@
   const settings = await loadSettings();
   document.getElementById('fireAndForget').checked = settings.fireAndForget;
   document.getElementById('sabEnabled').checked = settings.sabEnabled;
-  document.getElementById('sabCapacity').value = String(settings.sabCapacity);
+  const sabInput = document.getElementById('sabCapacity');
+  const sabOutput = document.getElementById('sabCapacityOutput');
+  sabInput.value = String(settings.sabCapacity);
+  sabOutput.textContent = String(settings.sabCapacity);
+  updateSabFill();
 
   const sabCapacityRow = document.getElementById('sab-capacity-row');
-  sabCapacityRow.style.display = settings.sabEnabled ? 'flex' : 'none';
+  sabCapacityRow.style.display = settings.sabEnabled ? '' : 'none';
+
+  function updateSabOutput() {
+    sabOutput.textContent = sabInput.value;
+  }
+
+  function updateSabFill() {
+    const val = parseInt(sabInput.value, 10);
+    sabInput.style.setProperty('--fill', ((val - 2048) / (32768 - 2048)) * 100 + '%');
+  }
 
   document.getElementById('fireAndForget').addEventListener('change', (e) => {
     saveSetting('fireAndForget', e.target.checked);
   });
   document.getElementById('sabEnabled').addEventListener('change', (e) => {
     saveSetting('sabEnabled', e.target.checked);
-    sabCapacityRow.style.display = e.target.checked ? 'flex' : 'none';
+    sabCapacityRow.style.display = e.target.checked ? '' : 'none';
   });
-  document.getElementById('sabCapacity').addEventListener('change', (e) => {
+  sabInput.addEventListener('input', () => { updateSabOutput(); updateSabFill(); });
+  sabInput.addEventListener('change', (e) => {
     saveSetting('sabCapacity', parseInt(e.target.value, 10));
   });
 
@@ -112,6 +126,7 @@
       if (r?.ids) openIds = new Set(r.ids);
     } catch {}
 
+    let openCount = 0;
     for (const hash of hashes) {
       const dev = cache.find(d => {
         const vid = String(d.vendor_id || d.vendorId || 0);
@@ -172,7 +187,9 @@
       card.appendChild(btn);
 
       list.appendChild(card);
+      if (dev && openIds.has(dev.device_id)) openCount++;
     }
+    document.getElementById('device-count').textContent = `(${openCount}/${hashes.length})`;
   }
 
   await renderDevices();

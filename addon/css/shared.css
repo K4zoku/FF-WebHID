@@ -94,3 +94,75 @@ select {
 select:hover {
   border-color: var(--accent);
 }
+
+/* Range slider — custom track + thumb */
+.sab-slider-wrapper {
+  grid-column: 1 / -1;
+  margin-bottom: 4px;
+}
+
+.sab-slider-wrapper input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  background: linear-gradient(to right, var(--accent) 0%, var(--accent) var(--fill, 50%), var(--border-strong) var(--fill, 50%), var(--border-strong) 100%);
+  border-radius: 3px;
+  outline: none;
+  cursor: pointer;
+  margin: 0;
+}
+
+.sab-slider-wrapper input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  background: var(--accent);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: 0.1s;
+}
+
+.sab-slider-wrapper input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+}
+
+.sab-slider-wrapper input[type="range"]::-moz-range-track {
+  height: 6px;
+  background: linear-gradient(to right, var(--accent) 0%, var(--accent) var(--fill, 50%), var(--border-strong) var(--fill, 50%), var(--border-strong) 100%);
+  border-radius: 3px;
+}
+
+.sab-slider-wrapper input[type="range"]::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  background: var(--accent);
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+}
+
+/* Measure labels below slider — positioned via calc to match actual tick positions */
+.sab-labels {
+  position: relative;
+  height: 1.5em;
+  margin: 2px calc(18px / 2);
+}
+
+.sab-labels span {
+  position: absolute;
+  font-size: 0.75em;
+  color: var(--text-muted);
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+/* Output value in KB */
+.sab-value {
+  font-weight: 600;
+  font-size: 0.9em;
+  align-self: center;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}

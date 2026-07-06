@@ -107,6 +107,11 @@ input:checked + .slider:before {
   background: var(--danger-hover-bg);
 }
 
+#device-list {
+  max-height: 220px;
+  overflow-y: auto;
+}
+
 #no-devices {
   padding: 8px 0;
 }
