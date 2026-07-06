@@ -412,3 +412,99 @@ fn make_feature_read_resp(req_id: u32, status: u8, data: &[u8]) -> Message {
     buf.extend_from_slice(&data[..len as usize]);
     Message::Binary(buf.into())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── create_batch_frame ──────────────────────────────────────────────
+
+    #[test]
+    fn test_batch_frame_empty() {
+        let frame = create_batch_frame(&[]);
+        assert!(frame.is_empty());
+    }
+
+    #[test]
+    fn test_batch_frame_single_report() {
+        let reports = vec![vec![0x01, 0xAA, 0xBB]];
+        let frame = create_batch_frame(&reports);
+        // [len_u16 LE = 3, 0][report bytes]
+        assert_eq!(frame, vec![0x03, 0x00, 0x01, 0xAA, 0xBB]);
+    }
+
+    #[test]
+    fn test_batch_frame_multiple_reports() {
+        let reports = vec![
+            vec![0x01, 0xAA],
+            vec![0x02, 0xBB, 0xCC],
+        ];
+        let frame = create_batch_frame(&reports);
+        // [2, 0, 0x01, 0xAA, 3, 0, 0x02, 0xBB, 0xCC]
+        assert_eq!(frame, vec![0x02, 0x00, 0x01, 0xAA, 0x03, 0x00, 0x02, 0xBB, 0xCC]);
+    }
+
+    #[test]
+    fn test_batch_frame_empty_report() {
+        let reports = vec![vec![]];
+        let frame = create_batch_frame(&reports);
+        // [0, 0]
+        assert_eq!(frame, vec![0x00, 0x00]);
+    }
+
+    // ── make_status_resp ────────────────────────────────────────────────
+
+    #[test]
+    fn test_status_resp_success() {
+        let msg = make_status_resp(0x81, 42, 0);
+        let expected = vec![0x81, 42, 0, 0, 0, 0];
+        assert_eq!(msg, Message::Binary(expected.into()));
+    }
+
+    #[test]
+    fn test_status_resp_error() {
+        let msg = make_status_resp(0x82, 1, 1);
+        assert_eq!(msg, Message::Binary(vec![0x82, 1, 0, 0, 0, 1].into()));
+    }
+
+    #[test]
+    fn test_status_resp_large_req_id() {
+        let msg = make_status_resp(0x81, 0xDEAD, 0);
+        assert_eq!(msg, Message::Binary(vec![0x81, 0xAD, 0xDE, 0x00, 0x00, 0x00].into()));
+    }
+
+    // ── make_feature_read_resp ──────────────────────────────────────────
+
+    #[test]
+    fn test_feature_read_resp_success() {
+        let msg = make_feature_read_resp(42, 0, &[0xAA, 0xBB]);
+        assert_eq!(
+            msg,
+            Message::Binary(vec![0x83, 42, 0, 0, 0, 0, 2, 0, 0xAA, 0xBB].into())
+        );
+    }
+
+    #[test]
+    fn test_feature_read_resp_error() {
+        let msg = make_feature_read_resp(7, 1, &[]);
+        assert_eq!(
+            msg,
+            Message::Binary(vec![0x83, 7, 0, 0, 0, 1, 0, 0].into())
+        );
+    }
+
+    #[test]
+    fn test_feature_read_resp_large_data() {
+        let data = vec![0xFF; 300];
+        let msg = make_feature_read_resp(0, 0, &data);
+        if let Message::Binary(buf) = &msg {
+            assert_eq!(buf[0], 0x83);
+            assert_eq!(buf[5], 0);
+            let len = u16::from_le_bytes([buf[6], buf[7]]);
+            assert_eq!(len as usize, data.len().min(0xFFFF));
+            assert_eq!(&buf[8..], &data[..len as usize]);
+        } else {
+            panic!("expected Binary message");
+        }
+    }
+}

@@ -275,3 +275,123 @@ pub fn info_by_raw_path(raw_path: &str) -> Option<DeviceInfo> {
     }
     None
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::uses_numbered_reports;
+
+    #[test]
+    fn test_uses_numbered_reports_empty() {
+        assert!(!uses_numbered_reports(&[]));
+    }
+
+    #[test]
+    fn test_uses_numbered_reports_no_report_id() {
+        // HID descriptor for a simple mouse (no Report ID)
+        let desc = vec![
+            0x05, 0x01, // Usage Page (Generic Desktop)
+            0x09, 0x02, // Usage (Mouse)
+            0xA1, 0x01, // Collection (Application)
+            0x09, 0x01, // Usage (Pointer)
+            0x75, 0x08, // Report Size (8)
+            0x95, 0x03, // Report Count (3)
+            0x81, 0x02, // Input (Data,Var,Abs)
+            0xC0,       // End Collection
+        ];
+        assert!(!uses_numbered_reports(&desc));
+    }
+
+    #[test]
+    fn test_uses_numbered_reports_with_report_id() {
+        // HID descriptor with Report ID = 1
+        let desc = vec![
+            0x05, 0x01, // Usage Page (Generic Desktop)
+            0x09, 0x02, // Usage (Mouse)
+            0xA1, 0x01, // Collection (Application)
+            0x85, 0x01, // Report ID (1)
+            0x09, 0x01, // Usage (Pointer)
+            0x75, 0x08, // Report Size (8)
+            0x95, 0x03, // Report Count (3)
+            0x81, 0x02, // Input (Data,Var,Abs)
+            0xC0,       // End Collection
+        ];
+        assert!(uses_numbered_reports(&desc));
+    }
+
+    #[test]
+    fn test_uses_numbered_reports_long_item_skipped() {
+        // Long item (0xFE) followed by normal items – no Report ID
+        // Long item: 0xFE, data_size, tag, data...
+        let desc = vec![
+            0xFE, 0x02, 0x00, 0x00, 0x00, // Long item with 2 data bytes (all zero)
+            0x05, 0x01,                    // Usage Page (Generic Desktop)
+            0x09, 0x02,                    // Usage (Mouse)
+            0xA1, 0x01,                    // Collection
+            0x75, 0x08,                    // Report Size
+            0x95, 0x01,                    // Report Count
+            0x81, 0x02,                    // Input
+            0xC0,                          // End Collection
+        ];
+        assert!(!uses_numbered_reports(&desc));
+    }
+
+    #[test]
+    fn test_uses_numbered_reports_report_id_after_long_item() {
+        // Long item: [0xFE, data_size=0, tag=0x00] (3 bytes total)
+        // Parser skips 3+0=3 bytes from start, landing on 0x85
+        let desc = vec![
+            0xFE, 0x00, 0x00, // Long item (data_size=0, tag=0x00)
+            0x85, 0x02,       // Report ID (2)
+            0x75, 0x08,       // Report Size
+            0x95, 0x01,       // Report Count
+            0x81, 0x02,       // Input
+        ];
+        assert!(uses_numbered_reports(&desc));
+    }
+
+    #[test]
+    fn test_uses_numbered_reports_truncated_long_item() {
+        // Only the 0xFE prefix byte, no data_size – should not panic
+        assert!(!uses_numbered_reports(&[0xFE]));
+    }
+
+    #[test]
+    fn test_uses_numbered_reports_just_long_item_no_tag() {
+        // 0xFE + data_size(0) = 2 bytes, parser skips 3+0=3 bytes from i=0
+        // i becomes 3, which is >= len(2), returns false
+        assert!(!uses_numbered_reports(&[0xFE, 0x00]));
+    }
+
+    #[test]
+    fn test_uses_numbered_reports_report_id_at_end() {
+        let desc = vec![
+            0x05, 0x01, // Usage Page
+            0x09, 0x02, // Usage
+            0xA1, 0x01, // Collection
+            0x85, 0x01, // Report ID (1) – at the end
+        ];
+        assert!(uses_numbered_reports(&desc));
+    }
+
+    #[test]
+    fn test_uses_numbered_reports_non_report_id_global_items() {
+        // Usage Page, Logical Minimum/Maximum, Report Size, Report Count etc.
+        // No Report ID – should return false
+        let desc = vec![
+            0x05, 0x01,       // Usage Page (Generic Desktop)
+            0x15, 0x00,       // Logical Minimum (0)
+            0x25, 0x01,       // Logical Maximum (1)
+            0x75, 0x08,       // Report Size (8)
+            0x95, 0x01,       // Report Count (1)
+            0x35, 0x00,       // Physical Minimum (0)
+            0x45, 0x00,       // Physical Maximum (0)
+            0x65, 0x00,       // Unit (None)
+            0x55, 0x00,       // Unit Exponent (0)
+        ];
+        assert!(!uses_numbered_reports(&desc));
+    }
+}

@@ -206,3 +206,32 @@ impl DeviceManager {
             .map(|(device_id, _)| device_id.clone())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::sync::broadcast;
+
+    #[test]
+    fn test_ws_active_default_false() {
+        let (tx, _) = broadcast::channel(16);
+        let mgr = DeviceManager::new(tx);
+        assert!(!mgr.is_ws_active("nonexistent"));
+        assert!(!mgr.is_ws_active("test"));
+    }
+
+    #[test]
+    fn test_close_client_devices_no_devices() {
+        let (tx, _) = broadcast::channel(16);
+        let mgr = DeviceManager::new(tx);
+        // Should not panic
+        mgr.close_client_devices(42);
+    }
+
+    #[test]
+    fn test_get_device_by_token_empty() {
+        let (tx, _) = broadcast::channel(16);
+        let mgr = DeviceManager::new(tx);
+        assert!(mgr.get_device_by_token("any").is_none());
+    }
+}

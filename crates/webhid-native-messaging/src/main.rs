@@ -358,3 +358,209 @@ fn ipc_event_to_nm(resp: IpcResponse) -> Option<NmResponse> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use webhid::{NmRequest, IpcRequest, IpcResponse, DeviceInfo};
+
+    // ── nm_to_ipc ───────────────────────────────────────────────────────
+
+    #[test]
+    fn test_nm_to_ipc_enumerate() {
+        let req = NmRequest::Enumerate { id: None };
+        let ipc = super::nm_to_ipc(req, 1);
+        assert!(matches!(ipc, IpcRequest::Enumerate { id: 1 }));
+    }
+
+    #[test]
+    fn test_nm_to_ipc_open() {
+        let req = NmRequest::Open { id: None, device_id: b"test-dev".to_vec() };
+        let ipc = super::nm_to_ipc(req, 2);
+        assert!(matches!(ipc, IpcRequest::Open { id: 2, .. }));
+        if let IpcRequest::Open { device_id, .. } = &ipc {
+            assert_eq!(device_id, "test-dev");
+        }
+    }
+
+    #[test]
+    fn test_nm_to_ipc_open_non_utf8() {
+        let req = NmRequest::Open { id: None, device_id: vec![0xFF, 0xFE] };
+        let ipc = super::nm_to_ipc(req, 3);
+        if let IpcRequest::Open { device_id, .. } = &ipc {
+            assert_eq!(device_id.as_str(), std::string::String::from_utf8_lossy(&[0xFF, 0xFE]));
+        } else {
+            panic!("expected Open");
+        }
+    }
+
+    #[test]
+    fn test_nm_to_ipc_close() {
+        let req = NmRequest::Close { id: Some(5), data: b"dev".to_vec() };
+        let ipc = super::nm_to_ipc(req, 4);
+        assert!(matches!(ipc, IpcRequest::Close { id: 4, .. }));
+        if let IpcRequest::Close { device_id, .. } = &ipc {
+            assert_eq!(device_id, "dev");
+        }
+    }
+
+    #[test]
+    fn test_nm_to_ipc_read() {
+        let req = NmRequest::Read { id: None, data: b"dev".to_vec(), timeout: 5000 };
+        let ipc = super::nm_to_ipc(req, 5);
+        assert!(matches!(ipc, IpcRequest::Read { id: 5, timeout_ms: 5000, .. }));
+    }
+
+    #[test]
+    fn test_nm_to_ipc_send_report() {
+        let req = NmRequest::SendReport {
+            id: None, device_id: b"dev".to_vec(), report_id: 1, data: vec![0x00, 0xFF],
+        };
+        let ipc = super::nm_to_ipc(req, 6);
+        assert!(matches!(ipc, IpcRequest::SendReport { id: 6, report_id: 1, .. }));
+        if let IpcRequest::SendReport { data, .. } = &ipc {
+            assert_eq!(data, &[0x00, 0xFF]);
+        }
+    }
+
+    #[test]
+    fn test_nm_to_ipc_receive_feature_report() {
+        let req = NmRequest::ReceiveFeatureReport {
+            id: Some(10), device_id: b"dev".to_vec(), report_id: 0,
+        };
+        let ipc = super::nm_to_ipc(req, 7);
+        assert!(matches!(ipc, IpcRequest::ReceiveFeatureReport { id: 7, report_id: 0, .. }));
+    }
+
+    #[test]
+    fn test_nm_to_ipc_send_feature_report() {
+        let req = NmRequest::SendFeatureReport {
+            id: None, device_id: b"dev".to_vec(), report_id: 2, data: vec![0xAA],
+        };
+        let ipc = super::nm_to_ipc(req, 8);
+        assert!(matches!(ipc, IpcRequest::SendFeatureReport { id: 8, report_id: 2, .. }));
+    }
+
+    // ── ipc_to_nm ───────────────────────────────────────────────────────
+
+    fn test_device() -> DeviceInfo {
+        DeviceInfo {
+            vendor_id: 0x1234, product_id: 0x5678,
+            product_name: Some("Test".into()), manufacturer: None,
+            serial_number: None, usage_page: None, usage: None,
+            device_id: "test-device-id".into(),
+            report_descriptor: None, collections: None,
+        }
+    }
+
+    #[test]
+    fn test_ipc_to_nm_devices() {
+        let dev = test_device();
+        let resp = IpcResponse::Devices { id: 1, devices: vec![dev] };
+        let nm = super::ipc_to_nm(resp);
+        assert_eq!(nm.success, Some(true));
+        assert!(nm.devices.is_some());
+        let devs = nm.devices.unwrap();
+        assert_eq!(devs.len(), 1);
+        assert_eq!(devs[0].vendor_id, 0x1234);
+        assert_eq!(devs[0].product_id, 0x5678);
+        assert_eq!(devs[0].device_id, "test-device-id");
+    }
+
+    #[test]
+    fn test_ipc_to_nm_opened() {
+        let resp = IpcResponse::Opened {
+            id: 2, device_id: "dev".into(),
+            session_token: Some("tok123".into()), ws_port: Some(31337),
+        };
+        let nm = super::ipc_to_nm(resp);
+        assert_eq!(nm.success, Some(true));
+        assert_eq!(nm.data, Some(b"dev".to_vec()));
+        assert_eq!(nm.session_token, Some("tok123".into()));
+        assert_eq!(nm.ws_port, Some(31337));
+    }
+
+    #[test]
+    fn test_ipc_to_nm_ok() {
+        let resp = IpcResponse::Ok { id: 3 };
+        let nm = super::ipc_to_nm(resp);
+        assert_eq!(nm.success, Some(true));
+        assert!(nm.error.is_none());
+    }
+
+    #[test]
+    fn test_ipc_to_nm_data() {
+        let resp = IpcResponse::Data { id: 4, data: vec![0xDE, 0xAD] };
+        let nm = super::ipc_to_nm(resp);
+        assert_eq!(nm.success, Some(true));
+        assert_eq!(nm.data, Some(vec![0xDE, 0xAD]));
+    }
+
+    #[test]
+    fn test_ipc_to_nm_error() {
+        let resp = IpcResponse::Error { id: 5, message: "permission denied".into() };
+        let nm = super::ipc_to_nm(resp);
+        assert_eq!(nm.success, Some(false));
+        assert_eq!(nm.error, Some("permission denied".into()));
+    }
+
+    #[test]
+    fn test_ipc_to_nm_unexpected_event() {
+        // Events (id=0) normally go through ipc_event_to_nm, not ipc_to_nm.
+        // If one arrives here, it should produce an error response.
+        let resp = IpcResponse::DeviceConnected { id: 0, device: test_device() };
+        let nm = super::ipc_to_nm(resp);
+        assert_eq!(nm.success, Some(false));
+        assert!(nm.error.is_some());
+    }
+
+    // ── ipc_event_to_nm ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_ipc_event_to_nm_device_connected() {
+        let dev = test_device();
+        let resp = IpcResponse::DeviceConnected { id: 0, device: dev };
+        let nm = super::ipc_event_to_nm(resp).unwrap();
+        assert_eq!(nm.event_type, Some("connect".into()));
+        assert!(nm.device.is_some());
+        assert_eq!(nm.device.as_ref().unwrap().vendor_id, 0x1234);
+    }
+
+    #[test]
+    fn test_ipc_event_to_nm_device_disconnected() {
+        let dev = test_device();
+        let resp = IpcResponse::DeviceDisconnected { id: 0, device: dev };
+        let nm = super::ipc_event_to_nm(resp).unwrap();
+        assert_eq!(nm.event_type, Some("disconnect".into()));
+        assert!(nm.device.is_some());
+        assert_eq!(nm.device.as_ref().unwrap().vendor_id, 0x1234);
+    }
+
+    #[test]
+    fn test_ipc_event_to_nm_input_report() {
+        let resp = IpcResponse::InputReport {
+            id: 0, device_id: "dev".into(), report_id: 5, data: vec![0xAA, 0xBB],
+        };
+        let nm = super::ipc_event_to_nm(resp).unwrap();
+        assert_eq!(nm.event_type, Some("input_report".into()));
+        assert_eq!(nm.device_id, Some(b"dev".to_vec()));
+        assert_eq!(nm.report_id, Some(5));
+        assert_eq!(nm.data, Some(vec![0xAA, 0xBB]));
+    }
+
+    #[test]
+    fn test_ipc_event_to_nm_hello() {
+        let resp = IpcResponse::Hello { id: 0, ws_port: 31337 };
+        let nm = super::ipc_event_to_nm(resp).unwrap();
+        assert_eq!(nm.event_type, Some("hello".into()));
+        assert_eq!(nm.ws_port, Some(31337));
+    }
+
+    #[test]
+    fn test_ipc_event_to_nm_non_event_returns_none() {
+        let resp = IpcResponse::Ok { id: 0 };
+        assert!(super::ipc_event_to_nm(resp).is_none());
+
+        let resp = IpcResponse::Error { id: 0, message: "x".into() };
+        assert!(super::ipc_event_to_nm(resp).is_none());
+    }
+}

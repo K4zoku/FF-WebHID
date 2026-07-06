@@ -591,3 +591,167 @@ impl CollectionTreeBuilder {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── detect_contiguous_range ─────────────────────────────────────────
+
+    #[test]
+    fn test_detect_contiguous_range_empty() {
+        let (usages, is_range, min, max) = detect_contiguous_range(vec![]);
+        assert!(usages.is_empty());
+        assert!(!is_range);
+        assert!(min.is_none());
+        assert!(max.is_none());
+    }
+
+    #[test]
+    fn test_detect_contiguous_range_single() {
+        let input = vec![0x00010001];
+        let (usages, is_range, min, max) = detect_contiguous_range(input.clone());
+        assert_eq!(usages, input);
+        assert!(!is_range);
+        assert!(min.is_none());
+        assert!(max.is_none());
+    }
+
+    #[test]
+    fn test_detect_contiguous_range_sequential() {
+        let (usages, is_range, min, max) = detect_contiguous_range(vec![
+            0x00010001,
+            0x00010002,
+            0x00010003,
+        ]);
+        assert!(usages.is_empty());
+        assert!(is_range);
+        assert_eq!(min, Some(0x00010001));
+        assert_eq!(max, Some(0x00010003));
+    }
+
+    #[test]
+    fn test_detect_contiguous_range_non_sequential() {
+        let input = vec![
+            0x00010001,
+            0x00010003, // skips 0x0002
+        ];
+        let (usages, is_range, _, _) = detect_contiguous_range(input.clone());
+        assert_eq!(usages, input);
+        assert!(!is_range);
+    }
+
+    #[test]
+    fn test_detect_contiguous_range_different_pages() {
+        let input = vec![
+            0x00010001, // page 0x0001
+            0x00020001, // page 0x0002 (different!)
+        ];
+        let (usages, is_range, _, _) = detect_contiguous_range(input.clone());
+        assert_eq!(usages, input);
+        assert!(!is_range);
+    }
+
+    #[test]
+    fn test_detect_contiguous_range_high_page() {
+        let (usages, is_range, min, max) = detect_contiguous_range(vec![
+            0xFF000001,
+            0xFF000002,
+            0xFF000003,
+        ]);
+        assert!(usages.is_empty());
+        assert!(is_range);
+        assert_eq!(min, Some(0xFF000001));
+        assert_eq!(max, Some(0xFF000003));
+    }
+
+    // ── unit_system_string ──────────────────────────────────────────────
+
+    #[test]
+    fn test_unit_system_string_none() {
+        assert_eq!(unit_system_string(hidreport::UnitSystem::None), "none");
+    }
+
+    #[test]
+    fn test_unit_system_string_si_linear() {
+        assert_eq!(unit_system_string(hidreport::UnitSystem::SILinear), "si-linear");
+    }
+
+    #[test]
+    fn test_unit_system_string_si_rotation() {
+        assert_eq!(unit_system_string(hidreport::UnitSystem::SIRotation), "si-rotation");
+    }
+
+    #[test]
+    fn test_unit_system_string_english_linear() {
+        assert_eq!(unit_system_string(hidreport::UnitSystem::EnglishLinear), "english-linear");
+    }
+
+    #[test]
+    fn test_unit_system_string_english_rotation() {
+        assert_eq!(unit_system_string(hidreport::UnitSystem::EnglishRotation), "english-rotation");
+    }
+
+    // ── units_exponent ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_units_exponent_none() {
+        assert_eq!(units_exponent(&hidreport::Units::None), 0);
+    }
+
+    #[test]
+    fn test_units_exponent_centimeter() {
+        assert_eq!(units_exponent(&hidreport::Units::Centimeter { exponent: 2 }), 2);
+        assert_eq!(units_exponent(&hidreport::Units::Centimeter { exponent: -3 }), -3);
+    }
+
+    #[test]
+    fn test_units_exponent_radians() {
+        assert_eq!(units_exponent(&hidreport::Units::Radians { exponent: 1 }), 1);
+    }
+
+    #[test]
+    fn test_units_exponent_inch() {
+        assert_eq!(units_exponent(&hidreport::Units::Inch { exponent: 0 }), 0);
+    }
+
+    #[test]
+    fn test_units_exponent_degrees() {
+        assert_eq!(units_exponent(&hidreport::Units::Degrees { exponent: -1 }), -1);
+    }
+
+    #[test]
+    fn test_units_exponent_gram() {
+        assert_eq!(units_exponent(&hidreport::Units::Gram { exponent: 4 }), 4);
+    }
+
+    #[test]
+    fn test_units_exponent_slug() {
+        assert_eq!(units_exponent(&hidreport::Units::Slug { exponent: -4 }), -4);
+    }
+
+    #[test]
+    fn test_units_exponent_seconds() {
+        assert_eq!(units_exponent(&hidreport::Units::Seconds { exponent: -2 }), -2);
+    }
+
+    #[test]
+    fn test_units_exponent_kelvin() {
+        assert_eq!(units_exponent(&hidreport::Units::Kelvin { exponent: 3 }), 3);
+    }
+
+    #[test]
+    fn test_units_exponent_fahrenheit() {
+        assert_eq!(units_exponent(&hidreport::Units::Fahrenheit { exponent: -3 }), -3);
+    }
+
+    #[test]
+    fn test_units_exponent_ampere() {
+        assert_eq!(units_exponent(&hidreport::Units::Ampere { exponent: 1 }), 1);
+    }
+
+    #[test]
+    fn test_units_exponent_candela() {
+        assert_eq!(units_exponent(&hidreport::Units::Candela { exponent: -1 }), -1);
+    }
+}

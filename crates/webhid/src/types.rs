@@ -381,3 +381,311 @@ impl NmResponse {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── NmResponse builders ─────────────────────────────────────────────
+
+    #[test]
+    fn test_nm_response_ok() {
+        let r = NmResponse::ok();
+        assert_eq!(r.success, Some(true));
+        assert!(r.error.is_none());
+        assert!(r.devices.is_none());
+        assert!(r.data.is_none());
+    }
+
+    #[test]
+    fn test_nm_response_err() {
+        let r = NmResponse::err("something went wrong");
+        assert_eq!(r.success, Some(false));
+        assert_eq!(r.error, Some("something went wrong".into()));
+    }
+
+    #[test]
+    fn test_nm_response_ok_with_data() {
+        let r = NmResponse::ok_with_data(vec![1, 2, 3]);
+        assert_eq!(r.success, Some(true));
+        assert_eq!(r.data, Some(vec![1, 2, 3]));
+    }
+
+    #[test]
+    fn test_nm_response_ok_with_devices() {
+        let dev = DeviceInfo {
+            vendor_id: 0x1234,
+            product_id: 0x5678,
+            product_name: Some("Test".into()),
+            manufacturer: None,
+            serial_number: None,
+            usage_page: None,
+            usage: None,
+            device_id: "abc".into(),
+            report_descriptor: None,
+            collections: None,
+        };
+        let r = NmResponse::ok_with_devices(vec![dev]);
+        assert_eq!(r.success, Some(true));
+        assert!(r.devices.is_some());
+    }
+
+    #[test]
+    fn test_nm_response_ok_opened() {
+        let r = NmResponse::ok_opened(b"devpath".to_vec(), Some("tok".into()), Some(31337));
+        assert_eq!(r.success, Some(true));
+        assert_eq!(r.data, Some(b"devpath".to_vec()));
+        assert_eq!(r.session_token, Some("tok".into()));
+        assert_eq!(r.ws_port, Some(31337));
+    }
+
+    #[test]
+    fn test_nm_response_ok_opened_no_ws() {
+        let r = NmResponse::ok_opened(b"devpath".to_vec(), None, None);
+        assert_eq!(r.success, Some(true));
+        assert_eq!(r.data, Some(b"devpath".to_vec()));
+        assert!(r.session_token.is_none());
+        assert!(r.ws_port.is_none());
+    }
+
+    #[test]
+    fn test_nm_response_event_connect() {
+        let r = NmResponse::event_connect(DeviceInfo {
+            vendor_id: 0x1234, product_id: 0x5678, product_name: None,
+            manufacturer: None, serial_number: None, usage_page: None,
+            usage: None, device_id: "dev1".into(), report_descriptor: None,
+            collections: None,
+        });
+        assert_eq!(r.event_type, Some("connect".into()));
+        assert!(r.device.is_some());
+        assert_eq!(r.device.as_ref().unwrap().vendor_id, 0x1234);
+    }
+
+    #[test]
+    fn test_nm_response_event_disconnect() {
+        let r = NmResponse::event_disconnect(DeviceInfo {
+            vendor_id: 0x4321, product_id: 0x8765, product_name: None,
+            manufacturer: None, serial_number: None, usage_page: None,
+            usage: None, device_id: "dev2".into(), report_descriptor: None,
+            collections: None,
+        });
+        assert_eq!(r.event_type, Some("disconnect".into()));
+        assert!(r.device.is_some());
+        assert_eq!(r.device.as_ref().unwrap().vendor_id, 0x4321);
+    }
+
+    #[test]
+    fn test_nm_response_event_input_report() {
+        let r = NmResponse::event_input_report(b"dev1".to_vec(), 5, vec![0xAA, 0xBB]);
+        assert_eq!(r.event_type, Some("input_report".into()));
+        assert_eq!(r.device_id, Some(b"dev1".to_vec()));
+        assert_eq!(r.report_id, Some(5));
+        assert_eq!(r.data, Some(vec![0xAA, 0xBB]));
+    }
+
+    // ── NmRequest::id ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_nm_request_id() {
+        assert_eq!(NmRequest::Enumerate { id: None }.id(), None);
+        assert_eq!(NmRequest::Enumerate { id: Some(3) }.id(), Some(3));
+        assert_eq!(
+            NmRequest::Open { id: Some(7), device_id: vec![] }.id(),
+            Some(7)
+        );
+        assert_eq!(
+            NmRequest::Close { id: None, data: vec![] }.id(),
+            None
+        );
+        assert_eq!(
+            NmRequest::Read { id: Some(1), data: vec![], timeout: 0 }.id(),
+            Some(1)
+        );
+        assert_eq!(
+            NmRequest::SendReport { id: None, device_id: vec![], report_id: 0, data: vec![] }.id(),
+            None
+        );
+        assert_eq!(
+            NmRequest::ReceiveFeatureReport { id: Some(9), device_id: vec![], report_id: 0 }.id(),
+            Some(9)
+        );
+        assert_eq!(
+            NmRequest::SendFeatureReport { id: None, device_id: vec![], report_id: 0, data: vec![] }.id(),
+            None
+        );
+    }
+
+    // ── IpcRequest::id ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_ipc_request_id() {
+        assert_eq!(IpcRequest::Enumerate { id: 1 }.id(), 1);
+        assert_eq!(IpcRequest::Open { id: 2, device_id: "".into() }.id(), 2);
+        assert_eq!(IpcRequest::Close { id: 3, device_id: "".into() }.id(), 3);
+        assert_eq!(IpcRequest::Read { id: 4, device_id: "".into(), timeout_ms: 0 }.id(), 4);
+        assert_eq!(IpcRequest::SendReport { id: 5, device_id: "".into(), report_id: 0, data: vec![] }.id(), 5);
+        assert_eq!(IpcRequest::ReceiveFeatureReport { id: 6, device_id: "".into(), report_id: 0 }.id(), 6);
+        assert_eq!(IpcRequest::SendFeatureReport { id: 7, device_id: "".into(), report_id: 0, data: vec![] }.id(), 7);
+    }
+
+    // ── IpcResponse::id ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_ipc_response_id() {
+        assert_eq!(IpcResponse::Devices { id: 1, devices: vec![] }.id(), 1);
+        assert_eq!(
+            IpcResponse::Opened { id: 2, device_id: "".into(), session_token: None, ws_port: None }.id(),
+            2
+        );
+        assert_eq!(IpcResponse::Ok { id: 3 }.id(), 3);
+        assert_eq!(IpcResponse::Data { id: 4, data: vec![] }.id(), 4);
+        assert_eq!(IpcResponse::Error { id: 5, message: "".into() }.id(), 5);
+        assert_eq!(IpcResponse::DeviceConnected { id: 0, device: DeviceInfo {
+            vendor_id: 0, product_id: 0, product_name: None, manufacturer: None,
+            serial_number: None, usage_page: None, usage: None, device_id: "".into(),
+            report_descriptor: None, collections: None,
+        }}.id(), 0);
+        assert_eq!(IpcResponse::Hello { id: 0, ws_port: 8080 }.id(), 0);
+    }
+
+    // ── JSON round-trips ────────────────────────────────────────────────
+
+    #[test]
+    fn test_device_info_json_roundtrip() {
+        let info = DeviceInfo {
+            vendor_id: 0x1234,
+            product_id: 0x5678,
+            product_name: Some("Test Device".into()),
+            manufacturer: Some("Test Vendor".into()),
+            serial_number: Some("SN001".into()),
+            usage_page: Some(0xFF00),
+            usage: Some(0x01),
+            device_id: "abc123def456".into(),
+            report_descriptor: Some(vec![0x05, 0x01, 0x09, 0x02]),
+            collections: None,
+        };
+        let json = serde_json::to_string(&info).unwrap();
+        let de: DeviceInfo = serde_json::from_str(&json).unwrap();
+        let json2 = serde_json::to_string(&de).unwrap();
+        assert_eq!(json, json2);
+    }
+
+    #[test]
+    fn test_collection_json_roundtrip() {
+        let col = Collection {
+            collection_type: 1,
+            usage_page: Some(0x01),
+            usage: Some(0x02),
+            children: vec![],
+            reports: Some(vec![Report {
+                id: Some(1),
+                report_type: "input".into(),
+                size_bits: 8,
+                fields: vec![Field {
+                    report_id: Some(1),
+                    report_type: "input".into(),
+                    size: 8,
+                    count: 1,
+                    usage_page: Some(0x01),
+                    usage: Some(0x02),
+                    usages: None,
+                    packed_usages: None,
+                    is_array: None,
+                    is_range: None,
+                    is_absolute: None,
+                    has_null: None,
+                    has_preferred_state: None,
+                    is_linear: None,
+                    is_buffered_bytes: None,
+                    is_constant: None,
+                    is_volatile: None,
+                    wrap: None,
+                    logical_minimum: None,
+                    logical_maximum: None,
+                    physical_minimum: None,
+                    physical_maximum: None,
+                    unit_exponent: None,
+                    unit_system: None,
+                    usage_minimum: None,
+                    usage_maximum: None,
+                    bit_offset: None,
+                }],
+            }]),
+        };
+        let json = serde_json::to_string(&col).unwrap();
+        let de: Collection = serde_json::from_str(&json).unwrap();
+        let json2 = serde_json::to_string(&de).unwrap();
+        assert_eq!(json, json2);
+    }
+
+    #[test]
+    fn test_ipc_request_json_roundtrip() {
+        let cases: Vec<IpcRequest> = vec![
+            IpcRequest::Enumerate { id: 1 },
+            IpcRequest::Open { id: 2, device_id: "test-device".into() },
+            IpcRequest::Close { id: 3, device_id: "test-device".into() },
+            IpcRequest::Read { id: 4, device_id: "test-device".into(), timeout_ms: 5000 },
+            IpcRequest::SendReport { id: 5, device_id: "test-device".into(), report_id: 1, data: vec![0x00, 0xFF] },
+            IpcRequest::ReceiveFeatureReport { id: 6, device_id: "test-device".into(), report_id: 0 },
+            IpcRequest::SendFeatureReport { id: 7, device_id: "test-device".into(), report_id: 0, data: vec![0xAA] },
+        ];
+        for req in cases {
+            let json = serde_json::to_string(&req).unwrap();
+            let de: IpcRequest = serde_json::from_str(&json).unwrap();
+            assert_eq!(de.id(), req.id());
+        }
+    }
+
+    #[test]
+    fn test_ipc_response_json_roundtrip() {
+        let dev = DeviceInfo {
+            vendor_id: 0x1234, product_id: 0x5678, product_name: None,
+            manufacturer: None, serial_number: None, usage_page: None,
+            usage: None, device_id: "dev".into(), report_descriptor: None,
+            collections: None,
+        };
+        let cases: Vec<IpcResponse> = vec![
+            IpcResponse::Devices { id: 1, devices: vec![dev.clone()] },
+            IpcResponse::Opened { id: 2, device_id: "dev".into(), session_token: Some("tok".into()), ws_port: Some(31337) },
+            IpcResponse::Ok { id: 3 },
+            IpcResponse::Data { id: 4, data: vec![0x01, 0x02] },
+            IpcResponse::Error { id: 5, message: "fail".into() },
+            IpcResponse::Hello { id: 0, ws_port: 31337 },
+        ];
+        for resp in cases {
+            let json = serde_json::to_string(&resp).unwrap();
+            let de: IpcResponse = serde_json::from_str(&json).unwrap();
+            assert_eq!(de.id(), resp.id());
+        }
+    }
+
+    #[test]
+    fn test_nm_response_json_serialize() {
+        let json = serde_json::to_string(&NmResponse::ok()).unwrap();
+        assert_eq!(json, r#"{"success":true}"#);
+
+        let json = serde_json::to_string(&NmResponse::err("err")).unwrap();
+        assert_eq!(json, r#"{"success":false,"error":"err"}"#);
+
+        let json = serde_json::to_string(&NmResponse::ok_with_data(vec![0xDE])).unwrap();
+        assert_eq!(json, r#"{"success":true,"data":[222]}"#);
+    }
+
+    #[test]
+    fn test_nm_request_deserialize() {
+        let json = r#"{"action":"enumerate"}"#;
+        let req: NmRequest = serde_json::from_str(json).unwrap();
+        assert!(matches!(req, NmRequest::Enumerate { id: None }));
+
+        let json = r#"{"action":"open","device_id":[47,100,101,118]}"#;
+        let req: NmRequest = serde_json::from_str(json).unwrap();
+        assert!(matches!(req, NmRequest::Open { .. }));
+        if let NmRequest::Open { device_id, .. } = req {
+            assert_eq!(device_id, vec![47, 100, 101, 118]);
+        }
+
+        let json = r#"{"action":"close","data":[47,100,101,118]}"#;
+        let req: NmRequest = serde_json::from_str(json).unwrap();
+        assert!(matches!(req, NmRequest::Close { .. }));
+    }
+}

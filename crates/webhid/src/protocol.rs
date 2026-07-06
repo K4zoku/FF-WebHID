@@ -56,3 +56,65 @@ where
     writer.write_all(&buf).await?;
     writer.flush().await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_write_then_read_u32() {
+        let mut buf = Vec::new();
+        write_message(&mut buf, &42u32).await.unwrap();
+
+        let mut reader: &[u8] = &buf;
+        let val: u32 = read_message(&mut reader).await.unwrap();
+        assert_eq!(val, 42);
+    }
+
+    #[tokio::test]
+    async fn test_write_then_read_string() {
+        let mut buf = Vec::new();
+        write_message(&mut buf, &"hello".to_string()).await.unwrap();
+
+        let mut reader: &[u8] = &buf;
+        let val: String = read_message(&mut reader).await.unwrap();
+        assert_eq!(val, "hello");
+    }
+
+    #[tokio::test]
+    async fn test_write_then_read_struct() {
+        #[derive(serde::Serialize, serde::Deserialize)]
+        struct Point { x: i32, y: i32 }
+
+        let pt = Point { x: 10, y: -5 };
+        let mut buf = Vec::new();
+        write_message(&mut buf, &pt).await.unwrap();
+
+        let mut reader: &[u8] = &buf;
+        let de: Point = read_message(&mut reader).await.unwrap();
+        assert_eq!(de.x, 10);
+        assert_eq!(de.y, -5);
+    }
+
+    #[tokio::test]
+    async fn test_rejects_oversized_message() {
+        let mut buf = Vec::new();
+        // length prefix = 2 MiB  ( > MAX_MSG = 1 MiB )
+        buf.extend_from_slice(&(2_000_000u32).to_le_bytes());
+        // payload bytes (doesn't matter – size check happens first)
+        buf.resize(buf.len() + 2_000_000, 0);
+
+        let mut reader: &[u8] = &buf;
+        let result: Result<serde_json::Value, _> = read_message(&mut reader).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[tokio::test]
+    async fn test_empty_writer_flushes() {
+        // write_message should still flush even for a minimal payload
+        let mut buf = Vec::new();
+        write_message(&mut buf, &true).await.unwrap();
+        assert!(!buf.is_empty());
+    }
+}
