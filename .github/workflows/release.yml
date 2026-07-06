@@ -46,7 +46,7 @@ jobs:
           workspaces: crates -> target
 
       - name: Build Rust binaries
-        run: cargo build --release --manifest-path crates/Cargo.toml
+        run: make build
 
       - name: Install wasm-pack
         if: runner.os == 'Linux'
@@ -54,7 +54,7 @@ jobs:
 
       - name: Build Addon XPI
         if: runner.os == 'Linux'
-        run: ./scripts/build-addon.sh
+        run: make build-addon
 
       - name: Upload XPI artifact
         if: runner.os == 'Linux'
@@ -63,14 +63,21 @@ jobs:
           name: webhid-addon
           path: dist/webhid-addon.xpi
 
-      - name: Prepare Artifacts (Unix)
-        if: runner.os != 'Windows'
+      - name: Prepare Artifacts (Linux)
+        if: runner.os == 'Linux'
         run: |
-          mkdir -p artifacts/bin artifacts/manifests
-          cp crates/target/release/webhid-daemon artifacts/bin/
-          cp crates/target/release/webhid-native-messaging artifacts/bin/
-          cp manifests/webhid_server.json artifacts/manifests/ || true
-          cp manifests/webhid-daemon.service artifacts/manifests/ || true
+          make install-system DESTDIR=artifacts PREFIX=/usr/local
+
+      - name: Prepare Artifacts (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p artifacts/usr/local/bin artifacts/usr/local/lib/mozilla/native-messaging-hosts artifacts/etc/systemd/system
+          cp crates/target/release/webhid-daemon artifacts/usr/local/bin/
+          cp crates/target/release/webhid-native-messaging artifacts/usr/local/bin/
+          sed 's|{{NM_BIN}}|/usr/local/bin/webhid-native-messaging|g' \
+            manifests/webhid_server.json > artifacts/usr/local/lib/mozilla/native-messaging-hosts/webhid_server.json
+          sed 's|{{DAEMON_BIN}}|/usr/local/bin/webhid-daemon|g' \
+            manifests/webhid-daemon.service > artifacts/etc/systemd/system/webhid-daemon.service
 
       - name: Prepare Artifacts (Windows)
         if: runner.os == 'Windows'
@@ -79,7 +86,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path artifacts/bin, artifacts/manifests
           Copy-Item crates/target/release/webhid-daemon.exe artifacts/bin/
           Copy-Item crates/target/release/webhid-native-messaging.exe artifacts/bin/
-          Copy-Item manifests/webhid_server.json artifacts/manifests/ -ErrorAction SilentlyContinue
+          Copy-Item manifests/webhid_server.windows.json artifacts/manifests/webhid_server.json
 
       - name: Upload platform artifacts
         uses: actions/upload-artifact@v7

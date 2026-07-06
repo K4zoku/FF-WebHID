@@ -1,0 +1,3 @@
+# Allow all users logged in at the console to access hidraw devices.
+# This is required for WebHID daemon to enumerate and communicate with HID devices.
+KERNEL=="hidraw*", TAG+="uaccess"

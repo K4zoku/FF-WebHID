@@ -29,10 +29,10 @@ sudo pacman -S rust systemd pkgconf zip
 cargo build --manifest-path crates/Cargo.toml
 
 # Release
-cargo build --release --manifest-path crates/Cargo.toml
+make build                # or: make build CARGO_ARGS=--frozen
 
-# Addon XPI
-./scripts/build-addon.sh
+# Addon XPI (builds WASM + zips addon/)
+make build-addon
 ```
 
 Binaries: `crates/target/{debug,release}/webhid-daemon` and `webhid-native-messaging`.
@@ -48,8 +48,7 @@ Two terminals:
 sudo RUST_LOG=debug crates/target/debug/webhid-daemon
 
 # Option B: udev rule (recommended)
-echo 'SUBSYSTEM=="hidraw", TAG+="uaccess"' | sudo tee /etc/udev/rules.d/99-webhid.rules
-sudo udevadm control --reload-rules && sudo udevadm trigger
+sudo make install-udev-rule
 RUST_LOG=debug crates/target/debug/webhid-daemon
 ```
 
@@ -74,6 +73,10 @@ EOF
 ```
 
 Restart browser after writing this file. Path must be absolute.
+
+> For a proper install (release binary + manifest + systemd user service in one
+> step), use `make install-user` instead — it substitutes the `{{NM_BIN}}`
+> placeholder in the template manifest with the real install path.
 
 ### Environment variables
 
@@ -133,12 +136,13 @@ FF-WebHID/
 │   ├── webhid-daemon/       System daemon (hidapi, WS server, hot-plug)
 │   └── webhid-native-messaging/  Firefox ↔ daemon bridge
 │
-├── manifests/               NM manifest + systemd unit + install script
+├── manifests/               NM manifest + systemd units (system + user) + udev rule
+│                            (templates use {{DAEMON_BIN}}/{{NM_BIN}} placeholders,
+│                             sed-replaced at install time)
 ├── packaging/               Arch Linux PKGBUILDs
 ├── docs/
 │   └── ARCHITECTURE.md      System architecture
-├── test/                    test_nm.py + browser test UI
-└── scripts/                 build-addon.sh, install.sh
+└── test/                    test_nm.py + browser test UI
 ```
 
 ## Packaging (Arch Linux)

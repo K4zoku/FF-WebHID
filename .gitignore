@@ -22,7 +22,7 @@ __pycache__/
 /test/tmp/
 /test/output/
 
-# Auto-built by scripts/build-addon.sh
+# Auto-built by make build-addon
 addon/wasm-parser.js
 addon/wasm-parser.wasm
 

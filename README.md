@@ -19,10 +19,12 @@ WebHID brings Human Interface Device (HID) support to Firefox on Linux, macOS, a
 
 ### 1. System daemon
 
+The daemon ships as a systemd service that runs as root, so it already has
+access to all hidraw devices — no udev rule needed.
+
 ```sh
-cargo build --release --manifest-path crates/Cargo.toml
-sudo ./scripts/install.sh
-systemctl status webhid-daemon
+sudo make install-system
+systemctl daemon-reload && systemctl enable --now webhid-daemon
 ```
 
 Or on Arch Linux:
@@ -30,16 +32,22 @@ Or on Arch Linux:
 cd packaging/webhid && makepkg -si
 ```
 
-### 2. Hardware permissions
+### 1b. User-local install (no root)
+
+Run the daemon as your own user instead of root. This needs a one-time udev
+rule so your user can open hidraw devices.
 
 ```sh
-echo 'SUBSYSTEM=="hidraw", TAG+="uaccess"' | sudo tee /etc/udev/rules.d/99-webhid.rules
-sudo udevadm control --reload-rules && sudo udevadm trigger
+make install-user
+sudo make install-udev-rule    # one-time, grants hidraw access to your user
+systemctl --user daemon-reload
+systemctl --user enable --now webhid-daemon
 ```
 
-The packaged systemd unit runs the daemon as root (no udev rule needed).
+Install paths are configurable: `make install-system PREFIX=/usr` or
+`make install-user USER_PREFIX=$HOME/.local`.
 
-### 3. Browser extension
+### 2. Browser extension
 
 Install from AMO: [WebHID](https://addons.mozilla.org/en-US/firefox/addon/webhid/)
 

@@ -26,7 +26,9 @@ url='https://github.com/user/webhid'
 license=('MIT')
 # The daemon must be running for the extension to do anything useful
 depends=('webhid')
-makedepends=('zip')
+# rust provides cargo (for wasm-pack) and rustup (for the wasm32 target);
+# zip is needed to assemble the XPI.
+makedepends=('rust' 'zip')
 install=webhid-addon.install
 source=()
 sha256sums=()
@@ -36,25 +38,29 @@ _ff_guid='{ec8030f7-c20a-464f-9b0e-13a3a9e97384}'
 # Must match browser_specific_settings.gecko.id in addon/manifest.json
 _ext_id='webhid@k4zoku.dev'
 
-_addon_dir() { echo "$startdir/../../addon"; }
+_root() { echo "$startdir/../.."; }
+
+prepare() {
+    # Install wasm-pack and the wasm32 target so build() can drive the
+    # Makefile's build-addon target (which runs wasm-pack under the hood).
+    cargo install wasm-pack
+    rustup target add wasm32-unknown-unknown
+    # Pre-fetch the WASM crate's deps for offline/reproducible builds.
+    cargo fetch --manifest-path "$(_root)/crates/webhid-descriptor-wasm/Cargo.toml"
+}
 
 build() {
     # An XPI is simply a ZIP archive of the extension directory.
-    # We build it into $srcdir so package() can pick it up cleanly.
-    local _xpi="$srcdir/$_ext_id.xpi"
+    # The Makefile's build-addon target builds the WASM parser and zips
+    # the addon/ directory into dist/webhid-addon.xpi.
+    make -C "$(_root)" build-addon
 
-    rm -f "$_xpi"
-
-    # Enter the addon directory so zip stores paths relative to its root.
-    cd "$(_addon_dir)"
-    zip -r "$_xpi" . \
-        --exclude '*.DS_Store' \
-        --exclude '*.git*'    \
-        --exclude '*.swp'
+    # Copy the XPI into $srcdir so package() can pick it up cleanly.
+    cp "$(_root)/dist/webhid-addon.xpi" "$srcdir/$_ext_id.xpi"
 }
 
 package() {
-    local _root="$startdir/../.."
+    local _root="$(_root)"
     local _xpi="$srcdir/$_ext_id.xpi"
 
     # ------------------------------------------------------------------ #

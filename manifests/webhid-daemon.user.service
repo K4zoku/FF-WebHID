@@ -1,0 +1,19 @@
+[Unit]
+Description=WebHID Daemon (User)
+Documentation=https://github.com/K4zoku/FF-WebHID
+
+[Service]
+Type=simple
+ExecStart={{DAEMON_BIN}}
+Restart=on-failure
+RestartSec=3
+
+Environment=RUST_LOG=info
+Environment=WEBHID_WS_PORT=31337
+Environment=WEBHID_WS_BATCH_MS=1
+
+RuntimeDirectory=webhid
+RuntimeDirectoryMode=0755
+
+[Install]
+WantedBy=default.target
