@@ -29,7 +29,7 @@ USER_SYSTEMD_DIR  ?= $(HOME)/.config/systemd/user
         install install-system install-user install-udev-rule \
         uninstall uninstall-system uninstall-user \
         clean help \
-        bump
+        bump bump-patch
 
 all: build build-wasm build-addon
 
