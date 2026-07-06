@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.6.2](https://github.com/K4zoku/FF-WebHID/compare/v1.6.1...v1.6.2) (2026-07-06)
+
+
+### Bug Fixes
+
+* browser action ([7326544](https://github.com/K4zoku/FF-WebHID/commit/73265446ea406119b73a6ed2726451e34e0bf2a3))
+
 ## [1.6.1](https://github.com/K4zoku/FF-WebHID/compare/v1.6.0...v1.6.1) (2026-07-06)
 
 
