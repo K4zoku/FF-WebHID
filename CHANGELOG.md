@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.6.0](https://github.com/K4zoku/FF-WebHID/compare/v1.5.3...v1.6.0) (2026-07-06)
+
+
+### Features
+
+* device count ([2f848af](https://github.com/K4zoku/FF-WebHID/commit/2f848af8d7ba081741b3ccca22aafca79b0589be))
+* move dialog to shadow dom ([4167690](https://github.com/K4zoku/FF-WebHID/commit/416769032c1234c01b9817d4e0ab3c0191fbb334))
+* sab slider ([227075e](https://github.com/K4zoku/FF-WebHID/commit/227075e778166b015d14d9d142ffd18316d4bca2))
+
+
+### Bug Fixes
+
+* using deprecated parameters warning ([a203e97](https://github.com/K4zoku/FF-WebHID/commit/a203e97ea922c0b13a681b8abfd14ad0af42dbbf))
+
+
+### Code Refactoring
+
+* cleanup ([85e80a7](https://github.com/K4zoku/FF-WebHID/commit/85e80a749e843ca42046ace6de21c83f104407fd))
+* theme system + restructure addon directory ([4ddafa9](https://github.com/K4zoku/FF-WebHID/commit/4ddafa93feeded3a9ba2efaf832925e0857a347f))
+
+
+### CI/CD
+
+* temporary disable AMO upload ([08b10af](https://github.com/K4zoku/FF-WebHID/commit/08b10af82b516190da8a438b2fc5f03687d7e1cd))
+
 ## [1.5.3](https://github.com/K4zoku/FF-WebHID/compare/v1.5.2...v1.5.3) (2026-07-06)
 
 
