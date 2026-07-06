@@ -36,6 +36,8 @@ all: build build-wasm build-addon
 bump:
 	npx commit-and-tag-version
 
+bump-patch:
+	npx commit-and-tag-version --release-as patch
 
 ## ---- Build ----
 
