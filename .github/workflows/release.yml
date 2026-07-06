@@ -151,12 +151,12 @@ jobs:
             dist/webhid-addon-*.xpi
             webhid-*.zip
 
-      - name: Upload to AMO
-        uses: kewisch/action-web-ext@v2
-        with:
-          cmd: sign
-          source: dist/webhid-addon-${{ steps.tag.outputs.name }}.xpi
-          channel: listed
-          apiKey: ${{ secrets.AMO_JWT_ISSUER }}
-          apiSecret: ${{ secrets.AMO_JWT_SECRET }}
-          timeout: 900000
+      # - name: Upload to AMO
+      #   uses: kewisch/action-web-ext@v2
+      #   with:
+      #     cmd: sign
+      #     source: dist/webhid-addon-${{ steps.tag.outputs.name }}.xpi
+      #     channel: listed
+      #     apiKey: ${{ secrets.AMO_JWT_ISSUER }}
+      #     apiSecret: ${{ secrets.AMO_JWT_SECRET }}
+      #     timeout: 900000
