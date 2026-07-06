@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.6.1](https://github.com/K4zoku/FF-WebHID/compare/v1.6.0...v1.6.1) (2026-07-06)
+
+
+### Features
+
+* cross platform report descriptor ([f01b88d](https://github.com/K4zoku/FF-WebHID/commit/f01b88d43f37d28ab7cb484c3928643933b86a13))
+
+
+### Chores
+
+* add bump patch ([b1854c4](https://github.com/K4zoku/FF-WebHID/commit/b1854c4e14dcc63de0bd281ef7a184a37dfdc086))
+
 ## [1.6.0](https://github.com/K4zoku/FF-WebHID/compare/v1.5.3...v1.6.0) (2026-07-06)
 
 
