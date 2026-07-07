@@ -10,6 +10,11 @@ const logger = {
   debug: (...a) => { if (logger._level >= 3) console.debug(...a); },
 };
 
+// Detect SharedArrayBuffer availability. Some sites (e.g. usevia.app) block
+// COOP/COEP injection or set conflicting headers, making SAB unavailable.
+// When that happens we fall back to postMessage for input report delivery.
+const SAB_AVAILABLE = typeof SharedArrayBuffer !== 'undefined';
+
 let CAPACITY = 8192;
 let sab = null, meta = null, data = null, reportSize = 64, ws = null;
 const _pending = new Map();
@@ -44,9 +49,14 @@ function connect(msg) {
   reportSize = msg.reportSize || 64;
   CAPACITY = msg.capacity || 8192;
   if (msg.logLevel !== undefined) logger._level = msg.logLevel;
-  sab = new SharedArrayBuffer(12 + CAPACITY * reportSize);
-  meta = new Int32Array(sab, 0, 3);
-  data = new Uint8Array(sab, 12);
+
+  if (SAB_AVAILABLE) {
+    sab = new SharedArrayBuffer(12 + CAPACITY * reportSize);
+    meta = new Int32Array(sab, 0, 3);
+    data = new Uint8Array(sab, 12);
+  } else {
+    logger.warn('[worker] SharedArrayBuffer unavailable — using postMessage fallback for input reports');
+  }
   _doConnect();
 }
 
@@ -60,7 +70,9 @@ function _doConnect() {
   ws.binaryType = 'arraybuffer';
   ws.onopen = () => {
     _reconnectDelay = 500;
-    self.postMessage({ type: 'ready', sab });
+    // Send SAB only if available; bridge/polyfill will detect null and use
+    // postMessage fallback for input reports.
+    self.postMessage({ type: 'ready', sab: SAB_AVAILABLE ? sab : null });
   };
   ws.onerror = (e) => logger.error('[worker] WS ERROR:', e.message || e);
   ws.onclose = () => {
@@ -72,7 +84,11 @@ function _doConnect() {
   ws.onmessage = ({ data: frame }) => {
     const batch = new Uint8Array(frame);
     if (batch.length > 0 && batch[0] >= 0x80 && batch.length <= 10) return handleControlResponse(batch);
-    pushInputBatch(batch);
+    if (SAB_AVAILABLE) {
+      pushInputBatch(batch);
+    } else {
+      pushInputBatchPostMessage(batch);
+    }
   };
 }
 
@@ -86,6 +102,7 @@ function _scheduleReconnect() {
   _reconnectDelay = Math.min(_reconnectDelay * 2, 5000);
 }
 
+// SAB path: write reports into the ring buffer, polyfill drains via Atomics.
 function pushInputBatch(batch) {
   let offset = 0, count = 0;
   while (offset + 1 < batch.length) {
@@ -111,6 +128,22 @@ function pushInputBatch(batch) {
     count++;
   }
   if (count > 0) Atomics.notify(meta, 0);
+}
+
+// Fallback path: postMessage each report to the bridge, which forwards to
+// the polyfill via window.postMessage. Higher latency than SAB but works
+// without COOP/COEP.
+function pushInputBatchPostMessage(batch) {
+  let offset = 0;
+  while (offset + 1 < batch.length) {
+    const len = batch[offset] | (batch[offset + 1] << 8);
+    offset += 2;
+    if (len === 0 || offset + len > batch.length) break;
+    // batch[offset..offset+len] = [report_id][...payload]
+    const report = batch.subarray(offset, offset + len);
+    self.postMessage({ type: 'inputReport', report: report.slice() });
+    offset += len;
+  }
 }
 
 function handleSend(msg, msgType) {

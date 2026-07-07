@@ -291,6 +291,7 @@
     #hotPath = false;
     #sabListener = null;
     #inputLoopStarted = false;
+    #sabDrainActive = false;
     #deviceId = null;
     #internalId = null;
     #manufacturer = null;
@@ -305,16 +306,28 @@
       const listener = (event) => {
         if (!event.data || event.data.__webhid_bridge !== "evt") return;
         const detail = event.data.event;
-        if (!detail || detail.event_type !== "webhid-sab") return;
+        if (!detail) return;
         const evDeviceId = detail.device_id ? String.fromCharCode(...detail.device_id) : null;
         if (!evDeviceId || !this.#deviceId || evDeviceId !== this.#deviceId) return;
-        this.#hotPath = true;
-        if (!this.#inputLoopStarted) {
-          this.#inputLoopStarted = true;
-          startInputReportLoop(this, detail.sab, detail.reportSize);
-        } else {
-          const updateFn = _sabUpdateFns.get(this);
-          if (updateFn) updateFn(detail.sab, detail.reportSize);
+
+        if (detail.event_type === "webhid-sab") {
+          // SAB path: start/update drain loop
+          this.#hotPath = true;
+          this.#sabDrainActive = true;
+          if (!this.#inputLoopStarted) {
+            this.#inputLoopStarted = true;
+            startInputReportLoop(this, detail.sab, detail.reportSize);
+          } else {
+            const updateFn = _sabUpdateFns.get(this);
+            if (updateFn) updateFn(detail.sab, detail.reportSize);
+          }
+        } else if (detail.event_type === "webhid-sab-disabled") {
+          // SAB unavailable (COOP/COEP blocked). Enable hotPath for send/
+          // receive/feature routing via WS worker, but skip SAB drain loop.
+          // Input reports arrive via `input_report` events from the worker.
+          this.#hotPath = true;
+          this.#sabDrainActive = false;
+          this.#inputLoopStarted = true; // prevent SAB drain from starting later
         }
       };
       this.#sabListener = listener;
@@ -606,6 +619,7 @@
           this.#opened = false;
           this.#hotPath = false;
           this.#inputLoopStarted = false;
+          this.#sabDrainActive = false;
           if (this.#sabListener) {
             window.removeEventListener("message", this.#sabListener);
             this.#sabListener = null;
@@ -741,10 +755,8 @@
             return;
           }
 
-          // IPC fallback for input reports (when WS data plane is down).
-          // Skipped when hotPath active to avoid duplicates.
           if (event_type === "input_report") {
-            if (this.#hotPath) return;
+            if (this.#sabDrainActive) return;
             if (evDeviceId && this.#deviceId && evDeviceId !== this.#deviceId) return;
             const dataBytes = detail.data
               ? new Uint8Array(detail.data)

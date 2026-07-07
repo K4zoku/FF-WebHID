@@ -594,14 +594,43 @@
 
         worker.onmessage = ({ data }) => {
           if (data.type === 'ready') {
-            logger.info('[bridge] worker ready for', deviceId);
+            logger.info('[bridge] worker ready for', deviceId, data.sab ? '(SAB)' : '(postMessage fallback)');
+            if (data.sab) {
+              // SAB path: polyfill drains via Atomics
+              window.postMessage({
+                __webhid_bridge: 'evt',
+                event: {
+                  event_type: 'webhid-sab',
+                  device_id: response.data,
+                  sab: data.sab,
+                  reportSize: payload.reportSize || 2048
+                }
+              }, '*');
+            } else {
+              // postMessage fallback: SAB unavailable, worker will send
+              // inputReport messages directly
+              window.postMessage({
+                __webhid_bridge: 'evt',
+                event: {
+                  event_type: 'webhid-sab-disabled',
+                  device_id: response.data,
+                }
+              }, '*');
+            }
+            return;
+          }
+          if (data.type === 'inputReport') {
+            // postMessage fallback: forward input report to polyfill
+            const report = data.report;
+            const reportId = report[0];
+            const payloadBytes = report.length > 1 ? Array.from(report.subarray(1)) : [];
             window.postMessage({
               __webhid_bridge: 'evt',
               event: {
-                event_type: 'webhid-sab',
+                event_type: 'input_report',
                 device_id: response.data,
-                sab: data.sab,
-                reportSize: payload.reportSize || 2048
+                report_id: reportId,
+                data: payloadBytes,
               }
             }, '*');
             return;
