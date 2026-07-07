@@ -88,6 +88,16 @@ jobs:
           Copy-Item crates/target/release/webhid-native-messaging.exe artifacts/bin/
           Copy-Item manifests/webhid_server.windows.json artifacts/manifests/webhid_server.json
 
+      - name: Build MSI (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # Install WiX v5 as a dotnet global tool
+          dotnet tool install --global wix
+          $env:PATH = "$env:USERPROFILE\.dotnet\tools;$env:PATH"
+          $pkg = Get-Content package.json -Raw | ConvertFrom-Json
+          ./packaging/windows/build-msi.ps1 -Version $pkg.version -OutputDir artifacts
+
       - name: Upload platform artifacts
         uses: actions/upload-artifact@v7
         with:
@@ -142,6 +152,8 @@ jobs:
           cd artifacts-linux   && zip -r "../webhid-linux-x86_64-${VER}.zip"   . && cd ..
           cd artifacts-windows && zip -r "../webhid-windows-x86_64-${VER}.zip" . && cd ..
           cd artifacts-macos   && zip -r "../webhid-macos-universal-${VER}.zip" . && cd ..
+          # MSI is uploaded as-is (already a single-file installer)
+          cp artifacts-windows/webhid-*.msi . 2>/dev/null || true
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
@@ -150,6 +162,7 @@ jobs:
           files: |
             dist/webhid-addon-*.xpi
             webhid-*.zip
+            webhid-*.msi
 
       # - name: Upload to AMO
       #   uses: kewisch/action-web-ext@v2

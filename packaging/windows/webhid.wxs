@@ -1,0 +1,102 @@
+<?xml version='1.0' encoding='windows-1252'?>
+<!--
+  WebHID Windows Installer (MSI)
+  Built with WiX Toolset v5.
+
+  Layout:
+    [ProgramFiles64Folder]WebHID\
+      webhid-daemon.exe
+      webhid-native-messaging.exe
+      webhid_server.json   (NM manifest, [INSTALLDIR] resolved at install time)
+
+  Registry:
+    HKLM\SOFTWARE\Mozilla\NativeMessagingHosts\webhid_server  = [INSTALLDIR]webhid_server.json
+
+  Scheduled Task:
+    "WebHID Daemon" — runs at logon, webhid-daemon.exe
+-->
+<Wix xmlns='http://wixtoolset.org/schemas/v4/wxs'>
+  <Package Name='WebHID'
+           Manufacturer='K4zoku'
+           Language='1033' Codepage='1252'
+           Version='$(var.Version)'
+           UpgradeCode='7c7e8f5a-3d2b-4e6f-9a1c-8b5d6e7f8a90'>
+
+    <SummaryInformation Codepage='1252'
+                        Description='WebHID daemon + native messaging host'
+                        Manufacturer='K4zoku'/>
+
+    <Media Id='1' Cabinet='webhid.cab' EmbedCab='yes'/>
+
+    <!-- Major upgrade: uninstall older versions before installing new -->
+    <MajorUpgrade DowngradeErrorMessage='A newer version of WebHID is already installed.'
+                  AllowSameVersion='yes'/>
+
+    <Feature Id='Complete' Title='WebHID' Level='1'>
+      <ComponentGroupRef Id='Binaries'/>
+      <ComponentGroupRef Id='Registry'/>
+      <ComponentGroupRef Id='ScheduledTask'/>
+    </Feature>
+
+    <!-- Install conditions -->
+    <Launch Condition='Privileged'>This installer requires administrator privileges.</Launch>
+
+    <InstallExecuteSequence>
+      <ScheduleReboot After='InstallFinalize'/>
+    </InstallExecuteSequence>
+  </Package>
+
+  <Fragment>
+    <StandardDirectory Id='ProgramFiles64Folder'>
+      <Directory Id='INSTALLDIR' Name='WebHID'>
+        <Component Id='DaemonBin' Guid='a1b2c3d4-1111-2222-3333-444455556666'>
+          <File Id='DaemonExe' Source='$(var.BuildDir)\webhid-daemon.exe' KeyPath='yes'/>
+        </Component>
+        <Component Id='NMBin' Guid='a1b2c3d4-1111-2222-3333-444455557777'>
+          <File Id='NMExe' Source='$(var.BuildDir)\webhid-native-messaging.exe' KeyPath='yes'/>
+        </Component>
+        <Component Id='NMManifest' Guid='a1b2c3d4-1111-2222-3333-444455558888'>
+          <File Id='NMJson' Name='webhid_server.json'
+                Source='$(var.BuildDir)\webhid_server.json' KeyPath='yes'/>
+        </Component>
+      </Directory>
+    </StandardDirectory>
+  </Fragment>
+
+  <Fragment>
+    <ComponentGroup Id='Binaries'>
+      <ComponentRef Id='DaemonBin'/>
+      <ComponentRef Id='NMBin'/>
+      <ComponentRef Id='NMManifest'/>
+    </ComponentGroup>
+  </Fragment>
+
+  <Fragment>
+    <ComponentGroup Id='Registry'>
+      <Component Id='NMRegistry' Directory='INSTALLDIR'
+                 Guid='a1b2c3d4-1111-2222-3333-444455559999'>
+        <RegistryKey Root='HKLM'
+                     Key='SOFTWARE\Mozilla\NativeMessagingHosts\webhid_server'>
+          <RegistryValue Type='string' Value='[INSTALLDIR]webhid_server.json' KeyPath='yes'/>
+        </RegistryKey>
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+
+  <Fragment>
+    <ComponentGroup Id='ScheduledTask'>
+      <Component Id='CreateScheduledTask' Directory='INSTALLDIR'
+                 Guid='a1b2c3d4-aaaa-bbbb-cccc-ddddeeeeffff'>
+        <!-- Create scheduled task at install time; runs at every user logon -->
+        <CustomAction Id='CreateTask' ExeCommand='powershell.exe -NoProfile -NonInteractive -Command &quot;Register-ScheduledTask -TaskName \&quot;WebHID Daemon\&quot; -Action (New-ScheduledTaskAction -Execute \&quot;[INSTALLDIR]webhid-daemon.exe\&quot;) -Trigger (New-ScheduledTaskTrigger -AtLogOn) -Settings (New-ScheduledTaskSettingsSet -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)) -Force&quot;'
+                      Return='check'/>
+        <CustomAction Id='DeleteTask' ExeCommand='powershell.exe -NoProfile -NonInteractive -Command &quot;Unregister-ScheduledTask -TaskName \&quot;WebHID Daemon\&quot; -Confirm:$false&quot;'
+                      Return='ignore'/>
+        <InstallExecuteSequence>
+          <Custom Action='CreateTask' After='InstallFiles' Condition='NOT Installed'/>
+          <Custom Action='DeleteTask' Before='RemoveFiles' Condition='Installed'/>
+        </InstallExecuteSequence>
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+</Wix>

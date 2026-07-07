@@ -28,6 +28,7 @@ USER_SYSTEMD_DIR  ?= $(HOME)/.config/systemd/user
 .PHONY: all build build-wasm build-addon package \
         install install-system install-user install-udev-rule \
         uninstall uninstall-system uninstall-user \
+        windows-msi \
         clean help \
         bump bump-patch
 
@@ -62,6 +63,14 @@ build-addon: build-wasm
 	@echo "Created $(DIST_DIR)/webhid-addon.xpi"
 
 package: build build-addon
+
+## ---- Windows MSI ----
+## Requires: WiX v5 (`dotnet tool install --global wix`) on Windows host.
+## Cross-build is not supported; run on a Windows machine or CI runner.
+
+windows-msi:
+	@echo "==> Building Windows MSI (run on Windows)…"
+	powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(ROOT)/packaging/windows/build-msi.ps1"
 
 ## ---- Install ----
 ## System-wide: requires root, binaries+NM manifest shared for all users
@@ -132,6 +141,7 @@ help:
 	@echo "  build-wasm         - build wasm descriptor parser into addon/"
 	@echo "  build-addon        - package addon/ into dist/webhid-addon.xpi"
 	@echo "  package            - build + build-addon"
+	@echo "  windows-msi        - build Windows MSI installer (run on Windows)"
 	@echo "  install-system     - install binaries + NM manifest + systemd service (needs root)"
 	@echo "  install-user       - install binaries + NM manifest + systemd user service (no root)"
 	@echo "  install-udev-rule  - install udev rule for hidraw access (needs root)"
