@@ -1,0 +1,108 @@
+name: Bug Report
+description: Report a problem with FF-WebHID (addon or daemon)
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please fill in as much as you can, missing info (especially logs) makes it much harder to track down the issue.
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating System
+      description: OS and version (e.g. Arch Linux, Windows 11 23H2, macOS 15 Sequoia)
+      placeholder: e.g. Windows 11 23H2
+    validations:
+      required: true
+
+  - type: input
+    id: firefox-version
+    attributes:
+      label: Firefox Version
+      description: Help → About Firefox
+      placeholder: e.g. Firefox 142.0
+    validations:
+      required: true
+
+  - type: input
+    id: addon-version
+    attributes:
+      label: Addon Version
+      description: about:addons → FF-WebHID
+      placeholder: e.g. 1.5.5
+    validations:
+      required: true
+
+  - type: input
+    id: daemon-version
+    attributes:
+      label: Daemon Version
+      description: Run `webhid-daemon --version` if unsure
+      placeholder: e.g. 1.5.5
+    validations:
+      required: true
+
+  - type: input
+    id: device
+    attributes:
+      label: HID Device
+      description: Device name/model, and vendor ID / product ID if known (e.g. from `lsusb` or Device Manager)
+      placeholder: e.g. Sayo Device XYZ (VID_1234&PID_5678)
+    validations:
+      required: false
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to Reproduce
+      description: What did you do, step by step?
+      placeholder: |
+        1. Open example.com
+        2. Click "Connect Device"
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: page-console-logs
+    attributes:
+      label: Page Console Logs
+      description: |
+        Set Log Level to Debug in the addon settings, reproduce the issue, then paste the output from the page's Web Console (F12 → Console, filter by `[webhid]` or similar).
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: daemon-logs
+    attributes:
+      label: Daemon Logs
+      description: |
+        Attach the daemon log output. Linux (systemd): `journalctl --user -u webhid-daemon`. Otherwise check the terminal/console output where the daemon runs, or the log file if configured.
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Screenshots, related issues, workarounds you tried, etc.
+    validations:
+      required: false
