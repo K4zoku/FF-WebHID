@@ -26,6 +26,11 @@ const DEFAULT_PIPE: &str = r"\\.\pipe\webhid";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    if std::env::args().any(|a| a == "--version" || a == "-V") {
+        println!("webhid-daemon {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+
     env_logger::Builder::from_default_env()
         .filter_level(log::LevelFilter::Info)
         .init();
