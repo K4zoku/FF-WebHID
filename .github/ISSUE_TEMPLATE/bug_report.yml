@@ -8,6 +8,16 @@ body:
       value: |
         Thanks for taking the time to report a bug. Please fill in as much as you can, missing info (especially logs) makes it much harder to track down the issue.
 
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues (open and closed) and this hasn't been reported before
+          required: true
+        - label: I'm using the latest released version of the addon and daemon
+          required: true
+
   - type: input
     id: os
     attributes:
@@ -30,8 +40,8 @@ body:
     id: addon-version
     attributes:
       label: Addon Version
-      description: about:addons → FF-WebHID
-      placeholder: e.g. 1.5.5
+      description: about:addons → WebHID
+      placeholder: e.g. 1.6.1
     validations:
       required: true
 
@@ -40,7 +50,7 @@ body:
     attributes:
       label: Daemon Version
       description: Run `webhid-daemon --version` if unsure
-      placeholder: e.g. 1.5.5
+      placeholder: e.g. 1.6.1
     validations:
       required: true
 
@@ -49,7 +59,7 @@ body:
     attributes:
       label: HID Device
       description: Device name/model, and vendor ID / product ID if known (e.g. from `lsusb` or Device Manager)
-      placeholder: e.g. Sayo Device XYZ (VID_1234&PID_5678)
+      placeholder: e.g. Device XYZ (VID_1234&PID_5678)
     validations:
       required: false
 
