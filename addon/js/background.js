@@ -176,13 +176,24 @@ browser.storage.onChanged.addListener((changes, area) => {
 browser.webRequest.onHeadersReceived.addListener(
   (details) => {
     if (!_sabEnabled) return {};
+
+    // Only inject COOP/COEP on main-frame document requests. Injecting on
+    // sub-resources (scripts, images, fonts) breaks cross-origin loads on
+    // sites like usevia.app that pull from CDNs without CORP headers.
+    const isMainFrame = details.type === 'main_frame';
+    if (!isMainFrame) return {};
+
     const headers = details.responseHeaders.filter(h =>
       !['cross-origin-opener-policy',
-        'cross-origin-embedder-policy'].includes(h.name.toLowerCase())
+        'cross-origin-embedder-policy',
+        'cross-origin-resource-policy'].includes(h.name.toLowerCase())
     );
     headers.push(
       { name: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
-      { name: 'Cross-Origin-Embedder-Policy', value: 'require-corp' },
+      // credentialless is more permissive than require-corp: cross-origin
+      // resources without CORP headers are still allowed (loaded without
+      // credentials). This avoids breaking sites that load from CDNs.
+      { name: 'Cross-Origin-Embedder-Policy', value: 'credentialless' },
     );
     return { responseHeaders: headers };
   },

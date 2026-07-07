@@ -26,16 +26,30 @@
     }
 
     injectShadowDOM() {
-      if (document.getElementById("webhid-shadow-host")) return;
+      // Defer until document.body is available. Bridge may run during
+      // document parsing (readyState === 'loading') when body is null.
+      const doInject = () => {
+        if (document.getElementById("webhid-shadow-host")) return;
+        if (!document.body) {
+          // Body not ready yet — retry on next tick.
+          if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', doInject, { once: true });
+          } else {
+            requestAnimationFrame(doInject);
+          }
+          return;
+        }
 
-      this.shadowHost = document.createElement("div");
-      this.shadowHost.id = "webhid-shadow-host";
-      document.body.appendChild(this.shadowHost);
+        this.shadowHost = document.createElement("div");
+        this.shadowHost.id = "webhid-shadow-host";
+        document.body.appendChild(this.shadowHost);
 
-      this.shadowRoot = this.shadowHost.attachShadow({ mode: "closed" });
+        this.shadowRoot = this.shadowHost.attachShadow({ mode: "closed" });
 
-      this._cssReady = this._loadCSS();
-      this._createTemplates();
+        this._cssReady = this._loadCSS();
+        this._createTemplates();
+      };
+      doInject();
     }
 
     async _loadCSS() {
@@ -126,6 +140,18 @@
       }
 
       this.filters = filters;
+
+      // Wait for shadowRoot to be injected (deferred until body ready).
+      let tries = 0;
+      while (!this.shadowRoot && tries < 100) {
+        await new Promise(r => requestAnimationFrame(r));
+        tries++;
+      }
+      if (!this.shadowRoot) {
+        logger.error('[WebHID] shadowRoot not initialized — cannot show device picker');
+        this.onDeviceCancelled();
+        return;
+      }
 
       await this._cssReady;
 
