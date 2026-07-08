@@ -145,7 +145,11 @@ async fn main() -> anyhow::Result<()> {
                     break;
                 }
             }
-            if let Err(e) = write_frame(&mut daemon_w, &buf).await {
+            // Vectored write: length prefix + payload in a single syscall
+            let len = u32::try_from(buf.len()).unwrap_or(0).to_le_bytes();
+            let len_io = std::io::IoSlice::new(&len);
+            let buf_io = std::io::IoSlice::new(&buf);
+            if let Err(e) = daemon_w.write_vectored(&[len_io, buf_io]).await {
                 log::warn!("daemon write error: {e}");
                 break;
             }
@@ -169,7 +173,10 @@ async fn main() -> anyhow::Result<()> {
                     break;
                 }
             }
-            if let Err(e) = write_frame(&mut stdout, &buf).await {
+            let len = u32::try_from(buf.len()).unwrap_or(0).to_le_bytes();
+            let len_io = std::io::IoSlice::new(&len);
+            let buf_io = std::io::IoSlice::new(&buf);
+            if let Err(e) = stdout.write_vectored(&[len_io, buf_io]).await {
                 log::warn!("stdout write error: {e}");
                 break;
             }
@@ -214,17 +221,6 @@ async fn read_frame<R: AsyncRead + Unpin>(
     buf.resize(len, 0);
     reader.read_exact(buf).await?;
     Ok(true)
-}
-
-/// Write a single length-prefixed frame.
-async fn write_frame<W: AsyncWrite + Unpin>(
-    writer: &mut W,
-    buf: &[u8],
-) -> anyhow::Result<()> {
-    let len = u32::try_from(buf.len())?;
-    writer.write_all(&len.to_le_bytes()).await?;
-    writer.write_all(buf).await?;
-    Ok(())
 }
 
 // ---------------------------------------------------------------------------

@@ -2,7 +2,16 @@
 
 
 use hidapi::{HidApi, HidDevice, DeviceInfo as HidDeviceInfo};
+use std::cell::RefCell;
 use webhid::DeviceInfo;
+
+// Thread-local buffers to avoid per-call allocation in the hot path.
+// These are used by write_report, write_feature_report, and read_feature_report
+// which are always called from spawn_blocking threads.
+thread_local! {
+    static WRITE_BUF: RefCell<Vec<u8>> = RefCell::new(Vec::with_capacity(4096));
+    static READ_BUF: RefCell<Vec<u8>> = RefCell::new(Vec::with_capacity(4096));
+}
 
 // ---------------------------------------------------------------------------
 // device_id: stable, platform-independent identifier
@@ -204,52 +213,62 @@ pub fn uses_numbered_reports(buf: &[u8]) -> bool {
 /// Block until a HID input report is available (or `timeout_ms` expires).
 /// hidapi's `read_timeout` handles polling internally.
 pub fn read_with_timeout(dev: &HidDevice, timeout_ms: i32) -> std::io::Result<Vec<u8>> {
-    let mut buf = vec![0u8; 4096];
-    let n = dev.read_timeout(&mut buf, timeout_ms)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
-    if n == 0 {
-        return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "HID read timed out"));
-    }
-    buf.truncate(n);
-    Ok(buf)
+    READ_BUF.with(|buf| {
+        let mut buf = buf.borrow_mut();
+        buf.resize(4096, 0);
+        let n = dev.read_timeout(&mut buf, timeout_ms)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+        if n == 0 {
+            return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "HID read timed out"));
+        }
+        Ok(buf[..n].to_vec())
+    })
 }
 
 /// Write a HID output report.  hidapi expects the first byte to be the report ID.
 pub fn write_report(dev: &HidDevice, report_id: u8, payload: &[u8]) -> std::io::Result<()> {
-    let mut buf = Vec::with_capacity(payload.len() + 1);
-    buf.push(report_id);
-    buf.extend_from_slice(payload);
-    let n = dev.write(&buf)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
-    if n != buf.len() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::WriteZero,
-            format!("short write: {} of {} bytes", n, buf.len()),
-        ));
-    }
-    Ok(())
+    WRITE_BUF.with(|buf| {
+        let mut buf = buf.borrow_mut();
+        buf.clear();
+        buf.push(report_id);
+        buf.extend_from_slice(payload);
+        let n = dev.write(&buf)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+        if n != buf.len() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::WriteZero,
+                format!("short write: {} of {} bytes", n, buf.len()),
+            ));
+        }
+        Ok(())
+    })
 }
 
 /// Receive a HID feature report.  hidapi's `get_feature_report` expects
 /// the first byte to be the report ID and returns the report including it.
 pub fn read_feature_report(dev: &HidDevice, report_id: u8) -> std::io::Result<Vec<u8>> {
-    let mut buf = vec![0u8; 4096];
-    buf[0] = report_id;
-    let n = dev.get_feature_report(&mut buf)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
-    buf.truncate(n);
-    Ok(buf)
+    READ_BUF.with(|buf| {
+        let mut buf = buf.borrow_mut();
+        buf.resize(4096, 0);
+        buf[0] = report_id;
+        let n = dev.get_feature_report(&mut buf)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+        Ok(buf[..n].to_vec())
+    })
 }
 
 /// Send a HID feature report.  hidapi's `send_feature_report` expects
 /// the first byte to be the report ID.
 pub fn write_feature_report(dev: &HidDevice, report_id: u8, payload: &[u8]) -> std::io::Result<()> {
-    let mut buf = Vec::with_capacity(payload.len() + 1);
-    buf.push(report_id);
-    buf.extend_from_slice(payload);
-    dev.send_feature_report(&buf)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
-    Ok(())
+    WRITE_BUF.with(|buf| {
+        let mut buf = buf.borrow_mut();
+        buf.clear();
+        buf.push(report_id);
+        buf.extend_from_slice(payload);
+        dev.send_feature_report(&buf)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+        Ok(())
+    })
 }
 
 /// Look up a DeviceInfo by raw platform path (used by hot-plug monitor).
