@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.6.3](https://github.com/K4zoku/FF-WebHID/compare/v1.6.2...v1.6.3) (2026-07-08)
+
+
+### Features
+
+* add --version ([646f475](https://github.com/K4zoku/FF-WebHID/commit/646f4751c4dbc38fe647e9af4952b850701528ff))
+* add debug logging back ([993483c](https://github.com/K4zoku/FF-WebHID/commit/993483c3fd8c70f846e19e1badba6280038f3a92))
+* nop logger, perf ([b83c53f](https://github.com/K4zoku/FF-WebHID/commit/b83c53f5c9490724f14ff57118216e008fae8539))
+
+
+### Bug Fixes
+
+* device picker wait for ready & COEP: credentialless ([beb5b14](https://github.com/K4zoku/FF-WebHID/commit/beb5b1430be70ecfdf3f049a07223fb89ca9bf2f))
+* picker error display ([b837499](https://github.com/K4zoku/FF-WebHID/commit/b83749917cd4e5b63141fc59818dc6903ebb342f))
+* sab fallback ([5dbb593](https://github.com/K4zoku/FF-WebHID/commit/5dbb593c7a6a0c4d060b464e232fdca83f5c5773))
+
+
+### Chores
+
+* add bug report template ([48ff62e](https://github.com/K4zoku/FF-WebHID/commit/48ff62e707602f59638bb9f1480ae8755d605ae6))
+* add FUNDING.yml ([e8ed88c](https://github.com/K4zoku/FF-WebHID/commit/e8ed88cb4ee99fe9cc00182e5457491c47346fd2))
+* update bug report template ([6dafa77](https://github.com/K4zoku/FF-WebHID/commit/6dafa777facfd7ad73064bd27c99ddde748fcdc3))
+
 ## [1.6.2](https://github.com/K4zoku/FF-WebHID/compare/v1.6.1...v1.6.2) (2026-07-06)
 
 
