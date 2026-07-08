@@ -1,0 +1,62 @@
+# Maintainer: K4zoku <k4zoku@pm.me>
+#
+# This PKGBUILD downloads the WebHID Firefox extension from AMO (addons.mozilla.org).
+# The version is extracted from the addon's manifest.json at build time.
+
+pkgname=webhid-addon
+pkgver=1.6.5
+pkgrel=1
+pkgdesc='WebHID browser extension for Firefox and Zen (system-wide installation)'
+arch=('any')
+url='https://github.com/K4zoku/FF-WebHID'
+license=('MIT')
+depends=('webhid')
+makedepends=('unzip' 'curl' 'jq')
+install=webhid-addon.install
+# AMO download URL — uses the addon's UUID (webhid@k4zoku.dev)
+_ext_id='webhid@k4zoku.dev'
+_amo_url="https://addons.mozilla.org/firefox/downloads/latest/${_ext_id}/latest.xpi"
+source=("${_ext_id}.xpi::${_amo_url}")
+sha256sums=('SKIP')
+noextract=("${_ext_id}.xpi")
+
+# Firefox / Gecko application GUID (shared by Firefox, Zen, Librewolf, etc.)
+_ff_guid='{ec8030f7-c20a-464f-9b0e-13a3a9e97384}'
+
+pkgver() {
+    # Extract version from the downloaded XPI's manifest.json
+    local _manifest
+    _manifest=$(unzip -p "$srcdir/${_ext_id}.xpi" manifest.json 2>/dev/null)
+    if [ -n "$_manifest" ]; then
+        echo "$_manifest" | jq -r '.version' 2>/dev/null || true
+    fi
+}
+
+build() {
+    # Verify we got a valid XPI by checking manifest.json exists
+    if ! unzip -l "$srcdir/${_ext_id}.xpi" | grep -q manifest.json; then
+        error "Downloaded XPI does not contain manifest.json — AMO download may have failed"
+        return 1
+    fi
+    # Extract version for informational purposes
+    local _ver
+    _ver=$(unzip -p "$srcdir/${_ext_id}.xpi" manifest.json | jq -r '.version')
+    msg2 "Building webhid-addon version $_ver"
+}
+
+package() {
+    local _xpi="$srcdir/${_ext_id}.xpi"
+
+    # System-wide extension directories
+    # Firefox, Zen Browser, and all Mozilla-compatible forks
+    install -Dm644 "$_xpi" \
+        "$pkgdir/usr/lib/mozilla/extensions/$_ff_guid/$_ext_id.xpi"
+
+    # LibreWolf
+    install -Dm644 "$_xpi" \
+        "$pkgdir/usr/lib/librewolf/extensions/$_ext_id.xpi"
+
+    # Waterfox
+    install -Dm644 "$_xpi" \
+        "$pkgdir/usr/lib/waterfox/extensions/$_ext_id.xpi"
+}
