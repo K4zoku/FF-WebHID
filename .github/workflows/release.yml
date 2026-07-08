@@ -160,14 +160,17 @@ jobs:
           rustup target add x86_64-apple-darwin aarch64-apple-darwin
           cargo build --release --target x86_64-apple-darwin --manifest-path crates/Cargo.toml
           cargo build --release --target aarch64-apple-darwin --manifest-path crates/Cargo.toml
+
+          # Create universal binaries with lipo
+          mkdir -p /tmp/universal-bin
           lipo -create \
             crates/target/x86_64-apple-darwin/release/webhid-daemon \
             crates/target/aarch64-apple-darwin/release/webhid-daemon \
-            -output /tmp/webhid-daemon-universal
+            -output crates/target/universal-apple-darwin/release/webhid-daemon
           lipo -create \
             crates/target/x86_64-apple-darwin/release/webhid-native-messaging \
             crates/target/aarch64-apple-darwin/release/webhid-native-messaging \
-            -output /tmp/webhid-native-messaging-universal
+            -output crates/target/universal-apple-darwin/release/webhid-native-messaging
 
           stage_macos() {
             local src_dir="$1" out_dir="$2"
@@ -180,11 +183,9 @@ jobs:
               manifests/webhid-daemon.service > "$out_dir/etc/systemd/system/webhid-daemon.service"
           }
 
-          stage_macos "crates/target/x86_64-apple-darwin/release"   "artifacts-x86_64"
-          stage_macos "crates/target/aarch64-apple-darwin/release"  "artifacts-aarch64"
-          stage_macos "/tmp"                                        "artifacts-universal"
-          mv /tmp/webhid-daemon-universal artifacts-universal/usr/local/bin/webhid-daemon
-          mv /tmp/webhid-native-messaging-universal artifacts-universal/usr/local/bin/webhid-native-messaging
+          stage_macos "crates/target/x86_64-apple-darwin/release" "artifacts-x86_64"
+          stage_macos "crates/target/aarch64-apple-darwin/release" "artifacts-aarch64"
+          stage_macos "crates/target/universal-apple-darwin/release" "artifacts-universal"
 
       - name: Prepare Artifacts (Windows)
         if: runner.os == 'Windows'
