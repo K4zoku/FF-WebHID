@@ -58,7 +58,7 @@ impl DeviceManager {
             }
         }
 
-        let (info, device) = hid::open_by_device_id(device_id)?;
+        let (info, uses_numbered_reports, device) = hid::open_by_device_id(device_id)?;
         let id = info.device_id.clone();
 
         let mut map = self.devices.lock().unwrap();
@@ -70,19 +70,13 @@ impl DeviceManager {
             };
         }
 
-        let uses_numbered_reports = info
-            .report_descriptor
-            .as_deref()
-            .map(hid::uses_numbered_reports)
-            .unwrap_or(false);
-
         let session_token = self::generate_session_token();
         let stop_flag = Arc::new(AtomicBool::new(false));
         // Open a second handle for the reader task so it doesn't hold the
         // writer's mutex during poll(2).  hidapi allows multiple opens of
         // the same device path.  Without this, every write blocks for up
         // to 5 seconds waiting for the reader's read_timeout to expire.
-        let reader_device = hid::open_by_device_id(&id)?.1;
+        let reader_device = hid::open_by_device_id(&id)?.2;
         let reader_arc = Arc::new(Mutex::new(reader_device));
         let writer_arc = Arc::new(Mutex::new(device));
         let ws_active = Arc::new(AtomicBool::new(false));

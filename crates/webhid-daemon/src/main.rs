@@ -1,4 +1,5 @@
 mod client;
+mod descriptor;
 mod device_mgr;
 mod hid;
 mod hotplug;

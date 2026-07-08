@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 // ---------------------------------------------------------------------------
 
 /// Information about a connected HID device, derived from hidapi + sysfs.
-#[derive(Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceInfo {
     pub vendor_id: u16,
     pub product_id: u16,
@@ -23,11 +23,103 @@ pub struct DeviceInfo {
     /// Format: hash of (vid, pid, serial, interface_number, usage_page, usage, physical_location).
     /// This is what the page sees as `deviceId` and what `open()` takes.
     pub device_id: String,
-    /// Raw HID report descriptor bytes, when available (from hidapi/sysfs).
-    /// Base64‑encoded in human‑readable formats (JSON), raw bytes in binary.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[serde(with = "base64_opt_serde")]
-    pub report_descriptor: Option<Vec<u8>>,
+    /// Parsed HID report descriptor collections tree, matching Chromium's
+    /// `HIDDevice.collections` shape exactly.  Always present after daemon-side
+    /// parsing; empty array when the descriptor is unavailable.
+    #[serde(default)]
+    pub collections: Vec<Collection>,
+}
+
+// ── Collections tree (parsed report descriptor) ───────────────────────────
+
+/// A single HID collection node, matching Chromium's `HIDCollectionInfo`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Collection {
+    /// Collection type (1 = Physical, 2 = Application, 3 = Logical, etc.).
+    #[serde(rename = "type")]
+    pub collection_type: u8,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage_page: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage: Option<u16>,
+    #[serde(default)]
+    pub children: Vec<Collection>,
+    #[serde(default)]
+    pub input_reports: Vec<Report>,
+    #[serde(default)]
+    pub output_reports: Vec<Report>,
+    #[serde(default)]
+    pub feature_reports: Vec<Report>,
+}
+
+/// A single HID report within a collection, matching Chromium's `HIDReportInfo`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Report {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub report_id: Option<u8>,
+    #[serde(default)]
+    pub items: Vec<Field>,
+}
+
+/// A single field (data item) within a HID report, matching Chromium's
+/// `HIDReportItem` exactly.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Field {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub usages: Vec<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage_minimum: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage_maximum: Option<u32>,
+    pub report_size: u32,
+    pub report_count: u32,
+    #[serde(default)]
+    pub logical_minimum: i32,
+    #[serde(default)]
+    pub logical_maximum: i32,
+    #[serde(default)]
+    pub physical_minimum: i32,
+    #[serde(default)]
+    pub physical_maximum: i32,
+    #[serde(default)]
+    pub unit_exponent: i32,
+    #[serde(default)]
+    pub unit_system: String,
+    #[serde(default)]
+    pub unit_factor_length_exponent: i32,
+    #[serde(default)]
+    pub unit_factor_mass_exponent: i32,
+    #[serde(default)]
+    pub unit_factor_time_exponent: i32,
+    #[serde(default)]
+    pub unit_factor_temperature_exponent: i32,
+    #[serde(default)]
+    pub unit_factor_current_exponent: i32,
+    #[serde(default)]
+    pub unit_factor_luminous_intensity_exponent: i32,
+    #[serde(default)]
+    pub is_absolute: bool,
+    #[serde(default)]
+    pub is_array: bool,
+    #[serde(default)]
+    pub is_range: bool,
+    #[serde(default)]
+    pub is_constant: bool,
+    #[serde(default)]
+    pub is_linear: bool,
+    #[serde(default)]
+    pub is_volatile: bool,
+    #[serde(default)]
+    pub is_buffered_bytes: bool,
+    #[serde(default)]
+    pub has_null: bool,
+    #[serde(default)]
+    pub has_preferred_state: bool,
+    #[serde(default)]
+    pub wrap: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -76,7 +168,7 @@ impl IpcRequest {
 }
 
 /// A response or unsolicited event sent from the daemon to the native-messaging process.
-#[derive(Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum IpcResponse {
     // Responses (id mirrors the matching request)
@@ -371,7 +463,7 @@ mod tests {
             usage_page: None,
             usage: None,
             device_id: "abc".into(),
-            report_descriptor: None,
+            collections: vec![],
         };
         let r = NmResponse::ok_with_devices(vec![dev]);
         assert_eq!(r.success, Some(true));
@@ -403,7 +495,7 @@ mod tests {
         let r = NmResponse::event_connect(DeviceInfo {
             vendor_id: 0x1234, product_id: 0x5678, product_name: None,
             manufacturer: None, serial_number: None, usage_page: None,
-            usage: None, device_id: "dev1".into(), report_descriptor: None,
+            usage: None, device_id: "dev1".into(), collections: vec![],
         });
         assert_eq!(r.event_type, Some("connect".into()));
         assert!(r.device.is_some());
@@ -415,7 +507,7 @@ mod tests {
         let r = NmResponse::event_disconnect(DeviceInfo {
             vendor_id: 0x4321, product_id: 0x8765, product_name: None,
             manufacturer: None, serial_number: None, usage_page: None,
-            usage: None, device_id: "dev2".into(), report_descriptor: None,
+            usage: None, device_id: "dev2".into(), collections: vec![],
         });
         assert_eq!(r.event_type, Some("disconnect".into()));
         assert!(r.device.is_some());
@@ -486,7 +578,7 @@ mod tests {
         assert_eq!(IpcResponse::DeviceConnected { id: 0, device: DeviceInfo {
             vendor_id: 0, product_id: 0, product_name: None, manufacturer: None,
             serial_number: None, usage_page: None, usage: None, device_id: "".into(),
-            report_descriptor: None,
+            collections: vec![],
         }}.id(), 0);
         assert_eq!(IpcResponse::Hello { id: 0, ws_port: 8080 }.id(), 0);
     }
@@ -504,7 +596,7 @@ mod tests {
             usage_page: Some(0xFF00),
             usage: Some(0x01),
             device_id: "abc123def456".into(),
-            report_descriptor: Some(vec![0x05, 0x01, 0x09, 0x02]),
+            collections: vec![],
         };
         let json = serde_json::to_string(&info).unwrap();
         let de: DeviceInfo = serde_json::from_str(&json).unwrap();
@@ -534,7 +626,7 @@ mod tests {
         let dev = DeviceInfo {
             vendor_id: 0x1234, product_id: 0x5678, product_name: None,
             manufacturer: None, serial_number: None, usage_page: None,
-            usage: None, device_id: "dev".into(), report_descriptor: None,
+            usage: None, device_id: "dev".into(), collections: vec![],
         };
         let cases: Vec<IpcResponse> = vec![
             IpcResponse::Devices { id: 1, devices: vec![dev.clone()] },

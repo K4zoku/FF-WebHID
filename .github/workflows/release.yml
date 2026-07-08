@@ -25,9 +25,6 @@ jobs:
         with:
           workspaces: crates -> target
 
-      - name: Install wasm-pack
-        run: cargo install wasm-pack && rustup target add wasm32-unknown-unknown
-
       - name: Build Addon XPI
         run: make build-addon
 

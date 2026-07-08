@@ -170,106 +170,7 @@
     }
   }
 
-  // Minimal HID report-descriptor parser (JS fallback). WASM parser in
-  // bridge.js produces richer output; this only extracts usage page/usage
-  // per collection for immediate sync availability.
-  function parseReportDescriptor(bytes) {
-    const collections = [];
-    const stack = [];
-    let i = 0;
-    let currentUsagePage = null;
-    let currentUsage = null;
-    let reportSize = 0;
-    let reportCount = 0;
-    let reportId = 0;
 
-    const readData = (size) => {
-      if (i + size > bytes.length) return null;
-      let val = 0;
-      for (let k = 0; k < size; k++) {
-        val |= bytes[i + k] << (8 * k);
-      }
-      i += size;
-      return val;
-    };
-
-    function ensureReports(col) {
-      if (!col.inputReports) col.inputReports = [];
-      if (!col.outputReports) col.outputReports = [];
-      if (!col.featureReports) col.featureReports = [];
-    }
-
-    function addReport(col, type) {
-      ensureReports(col);
-      const arr = type === 'input' ? col.inputReports : type === 'output' ? col.outputReports : col.featureReports;
-      const id = reportId || 0;
-      let rep = arr.find(r => r.reportId === id);
-      if (!rep) {
-        rep = { reportId: id, items: [] };
-        arr.push(rep);
-      }
-      rep.items.push({
-        reportId: id,
-        reportType: type,
-        reportSize: reportSize,
-        reportCount: reportCount,
-        usagePage: currentUsagePage,
-        usage: currentUsage,
-      });
-    }
-
-    while (i < bytes.length) {
-      const b = bytes[i++];
-      if (b === 0x05) {
-        const v = readData(1);
-        if (v !== null) currentUsagePage = v;
-      } else if (b === 0x06) {
-        const v = readData(2);
-        if (v !== null) currentUsagePage = v;
-      } else if (b === 0x09) {
-        const v = readData(1);
-        if (v !== null) currentUsage = v;
-      } else if (b === 0x29) {
-        readData(1);
-      } else if (b === 0x75) {
-        const v = readData(1);
-        if (v !== null) reportSize = v;
-      } else if (b === 0x95) {
-        const v = readData(1);
-        if (v !== null) reportCount = v;
-      } else if (b === 0x85) {
-        const v = readData(1);
-        if (v !== null) reportId = v;
-      } else if (b === 0xA1) {
-        const colType = readData(1);
-        const col = { type: colType, usagePage: currentUsagePage, usage: currentUsage, children: [], inputReports: [], outputReports: [], featureReports: [] };
-        if (stack.length === 0) {
-          collections.push(col);
-        } else {
-          stack[stack.length - 1].children.push(col);
-        }
-        stack.push(col);
-        currentUsage = null;
-      } else if (b === 0xC0) {
-        stack.pop();
-      } else if ((b & 0xF0) === 0x80 || (b & 0xF0) === 0x90 || (b & 0xF0) === 0xB0) {
-        const sizeCode = b & 0x03;
-        const size = sizeCode === 0 ? 0 : sizeCode === 1 ? 1 : sizeCode === 2 ? 2 : 4;
-        i += size;
-        if (stack.length > 0) {
-          const type = (b & 0xF0) === 0x80 ? 'input' : (b & 0xF0) === 0x90 ? 'output' : 'feature';
-          addReport(stack[stack.length - 1], type);
-        }
-        currentUsage = null;
-      } else {
-        const sizeCode = b & 0x03;
-        const size = sizeCode === 0 ? 0 : sizeCode === 1 ? 1 : sizeCode === 2 ? 2 : 4;
-        i += size;
-      }
-    }
-
-    return collections;
-  }
 
   // ── Global device registry ────────────────────────────────────────────────
   // Tracks all HIDDevice instances so getDevices()/requestDevice() return
@@ -355,197 +256,27 @@
       this.#usage = deviceInfo.usage !== undefined ? deviceInfo.usage : null;
       this.#deviceId = null;
       this.#internalId = deviceInfo.device_id || null;
-      this.#reportDescriptor = null;
 
-      // ... normalize collections ...
-
-      // Normalizes a field to Chromium's HIDReportItem shape.
-      // Accepts both snake_case (daemon/WASM) and camelCase keys.
-      // Emits `usages` XOR (`usageMinimum` + `usageMaximum`) per isRange.
-      function normalizeField(f, fallbackReportId, fallbackReportType) {
-        const pick = (camel, snake) =>
-          f[camel] !== undefined ? f[camel] :
-          f[snake] !== undefined ? f[snake] : undefined;
-
-        const isRange = pick("isRange", "is_range") === true;
-        let usageMinimum = pick("usageMinimum", "usage_minimum");
-        let usageMaximum = pick("usageMaximum", "usage_maximum");
-
-        // usages: prefer spec camelCase, then snake_case, then packed_usages (u32).
-        // If usages look like u16 values and we have a usagePage, pack them into
-        // the Chromium-style u32 form (page<<16 | id).
-        const uPage = f.usagePage !== undefined ? f.usagePage
-                    : f.usage_page !== undefined ? f.usage_page
-                    : null;
-        let usages = null;
-        if (Array.isArray(f.usages)) usages = f.usages.slice();
-        else if (Array.isArray(f.packed_usages)) usages = f.packed_usages.slice();
-        if (usages && usages.length && typeof usages[0] === "number" && usages[0] < 0x10000 && uPage != null) {
-          usages = usages.map(u => ((uPage << 16) | (u & 0xFFFF)) >>> 0);
-        }
-
-        // If isRange is true but usageMinimum/usageMaximum are missing
-        // (e.g. from the JS parser fallback), try to derive them from the
-        // usages list.
-        if (isRange && usageMinimum == null && usageMaximum == null && usages && usages.length > 1) {
-          const page = (usages[0] >> 16) & 0xFFFF;
-          const lo = usages[0] & 0xFFFF;
-          const hi = usages[usages.length - 1] & 0xFFFF;
-          usageMinimum = ((page << 16) | lo) >>> 0;
-          usageMaximum = ((page << 16) | hi) >>> 0;
-        }
-
-        const item = {
-          reportSize: f.reportSize !== undefined ? f.reportSize
-                    : f.size !== undefined ? f.size
-                    : f.size_bits !== undefined ? f.size_bits
-                    : 0,
-          reportCount: f.reportCount !== undefined ? f.reportCount
-                     : f.count !== undefined ? f.count
-                     : 0,
-          isArray: pick("isArray", "is_array") === true,
-          isRange,
-          isAbsolute: pick("isAbsolute", "is_absolute") === true,
-          isConstant: pick("isConstant", "is_constant") === true,
-          isLinear: pick("isLinear", "is_linear") === true,
-          isVolatile: pick("isVolatile", "is_volatile") === true,
-          isBufferedBytes: pick("isBufferedBytes", "is_buffered_bytes") === true,
-          hasNull: pick("hasNull", "has_null") === true,
-          hasPreferredState: pick("hasPreferredState", "has_preferred_state") === true,
-          wrap: pick("wrap", "wrap") === true,
-          logicalMinimum: pick("logicalMinimum", "logical_minimum") ?? 0,
-          logicalMaximum: pick("logicalMaximum", "logical_maximum") ?? 0,
-          physicalMinimum: pick("physicalMinimum", "physical_minimum") ?? 0,
-          physicalMaximum: pick("physicalMaximum", "physical_maximum") ?? 0,
-          unitExponent: pick("unitExponent", "unit_exponent") ?? 0,
-          unitSystem: pick("unitSystem", "unit_system") ?? "none",
-          unitFactorLengthExponent: pick("unitFactorLengthExponent", "unit_factor_length_exponent") ?? 0,
-          unitFactorMassExponent: pick("unitFactorMassExponent", "unit_factor_mass_exponent") ?? 0,
-          unitFactorTimeExponent: pick("unitFactorTimeExponent", "unit_factor_time_exponent") ?? 0,
-          unitFactorTemperatureExponent: pick("unitFactorTemperatureExponent", "unit_factor_temperature_exponent") ?? 0,
-          unitFactorCurrentExponent: pick("unitFactorCurrentExponent", "unit_factor_current_exponent") ?? 0,
-          unitFactorLuminousIntensityExponent: pick("unitFactorLuminousIntensityExponent", "unit_factor_luminous_intensity_exponent") ?? 0,
-        };
-
-        // Emit `usages` XOR `usageMinimum`+`usageMaximum`, matching Chromium.
-        if (isRange) {
-          item.usageMinimum = usageMinimum ?? 0;
-          item.usageMaximum = usageMaximum ?? 0;
-        } else {
-          item.usages = usages || [];
-        }
-
-        return item;
-      }
-
-      // Convert a single report object to spec shape.
-      // Accepts both { reportId, items[] } (WASM/JS) and
-      // { id, fields[], report_type } (daemon).
-      function normalizeReport(r, fallbackType) {
-        const rid = r.reportId !== undefined ? r.reportId
-                  : r.id !== undefined && r.id !== null ? r.id
-                  : 0;
-        const rtype = r.reportType !== undefined ? r.reportType
-                    : r.report_type !== undefined ? r.report_type
-                    : fallbackType;
-        const items = Array.isArray(r.items) ? r.items
-                    : Array.isArray(r.fields) ? r.fields
-                    : [];
-        return {
-          reportId: rid,
-          items: items.map(f => normalizeField(f, rid, rtype)),
-        };
-      }
-
-      function normalizeCollection(c) {
-        const out = {
-          type: c.type !== undefined ? c.type : (c.collection_type !== undefined ? c.collection_type : null),
-          usagePage: c.usagePage !== undefined ? c.usagePage : (c.usage_page !== undefined ? c.usage_page : null),
-          usage: c.usage !== undefined ? c.usage : null,
-          children: [],
-          // Always initialize report arrays to prevent "items is undefined" errors
-          // when iterating over collections - WebHID spec expects these arrays
-          // to always be present (even if empty).
-          inputReports: [],
-          outputReports: [],
-          featureReports: [],
-        };
-
-        // Normalize children recursively
-        if (Array.isArray(c.children) && c.children.length > 0) {
-          out.children = c.children.map(normalizeCollection);
-        }
-
-        // Path A: WASM / JS parser format: inputReports/outputReports/
-        // featureReports are already split arrays on the collection object.
-        const hasSplitReports =
-          (Array.isArray(c.inputReports) && c.inputReports.length > 0) ||
-          (Array.isArray(c.outputReports) && c.outputReports.length > 0) ||
-          (Array.isArray(c.featureReports) && c.featureReports.length > 0);
-
-        if (hasSplitReports) {
-          if (Array.isArray(c.inputReports)) {
-            out.inputReports = c.inputReports.map(r => normalizeReport(r, "input"));
-          }
-          if (Array.isArray(c.outputReports)) {
-            out.outputReports = c.outputReports.map(r => normalizeReport(r, "output"));
-          }
-          if (Array.isArray(c.featureReports)) {
-            out.featureReports = c.featureReports.map(r => normalizeReport(r, "feature"));
-          }
-          return out;
-        }
-
-        // Path B: legacy daemon format: flat `reports` array with per-report
-        // `report_type` field.
-        if (Array.isArray(c.reports) && c.reports.length > 0) {
-          c.reports.forEach((r) => {
-            const rep = normalizeReport(r, null);
-            if (r.report_type === "input") out.inputReports.push(rep);
-            else if (r.report_type === "output") out.outputReports.push(rep);
-            else if (r.report_type === "feature") out.featureReports.push(rep);
-          });
-        }
-
-        return out;
-      }
-
-      if (deviceInfo.collections && Array.isArray(deviceInfo.collections)) {
-        try {
-          this.#parsedCollections = deviceInfo.collections.map(normalizeCollection);
-        } catch (e) {
-          this.#parsedCollections = null;
-        }
-      } else if (deviceInfo.report_descriptor) {
-        try {
-          const arr = typeof deviceInfo.report_descriptor === 'string'
-            ? base64Decode(deviceInfo.report_descriptor)
-            : new Uint8Array(deviceInfo.report_descriptor);
-          this.#reportDescriptor = arr;
-          // JS parser runs immediately (sync fallback)
-          this.#parsedCollections = parseReportDescriptor(arr);
-          // Ask bridge (isolated world, CSP-free) for WASM parse: richer output
-          const parseId = ++_reqId;
-          window.postMessage({ __webhid_bridge: "parse-descriptor", id: parseId, bytes: arr }, "*");
-          const wasmListener = (event) => {
-            if (!event.data || event.data.__webhid_bridge !== "parse-descriptor-result") return;
-            if (event.data.id !== parseId) return;
-            window.removeEventListener("message", wasmListener);
-            if (event.data.collections) {
-              try {
-                this.#parsedCollections = Array.from(event.data.collections).map(normalizeCollection);
-                this.#maxInputReportSize = this.#calculateMaxInputReportSize();
-              } catch (e) {}
-            }
-          };
-          window.addEventListener("message", wasmListener);
-        } catch (e) {
-          this.#reportDescriptor = null;
-          this.#parsedCollections = null;
-        }
-      }
+      // Collections parsed by daemon; ensure arrays exist for spec compliance.
+      this.#parsedCollections = (deviceInfo.collections || []).map(c => ({
+        ...c,
+        children: (c.children || []).map(ensureArrays),
+        inputReports: c.inputReports || [],
+        outputReports: c.outputReports || [],
+        featureReports: c.featureReports || [],
+      }));
 
       this.#maxInputReportSize = this.#calculateMaxInputReportSize();
+    }
+
+    ensureArrays(c) {
+      return {
+        ...c,
+        children: (c.children || []).map(ensureArrays),
+        inputReports: c.inputReports || [],
+        outputReports: c.outputReports || [],
+        featureReports: c.featureReports || [],
+      };
     }
 
     #calculateMaxInputReportSize() {

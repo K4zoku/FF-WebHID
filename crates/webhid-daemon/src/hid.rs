@@ -92,7 +92,11 @@ pub fn info_from_hidapi_pub(info: &HidDeviceInfo) -> Option<DeviceInfo> {
 
 fn info_from_hidapi_pub_with_desc(info: &HidDeviceInfo, desc: Vec<u8>) -> Option<DeviceInfo> {
     let device_id = make_device_id(info);
-    let report_descriptor = if desc.is_empty() { None } else { Some(desc) };
+    let collections = if !desc.is_empty() {
+        crate::descriptor::parse_report_descriptor(&desc)
+    } else {
+        vec![]
+    };
     Some(DeviceInfo {
         vendor_id: info.vendor_id(),
         product_id: info.product_id(),
@@ -102,7 +106,7 @@ fn info_from_hidapi_pub_with_desc(info: &HidDeviceInfo, desc: Vec<u8>) -> Option
         usage_page: Some(info.usage_page()),
         usage: Some(info.usage()),
         device_id,
-        report_descriptor,
+        collections,
     })
 }
 
@@ -155,16 +159,18 @@ pub fn is_blocked_pub(info: &HidDeviceInfo) -> bool {
 // ---------------------------------------------------------------------------
 
 /// Open a device by its stable `device_id`.
-/// Returns (DeviceInfo, HidDevice) for I/O.
-pub fn open_by_device_id(device_id: &str) -> anyhow::Result<(DeviceInfo, HidDevice)> {
+/// Returns (DeviceInfo, uses_numbered_reports, HidDevice) for I/O.
+pub fn open_by_device_id(device_id: &str) -> anyhow::Result<(DeviceInfo, bool, HidDevice)> {
     let api = HidApi::new()?;
     for info in api.device_list() {
         if is_blocked_pub(info) { continue; }
         if make_device_id(info) == device_id {
-            let dev = api.open_path(info.path())?;
-            let device_info = info_from_hidapi_pub(info)
+            let desc = read_raw_report_descriptor_with_api(&api, info);
+            let device_info = info_from_hidapi_pub_with_desc(info, desc.clone())
                 .ok_or_else(|| anyhow::anyhow!("failed to build DeviceInfo"))?;
-            return Ok((device_info, dev));
+            let numbered = uses_numbered_reports(&desc);
+            let dev = api.open_path(info.path())?;
+            return Ok((device_info, numbered, dev));
         }
     }
     Err(anyhow::anyhow!("device_id '{}' not found", device_id))

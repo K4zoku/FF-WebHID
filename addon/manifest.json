@@ -47,7 +47,6 @@
       ],
       "js": [
         "js/utils/logger.js",
-        "js/utils/report-descriptor-parser.js",
         "js/bridge.js"
       ]
     }
@@ -62,9 +61,7 @@
         "js/utils/logger.js",
         "html/popup.html",
         "js/popup.js",
-        "css/popup.css",
-        "js/utils/report-descriptor-parser.js",
-        "js/utils/report-descriptor-parser.wasm"
+        "css/popup.css"
       ],
       "matches": [
         "<all_urls>"
