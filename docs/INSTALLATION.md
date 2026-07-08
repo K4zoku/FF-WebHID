@@ -1,8 +1,8 @@
 # Installation
 
 WebHID requires two components:
-1. **System daemon** (`webhid-daemon` + `webhid-native-messaging`) — runs in the background, talks to HID hardware
-2. **Browser extension** — installed in Firefox, bridges web pages to the daemon
+1. **System daemon** (`webhid-daemon` + `webhid-native-messaging`): runs in the background, talks to HID hardware
+2. **Browser extension**: installed in Firefox, bridges web pages to the daemon
 
 Install the browser extension from AMO: **[WebHID](https://addons.mozilla.org/en-US/firefox/addon/webhid/)**
 
@@ -18,7 +18,7 @@ Choose your platform below for daemon installation.
 # Daemon + native messaging host
 paru -S webhid           # or: yay -S webhid
 
-# Browser extension (system-wide, optional — alternatively install from AMO)
+# Browser extension (system-wide, optional; alternatively install from AMO)
 paru -S webhid-addon
 ```
 
@@ -28,7 +28,7 @@ The AUR packages install the daemon as a systemd system service (runs as root). 
 sudo systemctl enable --now webhid-daemon
 ```
 
-Root daemon has access to all hidraw devices — no udev rule needed.
+Root daemon has access to all hidraw devices; no udev rule needed.
 
 **Non-root daemon (optional):** If you prefer the daemon to run as your user:
 
@@ -126,15 +126,15 @@ The installer:
 - Registers the native messaging host in the Windows registry (Firefox auto-detects)
 - Creates a Scheduled Task ("WebHID Daemon") that auto-starts the daemon at logon
 
-No manual setup needed — install and restart Firefox.
+No manual setup needed; install and restart Firefox.
 
 ### Portable/Manual
 
 Download the Windows zip from [GitHub Releases](https://github.com/K4zoku/FF-WebHID/releases), extract, then:
 
-1. **Install binaries** — copy `webhid-daemon.exe` and `webhid-native-messaging.exe` to a permanent location (e.g. `C:\Program Files\WebHID\`)
+1. **Install binaries**: copy `webhid-daemon.exe` and `webhid-native-messaging.exe` to a permanent location (e.g. `C:\Program Files\WebHID\`)
 
-2. **Register native messaging host** — create a registry key pointing to the NM manifest:
+2. **Register native messaging host**: create a registry key pointing to the NM manifest:
 
    ```powershell
    # Create webhid-native-messaging-host.json with the correct path:
@@ -154,7 +154,7 @@ Download the Windows zip from [GitHub Releases](https://github.com/K4zoku/FF-Web
    reg add "HKLM\SOFTWARE\Mozilla\NativeMessagingHosts\webhid-native-messaging-host" /ve /t REG_SZ /d "$installDir\webhid-native-messaging-host.json" /f
    ```
 
-3. **Auto-start daemon** — create a Scheduled Task:
+3. **Auto-start daemon**: create a Scheduled Task:
 
    ```powershell
    $action = New-ScheduledTaskAction -Execute "$installDir\webhid-daemon.exe"
@@ -252,7 +252,7 @@ Then install the [browser extension](https://addons.mozilla.org/en-US/firefox/ad
 
 ## Troubleshooting
 
-- **"Cannot connect to the WebHID daemon"** — daemon not running. Start it with the commands above.
-- **"Permission denied"** (Linux non-root) — udev rule not installed. Run `sudo make install-udev-rule` or copy `99-webhid.rules` manually.
-- **Device picker shows "No HID devices found"** — daemon running but no HID devices detected. Check `hidapi` can enumerate: `ls /dev/hidraw*` (Linux).
-- **Site breaks after enabling SAB** — COOP/COEP conflict. Disable SAB Data Plane in the addon popup settings.
+- **"Cannot connect to the WebHID daemon"**: daemon not running. Start it with the commands above.
+- **"Permission denied"** (Linux non-root): udev rule not installed. Run `sudo make install-udev-rule` or copy `99-webhid.rules` manually.
+- **Device picker shows "No HID devices found"**: daemon running but no HID devices detected. Check `hidapi` can enumerate: `ls /dev/hidraw*` (Linux).
+- **Site breaks after enabling SAB**: COOP/COEP conflict. Disable SAB Data Plane in the addon popup settings.

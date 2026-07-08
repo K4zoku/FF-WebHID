@@ -31,7 +31,7 @@
       const doInject = () => {
         if (document.getElementById("webhid-shadow-host")) return;
         if (!document.body) {
-          // Body not ready yet — retry on next tick.
+          // Body not ready yet; retry on next tick.
           if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', doInject, { once: true });
           } else {
@@ -148,7 +148,7 @@
         tries++;
       }
       if (!this.shadowRoot) {
-        logger.error('[WebHID] shadowRoot not initialized — cannot show device picker');
+        logger.error('[WebHID] shadowRoot not initialized; cannot show device picker');
         this.onDeviceCancelled();
         return;
       }
@@ -209,7 +209,7 @@
           this.devices = response.devices || [];
           await this.renderDevices();
         } else {
-          // Daemon/NM returned an error — classify it for the user.
+          // Daemon/NM returned an error; classify it for the user.
           this.devices = [];
           const errMsg = response?.error || "Unknown error";
           const userMsg = this._classifyError(errMsg);

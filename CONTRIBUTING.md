@@ -4,10 +4,10 @@ Thanks for your interest in contributing! Here's how to get started.
 
 ## Project Structure
 
-- `addon/` — Firefox WebExtension (background/worker/page scripts, WASM descriptor parser)
-- `crates/` — Rust daemon, native messaging host, and WASM descriptor parser
-- `packaging/` — platform-specific packaging (Arch PKGBUILD, Windows MSI/WiX, Debian, RPM, Homebrew)
-- `docs/` — architecture documentation
+- `addon/`: Firefox WebExtension (background/worker/page scripts, WASM descriptor parser)
+- `crates/`: Rust daemon, native messaging host, and WASM descriptor parser
+- `packaging/`: platform-specific packaging (Arch PKGBUILD, Windows MSI/WiX, Debian, RPM, Homebrew)
+- `docs/`: architecture documentation
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for build instructions and architecture details.
 

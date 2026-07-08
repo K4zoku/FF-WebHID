@@ -3,7 +3,7 @@
 # Usage: ./build-deb.sh [version] [arch] [rust_target]
 #   arch: amd64 (default) or arm64
 #   rust_target: empty (native) or aarch64-unknown-linux-gnu
-# Binaries must already be built — this script only packages them.
+# Binaries must already be built; this script only packages them.
 set -euo pipefail
 
 VERSION="${1:-}"
@@ -23,7 +23,7 @@ else
 fi
 
 if [ ! -f "$BIN_DIR/webhid-daemon" ]; then
-  echo "ERROR: webhid-daemon not found in $BIN_DIR — build first with cargo build --release"
+  echo "ERROR: webhid-daemon not found in $BIN_DIR; build first with cargo build --release"
   exit 1
 fi
 

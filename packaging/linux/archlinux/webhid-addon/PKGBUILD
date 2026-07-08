@@ -13,7 +13,7 @@ license=('MIT')
 depends=('webhid')
 makedepends=('unzip' 'curl' 'jq')
 install=webhid-addon.install
-# AMO download URL — uses the addon's UUID (webhid@k4zoku.dev)
+# AMO download URL: uses the addon's UUID (webhid@k4zoku.dev)
 _ext_id='webhid@k4zoku.dev'
 _amo_url="https://addons.mozilla.org/firefox/downloads/latest/${_ext_id}/latest.xpi"
 source=("${_ext_id}.xpi::${_amo_url}")
@@ -35,7 +35,7 @@ pkgver() {
 build() {
     # Verify we got a valid XPI by checking manifest.json exists
     if ! unzip -l "$srcdir/${_ext_id}.xpi" | grep -q manifest.json; then
-        error "Downloaded XPI does not contain manifest.json — AMO download may have failed"
+        error "Downloaded XPI does not contain manifest.json; AMO download may have failed"
         return 1
     fi
     # Extract version for informational purposes

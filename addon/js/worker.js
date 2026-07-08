@@ -28,7 +28,7 @@ _applyLogLevel(1);
 // Performance timing: perf.begin() / perf.end("label") measures elapsed
 // time and logs it at debug level. When perf logging is disabled (either
 // logLevel < debug or the explicit perfLogging flag is off), both methods
-// are no-ops — zero overhead on the hot path.
+// are no-ops; zero overhead on the hot path.
 const perf = {
   begin: _nop,
   end: _nop,
@@ -99,7 +99,7 @@ function connect(msg) {
     meta = new Int32Array(sab, 0, 3);
     data = new Uint8Array(sab, 12);
   } else {
-    logger.warn('[worker] SharedArrayBuffer unavailable — using postMessage fallback for input reports');
+    logger.warn('[worker] SharedArrayBuffer unavailable; using postMessage fallback for input reports');
   }
   _doConnect();
 }
@@ -159,7 +159,7 @@ function pushInputBatch(batch) {
     const next = (head + 1) % CAPACITY;
     if (next === Atomics.load(meta, 1)) {
       Atomics.add(meta, 2, 1);
-      logger.warn('[worker] SAB ring buffer full — dropping report');
+      logger.warn('[worker] SAB ring buffer full; dropping report');
       offset += len;
       continue;
     }

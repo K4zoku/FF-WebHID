@@ -47,7 +47,7 @@ function _parseLevel(v) {
 
 // Performance timing helper. perf.begin() returns a timestamp token;
 // perf.end(token, label) logs `label <elapsed>ms` at debug level.
-// When logLevel < debug, both are no-ops — zero overhead.
+// When logLevel < debug, both are no-ops; zero overhead.
 const perf = {
   begin: _nop,
   end: _nop,

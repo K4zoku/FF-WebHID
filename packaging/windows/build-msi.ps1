@@ -66,7 +66,7 @@ $nmJson = $nmTemplate -replace '\{\{NM_BIN\}\}', 'C:\\Program Files\\WebHID\\web
 Set-Content -Path (Join-Path $Stage 'webhid-native-messaging-host.json') -Value $nmJson -Encoding ascii
 
 # Locate wix.exe (WiX v6). Try PATH first, then a tools/ folder.
-# WiX v7+ requires accepting the OSMF EULA — we pin to v6 to avoid that.
+# WiX v7+ requires accepting the OSMF EULA; we pin to v6 to avoid that.
 $wix = Get-Command wix -ErrorAction SilentlyContinue
 if (-not $wix) {
   $toolsDir = Join-Path $RepoRoot 'tools'
