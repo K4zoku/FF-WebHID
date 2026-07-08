@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.6.5](https://github.com/K4zoku/FF-WebHID/compare/v1.6.4...v1.6.5) (2026-07-08)
+
+
+### Bug Fixes
+
+* custom action ([c1bfb11](https://github.com/K4zoku/FF-WebHID/commit/c1bfb11d7fab888432d76363cfe6e544ab75cedf))
+* wix schema ([fcca18c](https://github.com/K4zoku/FF-WebHID/commit/fcca18cd481a75f33c5013b7927d4d49f3899c29))
+
+
+### CI/CD
+
+* add msi build ([e5b5955](https://github.com/K4zoku/FF-WebHID/commit/e5b595524f1d59d1ffea7774044e6ddfcfc039c4))
+
 ## [1.6.4](https://github.com/K4zoku/FF-WebHID/compare/v1.6.3...v1.6.4) (2026-07-08)
 
 ## [1.6.3](https://github.com/K4zoku/FF-WebHID/compare/v1.6.2...v1.6.3) (2026-07-08)
