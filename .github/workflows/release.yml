@@ -39,7 +39,6 @@ jobs:
 
   build:
     name: Build (${{ matrix.os }} ${{ matrix.arch }})
-    needs: build-addon
     strategy:
       fail-fast: false
       matrix:
@@ -105,7 +104,7 @@ jobs:
         with:
           workspaces: crates -> target
 
-      - name: Build Rust binaries
+      - name: Build Rust binaries (daemon + NM host only, skip WASM)
         run: |
           if [ -n "${{ matrix.rust_target }}" ]; then
             if [ "${{ matrix.rust_target }}" = "aarch64-unknown-linux-gnu" ]; then
@@ -115,9 +114,13 @@ jobs:
               export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
               export CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++
             fi
-            cargo build --release --target ${{ matrix.rust_target }} --manifest-path crates/Cargo.toml
+            cargo build --release --target ${{ matrix.rust_target }} \
+              --manifest-path crates/Cargo.toml \
+              -p webhid-daemon -p webhid-native-messaging
           else
-            make build
+            cargo build --release \
+              --manifest-path crates/Cargo.toml \
+              -p webhid-daemon -p webhid-native-messaging
           fi
         shell: bash
 
@@ -158,8 +161,10 @@ jobs:
         run: |
           # Build all 3 variants on one macOS runner via cross-compile + lipo
           rustup target add x86_64-apple-darwin aarch64-apple-darwin
-          cargo build --release --target x86_64-apple-darwin --manifest-path crates/Cargo.toml
-          cargo build --release --target aarch64-apple-darwin --manifest-path crates/Cargo.toml
+          cargo build --release --target x86_64-apple-darwin --manifest-path crates/Cargo.toml \
+            -p webhid-daemon -p webhid-native-messaging
+          cargo build --release --target aarch64-apple-darwin --manifest-path crates/Cargo.toml \
+            -p webhid-daemon -p webhid-native-messaging
 
           # Create universal binaries with lipo
           mkdir -p crates/target/universal-apple-darwin/release
