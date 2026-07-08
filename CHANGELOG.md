@@ -2,6 +2,46 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.6.6](https://github.com/K4zoku/FF-WebHID/compare/v1.6.5...v1.6.6) (2026-07-08)
+
+
+### Bug Fixes
+
+* chmod, add missing file ([d29707a](https://github.com/K4zoku/FF-WebHID/commit/d29707a749936f19c4ba8a9bbc4982b6ea2e0e92))
+* makefile indentation ([9a77212](https://github.com/K4zoku/FF-WebHID/commit/9a772124a098e2cdcaf81e35bfc2831cb96f1a3d))
+* repo root path ([88cba51](https://github.com/K4zoku/FF-WebHID/commit/88cba5114217dfe04e876ec9a1e7d43ffecc6e96))
+
+
+### Code Refactoring
+
+* cleanup ([4235800](https://github.com/K4zoku/FF-WebHID/commit/42358007cee0e51b5b9b8713c6f6c6c8783e7c42))
+
+
+### Documentation
+
+* add community standards documents ([470bf80](https://github.com/K4zoku/FF-WebHID/commit/470bf80ab9e89911d0b9bb828f740b6fa04c4de7))
+* update installation guide ([6cc294e](https://github.com/K4zoku/FF-WebHID/commit/6cc294eda3dd53217e4e8ca75945ec99e6259709))
+
+
+### CI/CD
+
+* add aarch64 target ([7259513](https://github.com/K4zoku/FF-WebHID/commit/7259513f530ac1d8d31483aaa0ee48d4828f788d))
+* build rpm and deb package ([f17bc8d](https://github.com/K4zoku/FF-WebHID/commit/f17bc8d1a382fc4eddff770b1ed8216368f3d48f))
+* fix arm64 sources ([4aa06cb](https://github.com/K4zoku/FF-WebHID/commit/4aa06cb99a2a574501788f09af687c31086a872b))
+* fix cross compile ([e0ec565](https://github.com/K4zoku/FF-WebHID/commit/e0ec565d990813c6af74171c6a9c1bdc2536bce9))
+* fix libudev-dev:arm64 ([55c762a](https://github.com/K4zoku/FF-WebHID/commit/55c762a031fbbfe148226352581dcdb38ceada03))
+* fix macos path ([7a86177](https://github.com/K4zoku/FF-WebHID/commit/7a8617736d5fd229112fe59a63e2c928880d501a))
+* fix mkdir ([10dccd0](https://github.com/K4zoku/FF-WebHID/commit/10dccd05d5897b55b3650f7beedc7c48ac6e17df))
+* fix rpm aarch64 build & separate linux artifacts ([cf2b145](https://github.com/K4zoku/FF-WebHID/commit/cf2b1457b1098d53ff8eb97b522d24f267e8161c))
+* separate steps for setup arm64 cross-compilation sources ([84cc4d6](https://github.com/K4zoku/FF-WebHID/commit/84cc4d6ff1af9fe5ab8db36c151013526cb3ae87))
+* split addon build, fix deb/rpm build ([0795776](https://github.com/K4zoku/FF-WebHID/commit/0795776f4258945f825e10d079cd993b6e0e6a53))
+* truly universal macos binaries ([26c1180](https://github.com/K4zoku/FF-WebHID/commit/26c11802b0bc75ef3ab0fc5231ad01bbfb02cb4e))
+
+
+### Chores
+
+* add feature request template ([bc0cacd](https://github.com/K4zoku/FF-WebHID/commit/bc0cacd31652e3d77c334cba7a5f19d593b8a72b))
+
 ## [1.6.5](https://github.com/K4zoku/FF-WebHID/compare/v1.6.4...v1.6.5) (2026-07-08)
 
 
