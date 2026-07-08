@@ -17,50 +17,25 @@ WebHID brings Human Interface Device (HID) support to Firefox on Linux, macOS, a
 
 ## Install
 
-### 1. System daemon
+For detailed installation instructions (system daemon, user-local setup, and browser extension), see [docs/INSTALLATION.md](docs/INSTALLATION.md).
 
-The daemon ships as a systemd service that runs as root, so it already has
-access to all hidraw devices, so no udev rule is needed.
+## Addon Settings
 
-```sh
-sudo make install-system
-systemctl daemon-reload && systemctl enable --now webhid-daemon
-```
+### Global settings
 
-Or on Arch Linux:
-```sh
-cd packaging/webhid && makepkg -si
-```
-
-### 1b. User-local install (no root)
-
-Run the daemon as your own user instead of root. This needs a one-time udev
-rule so your user can open hidraw devices.
-
-```sh
-make install-user
-sudo make install-udev-rule    # one-time, grants hidraw access to your user
-systemctl --user daemon-reload
-systemctl --user enable --now webhid-daemon
-```
-
-Install paths are configurable: `make install-system PREFIX=/usr` or
-`make install-user USER_PREFIX=$HOME/.local`.
-
-### 2. Browser extension
-
-Install from AMO: [WebHID](https://addons.mozilla.org/en-US/firefox/addon/webhid/)
-
-Or load manually via `about:debugging → Load Temporary Add-on → addon/manifest.json`.
-
-## Settings
-
-Open `about:addons → FF WebHID → Options`:
-- **Performance logging**: timing messages in console
+Open `about:addons → WebHID → Options`:
 - **Fire-and-forget sendReport**: resolve Promise immediately, no daemon ack wait (default ON)
 - **SharedArrayBuffer data plane**: WS + SAB hot path for high-performance I/O (default ON; disable if a site breaks due to COOP/COEP)
 - **SAB Buffer Capacity**: ring-buffer slots (2048–32768, default 8192)
 - **Log Level**: console output verbosity (Error/Warn/Info/Debug)
+- **Performance timing**: timing messages in console
+
+### Per-site settings (Will override global settings for the site you're currently on)
+
+Click on the WebHID addon icon:
+- **Fire-and-forget sendReport**: resolve Promise immediately, no daemon ack wait (default ON)
+- **SharedArrayBuffer data plane**: WS + SAB hot path for high-performance I/O (default ON; disable if a site breaks due to COOP/COEP)
+- **SAB Buffer Capacity**: ring-buffer slots (2048–32768, default 8192)
 
 ## Documentation
 
