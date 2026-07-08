@@ -1,7 +1,7 @@
-<?xml version='1.0' encoding='windows-1252'?>
+<?xml version='1.0' encoding='utf-8'?>
 <!--
   WebHID Windows Installer (MSI)
-  Built with WiX Toolset v5.
+  Built with WiX Toolset v6.
 
   Layout:
     [ProgramFiles64Folder]WebHID\
@@ -18,11 +18,11 @@
 <Wix xmlns='http://wixtoolset.org/schemas/v4/wxs'>
   <Package Name='WebHID'
            Manufacturer='K4zoku'
-           Language='1033' Codepage='1252'
+           Language='1033' Codepage='65001'
            Version='$(var.Version)'
            UpgradeCode='7c7e8f5a-3d2b-4e6f-9a1c-8b5d6e7f8a90'>
 
-    <SummaryInformation Codepage='1252'
+    <SummaryInformation Codepage='65001'
                         Description='WebHID daemon + native messaging host'
                         Manufacturer='K4zoku'/>
 
