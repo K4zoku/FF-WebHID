@@ -21,6 +21,24 @@ const DEFAULT_SOCKET: &str = "/run/webhid/webhid.sock";
 #[cfg(target_os = "macos")]
 const DEFAULT_SOCKET: &str = "/tmp/webhid.sock";
 
+#[cfg(target_os = "linux")]
+fn resolve_socket_path() -> String {
+    if let Ok(path) = std::env::var("WEBHID_SOCKET") {
+        return path;
+    }
+    // non-root → XDG_RUNTIME_DIR / fallback /run/user/<uid>
+    if unsafe { libc::geteuid() } != 0 {
+        if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
+            if !dir.is_empty() {
+                return format!("{dir}/webhid/webhid.sock");
+            }
+        }
+        let uid = unsafe { libc::getuid() };
+        return format!("/run/user/{uid}/webhid/webhid.sock");
+    }
+    DEFAULT_SOCKET.to_string()
+}
+
 #[cfg(target_os = "windows")]
 const DEFAULT_PIPE: &str = r"\\.\pipe\webhid";
 
@@ -57,8 +75,7 @@ async fn main() -> anyhow::Result<()> {
     #[cfg(unix)]
     {
         use tokio::net::UnixListener;
-        let socket_path = std::env::var("WEBHID_SOCKET")
-            .unwrap_or_else(|_| DEFAULT_SOCKET.to_string());
+        let socket_path = resolve_socket_path();
 
         if let Some(parent) = std::path::Path::new(&socket_path).parent() {
             std::fs::create_dir_all(parent)

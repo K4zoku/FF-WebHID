@@ -924,6 +924,7 @@ name = "webhid-native-messaging"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "libc",
  "log",
  "serde_json",
  "tokio",

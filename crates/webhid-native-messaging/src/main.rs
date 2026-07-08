@@ -38,6 +38,26 @@ const DEFAULT_SOCKET: &str = "/run/webhid/webhid.sock";
 #[cfg(target_os = "macos")]
 const DEFAULT_SOCKET: &str = "/tmp/webhid.sock";
 
+#[cfg(target_os = "linux")]
+fn candidate_sockets() -> Vec<String> {
+    if let Ok(path) = std::env::var("WEBHID_SOCKET") {
+        return vec![path];
+    }
+    let mut candidates = Vec::new();
+    let xdg = std::env::var("XDG_RUNTIME_DIR")
+        .ok()
+        .filter(|d| !d.is_empty());
+    match xdg {
+        Some(d) => candidates.push(format!("{d}/webhid/webhid.sock")),
+        None => {
+            let uid = unsafe { libc::getuid() };
+            candidates.push(format!("/run/user/{uid}/webhid/webhid.sock"));
+        }
+    }
+    candidates.push(DEFAULT_SOCKET.to_string());
+    candidates
+}
+
 #[cfg(target_os = "windows")]
 const DEFAULT_PIPE: &str = r"\\.\pipe\webhid";
 
@@ -57,24 +77,34 @@ async fn main() -> anyhow::Result<()> {
     #[cfg(unix)]
     let (daemon_read, daemon_write) = {
         use tokio::net::UnixStream;
-        let socket_path = std::env::var("WEBHID_SOCKET")
-            .unwrap_or_else(|_| DEFAULT_SOCKET.to_string());
+        let candidates = candidate_sockets();
         let mut delay = 100u64;
-        let stream = loop {
-            match UnixStream::connect(&socket_path).await {
-                Ok(s) => break s,
-                Err(e) => {
-                    if delay > 30000 {
-                        return Err(anyhow::anyhow!("cannot connect to webhid-daemon at '{socket_path}' after retries: {e}"));
+        let (stream, connected_path) = loop {
+            let mut last_err = None;
+            let matched = 'candidates: {
+                for path in &candidates {
+                    match UnixStream::connect(path).await {
+                        Ok(s) => break 'candidates Some((s, path.clone())),
+                        Err(e) => last_err = Some(e),
                     }
-                    log::warn!("daemon connect failed ({e}), retry in {delay}ms");
-                    tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
-                    delay *= 2;
-                    if delay > 2000 { delay = 2000; }
                 }
+                None
+            };
+            if let Some((s, p)) = matched {
+                break (s, p);
             }
+            let last_err = last_err.unwrap();
+            if delay > 30000 {
+                return Err(anyhow::anyhow!(
+                    "cannot connect to webhid-daemon (tried {}) after retries: {last_err}",
+                    candidates.join(", "),
+                ));
+            }
+            log::warn!("daemon connect failed ({last_err}), retry in {delay}ms");
+            tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
+            delay = (delay * 2).min(2000);
         };
-        log::info!("connected to daemon at {socket_path}");
+        log::info!("connected to daemon at {connected_path}");
         stream.into_split()
     };
 
