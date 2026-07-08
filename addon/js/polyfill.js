@@ -597,7 +597,7 @@
         });
         if (response.success) {
           this.#opened = true;
-          this.#deviceId = String.fromCharCode(...response.data);
+          this.#deviceId = response.device_id;
           logger.debug('[webhid] open deviceId=' + this.#deviceId);
           this.#installSabListener();
           this.dispatchEvent(new Event("open"));
@@ -614,7 +614,7 @@
       logger.debug('[webhid] close deviceId=' + this.#deviceId);
       try {
         const response = await sendRequest("close", {
-          data: this.#deviceId.split("").map((c) => c.charCodeAt(0)),
+          device_id: this.#deviceId,
         });
         if (response.success) {
           this.#opened = false;

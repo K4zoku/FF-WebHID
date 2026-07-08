@@ -103,7 +103,6 @@ fn info_from_hidapi_pub_with_desc(info: &HidDeviceInfo, desc: Vec<u8>) -> Option
         usage: Some(info.usage()),
         device_id,
         report_descriptor,
-        collections: None,
     })
 }
 

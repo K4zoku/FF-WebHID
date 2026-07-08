@@ -314,12 +314,8 @@ fn nm_to_ipc(req: NmRequest, id: u32) -> IpcRequest {
             IpcRequest::Open { id, device_id }
         }
 
-        NmRequest::Close { data, .. } => {
-            IpcRequest::Close { id, device_id: data }
-        }
-
-        NmRequest::Read { data, timeout, .. } => {
-            IpcRequest::Read { id, device_id: data, timeout_ms: timeout }
+        NmRequest::Close { device_id, .. } => {
+            IpcRequest::Close { id, device_id }
         }
 
         NmRequest::SendReport { device_id, report_id, data, .. } => {
@@ -434,19 +430,12 @@ mod tests {
 
     #[test]
     fn test_nm_to_ipc_close() {
-        let req = NmRequest::Close { id: Some(5), data: "dev".into() };
+        let req = NmRequest::Close { id: Some(5), device_id: "dev".into() };
         let ipc = super::nm_to_ipc(req, 4);
         assert!(matches!(ipc, IpcRequest::Close { id: 4, .. }));
         if let IpcRequest::Close { device_id, .. } = &ipc {
             assert_eq!(device_id, "dev");
         }
-    }
-
-    #[test]
-    fn test_nm_to_ipc_read() {
-        let req = NmRequest::Read { id: None, data: "dev".into(), timeout: 5000 };
-        let ipc = super::nm_to_ipc(req, 5);
-        assert!(matches!(ipc, IpcRequest::Read { id: 5, timeout_ms: 5000, .. }));
     }
 
     #[test]
@@ -487,7 +476,7 @@ mod tests {
             product_name: Some("Test".into()), manufacturer: None,
             serial_number: None, usage_page: None, usage: None,
             device_id: "test-device-id".into(),
-            report_descriptor: None, collections: None,
+            report_descriptor: None,
         }
     }
 

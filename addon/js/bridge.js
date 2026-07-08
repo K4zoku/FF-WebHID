@@ -744,7 +744,7 @@
       }
 
       if (action === "close") {
-        const deviceId = String.fromCharCode(...(payload.data || []));
+        const deviceId = payload.device_id;
         logger.debug('[bridge] close deviceId=' + deviceId);
         const worker = _workers.get(deviceId);
         if (worker) {

@@ -4,115 +4,6 @@ use serde::{Deserialize, Serialize};
 // Shared device info
 // ---------------------------------------------------------------------------
 
-/// A (shallow) collection entry derived from a HID report descriptor.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct Collection {
-    #[serde(rename = "type")]
-    pub collection_type: u8,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub usage_page: Option<u16>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub usage: Option<u16>,
-    #[serde(default)]
-    pub children: Vec<Collection>,
-    /// Optional, richer report metadata parsed from the descriptor.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reports: Option<Vec<Report>>,
-}
-
-/// A field within a HID report (input/output/feature).
-///
-/// This struct was intentionally kept small historically but needs to be
-/// expanded to carry the richer set of attributes Chromium exposes (flags,
-/// logical/physical ranges, units, usage ranges, and packed usages). Keep
-/// backward-compatible field names where possible so older consumers still
-/// work.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct Field {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub report_id: Option<u8>,
-
-    // report_type is typically "input" | "output" | "feature"
-    pub report_type: String,
-
-    // size in bits and count of items (as before)
-    pub size: u32,
-    pub count: u32,
-
-    // Usage information: keep both the split `usage_page`/`usage` form for
-    // compatibility and a packed `packed_usages` vector (u32) to match
-    // Chromium's representation which may pack usagePage<<16 | usage.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub usage_page: Option<u16>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub usage: Option<u16>,
-
-    /// Legacy small-usages array (kept for backward compatibility).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub usages: Option<Vec<u16>>,
-
-    /// Packed usages (u32) to match Chromium's packed encoding.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub packed_usages: Option<Vec<u32>>,
-
-    // Per-item flags (optional)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub is_array: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub is_range: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub is_absolute: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub has_null: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub has_preferred_state: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub is_linear: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub is_buffered_bytes: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub is_constant: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub is_volatile: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub wrap: Option<bool>,
-
-    // Numeric ranges and units
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub logical_minimum: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub logical_maximum: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub physical_minimum: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub physical_maximum: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub unit_exponent: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub unit_system: Option<String>,
-
-    // Usage range (when item uses UsageMinimum/UsageMaximum)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub usage_minimum: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub usage_maximum: Option<u32>,
-
-    // Optional bit offset within the report payload (helpful for consumers).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub bit_offset: Option<u32>,
-}
-
-/// A HID report grouping (identified by report-id and type).
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct Report {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub id: Option<u8>,
-    pub report_type: String,
-    pub size_bits: u32,
-    #[serde(default)]
-    pub fields: Vec<Field>,
-}
-
 /// Information about a connected HID device, derived from hidapi + sysfs.
 #[derive(Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct DeviceInfo {
@@ -135,10 +26,6 @@ pub struct DeviceInfo {
     /// Raw HID report descriptor bytes, when available (from hidapi/sysfs).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub report_descriptor: Option<Vec<u8>>,
-    /// Parsed collection metadata (populated by daemon when possible).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[rkyv(with = rkyv::with::Skip)]
-    pub collections: Option<Vec<Collection>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -160,8 +47,6 @@ pub enum IpcRequest {
     Open { id: u32, device_id: String },
     /// Release an open device.
     Close { id: u32, device_id: String },
-    /// Block until a HID input report arrives or `timeout_ms` elapses.
-    Read { id: u32, device_id: String, timeout_ms: u64 },
     /// Send a HID output report.  `data` is the report *payload only*;
     /// the daemon is responsible for prepending the `report_id` byte
     /// before handing the buffer to `write(2)`.  Use `report_id = 0`
@@ -181,7 +66,6 @@ impl IpcRequest {
             Self::Enumerate { id }
             | Self::Open { id, .. }
             | Self::Close { id, .. }
-            | Self::Read { id, .. }
             | Self::SendReport { id, .. }
             | Self::ReceiveFeatureReport { id, .. }
             | Self::SendFeatureReport { id, .. } => *id,
@@ -248,19 +132,10 @@ pub enum NmRequest {
         id: Option<u32>,
         device_id: String,
     },
-    /// `data` is the device path as a plain string (e.g. `"/dev/hidraw0"`).
     Close {
         #[serde(default)]
         id: Option<u32>,
-        data: String,
-    },
-    /// `data` is the device path as a plain string; `timeout` is in
-    /// milliseconds.
-    Read {
-        #[serde(default)]
-        id: Option<u32>,
-        data: String,
-        timeout: u64,
+        device_id: String,
     },
     /// `device_id` is the device path as a plain string; `data` is the
     /// report *payload only* (base64‑encoded, without the leading report‑ID
@@ -303,7 +178,6 @@ impl NmRequest {
             Self::Enumerate { id }
             | Self::Open { id, .. }
             | Self::Close { id, .. }
-            | Self::Read { id, .. }
             | Self::SendReport { id, .. }
             | Self::ReceiveFeatureReport { id, .. }
             | Self::SendFeatureReport { id, .. } => *id,
@@ -496,7 +370,6 @@ mod tests {
             usage: None,
             device_id: "abc".into(),
             report_descriptor: None,
-            collections: None,
         };
         let r = NmResponse::ok_with_devices(vec![dev]);
         assert_eq!(r.success, Some(true));
@@ -529,7 +402,6 @@ mod tests {
             vendor_id: 0x1234, product_id: 0x5678, product_name: None,
             manufacturer: None, serial_number: None, usage_page: None,
             usage: None, device_id: "dev1".into(), report_descriptor: None,
-            collections: None,
         });
         assert_eq!(r.event_type, Some("connect".into()));
         assert!(r.device.is_some());
@@ -542,7 +414,6 @@ mod tests {
             vendor_id: 0x4321, product_id: 0x8765, product_name: None,
             manufacturer: None, serial_number: None, usage_page: None,
             usage: None, device_id: "dev2".into(), report_descriptor: None,
-            collections: None,
         });
         assert_eq!(r.event_type, Some("disconnect".into()));
         assert!(r.device.is_some());
@@ -569,12 +440,8 @@ mod tests {
             Some(7)
         );
         assert_eq!(
-            NmRequest::Close { id: None, data: "".into() }.id(),
+            NmRequest::Close { id: None, device_id: "".into() }.id(),
             None
-        );
-        assert_eq!(
-            NmRequest::Read { id: Some(1), data: "".into(), timeout: 0 }.id(),
-            Some(1)
         );
         assert_eq!(
             NmRequest::SendReport { id: None, device_id: "".into(), report_id: 0, data: vec![] }.id(),
@@ -597,7 +464,6 @@ mod tests {
         assert_eq!(IpcRequest::Enumerate { id: 1 }.id(), 1);
         assert_eq!(IpcRequest::Open { id: 2, device_id: "".into() }.id(), 2);
         assert_eq!(IpcRequest::Close { id: 3, device_id: "".into() }.id(), 3);
-        assert_eq!(IpcRequest::Read { id: 4, device_id: "".into(), timeout_ms: 0 }.id(), 4);
         assert_eq!(IpcRequest::SendReport { id: 5, device_id: "".into(), report_id: 0, data: vec![] }.id(), 5);
         assert_eq!(IpcRequest::ReceiveFeatureReport { id: 6, device_id: "".into(), report_id: 0 }.id(), 6);
         assert_eq!(IpcRequest::SendFeatureReport { id: 7, device_id: "".into(), report_id: 0, data: vec![] }.id(), 7);
@@ -618,7 +484,7 @@ mod tests {
         assert_eq!(IpcResponse::DeviceConnected { id: 0, device: DeviceInfo {
             vendor_id: 0, product_id: 0, product_name: None, manufacturer: None,
             serial_number: None, usage_page: None, usage: None, device_id: "".into(),
-            report_descriptor: None, collections: None,
+            report_descriptor: None,
         }}.id(), 0);
         assert_eq!(IpcResponse::Hello { id: 0, ws_port: 8080 }.id(), 0);
     }
@@ -637,58 +503,9 @@ mod tests {
             usage: Some(0x01),
             device_id: "abc123def456".into(),
             report_descriptor: Some(vec![0x05, 0x01, 0x09, 0x02]),
-            collections: None,
         };
         let json = serde_json::to_string(&info).unwrap();
         let de: DeviceInfo = serde_json::from_str(&json).unwrap();
-        let json2 = serde_json::to_string(&de).unwrap();
-        assert_eq!(json, json2);
-    }
-
-    #[test]
-    fn test_collection_json_roundtrip() {
-        let col = Collection {
-            collection_type: 1,
-            usage_page: Some(0x01),
-            usage: Some(0x02),
-            children: vec![],
-            reports: Some(vec![Report {
-                id: Some(1),
-                report_type: "input".into(),
-                size_bits: 8,
-                fields: vec![Field {
-                    report_id: Some(1),
-                    report_type: "input".into(),
-                    size: 8,
-                    count: 1,
-                    usage_page: Some(0x01),
-                    usage: Some(0x02),
-                    usages: None,
-                    packed_usages: None,
-                    is_array: None,
-                    is_range: None,
-                    is_absolute: None,
-                    has_null: None,
-                    has_preferred_state: None,
-                    is_linear: None,
-                    is_buffered_bytes: None,
-                    is_constant: None,
-                    is_volatile: None,
-                    wrap: None,
-                    logical_minimum: None,
-                    logical_maximum: None,
-                    physical_minimum: None,
-                    physical_maximum: None,
-                    unit_exponent: None,
-                    unit_system: None,
-                    usage_minimum: None,
-                    usage_maximum: None,
-                    bit_offset: None,
-                }],
-            }]),
-        };
-        let json = serde_json::to_string(&col).unwrap();
-        let de: Collection = serde_json::from_str(&json).unwrap();
         let json2 = serde_json::to_string(&de).unwrap();
         assert_eq!(json, json2);
     }
@@ -699,7 +516,6 @@ mod tests {
             IpcRequest::Enumerate { id: 1 },
             IpcRequest::Open { id: 2, device_id: "test-device".into() },
             IpcRequest::Close { id: 3, device_id: "test-device".into() },
-            IpcRequest::Read { id: 4, device_id: "test-device".into(), timeout_ms: 5000 },
             IpcRequest::SendReport { id: 5, device_id: "test-device".into(), report_id: 1, data: vec![0x00, 0xFF] },
             IpcRequest::ReceiveFeatureReport { id: 6, device_id: "test-device".into(), report_id: 0 },
             IpcRequest::SendFeatureReport { id: 7, device_id: "test-device".into(), report_id: 0, data: vec![0xAA] },
@@ -717,7 +533,6 @@ mod tests {
             vendor_id: 0x1234, product_id: 0x5678, product_name: None,
             manufacturer: None, serial_number: None, usage_page: None,
             usage: None, device_id: "dev".into(), report_descriptor: None,
-            collections: None,
         };
         let cases: Vec<IpcResponse> = vec![
             IpcResponse::Devices { id: 1, devices: vec![dev.clone()] },
@@ -760,7 +575,7 @@ mod tests {
             assert_eq!(device_id, "test-dev");
         }
 
-        let json = r#"{"action":"close","data":"/dev/hidraw0"}"#;
+        let json = r#"{"action":"close","device_id":"abc123"}"#;
         let req: NmRequest = serde_json::from_str(json).unwrap();
         assert!(matches!(req, NmRequest::Close { .. }));
     }

@@ -107,7 +107,7 @@ const NativeMessaging = {
   async closeDevice(deviceId) {
     return await this.sendRequest({
       action: "close",
-      data: deviceId,
+      device_id: deviceId,
     });
   },
 
@@ -247,7 +247,7 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true;
 
     case "close":
-      NativeMessaging.closeDevice(String.fromCharCode(...request.data))
+      NativeMessaging.closeDevice(request.device_id)
         .then(sendResponse)
         .catch((e) => sendResponse({ success: false, error: e.message }));
       return true;

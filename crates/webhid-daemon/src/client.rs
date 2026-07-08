@@ -116,24 +116,6 @@ async fn dispatch(device_mgr: &DeviceManager, client_id: u64, req: IpcRequest, w
             Err(e) => IpcResponse::Error { id, message: e.to_string() },
         },
 
-        IpcRequest::Read { device_id, timeout_ms, .. } => {
-            match device_mgr.get_file(&device_id, client_id) {
-                Err(e) => IpcResponse::Error { id, message: e.to_string() },
-                Ok(dev_arc) => {
-                    let result = tokio::task::spawn_blocking(move || {
-                        let dev = dev_arc.lock().unwrap();
-                        hid::read_with_timeout(&dev, timeout_ms as i32)
-                    })
-                    .await;
-                    match result {
-                        Ok(Ok(data)) => IpcResponse::Data { id, data },
-                        Ok(Err(e)) => IpcResponse::Error { id, message: e.to_string() },
-                        Err(e) => IpcResponse::Error { id, message: e.to_string() },
-                    }
-                }
-            }
-        }
-
         IpcRequest::SendReport { device_id, report_id, data, .. } => {
             match device_mgr.get_file(&device_id, client_id) {
                 Err(e) => IpcResponse::Error { id, message: e.to_string() },
