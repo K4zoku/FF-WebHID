@@ -642,7 +642,7 @@
         data instanceof DataView
           ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
           : new Uint8Array(data);
-      const t0 = (typeof logger !== 'undefined' && logger._level >= 3) ? performance.now() : 0;
+      const t0 = perf.begin();
       try {
         if (!this.#hotPath && this.#sabListener) {
           await this.#waitForHotPath(2000);
@@ -655,7 +655,7 @@
           data: Array.from(buffer),
         });
         if (response.success) {
-          if (t0) logger.debug('[webhid] sendReport done ' + (performance.now() - t0).toFixed(2) + 'ms');
+          perf.end(t0, '[webhid] sendReport reportId=' + reportId);
           return;
         }
         throw new Error("sendReport failed");

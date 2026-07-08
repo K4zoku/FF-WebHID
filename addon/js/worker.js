@@ -2,13 +2,56 @@
 // Worker is spawned from a blob URL so it can't importScripts the addon's
 // logger.js directly. The bridge sends the current logLevel in the `connect`
 // message; default to warn until that arrives.
+//
+// Level changes reassign the methods to either the real console function or
+// a no-op, so call sites never need `if (level >= X)` guards.
+const _nop = () => {};
 const logger = {
   _level: 1,
-  error: (...a) => { if (logger._level >= 0) console.error(...a); },
-  warn: (...a) => { if (logger._level >= 1) console.warn(...a); },
-  info: (...a) => { if (logger._level >= 2) console.info(...a); },
-  debug: (...a) => { if (logger._level >= 3) console.debug(...a); },
+  error: _nop,
+  warn: _nop,
+  info: _nop,
+  debug: _nop,
 };
+
+function _applyLogLevel(level) {
+  logger._level = level;
+  logger.error = level >= 0 ? console.error.bind(console) : _nop;
+  logger.warn  = level >= 1 ? console.warn.bind(console)  : _nop;
+  logger.info  = level >= 2 ? console.info.bind(console)  : _nop;
+  logger.debug = level >= 3 ? console.debug.bind(console) : _nop;
+  // Re-evaluate perf helpers since they depend on debug being active.
+  _applyPerf();
+}
+_applyLogLevel(1);
+
+// Performance timing: perf.begin() / perf.end("label") measures elapsed
+// time and logs it at debug level. When perf logging is disabled (either
+// logLevel < debug or the explicit perfLogging flag is off), both methods
+// are no-ops — zero overhead on the hot path.
+const perf = {
+  begin: _nop,
+  end: _nop,
+};
+
+let _perfLogging = false;
+
+function _applyPerf() {
+  if (_perfLogging && logger._level >= 3) {
+    const marks = new Map();
+    perf.begin = () => {
+      const t = performance.now();
+      return () => t;  // return a closure that captures the start time
+    };
+    // Simpler: begin() returns a token, end(token, label) logs elapsed.
+    perf.begin = () => performance.now();
+    perf.end = (t0, label) => logger.debug(label + ' ' + (performance.now() - t0).toFixed(2) + 'ms');
+  } else {
+    perf.begin = _nop;
+    perf.end = _nop;
+  }
+}
+_applyPerf();
 
 // Detect SharedArrayBuffer availability. Some sites (e.g. usevia.app) block
 // COOP/COEP injection or set conflicting headers, making SAB unavailable.
@@ -20,7 +63,6 @@ let sab = null, meta = null, data = null, reportSize = 64, ws = null;
 const _pending = new Map();
 let _nextReqId = 1;
 let _fireAndForget = true;
-let _perfLogging = false;
 
 const MSG_SEND_REPORT = 0x01;
 const MSG_SEND_FEATURE_REPORT = 0x02;
@@ -31,9 +73,9 @@ self.onmessage = ({ data: msg }) => {
   if (msg.type === 'connect') return connect(msg);
   if (msg.type === 'settings') {
     if (msg.fireAndForget !== undefined) _fireAndForget = msg.fireAndForget !== false;
-    if (msg.perfLogging !== undefined) _perfLogging = msg.perfLogging === true;
-    if (msg.logLevel !== undefined) logger._level = msg.logLevel;
-    logger.debug('[worker] settings updated fireAndForget=' + _fireAndForget + ' perfLogging=' + _perfLogging + ' logLevel=' + logger._level);
+    if (msg.perfLogging !== undefined) { _perfLogging = msg.perfLogging === true; _applyPerf(); }
+    if (msg.logLevel !== undefined) _applyLogLevel(msg.logLevel);
+    logger.debug('[worker] settings fireAndForget=' + _fireAndForget + ' perfLogging=' + _perfLogging + ' logLevel=' + logger._level);
     return;
   }
   if (msg.type === 'send') return handleSend(msg, MSG_SEND_REPORT);
@@ -49,7 +91,7 @@ function connect(msg) {
   _connectMsg = msg;
   reportSize = msg.reportSize || 64;
   CAPACITY = msg.capacity || 8192;
-  if (msg.logLevel !== undefined) logger._level = msg.logLevel;
+  if (msg.logLevel !== undefined) _applyLogLevel(msg.logLevel);
   logger.debug('[worker] connect capacity=' + CAPACITY + ' reportSize=' + reportSize + ' SAB=' + SAB_AVAILABLE);
 
   if (SAB_AVAILABLE) {
@@ -133,7 +175,7 @@ function pushInputBatch(batch) {
     count++;
   }
   if (count > 0) {
-    if (_perfLogging) logger.debug('[worker] pushed ' + count + ' reports to SAB');
+    logger.debug('[worker] pushed ' + count + ' reports to SAB');
     Atomics.notify(meta, 0);
   }
 }
@@ -149,11 +191,11 @@ function pushInputBatchPostMessage(batch) {
     offset += len;
     count++;
   }
-  if (_perfLogging && count > 0) logger.debug('[worker] forwarded ' + count + ' reports via postMessage');
+  if (count > 0) logger.debug('[worker] forwarded ' + count + ' reports via postMessage');
 }
 
 function handleSend(msg, msgType) {
-  const t0 = _perfLogging ? performance.now() : 0;
+  const t0 = perf.begin();
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     logger.warn('[worker] send: WS not open');
     self.postMessage({ type: 'sendResult', reqId: msg.reqId, error: 'ws not open' });
@@ -168,13 +210,13 @@ function handleSend(msg, msgType) {
   frame.set(payload, 6);
   if (_fireAndForget) {
     ws.send(frame);
-    if (_perfLogging) logger.debug('[worker] send reportId=' + msg.reportId + ' len=' + payload.length + ' fire-and-forget ' + (performance.now() - t0).toFixed(2) + 'ms');
+    perf.end(t0, '[worker] send reportId=' + msg.reportId + ' len=' + payload.length + ' fire-and-forget');
     self.postMessage({ type: 'sendResult', reqId: msg.reqId, success: true });
     return;
   }
   _pending.set(reqId, {
     resolve: () => {
-      if (_perfLogging) logger.debug('[worker] send reportId=' + msg.reportId + ' len=' + payload.length + ' acked ' + (performance.now() - t0).toFixed(2) + 'ms');
+      perf.end(t0, '[worker] send reportId=' + msg.reportId + ' len=' + payload.length + ' acked');
       self.postMessage({ type: 'sendResult', reqId: msg.reqId, success: true });
     },
     reject: (e) => self.postMessage({ type: 'sendResult', reqId: msg.reqId, error: String(e.message || e) }),
