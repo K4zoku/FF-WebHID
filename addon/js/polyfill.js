@@ -209,7 +209,6 @@
     #serialNumber = null;
     #usagePage = null;
     #usage = null;
-    #reportDescriptor = null;
     #maxInputReportSize = 2048;
 
     #installSabListener() {
@@ -257,26 +256,17 @@
       this.#deviceId = null;
       this.#internalId = deviceInfo.device_id || null;
 
-      // Collections parsed by daemon; ensure arrays exist for spec compliance.
-      this.#parsedCollections = (deviceInfo.collections || []).map(c => ({
-        ...c,
-        children: (c.children || []).map(ensureArrays),
-        inputReports: c.inputReports || [],
-        outputReports: c.outputReports || [],
-        featureReports: c.featureReports || [],
-      }));
+      // Collections parsed by daemon; ensure report arrays exist for spec compliance.
+      const ensureReportArrays = (col) => ({
+        ...col,
+        children: (col.children || []).map(ensureReportArrays),
+        inputReports: col.inputReports || [],
+        outputReports: col.outputReports || [],
+        featureReports: col.featureReports || [],
+      });
+      this.#parsedCollections = (deviceInfo.collections || []).map(ensureReportArrays);
 
       this.#maxInputReportSize = this.#calculateMaxInputReportSize();
-    }
-
-    ensureArrays(c) {
-      return {
-        ...c,
-        children: (c.children || []).map(ensureArrays),
-        inputReports: c.inputReports || [],
-        outputReports: c.outputReports || [],
-        featureReports: c.featureReports || [],
-      };
     }
 
     #calculateMaxInputReportSize() {
