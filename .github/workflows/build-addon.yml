@@ -1,0 +1,31 @@
+name: Build Addon
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'addon/**'
+      - '.github/workflows/build-addon.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'addon/**'
+      - '.github/workflows/build-addon.yml'
+  workflow_dispatch:
+
+jobs:
+  build-addon:
+    name: Build Addon
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Build Addon XPI
+        run: make build-addon
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: webhid-addon
+          path: dist/webhid-addon.xpi

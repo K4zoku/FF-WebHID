@@ -4,7 +4,6 @@ on:
   push:
     branches: [ main ]
     paths:
-      - 'addon/**'
       - 'crates/**'
       - 'manifests/**'
       - 'packaging/**'
@@ -13,7 +12,6 @@ on:
   pull_request:
     branches: [ main ]
     paths:
-      - 'addon/**'
       - 'crates/**'
       - 'manifests/**'
       - 'packaging/**'
@@ -22,36 +20,6 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-addon:
-    name: Build Addon
-    runs-on: ubuntu-latest
-    if: |
-      github.event_name == 'workflow_dispatch' ||
-      contains(github.event.head_commit.modified, 'addon/') ||
-      contains(github.event.head_commit.modified, '.github/workflows/build.yml') ||
-      contains(github.event.head_commit.added, 'addon/') ||
-      contains(github.event.head_commit.added, '.github/workflows/build.yml')
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: crates -> target
-
-      - name: Build Addon XPI
-        run: make build-addon
-
-      - name: Upload XPI
-        uses: actions/upload-artifact@v7
-        with:
-          name: webhid-addon
-          path: dist/webhid-addon.xpi
-
   build:
     name: Build (${{ matrix.os }} ${{ matrix.arch }})
     strategy:
