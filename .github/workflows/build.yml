@@ -182,7 +182,7 @@ jobs:
           cargo build --release --target aarch64-apple-darwin --manifest-path crates/Cargo.toml
 
           # Create universal binaries with lipo
-          mkdir -p /tmp/universal-bin
+          mkdir -p crates/target/universal-apple-darwin/release
           lipo -create \
             crates/target/x86_64-apple-darwin/release/webhid-daemon \
             crates/target/aarch64-apple-darwin/release/webhid-daemon \
