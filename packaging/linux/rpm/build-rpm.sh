@@ -97,22 +97,24 @@ install -Dm644 "$REPO_ROOT/LICENSE" \\
 EOF
 
 # Build the RPM. On Ubuntu, rpmbuild only knows x86_64 and noarch targets.
-# For aarch64, we override _target_cpu directly instead of using --target.
-# We also suppress the "Arch dependent binaries in noarch package" check
-# by setting _unpackaged_files_terminate_build to 0 and _binaries_in_noarch
-# to 0.
-RPM_TARGET="$ARCH"
+# For aarch64, we build as x86_64 (host) and rename the output file.
+# We disable brp-strip/brp-elfperms because x86_64's strip can't handle
+# aarch64 ELF binaries, and Rust release builds are already optimized.
 RPM_DEFS=(
   --define "_topdir $RPMROOT"
   --define "_binaries_in_noarch_packages_terminate_build 0"
   --define "_unpackaged_files_terminate_build 0"
+  --define "__strip /bin/true"
+  --define "__objdump /bin/true"
+  --define "__brp_strip /bin/true"
+  --define "__brp_strip_static_archive /bin/true"
+  --define "__brp_strip_comment_note /bin/true"
+  --define "__brp_elfperms /bin/true"
+  --define "__brp_compress /bin/true"
 )
 
 if [ "$ARCH" = "aarch64" ]; then
-  # Ubuntu's rpm doesn't have aarch64 in its rpmrc, so we can't use --target.
-  # Build as x86_64 (host) and override the arch in the output filename.
   RPM_DEFS+=(--target x86_64)
-  RPM_TARGET="x86_64"
 else
   RPM_DEFS+=(--target "$ARCH")
 fi
