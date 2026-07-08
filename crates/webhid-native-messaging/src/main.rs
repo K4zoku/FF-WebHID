@@ -38,20 +38,23 @@ const DEFAULT_SOCKET: &str = "/run/webhid/webhid.sock";
 #[cfg(target_os = "macos")]
 const DEFAULT_SOCKET: &str = "/tmp/webhid.sock";
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 fn candidate_sockets() -> Vec<String> {
     if let Ok(path) = std::env::var("WEBHID_SOCKET") {
         return vec![path];
     }
     let mut candidates = Vec::new();
-    let xdg = std::env::var("XDG_RUNTIME_DIR")
-        .ok()
-        .filter(|d| !d.is_empty());
-    match xdg {
-        Some(d) => candidates.push(format!("{d}/webhid/webhid.sock")),
-        None => {
-            let uid = unsafe { libc::getuid() };
-            candidates.push(format!("/run/user/{uid}/webhid/webhid.sock"));
+    #[cfg(target_os = "linux")]
+    {
+        let xdg = std::env::var("XDG_RUNTIME_DIR")
+            .ok()
+            .filter(|d| !d.is_empty());
+        match xdg {
+            Some(d) => candidates.push(format!("{d}/webhid/webhid.sock")),
+            None => {
+                let uid = unsafe { libc::getuid() };
+                candidates.push(format!("/run/user/{uid}/webhid/webhid.sock"));
+            }
         }
     }
     candidates.push(DEFAULT_SOCKET.to_string());

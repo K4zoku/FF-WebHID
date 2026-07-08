@@ -21,12 +21,12 @@ const DEFAULT_SOCKET: &str = "/run/webhid/webhid.sock";
 #[cfg(target_os = "macos")]
 const DEFAULT_SOCKET: &str = "/tmp/webhid.sock";
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 fn resolve_socket_path() -> String {
     if let Ok(path) = std::env::var("WEBHID_SOCKET") {
         return path;
     }
-    // non-root → XDG_RUNTIME_DIR / fallback /run/user/<uid>
+    #[cfg(target_os = "linux")]
     if unsafe { libc::geteuid() } != 0 {
         if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
             if !dir.is_empty() {
