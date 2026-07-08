@@ -45,17 +45,14 @@ const DEFAULT_PIPE: &str = r"\\.\pipe\webhid";
 // Entry point
 // ---------------------------------------------------------------------------
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
     if std::env::args().any(|a| a == "--version" || a == "-V") {
         eprintln!("webhid-native-messaging {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
 
-    env_logger::Builder::from_default_env()
-        .target(env_logger::Target::Stderr)
-        .filter_level(log::LevelFilter::Info)
-        .init();
+    init_logger();
 
     #[cfg(unix)]
     let (daemon_read, daemon_write) = {
@@ -362,6 +359,30 @@ fn ipc_event_to_nm(resp: IpcResponse) -> Option<NmResponse> {
 
         _ => None,
     }
+}
+
+fn init_logger() {
+    let level = std::env::var("RUST_LOG")
+        .ok()
+        .and_then(|v| v.parse::<log::LevelFilter>().ok())
+        .unwrap_or(log::LevelFilter::Info);
+    if log::set_boxed_logger(Box::new(SimpleLogger)).is_ok() {
+        log::set_max_level(level);
+    }
+}
+
+struct SimpleLogger;
+
+impl log::Log for SimpleLogger {
+    fn enabled(&self, _: &log::Metadata) -> bool {
+        true
+    }
+    fn log(&self, record: &log::Record) {
+        if self.enabled(record.metadata()) {
+            eprintln!("[{:5} {}] {}", record.level(), record.target(), record.args());
+        }
+    }
+    fn flush(&self) {}
 }
 
 #[cfg(test)]
