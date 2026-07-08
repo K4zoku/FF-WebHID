@@ -84,7 +84,7 @@ Restart browser after writing this file. Path must be absolute.
 |---|---|---|
 | `WEBHID_SOCKET` | `/run/webhid/webhid.sock` (Linux) / `/tmp/webhid.sock` (macOS) | IPC socket path |
 | `WEBHID_WS_PORT` | `31337` | WebSocket server port |
-| `WEBHID_WS_BATCH_MS` | `1` | Input report batch flush interval (ms) |
+| `WEBHID_WS_BATCH_MS` | `0` | Input report batch flush interval (ms). `0` = flush immediately on receipt (best for high-polling devices like 8000 Hz mice). `1`+ = batch into fewer WS frames (lower CPU, +0–N ms latency). |
 | `WEBHID_IPC_PORT` | `31338` | TCP IPC port (Windows only, replaces Unix socket) |
 | `RUST_LOG` | `info` | Log level |
 

@@ -10,7 +10,7 @@ RestartSec=3
 
 Environment=RUST_LOG=info
 Environment=WEBHID_WS_PORT=31337
-Environment=WEBHID_WS_BATCH_MS=1
+Environment=WEBHID_WS_BATCH_MS=0
 
 RuntimeDirectory=webhid
 RuntimeDirectoryMode=0755

@@ -5,7 +5,6 @@ use anyhow::Context as _;
 use futures::{SinkExt, StreamExt};
 use tokio::net::TcpListener;
 use tokio::sync::{broadcast, mpsc};
-use tokio::time::interval;
 use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
 use tokio_tungstenite::tungstenite::http::StatusCode;
 use tokio_tungstenite::tungstenite::Message;
@@ -14,7 +13,8 @@ use crate::device_mgr::DeviceManager;
 use crate::hid;
 
 /// Default flush interval for batching input reports (milliseconds).
-const DEFAULT_BATCH_FLUSH_MS: u64 = 1;
+/// 0 = flush immediately on receipt.
+const DEFAULT_BATCH_FLUSH_MS: u64 = 0;
 
 // ---------------------------------------------------------------------------
 // Wire format for client → daemon binary frames (page → device hot path)
@@ -220,53 +220,51 @@ async fn handle_websocket(
         }
     });
 
-    // --- Sender task: batch and forward input reports ---
+    // --- Sender task ---
     let tx_for_sender = tx.clone();
     let device_id_for_sender = device_id.clone();
     let batch_ms = std::env::var("WEBHID_WS_BATCH_MS")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(DEFAULT_BATCH_FLUSH_MS)
-        .max(1);
+        .unwrap_or(DEFAULT_BATCH_FLUSH_MS);
 
-    // event_rx was already subscribed above (before set_ws_active) to avoid
-    // losing reports between set_ws_active(true) and the sender task start.
     let mut sender_task = tokio::spawn(async move {
-        let mut batch: Vec<Vec<u8>> = Vec::with_capacity(64);
-        let mut flush_interval = interval(Duration::from_millis(batch_ms));
+        let mut batch: Vec<Vec<u8>> = Vec::with_capacity(8);
+        let mut flush_interval = if batch_ms > 0 {
+            Some(tokio::time::interval(Duration::from_millis(batch_ms)))
+        } else {
+            None
+        };
 
         loop {
-            tokio::select! {
-                _ = flush_interval.tick() => {
-                    if !batch.is_empty() {
-                        let frame = create_batch_frame(&batch);
-                        if tx_for_sender.send(Message::Binary(frame.into())).is_err() {
+            if let Some(ref mut interval) = flush_interval {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        if !batch.is_empty() {
+                            let frame = create_batch_frame(&batch);
+                            if tx_for_sender.send(Message::Binary(frame.into())).is_err() {
+                                break;
+                            }
+                            batch.clear();
+                        }
+                    }
+                    event_result = event_rx.recv() => {
+                        if !handle_event(event_result, &device_id_for_sender, &mut batch, &tx_for_sender) {
                             break;
                         }
-                        batch.clear();
                     }
                 }
-                event_result = event_rx.recv() => {
-                    match event_result {
-                        Ok(webhid::IpcResponse::InputReport { device_id: evt_device_id, report_id, data, .. }) => {
-                            if evt_device_id == device_id_for_sender {
-                                let mut full_report = Vec::with_capacity(1 + data.len());
-                                full_report.push(report_id);
-                                full_report.extend_from_slice(&data);
-                                batch.push(full_report);
-                            }
-                        }
-                        Ok(_) => {}
-                        Err(broadcast::error::RecvError::Lagged(n)) => {
-                            log::warn!("[ws] broadcast lagged by {n} events, flushing batch");
-                            if !batch.is_empty() {
-                                let frame = create_batch_frame(&batch);
-                                if tx_for_sender.send(Message::Binary(frame.into())).is_err() { break; }
-                                batch.clear();
-                            }
-                        }
-                        Err(broadcast::error::RecvError::Closed) => break,
+            } else {
+                let event_result = event_rx.recv().await;
+                if !handle_event(event_result, &device_id_for_sender, &mut batch, &tx_for_sender) {
+                    break;
+                }
+                if !batch.is_empty() {
+                    let frame = create_batch_frame(&batch);
+                    if tx_for_sender.send(Message::Binary(frame.into())).is_err() {
+                        break;
                     }
+                    batch.clear();
                 }
             }
         }
@@ -285,6 +283,44 @@ async fn handle_websocket(
     log::info!("[ws] connection for {device_id} closed");
     device_mgr.set_ws_active(&device_id, false);
     Ok(())
+}
+
+/// Append matching `InputReport`s to `batch`; flush on `Lagged`.
+/// Returns `false` when the channel is closed.
+fn handle_event(
+    event_result: Result<webhid::IpcResponse, broadcast::error::RecvError>,
+    device_id: &str,
+    batch: &mut Vec<Vec<u8>>,
+    tx: &mpsc::UnboundedSender<Message>,
+) -> bool {
+    match event_result {
+        Ok(webhid::IpcResponse::InputReport {
+            device_id: evt_device_id,
+            report_id,
+            data,
+            ..
+        }) => {
+            if evt_device_id == device_id {
+                let mut full_report = Vec::with_capacity(1 + data.len());
+                full_report.push(report_id);
+                full_report.extend_from_slice(&data);
+                batch.push(full_report);
+            }
+        }
+        Ok(_) => {}
+        Err(broadcast::error::RecvError::Lagged(n)) => {
+            log::warn!("[ws] broadcast lagged by {n} events, flushing batch");
+            if !batch.is_empty() {
+                let frame = create_batch_frame(batch);
+                if tx.send(Message::Binary(frame.into())).is_err() {
+                    return false;
+                }
+                batch.clear();
+            }
+        }
+        Err(broadcast::error::RecvError::Closed) => return false,
+    }
+    true
 }
 
 fn create_batch_frame(reports: &[Vec<u8>]) -> Vec<u8> {
