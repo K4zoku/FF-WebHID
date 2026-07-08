@@ -1,0 +1,75 @@
+name: Feature Request
+description: Suggest a new feature or improvement for FF-WebHID (addon or daemon)
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to suggest an improvement. Please fill in as much as you can so it's easier to evaluate.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues (open and closed) and this hasn't been requested before
+          required: true
+        - label: I'm using the latest released version of the addon and daemon
+          required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of the project does this relate to?
+      options:
+        - Addon (background/popup/settings/device picker)
+        - Daemon (Rust, data plane, hotplug, packaging)
+        - Documentation
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: What are you trying to do that isn't currently possible or is unnecessarily hard?
+      placeholder: |
+        e.g. I want to configure per-device settings instead of per-site, because...
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed Solution
+      description: How would you like this to work? Mockups, examples from other tools, or a rough description are all welcome.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Any workarounds you're currently using, or other approaches you thought about?
+    validations:
+      required: false
+
+  - type: input
+    id: device
+    attributes:
+      label: HID Device
+      description: If this request is about a specific device, name/model and vendor ID / product ID if known
+      placeholder: e.g. Device XYZ (VID_1234&PID_5678)
+    validations:
+      required: false
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Screenshots, related issues, links to similar features elsewhere, etc.
+    validations:
+      required: false
