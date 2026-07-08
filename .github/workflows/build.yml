@@ -83,8 +83,8 @@ jobs:
             apt_deps: ""
             rust_target: aarch64-pc-windows-msvc
           - os: macos-latest
-            arch: x86_64
-            artifact_name: webhid-macos-universal
+            arch: universal
+            artifact_name: webhid-macos
             apt_deps: ""
             rust_target: ""
 
@@ -177,13 +177,38 @@ jobs:
       - name: Prepare Artifacts (macOS)
         if: runner.os == 'macOS'
         run: |
-          mkdir -p artifacts/usr/local/bin artifacts/usr/local/lib/mozilla/native-messaging-hosts artifacts/etc/systemd/system
-          cp crates/target/release/webhid-daemon artifacts/usr/local/bin/
-          cp crates/target/release/webhid-native-messaging artifacts/usr/local/bin/
-          sed 's|{{NM_BIN}}|/usr/local/bin/webhid-native-messaging|g' \
-            manifests/webhid-native-messaging-host.json > artifacts/usr/local/lib/mozilla/native-messaging-hosts/webhid-native-messaging-host.json
-          sed 's|{{DAEMON_BIN}}|/usr/local/bin/webhid-daemon|g' \
-            manifests/webhid-daemon.service > artifacts/etc/systemd/system/webhid-daemon.service
+          # Build all 3 variants on one macOS runner via cross-compile + lipo
+          rustup target add x86_64-apple-darwin aarch64-apple-darwin
+          cargo build --release --target x86_64-apple-darwin --manifest-path crates/Cargo.toml
+          cargo build --release --target aarch64-apple-darwin --manifest-path crates/Cargo.toml
+          # Create universal binaries with lipo
+          lipo -create \
+            crates/target/x86_64-apple-darwin/release/webhid-daemon \
+            crates/target/aarch64-apple-darwin/release/webhid-daemon \
+            -output /tmp/webhid-daemon-universal
+          lipo -create \
+            crates/target/x86_64-apple-darwin/release/webhid-native-messaging \
+            crates/target/aarch64-apple-darwin/release/webhid-native-messaging \
+            -output /tmp/webhid-native-messaging-universal
+
+          # Helper: fill a staging dir with binaries + manifests
+          stage_macos() {
+            local src_dir="$1" out_dir="$2"
+            mkdir -p "$out_dir/usr/local/bin" "$out_dir/usr/local/lib/mozilla/native-messaging-hosts" "$out_dir/etc/systemd/system"
+            cp "$src_dir/webhid-daemon" "$out_dir/usr/local/bin/"
+            cp "$src_dir/webhid-native-messaging" "$out_dir/usr/local/bin/"
+            sed 's|{{NM_BIN}}|/usr/local/bin/webhid-native-messaging|g' \
+              manifests/webhid-native-messaging-host.json > "$out_dir/usr/local/lib/mozilla/native-messaging-hosts/webhid-native-messaging-host.json"
+            sed 's|{{DAEMON_BIN}}|/usr/local/bin/webhid-daemon|g' \
+              manifests/webhid-daemon.service > "$out_dir/etc/systemd/system/webhid-daemon.service"
+          }
+
+          stage_macos "crates/target/x86_64-apple-darwin/release"   "artifacts-x86_64"
+          stage_macos "crates/target/aarch64-apple-darwin/release"  "artifacts-aarch64"
+          stage_macos "/tmp"                                        "artifacts-universal"
+          # Fix universal binary names (lipo output has -universal suffix)
+          mv /tmp/webhid-daemon-universal artifacts-universal/usr/local/bin/webhid-daemon
+          mv /tmp/webhid-native-messaging-universal artifacts-universal/usr/local/bin/webhid-native-messaging
 
       - name: Prepare Artifacts (Windows)
         if: runner.os == 'Windows'
@@ -222,8 +247,8 @@ jobs:
           name: ${{ matrix.artifact_name }}-msi
           path: artifacts-msi/
 
-      - name: Upload Artifacts (Linux/macOS)
-        if: runner.os != 'Windows'
+      - name: Upload Artifacts (Linux)
+        if: runner.os == 'Linux'
         uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact_name }}
@@ -242,3 +267,24 @@ jobs:
         with:
           name: ${{ matrix.artifact_name }}-rpm
           path: dist/*.rpm
+
+      - name: Upload macOS x86_64
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v7
+        with:
+          name: webhid-macos-x86_64
+          path: artifacts-x86_64/
+
+      - name: Upload macOS aarch64
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v7
+        with:
+          name: webhid-macos-aarch64
+          path: artifacts-aarch64/
+
+      - name: Upload macOS universal
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v7
+        with:
+          name: webhid-macos-universal
+          path: artifacts-universal/
