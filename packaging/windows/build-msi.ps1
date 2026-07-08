@@ -54,13 +54,14 @@ $nmTemplate = Get-Content (Join-Path $Manifests 'webhid_server.windows.template.
 $nmJson = $nmTemplate -replace '\{\{INSTALLDIR\}\}', 'C:\\Program Files\\WebHID\\'
 Set-Content -Path (Join-Path $Stage 'webhid_server.json') -Value $nmJson -Encoding ascii
 
-# Locate wix.exe (WiX v5). Try PATH first, then a tools/ folder.
+# Locate wix.exe (WiX v6). Try PATH first, then a tools/ folder.
+# WiX v7+ requires accepting the OSMF EULA — we pin to v6 to avoid that.
 $wix = Get-Command wix -ErrorAction SilentlyContinue
 if (-not $wix) {
   $toolsDir = Join-Path $RepoRoot 'tools'
   $wixExe = Join-Path $toolsDir 'wix.exe'
   if (Test-Path $wixExe) { $wix = $wixExe }
-  else { throw "wix.exe not found. Install WiX v5: dotnet tool install --global wix" }
+  else { throw "wix.exe not found. Install WiX v6: dotnet tool install --global wix --version 6.0.0" }
 }
 
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
