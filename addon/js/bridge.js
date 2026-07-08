@@ -770,9 +770,9 @@
   browser.runtime.onMessage.addListener((message) => {
     if (message.action === "webhid-device-event" && message.event) {
       const evt = message.event;
-      if (evt.event_type === "hello") {
+      if (evt.event_type === "handshake") {
         _wsPort = evt.ws_port;
-        logger.info('[bridge] hello: ws_port=' + _wsPort);
+        logger.info('[bridge] handshake: ws_port=' + _wsPort);
         return;
       }
       window.postMessage({ __webhid_bridge: "evt", event: evt }, "*");

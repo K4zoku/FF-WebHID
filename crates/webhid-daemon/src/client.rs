@@ -35,7 +35,7 @@ pub async fn handle(
     // addon can connect its data-plane Worker before opening any device.
     let _ = tx
         .send(NmResponse {
-            event_type: Some("hello".into()),
+            event_type: Some("handshake".into()),
             ws_port: Some(ws_port),
             ..Default::default()
         })
@@ -213,8 +213,8 @@ fn ipc_event_to_nm(ev: IpcResponse) -> Option<NmResponse> {
             ..
         } => Some(NmResponse::event_input_report(device_id, report_id, data)),
 
-        IpcResponse::Hello { ws_port, .. } => Some(NmResponse {
-            event_type: Some("hello".into()),
+        IpcResponse::Handshake { ws_port, .. } => Some(NmResponse {
+            event_type: Some("handshake".into()),
             ws_port: Some(ws_port),
             ..Default::default()
         }),

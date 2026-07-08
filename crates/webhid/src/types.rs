@@ -183,7 +183,7 @@ pub enum IpcResponse {
     InputReport { id: u32, device_id: String, report_id: u8, data: Vec<u8> },
     /// Sent once when a client connects, announcing daemon capabilities
     /// (currently just the WebSocket data-plane port).
-    Hello { id: u32, ws_port: u16 },
+    Handshake { id: u32, ws_port: u16 },
 }
 
 impl IpcResponse {
@@ -197,7 +197,7 @@ impl IpcResponse {
             | Self::DeviceConnected { id, .. }
             | Self::DeviceDisconnected { id, .. }
             | Self::InputReport { id, .. }
-            | Self::Hello { id, .. } => *id,
+            | Self::Handshake { id, .. } => *id,
         }
     }
 }
@@ -580,7 +580,7 @@ mod tests {
             serial_number: None, usage_page: None, usage: None, device_id: "".into(),
             collections: vec![],
         }}.id(), 0);
-        assert_eq!(IpcResponse::Hello { id: 0, ws_port: 8080 }.id(), 0);
+        assert_eq!(IpcResponse::Handshake { id: 0, ws_port: 8080 }.id(), 0);
     }
 
     // ── JSON round-trips ────────────────────────────────────────────────
@@ -634,7 +634,7 @@ mod tests {
             IpcResponse::Ok { id: 3 },
             IpcResponse::Data { id: 4, data: vec![0x01, 0x02] },
             IpcResponse::Error { id: 5, message: "fail".into() },
-            IpcResponse::Hello { id: 0, ws_port: 31337 },
+            IpcResponse::Handshake { id: 0, ws_port: 31337 },
         ];
         for resp in cases {
             let json = serde_json::to_string(&resp).unwrap();
