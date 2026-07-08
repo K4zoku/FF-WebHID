@@ -18,31 +18,34 @@
 <Wix xmlns='http://wixtoolset.org/schemas/v4/wxs'>
   <Package Name='WebHID'
            Manufacturer='K4zoku'
-           Language='1033' Codepage='65001'
+           Language='1033'
            Version='$(var.Version)'
            UpgradeCode='7c7e8f5a-3d2b-4e6f-9a1c-8b5d6e7f8a90'>
 
-    <SummaryInformation Codepage='65001'
-                        Description='WebHID daemon + native messaging host'
+    <SummaryInformation Description='WebHID daemon + native messaging host'
                         Manufacturer='K4zoku'/>
 
     <Media Id='1' Cabinet='webhid.cab' EmbedCab='yes'/>
 
-    <!-- Major upgrade: uninstall older versions before installing new -->
-    <MajorUpgrade DowngradeErrorMessage='A newer version of WebHID is already installed.'
-                  AllowSameVersion='yes'/>
+    <MajorUpgrade DowngradeErrorMessage='A newer version of WebHID is already installed.'/>
 
     <Feature Id='Complete' Title='WebHID' Level='1'>
       <ComponentGroupRef Id='Binaries'/>
       <ComponentGroupRef Id='Registry'/>
-      <ComponentGroupRef Id='ScheduledTask'/>
     </Feature>
 
-    <!-- Install conditions -->
-    <Launch Condition='Privileged'>This installer requires administrator privileges.</Launch>
+    <Launch Condition='Privileged' Message='This installer requires administrator privileges.'/>
+
+    <CustomAction Id='CreateTask'
+                  ExeCommand='powershell.exe -NoProfile -NonInteractive -Command &quot;Register-ScheduledTask -TaskName \&quot;WebHID Daemon\&quot; -Action (New-ScheduledTaskAction -Execute \&quot;[INSTALLDIR]webhid-daemon.exe\&quot;) -Trigger (New-ScheduledTaskTrigger -AtLogOn) -Settings (New-ScheduledTaskSettingsSet -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)) -Force&quot;'
+                  Return='check'/>
+    <CustomAction Id='DeleteTask'
+                  ExeCommand='powershell.exe -NoProfile -NonInteractive -Command &quot;Unregister-ScheduledTask -TaskName \&quot;WebHID Daemon\&quot; -Confirm:$false&quot;'
+                  Return='ignore'/>
 
     <InstallExecuteSequence>
-      <ScheduleReboot After='InstallFinalize'/>
+      <Custom Action='CreateTask' After='InstallFiles'>NOT Installed</Custom>
+      <Custom Action='DeleteTask' Before='RemoveFiles'>Installed</Custom>
     </InstallExecuteSequence>
   </Package>
 
@@ -59,6 +62,12 @@
           <File Id='NMJson' Name='webhid_server.json'
                 Source='$(var.BuildDir)\webhid_server.json' KeyPath='yes'/>
         </Component>
+        <Component Id='NMRegistry' Guid='a1b2c3d4-1111-2222-3333-444455559999'>
+          <RegistryKey Root='HKLM'
+                       Key='SOFTWARE\Mozilla\NativeMessagingHosts\webhid_server'>
+            <RegistryValue Type='string' Value='[INSTALLDIR]webhid_server.json' KeyPath='yes'/>
+          </RegistryKey>
+        </Component>
       </Directory>
     </StandardDirectory>
   </Fragment>
@@ -69,34 +78,8 @@
       <ComponentRef Id='NMBin'/>
       <ComponentRef Id='NMManifest'/>
     </ComponentGroup>
-  </Fragment>
-
-  <Fragment>
     <ComponentGroup Id='Registry'>
-      <Component Id='NMRegistry' Directory='INSTALLDIR'
-                 Guid='a1b2c3d4-1111-2222-3333-444455559999'>
-        <RegistryKey Root='HKLM'
-                     Key='SOFTWARE\Mozilla\NativeMessagingHosts\webhid_server'>
-          <RegistryValue Type='string' Value='[INSTALLDIR]webhid_server.json' KeyPath='yes'/>
-        </RegistryKey>
-      </Component>
-    </ComponentGroup>
-  </Fragment>
-
-  <Fragment>
-    <ComponentGroup Id='ScheduledTask'>
-      <Component Id='CreateScheduledTask' Directory='INSTALLDIR'
-                 Guid='a1b2c3d4-aaaa-bbbb-cccc-ddddeeeeffff'>
-        <!-- Create scheduled task at install time; runs at every user logon -->
-        <CustomAction Id='CreateTask' ExeCommand='powershell.exe -NoProfile -NonInteractive -Command &quot;Register-ScheduledTask -TaskName \&quot;WebHID Daemon\&quot; -Action (New-ScheduledTaskAction -Execute \&quot;[INSTALLDIR]webhid-daemon.exe\&quot;) -Trigger (New-ScheduledTaskTrigger -AtLogOn) -Settings (New-ScheduledTaskSettingsSet -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)) -Force&quot;'
-                      Return='check'/>
-        <CustomAction Id='DeleteTask' ExeCommand='powershell.exe -NoProfile -NonInteractive -Command &quot;Unregister-ScheduledTask -TaskName \&quot;WebHID Daemon\&quot; -Confirm:$false&quot;'
-                      Return='ignore'/>
-        <InstallExecuteSequence>
-          <Custom Action='CreateTask' After='InstallFiles' Condition='NOT Installed'/>
-          <Custom Action='DeleteTask' Before='RemoveFiles' Condition='Installed'/>
-        </InstallExecuteSequence>
-      </Component>
+      <ComponentRef Id='NMRegistry'/>
     </ComponentGroup>
   </Fragment>
 </Wix>

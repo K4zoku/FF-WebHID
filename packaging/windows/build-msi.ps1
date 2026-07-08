@@ -61,7 +61,7 @@ if (-not $wix) {
   $toolsDir = Join-Path $RepoRoot 'tools'
   $wixExe = Join-Path $toolsDir 'wix.exe'
   if (Test-Path $wixExe) { $wix = $wixExe }
-  else { throw "wix.exe not found. Install WiX v6: dotnet tool install --global wix --version 6.0.0" }
+  else { throw "wix.exe not found. Install WiX v6.0.2: dotnet tool install --global wix --version 6.0.2" }
 }
 
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null

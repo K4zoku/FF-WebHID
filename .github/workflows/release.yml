@@ -92,8 +92,8 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          # Install WiX v6
-          dotnet tool install --global wix --version 6.0.0
+          # Install WiX v6.0.2 (latest v6 patch; v6.0.0 has a build bug, v7+ requires OSMF EULA)
+          dotnet tool install --global wix --version 6.0.2
           $env:PATH = "$env:USERPROFILE\.dotnet\tools;$env:PATH"
           $pkg = Get-Content package.json -Raw | ConvertFrom-Json
           ./packaging/windows/build-msi.ps1 -Version $pkg.version -OutputDir artifacts
