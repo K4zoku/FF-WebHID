@@ -22,8 +22,42 @@ on:
   workflow_dispatch:
 
 jobs:
+  build-addon:
+    name: Build Addon
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.head_commit.modified, 'addon/') ||
+      contains(github.event.head_commit.modified, '.github/workflows/build.yml') ||
+      contains(github.event.head_commit.added, 'addon/') ||
+      contains(github.event.head_commit.added, '.github/workflows/build.yml')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates -> target
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack && rustup target add wasm32-unknown-unknown
+
+      - name: Build Addon XPI
+        run: make build-addon
+
+      - name: Upload XPI
+        uses: actions/upload-artifact@v7
+        with:
+          name: webhid-addon
+          path: dist/webhid-addon.xpi
+
   build:
     name: Build (${{ matrix.os }} ${{ matrix.arch }})
+    needs: []
     strategy:
       fail-fast: false
       matrix:
@@ -36,7 +70,7 @@ jobs:
           - os: ubuntu-latest
             arch: aarch64
             artifact_name: webhid-linux-aarch64
-            apt_deps: libudev-dev zip gcc-aarch64-linux-gnu libudev-dev:arm64
+            apt_deps: libudev-dev zip gcc-aarch64-linux-gnu
             rust_target: aarch64-unknown-linux-gnu
           - os: windows-latest
             arch: x86_64
@@ -58,26 +92,29 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
+
       - name: Set up arm64 cross-compilation sources for libudev
         if: runner.os == 'Linux' && matrix.rust_target == 'aarch64-unknown-linux-gnu'
         run: |
           sudo dpkg --add-architecture arm64
-            # Pin existing deb822 sources to amd64 only (noble uses this format)
           if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
             sudo sed -i '/^Types:/a Architectures: amd64' /etc/apt/sources.list.d/ubuntu.sources
           fi
-          # Add arm64 sources from ports.ubuntu.com
           CODENAME="$(lsb_release -cs)"
           sudo tee /etc/apt/sources.list.d/arm64-ports.list >/dev/null <<EOF
           deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ ${CODENAME} main restricted universe multiverse
           deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ ${CODENAME}-updates main restricted universe multiverse
           deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ ${CODENAME}-security main restricted universe multiverse
           EOF
+
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y ${{ matrix.apt_deps }}
+          if [ -n "${{ matrix.rust_target }}" ] && [ "${{ matrix.rust_target }}" = "aarch64-unknown-linux-gnu" ]; then
+            sudo apt-get install -y libudev-dev:arm64
+          fi
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -104,21 +141,6 @@ jobs:
             make build
           fi
         shell: bash
-
-      - name: Install wasm-pack
-        if: runner.os == 'Linux' && matrix.arch == 'x86_64'
-        run: cargo install wasm-pack && rustup target add wasm32-unknown-unknown
-
-      - name: Build Addon XPI
-        if: runner.os == 'Linux' && matrix.arch == 'x86_64'
-        run: make build-addon
-
-      - name: Upload XPI
-        if: runner.os == 'Linux' && matrix.arch == 'x86_64'
-        uses: actions/upload-artifact@v7
-        with:
-          name: webhid-addon
-          path: dist/webhid-addon.xpi
 
       - name: Prepare Artifacts (Linux)
         if: runner.os == 'Linux'

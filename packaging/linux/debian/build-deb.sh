@@ -3,7 +3,7 @@
 # Usage: ./build-deb.sh [version] [arch] [rust_target]
 #   arch: amd64 (default) or arm64
 #   rust_target: empty (native) or aarch64-unknown-linux-gnu
-# Requires: cargo, dpkg-deb
+# Binaries must already be built — this script only packages them.
 set -euo pipefail
 
 VERSION="${1:-}"
@@ -15,17 +15,19 @@ if [ -z "$VERSION" ]; then
   VERSION=$(grep -oP '"version":\s*"\K[^"]+' "$REPO_ROOT/package.json")
 fi
 
-echo "==> Building webhid $VERSION for $ARCH (target: ${RUST_TARGET:-native})"
-
-# Build Rust binaries
-echo "==> cargo build --release"
+# Locate pre-built binaries
 if [ -n "$RUST_TARGET" ]; then
-  cargo build --release --target "$RUST_TARGET" --manifest-path "$REPO_ROOT/crates/Cargo.toml"
   BIN_DIR="$REPO_ROOT/crates/target/$RUST_TARGET/release"
 else
-  cargo build --release --manifest-path "$REPO_ROOT/crates/Cargo.toml"
   BIN_DIR="$REPO_ROOT/crates/target/release"
 fi
+
+if [ ! -f "$BIN_DIR/webhid-daemon" ]; then
+  echo "ERROR: webhid-daemon not found in $BIN_DIR — build first with cargo build --release"
+  exit 1
+fi
+
+echo "==> Packaging webhid $VERSION for $ARCH (binaries from $BIN_DIR)"
 
 PKGDIR=$(mktemp -d)
 trap 'rm -rf "$PKGDIR"' EXIT
