@@ -9,7 +9,7 @@ set -euo pipefail
 VERSION="${1:-}"
 ARCH="${2:-x86_64}"
 RUST_TARGET="${3:-}"
-REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 
 if [ -z "$VERSION" ]; then
   VERSION=$(grep -oP '"version":\s*"\K[^"]+' "$REPO_ROOT/package.json")
