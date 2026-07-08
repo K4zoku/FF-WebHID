@@ -114,7 +114,7 @@ pub struct Report {
 }
 
 /// Information about a connected HID device, derived from hidapi + sysfs.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct DeviceInfo {
     pub vendor_id: u16,
     pub product_id: u16,
@@ -137,6 +137,7 @@ pub struct DeviceInfo {
     pub report_descriptor: Option<Vec<u8>>,
     /// Parsed collection metadata (populated by daemon when possible).
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[rkyv(with = rkyv::with::Skip)]
     pub collections: Option<Vec<Collection>>,
 }
 
@@ -149,7 +150,7 @@ pub struct DeviceInfo {
 // ---------------------------------------------------------------------------
 
 /// Request sent from the native-messaging process to the daemon.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[serde(tag = "type")]
 pub enum IpcRequest {
     /// List every connected HID device.
@@ -189,7 +190,7 @@ impl IpcRequest {
 }
 
 /// A response or unsolicited event sent from the daemon to the native-messaging process.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[serde(tag = "type")]
 pub enum IpcResponse {
     // Responses (id mirrors the matching request)
