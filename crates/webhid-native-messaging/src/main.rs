@@ -126,7 +126,7 @@ async fn main() -> anyhow::Result<()> {
         return Err(anyhow::anyhow!("IPC not supported on this platform"));
     };
 
-    let (daemon_r, daemon_w) = daemon.into_split();
+    let (daemon_r, daemon_w) = tokio::io::split(daemon);
     let mut daemon_r = BufReader::new(daemon_r);
     let mut daemon_w = BufWriter::new(daemon_w);
 
