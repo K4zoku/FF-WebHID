@@ -39,6 +39,15 @@ fn resolve_socket_path() -> String {
     DEFAULT_SOCKET.to_string()
 }
 
+#[cfg(unix)]
+fn socket_mode(path: &str) -> u32 {
+    if path.starts_with("/run/user/") || path.contains("/run/user/") {
+        0o600
+    } else {
+        0o666
+    }
+}
+
 #[cfg(target_os = "windows")]
 const DEFAULT_PIPE: &str = r"\\.\pipe\webhid";
 
@@ -87,7 +96,7 @@ async fn main() -> anyhow::Result<()> {
 
         {
             use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(0o666))
+            std::fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(socket_mode(&socket_path)))
                 .context("set socket permissions")?;
         }
 
