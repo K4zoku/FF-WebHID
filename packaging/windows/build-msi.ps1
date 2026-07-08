@@ -6,20 +6,25 @@
 .DESCRIPTION
   - cargo build --release (daemon + native-messaging host)
   - Resolves the NM manifest template ([INSTALLDIR] placeholder)
-  - Compiles the WiX source to webhid-<version>-x86_64.msi
+  - Compiles the WiX source to webhid-windows-<arch>-v<version>.msi
 
 .PARAMETER Version
   MSI ProductVersion. Pulled from package.json if omitted.
+
+.PARAMETER Arch
+  Target architecture: x86_64 (default) or aarch64.
 
 .PARAMETER OutputDir
   Where to put the MSI. Default: dist\
 
 .EXAMPLE
   .\build-msi.ps1
+  .\build-msi.ps1 -Arch aarch64
 #>
 [CmdletBinding()]
 param(
   [string]$Version,
+  [string]$Arch = "x86_64",
   [string]$OutputDir = (Join-Path $PSScriptRoot '..\..\dist')
 )
 
@@ -33,7 +38,7 @@ if (-not $Version) {
   $pkg = Get-Content (Join-Path $RepoRoot 'package.json') -Raw | ConvertFrom-Json
   $Version = $pkg.version
 }
-Write-Host "==> WebHID MSI build, version $Version"
+Write-Host "==> WebHID MSI build, version $Version arch $Arch"
 
 # Stage binaries + manifest into a build dir that WiX references as $(var.BuildDir)
 $Stage = Join-Path $RepoRoot 'packaging\windows\stage'
@@ -41,10 +46,16 @@ if (Test-Path $Stage) { Remove-Item $Stage -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $Stage | Out-Null
 
 Write-Host '==> cargo build --release'
-& cargo build --release --manifest-path (Join-Path $Crates 'Cargo.toml')
+$rustTarget = if ($Arch -eq "aarch64") { "aarch64-pc-windows-msvc" } else { "" }
+if ($rustTarget) {
+  & cargo build --release --target $rustTarget --manifest-path (Join-Path $Crates 'Cargo.toml')
+  $Target = Join-Path $Crates "target\$rustTarget\release"
+} else {
+  & cargo build --release --manifest-path (Join-Path $Crates 'Cargo.toml')
+  $Target = Join-Path $Crates 'target\release'
+}
 if ($LASTEXITCODE -ne 0) { throw "cargo build failed (exit $LASTEXITCODE)" }
 
-$Target = Join-Path $Crates 'target\release'
 Copy-Item (Join-Path $Target 'webhid-daemon.exe')           $Stage
 Copy-Item (Join-Path $Target 'webhid-native-messaging.exe') $Stage
 
@@ -65,12 +76,13 @@ if (-not $wix) {
 }
 
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
-$msiName = "webhid-$Version-x86_64.msi"
+$msiName = "webhid-windows-${Arch}-v${Version}.msi"
 $msiPath = Join-Path $OutputDir $msiName
 
+$wixArch = if ($Arch -eq "aarch64") { "arm64" } else { "x64" }
 Write-Host "==> wix build -> $msiPath"
 & $wix build `
-  -arch x64 `
+  -arch $wixArch `
   -d "Version=$Version" `
   -d "BuildDir=$Stage" `
   -o $msiPath `

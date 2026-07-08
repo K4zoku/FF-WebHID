@@ -23,20 +23,36 @@ on:
 
 jobs:
   build:
-    name: Build (${{ matrix.os }})
+    name: Build (${{ matrix.os }} ${{ matrix.arch }})
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
+            arch: x86_64
             artifact_name: webhid-linux-x86_64
             apt_deps: libudev-dev zip
+            rust_target: ""
+          - os: ubuntu-latest
+            arch: aarch64
+            artifact_name: webhid-linux-aarch64
+            apt_deps: libudev-dev zip
+            rust_target: aarch64-unknown-linux-gnu
           - os: windows-latest
+            arch: x86_64
             artifact_name: webhid-windows-x86_64
             apt_deps: ""
+            rust_target: ""
+          - os: windows-latest
+            arch: aarch64
+            artifact_name: webhid-windows-aarch64
+            apt_deps: ""
+            rust_target: aarch64-pc-windows-msvc
           - os: macos-latest
+            arch: x86_64
             artifact_name: webhid-macos-universal
             apt_deps: ""
+            rust_target: ""
 
     runs-on: ${{ matrix.os }}
     steps:
@@ -51,6 +67,8 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
@@ -58,18 +76,24 @@ jobs:
           workspaces: crates -> target
 
       - name: Build Rust binaries
-        run: make build
+        run: |
+          if [ -n "${{ matrix.rust_target }}" ]; then
+            cargo build --release --target ${{ matrix.rust_target }} --manifest-path crates/Cargo.toml
+          else
+            make build
+          fi
+        shell: bash
 
       - name: Install wasm-pack
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.arch == 'x86_64'
         run: cargo install wasm-pack && rustup target add wasm32-unknown-unknown
 
       - name: Build Addon XPI
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.arch == 'x86_64'
         run: make build-addon
 
       - name: Upload XPI
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.arch == 'x86_64'
         uses: actions/upload-artifact@v7
         with:
           name: webhid-addon
@@ -78,7 +102,18 @@ jobs:
       - name: Prepare Artifacts (Linux)
         if: runner.os == 'Linux'
         run: |
-          make install-system DESTDIR=artifacts PREFIX=/usr/local
+          if [ -n "${{ matrix.rust_target }}" ]; then
+            BIN_DIR="crates/target/${{ matrix.rust_target }}/release"
+          else
+            BIN_DIR="crates/target/release"
+          fi
+          mkdir -p artifacts/usr/local/bin artifacts/usr/local/lib/mozilla/native-messaging-hosts artifacts/etc/systemd/system
+          cp "$BIN_DIR/webhid-daemon" artifacts/usr/local/bin/
+          cp "$BIN_DIR/webhid-native-messaging" artifacts/usr/local/bin/
+          sed 's|{{NM_BIN}}|/usr/local/bin/webhid-native-messaging|g' \
+            manifests/webhid_server.json > artifacts/usr/local/lib/mozilla/native-messaging-hosts/webhid_server.json
+          sed 's|{{DAEMON_BIN}}|/usr/local/bin/webhid-daemon|g' \
+            manifests/webhid-daemon.service > artifacts/etc/systemd/system/webhid-daemon.service
 
       - name: Prepare Artifacts (macOS)
         if: runner.os == 'macOS'
@@ -95,10 +130,15 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path artifacts/bin, artifacts/manifests
-          Copy-Item crates/target/release/webhid-daemon.exe artifacts/bin/
-          Copy-Item crates/target/release/webhid-native-messaging.exe artifacts/bin/
-          Copy-Item manifests/webhid_server.windows.json artifacts/manifests/webhid_server.json
+          New-Item -ItemType Directory -Force -Path artifacts-portable/bin, artifacts-portable/manifests
+          if ("${{ matrix.rust_target }}") {
+            $binDir = "crates/target/${{ matrix.rust_target }}/release"
+          } else {
+            $binDir = "crates/target/release"
+          }
+          Copy-Item "$binDir/webhid-daemon.exe" artifacts-portable/bin/
+          Copy-Item "$binDir/webhid-native-messaging.exe" artifacts-portable/bin/
+          Copy-Item manifests/webhid_server.windows.json artifacts-portable/manifests/webhid_server.json
 
       - name: Build MSI (Windows)
         if: runner.os == 'Windows'
@@ -107,9 +147,24 @@ jobs:
           dotnet tool install --global wix --version 6.0.2
           $env:PATH = "$env:USERPROFILE\.dotnet\tools;$env:PATH"
           $pkg = Get-Content package.json -Raw | ConvertFrom-Json
-          ./packaging/windows/build-msi.ps1 -Version $pkg.version -OutputDir artifacts
+          ./packaging/windows/build-msi.ps1 -Version $pkg.version -Arch ${{ matrix.arch }} -OutputDir artifacts-msi
 
-      - name: Upload Artifacts
+      - name: Upload Portable Artifacts (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: artifacts-portable/
+
+      - name: Upload MSI Artifacts (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact_name }}-msi
+          path: artifacts-msi/
+
+      - name: Upload Artifacts (Linux/macOS)
+        if: runner.os != 'Windows'
         uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact_name }}
