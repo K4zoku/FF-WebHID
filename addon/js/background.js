@@ -1,20 +1,14 @@
 let _deviceCache = [];
 
 // ---------------------------------------------------------------------------
-// Base64 helpers  (Uint8Array ↔ base64 string)
+// Base64 encode helper  (Uint8Array → base64 string — for NM requests only)
+// Decode happens at the final consumer (polyfill) to avoid structured-clone
+// copies of typed arrays across context boundaries.
 // ---------------------------------------------------------------------------
 
 function base64Encode(bytes) {
   const binary = String.fromCharCode(...bytes);
   return btoa(binary);
-}
-
-function base64Decode(str) {
-  const binary = atob(str);
-  const len = binary.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
 }
 
 const NativeMessaging = {
@@ -33,11 +27,9 @@ const NativeMessaging = {
       logger.debug('[nm] connected');
 
       this.port.onMessage.addListener((message) => {
-        // Decode base64 `data` back to a number array so downstream
-        // consumers (bridge / polyfill) see the same shape as before.
-        if (typeof message.data === 'string') {
-          message.data = Array.from(base64Decode(message.data));
-        }
+        // `data` arrives as a base64 string and is forwarded as-is;
+        // decoding happens at the final consumer (polyfill) to avoid
+        // structured-clone copies of typed arrays.
         if (message.event_type) { this.onMessage(message); return; }
         if (message.id) {
           const p = this._pending.get(message.id);
@@ -140,11 +132,6 @@ const NativeMessaging = {
   onMessage(message) {
     if (message.event_type) {
       if (message.event_type === "input_report") return;
-      // Decode base64 `data` back to a number array so content scripts
-      // (which expect ArrayLike for new Uint8Array(…)) keep working.
-      if (typeof message.data === 'string') {
-        message.data = Array.from(base64Decode(message.data));
-      }
       browser.tabs.query({}).then((tabs) => {
         for (const tab of tabs) {
           browser.tabs
@@ -241,7 +228,7 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true; // keep channel open for async response
 
     case "open":
-      NativeMessaging.openDevice(String.fromCharCode(...request.device_id))
+      NativeMessaging.openDevice(request.device_id)
         .then(sendResponse)
         .catch((e) => sendResponse({ success: false, error: e.message }));
       return true;
@@ -254,9 +241,9 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     case "sendreport":
       NativeMessaging.sendReport(
-        String.fromCharCode(...request.device_id),
+        request.device_id,
         request.report_id || 0,
-        base64Encode(request.data),
+        request.data,
       )
         .then(sendResponse)
         .catch((e) => sendResponse({ success: false, error: e.message }));
@@ -264,7 +251,7 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     case "receivefeaturereport":
       NativeMessaging.receiveFeatureReport(
-        String.fromCharCode(...request.device_id),
+        request.device_id,
         request.report_id,
       )
         .then(sendResponse)
@@ -273,9 +260,9 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     case "sendfeaturereport":
       NativeMessaging.sendFeatureReport(
-        String.fromCharCode(...request.device_id),
+        request.device_id,
         request.report_id || 0,
-        base64Encode(request.data),
+        request.data,
       )
         .then(sendResponse)
         .catch((e) => sendResponse({ success: false, error: e.message }));
@@ -327,8 +314,7 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
           let hashes = result[storageKey] || [];
           // Remove matching hash
           if (request.device_id) {
-            const devIdStr = String.fromCharCode(...request.device_id);
-            hashes = hashes.filter(h => h !== devIdStr);
+            hashes = hashes.filter(h => h !== request.device_id);
             await browser.storage.local.set({ [storageKey]: hashes });
           }
           sendResponse({ success: true, hashes });

@@ -529,7 +529,7 @@
     // Hot-path actions: forward to the Worker (WebSocket) when available.
     // Falls back to NM path if no worker exists (device not opened or WS died).
     if (action === "worker-send" || action === "worker-sendFeature" || action === "worker-receiveFeature") {
-      const deviceId = String.fromCharCode(...(payload.device_id || []));
+      const deviceId = payload.device_id;
       const worker = _workers.get(deviceId);
       if (worker) {
         const wType =
@@ -541,7 +541,7 @@
         cbMap.set(id, (data) => {
           let result;
           if (data.type === 'featureResult') {
-            result = data.error ? { success: false, error: data.error } : { success: true, data: Array.from(data.data) };
+            result = data.error ? { success: false, error: data.error } : { success: true, data: data.data };
           } else {
             result = data.error ? { success: false, error: data.error } : { success: true };
           }
@@ -677,17 +677,14 @@
             return;
           }
           if (data.type === 'inputReport') {
-            // postMessage fallback: forward input report to polyfill
-            const report = data.report;
-            const reportId = report[0];
-            const payloadBytes = report.length > 1 ? Array.from(report.subarray(1)) : [];
+            // postMessage fallback: forward base64-encoded payload to polyfill
             window.postMessage({
               __webhid_bridge: 'evt',
               event: {
                 event_type: 'input_report',
                 device_id: response.device_id,
-                report_id: reportId,
-                data: payloadBytes,
+                report_id: data.reportId,
+                data: data.data,
               }
             }, '*');
             return;
@@ -793,7 +790,7 @@
     await initWasm();
     let collections = null;
     if (_wasmParser) {
-      try { collections = _wasmParser(new Uint8Array(bytes)); } catch (e) {
+      try { collections = _wasmParser(bytes); } catch (e) {
         logger.warn('[bridge] WASM parse failed:', e);
       }
     }

@@ -24,7 +24,9 @@ pub struct DeviceInfo {
     /// This is what the page sees as `deviceId` and what `open()` takes.
     pub device_id: String,
     /// Raw HID report descriptor bytes, when available (from hidapi/sysfs).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Base64‑encoded in human‑readable formats (JSON), raw bytes in binary.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(with = "base64_opt_serde")]
     pub report_descriptor: Option<Vec<u8>>,
 }
 

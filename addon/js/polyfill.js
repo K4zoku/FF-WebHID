@@ -16,6 +16,16 @@
    * @param {Object} device - Device object with vendor_id, product_id, serial_number, path
    * @returns {string} Hex string hash
    */
+  // ── Base64 helper (decode only — encode lives in background.js) ───────
+
+  function base64Decode(str) {
+    const binary = atob(str);
+    const len = binary.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  }
+
   function createDeviceHash(device) {
     const vendorId = String(device.vendor_id || 0);
     const productId = String(device.product_id || 0);
@@ -307,7 +317,7 @@
         if (!event.data || event.data.__webhid_bridge !== "evt") return;
         const detail = event.data.event;
         if (!detail) return;
-        const evDeviceId = detail.device_id ? String.fromCharCode(...detail.device_id) : null;
+        const evDeviceId = detail.device_id;
         if (!evDeviceId || !this.#deviceId || evDeviceId !== this.#deviceId) return;
 
         if (detail.event_type === "webhid-sab") {
@@ -506,15 +516,17 @@
         } catch (e) {
           this.#parsedCollections = null;
         }
-      } else if (deviceInfo.report_descriptor && Array.isArray(deviceInfo.report_descriptor)) {
+      } else if (deviceInfo.report_descriptor) {
         try {
-          const arr = new Uint8Array(deviceInfo.report_descriptor);
+          const arr = typeof deviceInfo.report_descriptor === 'string'
+            ? base64Decode(deviceInfo.report_descriptor)
+            : new Uint8Array(deviceInfo.report_descriptor);
           this.#reportDescriptor = arr;
           // JS parser runs immediately (sync fallback)
           this.#parsedCollections = parseReportDescriptor(arr);
           // Ask bridge (isolated world, CSP-free) for WASM parse: richer output
           const parseId = ++_reqId;
-          window.postMessage({ __webhid_bridge: "parse-descriptor", id: parseId, bytes: Array.from(arr) }, "*");
+          window.postMessage({ __webhid_bridge: "parse-descriptor", id: parseId, bytes: arr }, "*");
           const wasmListener = (event) => {
             if (!event.data || event.data.__webhid_bridge !== "parse-descriptor-result") return;
             if (event.data.id !== parseId) return;
@@ -592,7 +604,7 @@
       }
       try {
         const response = await sendRequest("open", {
-          device_id: this.#internalId.split("").map((c) => c.charCodeAt(0)),
+          device_id: this.#internalId,
           reportSize: this.#maxInputReportSize,
         });
         if (response.success) {
@@ -650,9 +662,9 @@
         const action = this.#hotPath ? "worker-send" : "sendreport";
         logger.debug('[webhid] sendReport reportId=' + reportId + ' len=' + buffer.length + ' hotPath=' + this.#hotPath);
         const response = await sendRequest(action, {
-          device_id: this.#deviceId.split("").map((c) => c.charCodeAt(0)),
+          device_id: this.#deviceId,
           report_id: reportId,
-          data: Array.from(buffer),
+          data: buffer,
         });
         if (response.success) {
           perf.end(t0, '[webhid] sendReport reportId=' + reportId);
@@ -684,12 +696,13 @@
       try {
         const action = this.#hotPath ? "worker-receiveFeature" : "receivefeaturereport";
         const response = await sendRequest(action, {
-          device_id: this.#deviceId.split("").map((c) => c.charCodeAt(0)),
+          device_id: this.#deviceId,
           report_id: reportId,
         });
         if (response.success && response.data) {
-          logger.debug('[webhid] receiveFeatureReport done len=' + response.data.length);
-          return new DataView(new Uint8Array(response.data).buffer);
+          logger.debug('[webhid] receiveFeatureReport done len=' + (typeof response.data === 'string' ? 'base64' : response.data.length));
+          const buf = typeof response.data === 'string' ? base64Decode(response.data) : new Uint8Array(response.data);
+          return new DataView(buf.buffer);
         }
         throw new Error("receiveFeatureReport failed");
       } catch (error) {
@@ -708,9 +721,9 @@
       try {
         const action = this.#hotPath ? "worker-sendFeature" : "sendfeaturereport";
         const response = await sendRequest(action, {
-          device_id: this.#deviceId.split("").map((c) => c.charCodeAt(0)),
+          device_id: this.#deviceId,
           report_id: reportId,
-          data: Array.from(buffer),
+          data: buffer,
         });
         if (response.success) {
           return undefined;
@@ -724,7 +737,7 @@
     async forget() {
       if (this.opened) await this.close();
       await sendRequest("forgetDevice", {
-        device_id: this.#internalId.split("").map((c) => c.charCodeAt(0)),
+        device_id: this.#internalId,
       });
     }
 
@@ -742,10 +755,7 @@
 
           const event_type = detail.event_type;
 
-          // Decode device_id from the event for comparison
-          const evDeviceId = detail.device_id
-            ? String.fromCharCode(...detail.device_id)
-            : null;
+          const evDeviceId = detail.device_id;
 
           // Handle SharedArrayBuffer loop initiation
           if (event_type === "webhid-sab") {
@@ -762,9 +772,11 @@
           if (event_type === "input_report") {
             if (this.#sabDrainActive) return;
             if (evDeviceId && this.#deviceId && evDeviceId !== this.#deviceId) return;
-            const dataBytes = detail.data
-              ? new Uint8Array(detail.data)
-              : new Uint8Array(0);
+            const dataBytes = typeof detail.data === 'string'
+              ? base64Decode(detail.data)
+              : detail.data
+                ? new Uint8Array(detail.data)
+                : new Uint8Array(0);
             this.dispatchEvent(new HIDInputReportEvent('inputreport', {
               device: this,
               reportId: detail.report_id || 0,

@@ -180,14 +180,26 @@ function pushInputBatch(batch) {
   }
 }
 
+function base64Encode(bytes) {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+
 function pushInputBatchPostMessage(batch) {
   let offset = 0, count = 0;
   while (offset + 1 < batch.length) {
     const len = batch[offset] | (batch[offset + 1] << 8);
     offset += 2;
     if (len === 0 || offset + len > batch.length) break;
-    const report = batch.subarray(offset, offset + len);
-    self.postMessage({ type: 'inputReport', report: report.slice() });
+    const reportId = batch[offset];
+    const payloadLen = len - 1;
+    if (payloadLen > 0) {
+      const payload = batch.subarray(offset + 1, offset + len);
+      self.postMessage({ type: 'inputReport', reportId, data: base64Encode(payload) });
+    } else {
+      self.postMessage({ type: 'inputReport', reportId, data: '' });
+    }
     offset += len;
     count++;
   }
@@ -202,7 +214,7 @@ function handleSend(msg, msgType) {
     return;
   }
   const reqId = _nextReqId++;
-  const payload = new Uint8Array(msg.data);
+    const payload = msg.data;
   const frame = new Uint8Array(6 + payload.length);
   frame[0] = msgType;
   frame[1] = reqId & 0xFF; frame[2] = (reqId >> 8) & 0xFF; frame[3] = (reqId >> 16) & 0xFF; frame[4] = (reqId >> 24) & 0xFF;
