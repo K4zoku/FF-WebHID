@@ -205,16 +205,52 @@
         const response = await browser.runtime.sendMessage({
           action: "enumerate",
         });
-        if (response.success) {
+        if (response && response.success) {
           this.devices = response.devices || [];
           await this.renderDevices();
         } else {
-          this.showError("Failed to load devices");
+          // Daemon/NM returned an error — classify it for the user.
+          this.devices = [];
+          const errMsg = response?.error || "Unknown error";
+          const userMsg = this._classifyError(errMsg);
+          logger.error('[WebHID] enumerate failed:', errMsg);
+          this._showMessage(userMsg, true);
         }
       } catch (error) {
-        this.showError("Failed to connect to server");
-        logger.debug("[WebHID]", "Failed to connect to server", error);
+        // NM host unreachable or crashed.
+        this.devices = [];
+        const errMsg = error?.message || String(error);
+        const userMsg = this._classifyError(errMsg);
+        logger.error('[WebHID] enumerate exception:', errMsg);
+        this._showMessage(userMsg, true);
       }
+    }
+
+    // Map low-level error strings to human-readable messages so the user
+    // knows what to fix (install daemon, start service, fix udev rules, …).
+    _classifyError(errMsg) {
+      const e = (errMsg || "").toLowerCase();
+      if (e.includes("nm disconnected") || e.includes("reconnecting"))
+        return "Native messaging host is not responding. Please ensure the WebHID daemon is installed and running.";
+      if (e.includes("permission denied") || e.includes("access denied"))
+        return "Permission denied. The daemon may lack access to HID devices (check udev rules on Linux, or run daemon as admin on Windows).";
+      if (e.includes("no such file") || e.includes("not found") || e.includes("connection refused"))
+        return "Cannot connect to the WebHID daemon. Please install it and ensure the service is running.";
+      if (e.includes("timeout") || e.includes("timed out"))
+        return "Connection to the WebHID daemon timed out. Please check if the daemon is running.";
+      return "Failed to load devices: " + errMsg;
+    }
+
+    // Replace the device list content with a single message (info or error).
+    _showMessage(message, isError = false) {
+      if (!this.dialog) return;
+      const deviceList = this.dialog.querySelector("#webhidDeviceList");
+      if (!deviceList) return;
+      deviceList.innerHTML = "";
+      const div = document.createElement("div");
+      div.className = isError ? "webhid-error" : "webhid-no-devices";
+      div.textContent = message;
+      deviceList.appendChild(div);
     }
 
     createDeviceHash(device) {
@@ -262,8 +298,10 @@
     async renderDevices() {
       if (!this.dialog) return;
       const deviceList = this.dialog.querySelector("#webhidDeviceList");
-      const loading = deviceList.querySelector("#webhidLoading");
-      loading.remove();
+      if (!deviceList) return;
+      // Clear loading text (or any previous content) before rendering.
+      deviceList.innerHTML = "";
+
       if (this.devices.length === 0) {
         deviceList.innerHTML =
           '<div class="webhid-no-devices">No HID devices found</div>';
@@ -462,15 +500,6 @@
     onDeviceCancelled() {
       const event = new CustomEvent("webhid-device-cancelled", { detail: {} });
       window.dispatchEvent(event);
-    }
-
-    showError(message) {
-      if (!this.dialog) return;
-      const deviceList = this.dialog.querySelector("#webhidDeviceList");
-      const span = document.createElement("span");
-      span.className = "webhid-error";
-      span.textContent = message;
-      deviceList.appendChild(span);
     }
   }
 

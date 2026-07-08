@@ -220,3 +220,16 @@
   width: 0;
   height: 0;
 }
+
+.webhid-no-devices,
+.webhid-error {
+  padding: 24px 16px;
+  text-align: center;
+  color: var(--text-muted, #888);
+  font-size: 0.9em;
+  line-height: 1.5;
+}
+
+.webhid-error {
+  color: var(--danger, #f88);
+}
