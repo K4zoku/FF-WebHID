@@ -677,7 +677,7 @@
             return;
           }
           if (data.type === 'inputReport') {
-            // postMessage fallback: forward base64-encoded payload to polyfill
+            const transfer = data.data instanceof ArrayBuffer ? [data.data] : [];
             window.postMessage({
               __webhid_bridge: 'evt',
               event: {
@@ -686,7 +686,7 @@
                 report_id: data.reportId,
                 data: data.data,
               }
-            }, '*');
+            }, '*', transfer);
             return;
           }
           if (data.type === 'error') {

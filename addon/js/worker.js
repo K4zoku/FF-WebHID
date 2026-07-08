@@ -193,15 +193,16 @@ function pushInputBatchPostMessage(batch) {
     const reportId = batch[offset];
     const payloadLen = len - 1;
     if (payloadLen > 0) {
-      const payload = batch.subarray(offset + 1, offset + len);
-      self.postMessage({ type: 'inputReport', reportId, data: base64Encode(payload) });
+      const buf = new ArrayBuffer(payloadLen);
+      new Uint8Array(buf).set(batch.subarray(offset + 1, offset + len));
+      self.postMessage({ type: 'inputReport', reportId, data: buf }, [buf]);
     } else {
-      self.postMessage({ type: 'inputReport', reportId, data: '' });
+      self.postMessage({ type: 'inputReport', reportId, data: null });
     }
     offset += len;
     count++;
   }
-  if (count > 0) logger.debug('[worker] forwarded ' + count + ' reports via postMessage');
+  if (count > 0) logger.debug('[worker] forwarded ' + count + ' reports via postMessage (transfer)');
 }
 
 function handleSend(msg, msgType) {

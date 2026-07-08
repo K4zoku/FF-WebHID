@@ -1,5 +1,43 @@
 let _deviceCache = [];
 
+/** device_id → Set<tabId> */
+const _deviceTabMap = new Map();
+
+function registerDeviceTab(deviceId, tabId) {
+  if (!deviceId || tabId == null) return;
+  let tabs = _deviceTabMap.get(deviceId);
+  if (!tabs) { tabs = new Set(); _deviceTabMap.set(deviceId, tabs); }
+  tabs.add(tabId);
+  logger.debug(`[bg] register device ${deviceId} → tab ${tabId} (owners: ${tabs.size})`);
+}
+
+function unregisterDeviceTab(deviceId, tabId) {
+  if (!deviceId || tabId == null) return;
+  const tabs = _deviceTabMap.get(deviceId);
+  if (!tabs) return;
+  tabs.delete(tabId);
+  if (tabs.size === 0) _deviceTabMap.delete(deviceId);
+  else _deviceTabMap.set(deviceId, tabs);
+  logger.debug(`[bg] unregister device ${deviceId} ← tab ${tabId} (remaining: ${tabs.size})`);
+}
+
+/** Drop every device→tab entry that points at `tabId` (called on tab close). */
+function purgeTab(tabId) {
+  if (tabId == null) return;
+  for (const [deviceId, tabs] of _deviceTabMap) {
+    if (tabs.delete(tabId) && tabs.size === 0) _deviceTabMap.delete(deviceId);
+  }
+}
+
+/** Resolve the set of tabIds that should receive an event for `deviceId`. */
+function tabsForEvent(message) {
+  // Handshake and other non-device-scoped events go to every tab.
+  const eventType = message.event_type;
+  if (eventType === 'handshake' || !message.device_id) return null; // null = broadcast
+  const tabs = _deviceTabMap.get(message.device_id);
+  return tabs && tabs.size > 0 ? [...tabs] : null;
+}
+
 // ---------------------------------------------------------------------------
 // Base64 encode helper  (Uint8Array → base64 string — for NM requests only)
 // Decode happens at the final consumer (polyfill) to avoid structured-clone
@@ -166,17 +204,21 @@ const NativeMessaging = {
   },
 
   onMessage(message) {
-    if (message.event_type) {
-      if (message.event_type === "input_report") return;
+    if (!message.event_type) return;
+    // Input reports travel over the WebSocket data plane, never via NM.
+    if (message.event_type === "input_report") return;
+
+    // Targeted delivery: send only to tab(s) that own the device. Falls back
+    // to broadcast for non-device-scoped events (e.g. `handshake`).
+    const targets = tabsForEvent(message);
+    const send = (tabId) => browser.tabs
+      .sendMessage(tabId, { action: "webhid-device-event", event: message })
+      .catch(() => {});
+    if (targets) {
+      for (const tabId of targets) send(tabId);
+    } else {
       browser.tabs.query({}).then((tabs) => {
-        for (const tab of tabs) {
-          browser.tabs
-            .sendMessage(tab.id, {
-              action: "webhid-device-event",
-              event: message,
-            })
-            .catch(() => {});
-        }
+        for (const tab of tabs) send(tab.id);
       });
     }
   },
@@ -198,6 +240,11 @@ browser.runtime.onInstalled.addListener(() => {
 // onInstalled in some Firefox versions during temporary load), pull the
 // setting and connect.
 loadNmHostSetting().then(() => NativeMessaging.connect());
+
+// Clean up device→tab mappings when a tab closes so we don't leak entries
+// (and so a re-opened tab doesn't keep receiving events for a device it no
+// longer owns).
+browser.tabs.onRemoved.addListener((tabId) => purgeTab(tabId));
 
 // ---------------------------------------------------------------------------
 // Security Headers (COOP/COEP): only when SAB data plane is enabled
@@ -277,17 +324,29 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
         });
       return true; // keep channel open for async response
 
-    case "open":
+    case "open": {
+      const tabId = sender.tab?.id;
       NativeMessaging.openDevice(request.device_id)
-        .then(sendResponse)
+        .then((response) => {
+          if (response.success && response.device_id) {
+            registerDeviceTab(response.device_id, tabId);
+          }
+          sendResponse(response);
+        })
         .catch((e) => sendResponse({ success: false, error: e.message }));
       return true;
+    }
 
-    case "close":
+    case "close": {
+      const tabId = sender.tab?.id;
       NativeMessaging.closeDevice(request.device_id)
-        .then(sendResponse)
+        .then((response) => {
+          if (response.success) unregisterDeviceTab(request.device_id, tabId);
+          sendResponse(response);
+        })
         .catch((e) => sendResponse({ success: false, error: e.message }));
       return true;
+    }
 
     case "sendreport":
       NativeMessaging.sendReport(
