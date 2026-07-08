@@ -598,7 +598,7 @@
         if (response.success) {
           this.#opened = true;
           this.#deviceId = String.fromCharCode(...response.data);
-          logger.info('[webhid] open ok, installing sab listener for', this.#deviceId);
+          logger.debug('[webhid] open deviceId=' + this.#deviceId);
           this.#installSabListener();
           this.dispatchEvent(new Event("open"));
           return true;
@@ -611,6 +611,7 @@
 
     async close() {
       if (!this.opened || !this.#deviceId) return;
+      logger.debug('[webhid] close deviceId=' + this.#deviceId);
       try {
         const response = await sendRequest("close", {
           data: this.#deviceId.split("").map((c) => c.charCodeAt(0)),
@@ -641,22 +642,22 @@
         data instanceof DataView
           ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
           : new Uint8Array(data);
+      const t0 = (typeof logger !== 'undefined' && logger._level >= 3) ? performance.now() : 0;
       try {
-        // If the SAB/Worker data plane is not yet ready but SAB is enabled
-        // (worker is connecting), wait briefly for it. Otherwise the first
-        // sendReport goes via the slow NM path while the device response
-        // arrives via the WS path, but the WS sender may not be subscribed
-        // yet, causing the response to be lost and the page to time out.
         if (!this.#hotPath && this.#sabListener) {
           await this.#waitForHotPath(2000);
         }
         const action = this.#hotPath ? "worker-send" : "sendreport";
+        logger.debug('[webhid] sendReport reportId=' + reportId + ' len=' + buffer.length + ' hotPath=' + this.#hotPath);
         const response = await sendRequest(action, {
           device_id: this.#deviceId.split("").map((c) => c.charCodeAt(0)),
           report_id: reportId,
           data: Array.from(buffer),
         });
-        if (response.success) return;
+        if (response.success) {
+          if (t0) logger.debug('[webhid] sendReport done ' + (performance.now() - t0).toFixed(2) + 'ms');
+          return;
+        }
         throw new Error("sendReport failed");
       } catch (error) {
         throw new DOMException(error.message, "NetworkError");
@@ -679,6 +680,7 @@
     async receiveFeatureReport(reportId) {
       if (!this.opened)
         throw new DOMException("Device is not open", "InvalidStateError");
+      logger.debug('[webhid] receiveFeatureReport reportId=' + reportId + ' hotPath=' + this.#hotPath);
       try {
         const action = this.#hotPath ? "worker-receiveFeature" : "receivefeaturereport";
         const response = await sendRequest(action, {
@@ -686,6 +688,7 @@
           report_id: reportId,
         });
         if (response.success && response.data) {
+          logger.debug('[webhid] receiveFeatureReport done len=' + response.data.length);
           return new DataView(new Uint8Array(response.data).buffer);
         }
         throw new Error("receiveFeatureReport failed");
@@ -701,6 +704,7 @@
         data instanceof DataView
           ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
           : new Uint8Array(data);
+      logger.debug('[webhid] sendFeatureReport reportId=' + reportId + ' len=' + buffer.length + ' hotPath=' + this.#hotPath);
       try {
         const action = this.#hotPath ? "worker-sendFeature" : "sendfeaturereport";
         const response = await sendRequest(action, {
@@ -933,6 +937,7 @@
 
   class HID extends EventTarget {
     async getDevices() {
+      logger.debug('[webhid] getDevices');
       try {
         const savedHashes = await getSavedDevices();
         const deviceCache = await getDeviceCache();
@@ -943,8 +948,10 @@
             grantedDevices.push(getOrCreateDevice(device));
           }
         }
+        logger.debug('[webhid] getDevices returned ' + grantedDevices.length + ' device(s)');
         return grantedDevices;
       } catch (error) {
+        logger.warn('[webhid] getDevices error:', error);
         return [];
       }
     }
@@ -952,6 +959,7 @@
     // Per the WebHID spec the argument is an options object: { filters: [] }
     async requestDevice(options = {}) {
       const filters = Array.isArray(options.filters) ? options.filters : [];
+      logger.debug('[webhid] requestDevice filters=' + JSON.stringify(filters));
       return new Promise((resolve, reject) => {
         const id = ++_reqId;
         _pending[id] = (result) => {

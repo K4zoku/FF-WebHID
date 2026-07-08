@@ -9,9 +9,11 @@ const NativeMessaging = {
 
   connect() {
     if (this.port) return Promise.resolve();
+    logger.debug('[nm] connecting to webhid_server...');
     try {
       this.port = browser.runtime.connectNative("webhid_server");
       this._reconnectDelay = 1000;
+      logger.debug('[nm] connected');
 
       this.port.onMessage.addListener((message) => {
         if (message.event_type) { this.onMessage(message); return; }
@@ -42,7 +44,7 @@ const NativeMessaging = {
     if (this._reconnectTimer) return;
     this._reconnectTimer = setTimeout(() => {
       this._reconnectTimer = null;
-      logger.info("[nm] reconnecting...");
+      logger.debug("[nm] reconnecting...");
       this.connect().catch(() => {});
     }, this._reconnectDelay);
     this._reconnectDelay = Math.min(this._reconnectDelay * 2, 10000);
@@ -57,6 +59,7 @@ const NativeMessaging = {
       }
 
       const id = this._nextId++;
+      logger.debug('[nm] sendRequest action=' + request.action + ' id=' + id);
       this._pending.set(id, { resolve, reject });
 
       try {

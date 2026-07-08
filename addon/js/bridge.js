@@ -524,6 +524,7 @@
     if (!event.data || event.data.__webhid_bridge !== "req") return;
 
     const { id, action, payload } = event.data;
+    logger.debug('[bridge] req action=' + action + ' id=' + id);
 
     // Hot-path actions: forward to the Worker (WebSocket) when available.
     // Falls back to NM path if no worker exists (device not opened or WS died).
@@ -608,6 +609,7 @@
 
       if (action === "open" && response.success && response.session_token) {
         const deviceId = String.fromCharCode(...response.data);
+        logger.debug('[bridge] open ok deviceId=' + deviceId + ' wsPort=' + response.ws_port);
         const origin = window.location.origin;
         const siteKey = origin ? `site:${origin}` : null;
 
@@ -743,6 +745,7 @@
 
       if (action === "close") {
         const deviceId = String.fromCharCode(...(payload.data || []));
+        logger.debug('[bridge] close deviceId=' + deviceId);
         const worker = _workers.get(deviceId);
         if (worker) {
           worker.terminate();
@@ -786,10 +789,13 @@
   window.addEventListener("message", async (event) => {
     if (!event.data || event.data.__webhid_bridge !== "parse-descriptor") return;
     const { id, bytes } = event.data;
+    logger.debug('[bridge] parse-descriptor id=' + id + ' len=' + bytes.length);
     await initWasm();
     let collections = null;
     if (_wasmParser) {
-      try { collections = _wasmParser(new Uint8Array(bytes)); } catch (e) {}
+      try { collections = _wasmParser(new Uint8Array(bytes)); } catch (e) {
+        logger.warn('[bridge] WASM parse failed:', e);
+      }
     }
     window.postMessage({ __webhid_bridge: "parse-descriptor-result", id, collections }, "*");
   });

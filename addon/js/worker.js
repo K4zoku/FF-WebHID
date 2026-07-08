@@ -33,6 +33,7 @@ self.onmessage = ({ data: msg }) => {
     if (msg.fireAndForget !== undefined) _fireAndForget = msg.fireAndForget !== false;
     if (msg.perfLogging !== undefined) _perfLogging = msg.perfLogging === true;
     if (msg.logLevel !== undefined) logger._level = msg.logLevel;
+    logger.debug('[worker] settings updated fireAndForget=' + _fireAndForget + ' perfLogging=' + _perfLogging + ' logLevel=' + logger._level);
     return;
   }
   if (msg.type === 'send') return handleSend(msg, MSG_SEND_REPORT);
@@ -49,6 +50,7 @@ function connect(msg) {
   reportSize = msg.reportSize || 64;
   CAPACITY = msg.capacity || 8192;
   if (msg.logLevel !== undefined) logger._level = msg.logLevel;
+  logger.debug('[worker] connect capacity=' + CAPACITY + ' reportSize=' + reportSize + ' SAB=' + SAB_AVAILABLE);
 
   if (SAB_AVAILABLE) {
     sab = new SharedArrayBuffer(12 + CAPACITY * reportSize);
@@ -61,21 +63,23 @@ function connect(msg) {
 }
 
 function _doConnect() {
+  logger.debug('[worker] WS connecting to ws://127.0.0.1:' + _connectMsg.wsPort);
   try {
     ws = new WebSocket(`ws://127.0.0.1:${_connectMsg.wsPort}`, [`webhid.${_connectMsg.token}`]);
   } catch (e) {
+    logger.error('[worker] WS constructor threw:', e.message || e);
     _scheduleReconnect();
     return;
   }
   ws.binaryType = 'arraybuffer';
   ws.onopen = () => {
     _reconnectDelay = 500;
-    // Send SAB only if available; bridge/polyfill will detect null and use
-    // postMessage fallback for input reports.
+    logger.debug('[worker] WS connected');
     self.postMessage({ type: 'ready', sab: SAB_AVAILABLE ? sab : null });
   };
   ws.onerror = (e) => logger.error('[worker] WS ERROR:', e.message || e);
-  ws.onclose = () => {
+  ws.onclose = (e) => {
+    logger.debug('[worker] WS closed code=' + e.code + ' clean=' + e.wasClean);
     for (const [, p] of _pending) p.reject(new Error('ws closed'));
     _pending.clear();
     self.postMessage({ type: 'closed' });
@@ -94,6 +98,7 @@ function _doConnect() {
 
 function _scheduleReconnect() {
   if (_reconnectTimer) return;
+  logger.debug('[worker] scheduling reconnect in ' + _reconnectDelay + 'ms');
   _reconnectTimer = setTimeout(() => {
     _reconnectTimer = null;
     if (!_connectMsg) return;
@@ -102,7 +107,6 @@ function _scheduleReconnect() {
   _reconnectDelay = Math.min(_reconnectDelay * 2, 5000);
 }
 
-// SAB path: write reports into the ring buffer, polyfill drains via Atomics.
 function pushInputBatch(batch) {
   let offset = 0, count = 0;
   while (offset + 1 < batch.length) {
@@ -113,6 +117,7 @@ function pushInputBatch(batch) {
     const next = (head + 1) % CAPACITY;
     if (next === Atomics.load(meta, 1)) {
       Atomics.add(meta, 2, 1);
+      logger.warn('[worker] SAB ring buffer full — dropping report');
       offset += len;
       continue;
     }
@@ -127,27 +132,30 @@ function pushInputBatch(batch) {
     offset += len;
     count++;
   }
-  if (count > 0) Atomics.notify(meta, 0);
+  if (count > 0) {
+    if (_perfLogging) logger.debug('[worker] pushed ' + count + ' reports to SAB');
+    Atomics.notify(meta, 0);
+  }
 }
 
-// Fallback path: postMessage each report to the bridge, which forwards to
-// the polyfill via window.postMessage. Higher latency than SAB but works
-// without COOP/COEP.
 function pushInputBatchPostMessage(batch) {
-  let offset = 0;
+  let offset = 0, count = 0;
   while (offset + 1 < batch.length) {
     const len = batch[offset] | (batch[offset + 1] << 8);
     offset += 2;
     if (len === 0 || offset + len > batch.length) break;
-    // batch[offset..offset+len] = [report_id][...payload]
     const report = batch.subarray(offset, offset + len);
     self.postMessage({ type: 'inputReport', report: report.slice() });
     offset += len;
+    count++;
   }
+  if (_perfLogging && count > 0) logger.debug('[worker] forwarded ' + count + ' reports via postMessage');
 }
 
 function handleSend(msg, msgType) {
+  const t0 = _perfLogging ? performance.now() : 0;
   if (!ws || ws.readyState !== WebSocket.OPEN) {
+    logger.warn('[worker] send: WS not open');
     self.postMessage({ type: 'sendResult', reqId: msg.reqId, error: 'ws not open' });
     return;
   }
@@ -160,11 +168,15 @@ function handleSend(msg, msgType) {
   frame.set(payload, 6);
   if (_fireAndForget) {
     ws.send(frame);
+    if (_perfLogging) logger.debug('[worker] send reportId=' + msg.reportId + ' len=' + payload.length + ' fire-and-forget ' + (performance.now() - t0).toFixed(2) + 'ms');
     self.postMessage({ type: 'sendResult', reqId: msg.reqId, success: true });
     return;
   }
   _pending.set(reqId, {
-    resolve: () => self.postMessage({ type: 'sendResult', reqId: msg.reqId, success: true }),
+    resolve: () => {
+      if (_perfLogging) logger.debug('[worker] send reportId=' + msg.reportId + ' len=' + payload.length + ' acked ' + (performance.now() - t0).toFixed(2) + 'ms');
+      self.postMessage({ type: 'sendResult', reqId: msg.reqId, success: true });
+    },
     reject: (e) => self.postMessage({ type: 'sendResult', reqId: msg.reqId, error: String(e.message || e) }),
   });
   ws.send(frame);
