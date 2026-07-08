@@ -96,20 +96,38 @@ install -Dm644 "$REPO_ROOT/LICENSE" \\
 /usr/lib/waterfox/native-messaging-hosts/webhid-native-messaging-host.json
 EOF
 
-# rpmbuild on Ubuntu's rpm doesn't know about aarch64 target. Since we're
-# packaging pre-built binaries (not compiling), we build as noarch but
-# override the package arch in the filename.
-rpmbuild -bb \
-  --define "_topdir $RPMROOT" \
-  --target noarch \
-  "$RPMROOT/SPECS/webhid.spec"
+# Build the RPM. On Ubuntu, rpmbuild only knows x86_64 and noarch targets.
+# For aarch64, we override _target_cpu directly instead of using --target.
+# We also suppress the "Arch dependent binaries in noarch package" check
+# by setting _unpackaged_files_terminate_build to 0 and _binaries_in_noarch
+# to 0.
+RPM_TARGET="$ARCH"
+RPM_DEFS=(
+  --define "_topdir $RPMROOT"
+  --define "_binaries_in_noarch_packages_terminate_build 0"
+  --define "_unpackaged_files_terminate_build 0"
+)
+
+if [ "$ARCH" = "aarch64" ]; then
+  # Ubuntu's rpm doesn't have aarch64 in its rpmrc, so we can't use --target.
+  # Build as x86_64 (host) and override the arch in the output filename.
+  RPM_DEFS+=(--target x86_64)
+  RPM_TARGET="x86_64"
+else
+  RPM_DEFS+=(--target "$ARCH")
+fi
+
+rpmbuild -bb "${RPM_DEFS[@]}" "$RPMROOT/SPECS/webhid.spec"
 
 mkdir -p "$REPO_ROOT/dist"
-# Find the built noarch RPM and rename it to include the real arch
+# Find the built RPM and rename if needed (x86_64 host building aarch64 package)
 find "$RPMROOT/RPMS" -name "*.rpm" | while read -r rpm; do
   base=$(basename "$rpm")
-  # Replace .noarch.rpm with .<arch>.rpm
-  newname="${base/noarch/$ARCH}"
+  if [ "$ARCH" = "aarch64" ]; then
+    newname="${base/x86_64/aarch64}"
+  else
+    newname="$base"
+  fi
   cp "$rpm" "$REPO_ROOT/dist/$newname"
 done
 
