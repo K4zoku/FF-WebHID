@@ -64,9 +64,20 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ${{ matrix.apt_deps }}
-          # Enable arm64 architecture for cross-compiling libudev
+          # Set up arm64 cross-compilation sources for libudev
           if [ -n "${{ matrix.rust_target }}" ] && [ "${{ matrix.rust_target }}" = "aarch64-unknown-linux-gnu" ]; then
             sudo dpkg --add-architecture arm64
+            # Pin existing deb822 sources to amd64 only (noble uses this format)
+            if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+              sudo sed -i '/^Types:/a Architectures: amd64' /etc/apt/sources.list.d/ubuntu.sources
+            fi
+            # Add arm64 sources from ports.ubuntu.com
+            CODENAME="$(lsb_release -cs)"
+            sudo tee /etc/apt/sources.list.d/arm64-ports.list >/dev/null <<EOF
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ ${CODENAME} main restricted universe multiverse
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ ${CODENAME}-updates main restricted universe multiverse
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ ${CODENAME}-security main restricted universe multiverse
+          EOF
             sudo apt-get update
             sudo apt-get install -y libudev-dev:arm64
           fi
