@@ -37,15 +37,17 @@
     <Launch Condition='Privileged' Message='This installer requires administrator privileges.'/>
 
     <CustomAction Id='CreateTask'
+                  Directory='INSTALLDIR'
                   ExeCommand='powershell.exe -NoProfile -NonInteractive -Command &quot;Register-ScheduledTask -TaskName \&quot;WebHID Daemon\&quot; -Action (New-ScheduledTaskAction -Execute \&quot;[INSTALLDIR]webhid-daemon.exe\&quot;) -Trigger (New-ScheduledTaskTrigger -AtLogOn) -Settings (New-ScheduledTaskSettingsSet -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)) -Force&quot;'
                   Return='check'/>
     <CustomAction Id='DeleteTask'
+                  Directory='INSTALLDIR'
                   ExeCommand='powershell.exe -NoProfile -NonInteractive -Command &quot;Unregister-ScheduledTask -TaskName \&quot;WebHID Daemon\&quot; -Confirm:$false&quot;'
                   Return='ignore'/>
 
     <InstallExecuteSequence>
-      <Custom Action='CreateTask' After='InstallFiles'>NOT Installed</Custom>
-      <Custom Action='DeleteTask' Before='RemoveFiles'>Installed</Custom>
+      <Custom Action='CreateTask' After='InstallFiles' Condition='NOT Installed'/>
+      <Custom Action='DeleteTask' Before='RemoveFiles' Condition='Installed'/>
     </InstallExecuteSequence>
   </Package>
 
