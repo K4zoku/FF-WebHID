@@ -55,13 +55,21 @@ pub async fn start_server(
     port: u16,
     event_tx: broadcast::Sender<webhid::IpcResponse>,
     device_mgr: Arc<DeviceManager>,
+    port_callback: Option<tokio::sync::oneshot::Sender<u16>>,
 ) -> anyhow::Result<()> {
     let addr = format!("127.0.0.1:{port}");
     let listener = TcpListener::bind(&addr)
         .await
         .with_context(|| format!("bind WebSocket server on {addr}"))?;
 
-    log::info!("WebSocket server listening on {addr}");
+    let actual_port = listener.local_addr().unwrap().port();
+    log::info!("WebSocket server listening on 127.0.0.1:{actual_port}");
+
+    // Send the actual bound port back to the caller (for --nm-host mode
+    // where port 0 = random).
+    if let Some(tx) = port_callback {
+        let _ = tx.send(actual_port);
+    }
 
     loop {
         match listener.accept().await {

@@ -61,10 +61,23 @@ async fn main() -> anyhow::Result<()> {
 
     init_logger();
 
-    let ws_port: u16 = std::env::var("WEBHID_WS_PORT")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(DEFAULT_WS_PORT);
+    // --nm-host mode: daemon acts as the native messaging host directly,
+    // speaking the NM protocol on stdin/stdout (no separate NM host binary,
+    // no IPC socket). This eliminates 1 IPC hop + 2 copies per frame.
+    // Requires the daemon to run as the user (with udev rules for hidraw).
+    // WS port is random to avoid conflicts with a root daemon instance.
+    let nm_host_mode = std::env::args().any(|a| a == "--nm-host");
+
+    let ws_port: u16 = if nm_host_mode {
+        // Bind to port 0 → OS assigns a random free port.
+        // We'll read it back after binding.
+        0
+    } else {
+        std::env::var("WEBHID_WS_PORT")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(DEFAULT_WS_PORT)
+    };
 
     let (event_tx, _) = broadcast::channel::<IpcResponse>(EVENT_CAPACITY);
 
@@ -72,14 +85,33 @@ async fn main() -> anyhow::Result<()> {
 
     let device_mgr = Arc::new(DeviceManager::new(event_tx.clone()));
 
-    {
+    // Start WS server and get the actual bound port.
+    let actual_ws_port = {
         let event_tx_clone = event_tx.clone();
         let device_mgr_clone = Arc::clone(&device_mgr);
+        let (port_tx, port_rx) = tokio::sync::oneshot::channel();
         tokio::spawn(async move {
-            if let Err(e) = websocket::start_server(ws_port, event_tx_clone, device_mgr_clone).await {
-                log::error!("WebSocket server error: {e:#}");
+            match websocket::start_server(ws_port, event_tx_clone, device_mgr_clone, Some(port_tx)).await {
+                Ok(_) => {}
+                Err(e) => log::error!("WebSocket server error: {e:#}"),
             }
         });
+        port_rx.await.unwrap_or(DEFAULT_WS_PORT)
+    };
+
+    if nm_host_mode {
+        log::info!("running in --nm-host mode (stdin/stdout, no IPC socket)");
+        log::info!("WebSocket server on port {actual_ws_port} (random)");
+
+        // In NM-host mode, stdin/stdout ARE the IPC channel.
+        // The daemon reads NmRequest from stdin and writes NmResponse to stdout,
+        // exactly like the thin forwarder did — but without the extra hop.
+        let stdin = tokio::io::stdin();
+        let stdout = tokio::io::stdout();
+        let rx = event_tx.subscribe();
+        let cid = 0; // single client in NM-host mode
+        client::handle(stdin, cid, device_mgr, rx, actual_ws_port).await?;
+        return Ok(());
     }
 
     #[cfg(unix)]
@@ -102,7 +134,7 @@ async fn main() -> anyhow::Result<()> {
         }
 
         log::info!("webhid-daemon listening on {socket_path}");
-        log::info!("WebSocket server on port {ws_port}");
+        log::info!("WebSocket server on port {actual_ws_port}");
 
         let mut next_client_id: u64 = 0;
         loop {
@@ -114,7 +146,7 @@ async fn main() -> anyhow::Result<()> {
                     let rx = event_tx.subscribe();
                     tokio::spawn(async move {
                         log::info!("[client {cid}] connected");
-                        if let Err(e) = client::handle(stream, cid, mgr, rx, ws_port).await {
+                        if let Err(e) = client::handle(stream, cid, mgr, rx, actual_ws_port).await {
                             log::warn!("[client {cid}] error: {e:#}");
                         }
                         log::info!("[client {cid}] disconnected");
@@ -132,7 +164,7 @@ async fn main() -> anyhow::Result<()> {
             .unwrap_or_else(|_| DEFAULT_PIPE.to_string());
 
         log::info!("webhid-daemon listening on {pipe_name}");
-        log::info!("WebSocket server on port {ws_port}");
+        log::info!("WebSocket server on port {actual_ws_port}");
 
         let mut next_client_id: u64 = 0;
         loop {
@@ -147,7 +179,7 @@ async fn main() -> anyhow::Result<()> {
             let rx = event_tx.subscribe();
             tokio::spawn(async move {
                 log::info!("[client {cid}] connected");
-                if let Err(e) = client::handle(server, cid, mgr, rx, ws_port).await {
+                if let Err(e) = client::handle(server, cid, mgr, rx, actual_ws_port).await {
                     log::warn!("[client {cid}] error: {e:#}");
                 }
                 log::info!("[client {cid}] disconnected");
@@ -157,7 +189,7 @@ async fn main() -> anyhow::Result<()> {
 
     #[cfg(not(any(unix, windows)))]
     {
-        log::info!("WebSocket server on port {ws_port}");
+        log::info!("WebSocket server on port {actual_ws_port}");
         log::info!("IPC not supported on this platform");
         tokio::signal::ctrl_c().await?;
         Ok(())
