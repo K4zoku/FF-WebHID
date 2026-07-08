@@ -206,10 +206,21 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact_name }}
-          path: |
-            artifacts/
-            dist/*.deb
-            dist/*.rpm
+          path: artifacts/
+
+      - name: Upload .deb (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact_name }}-deb
+          path: dist/*.deb
+
+      - name: Upload .rpm (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact_name }}-rpm
+          path: dist/*.rpm
 
   release:
     name: Create GitHub Release
@@ -270,6 +281,30 @@ jobs:
           name: webhid-macos-universal
           path: artifacts-macos/
 
+      - name: Download Linux x86_64 .deb
+        uses: actions/download-artifact@v8
+        with:
+          name: webhid-linux-x86_64-deb
+          path: debs-x86_64/
+
+      - name: Download Linux aarch64 .deb
+        uses: actions/download-artifact@v8
+        with:
+          name: webhid-linux-aarch64-deb
+          path: debs-aarch64/
+
+      - name: Download Linux x86_64 .rpm
+        uses: actions/download-artifact@v8
+        with:
+          name: webhid-linux-x86_64-rpm
+          path: rpms-x86_64/
+
+      - name: Download Linux aarch64 .rpm
+        uses: actions/download-artifact@v8
+        with:
+          name: webhid-linux-aarch64-rpm
+          path: rpms-aarch64/
+
       - name: Resolve tag name
         id: tag
         run: echo "name=${{ github.event.inputs.tag || github.ref_name }}" >> $GITHUB_OUTPUT
@@ -280,9 +315,9 @@ jobs:
         run: |
           VER=${{ steps.tag.outputs.name }}
           cp dist/webhid-addon.xpi "dist/webhid-addon-${VER}.xpi"
-          # Zip portable artifacts (exclude deb/rpm — uploaded separately)
-          cd artifacts-linux-x86_64   && zip -r "../webhid-linux-x86_64-${VER}.zip"   . -x "*.deb" "*.rpm" && cd ..
-          cd artifacts-linux-aarch64  && zip -r "../webhid-linux-aarch64-${VER}.zip"  . -x "*.deb" "*.rpm" && cd ..
+          # Zip portable artifacts
+          cd artifacts-linux-x86_64   && zip -r "../webhid-linux-x86_64-${VER}.zip"   . && cd ..
+          cd artifacts-linux-aarch64  && zip -r "../webhid-linux-aarch64-${VER}.zip"  . && cd ..
           cd artifacts-windows-x86_64 && zip -r "../webhid-windows-x86_64-${VER}.zip" . && cd ..
           cd artifacts-windows-aarch64 && zip -r "../webhid-windows-aarch64-${VER}.zip" . && cd ..
           cd artifacts-macos          && zip -r "../webhid-macos-universal-${VER}.zip" . && cd ..
@@ -290,10 +325,10 @@ jobs:
           cp artifacts-windows-x86_64-msi/*.msi . 2>/dev/null || true
           cp artifacts-windows-aarch64-msi/*.msi . 2>/dev/null || true
           # .deb and .rpm files
-          cp artifacts-linux-x86_64/*.deb . 2>/dev/null || true
-          cp artifacts-linux-aarch64/*.deb . 2>/dev/null || true
-          cp artifacts-linux-x86_64/*.rpm . 2>/dev/null || true
-          cp artifacts-linux-aarch64/*.rpm . 2>/dev/null || true
+          cp debs-x86_64/*.deb . 2>/dev/null || true
+          cp debs-aarch64/*.deb . 2>/dev/null || true
+          cp rpms-x86_64/*.rpm . 2>/dev/null || true
+          cp rpms-aarch64/*.rpm . 2>/dev/null || true
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3

@@ -227,7 +227,18 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact_name }}
-          path: |
-            artifacts/
-            dist/*.deb
-            dist/*.rpm
+          path: artifacts/
+
+      - name: Upload .deb (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact_name }}-deb
+          path: dist/*.deb
+
+      - name: Upload .rpm (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact_name }}-rpm
+          path: dist/*.rpm

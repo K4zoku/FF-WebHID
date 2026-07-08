@@ -42,7 +42,6 @@ Release:        1
 Summary:        WebHID implementation for Firefox via native-messaging bridge and hidraw daemon
 License:        MIT
 URL:            https://github.com/K4zoku/FF-WebHID
-BuildArch:      $ARCH
 Requires:       systemd-libs
 Requires(post): systemd
 Requires(preun): systemd
@@ -97,12 +96,21 @@ install -Dm644 "$REPO_ROOT/LICENSE" \\
 /usr/lib/waterfox/native-messaging-hosts/webhid-native-messaging-host.json
 EOF
 
+# rpmbuild on Ubuntu's rpm doesn't know about aarch64 target. Since we're
+# packaging pre-built binaries (not compiling), we build as noarch but
+# override the package arch in the filename.
 rpmbuild -bb \
   --define "_topdir $RPMROOT" \
-  --target "$ARCH" \
+  --target noarch \
   "$RPMROOT/SPECS/webhid.spec"
 
 mkdir -p "$REPO_ROOT/dist"
-find "$RPMROOT/RPMS" -name "*.rpm" -exec cp {} "$REPO_ROOT/dist/" \;
+# Find the built noarch RPM and rename it to include the real arch
+find "$RPMROOT/RPMS" -name "*.rpm" | while read -r rpm; do
+  base=$(basename "$rpm")
+  # Replace .noarch.rpm with .<arch>.rpm
+  newname="${base/noarch/$ARCH}"
+  cp "$rpm" "$REPO_ROOT/dist/$newname"
+done
 
 echo "Done: $(ls "$REPO_ROOT"/dist/webhid-*.rpm)"
