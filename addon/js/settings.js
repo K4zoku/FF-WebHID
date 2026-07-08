@@ -1,8 +1,8 @@
 (async () => {
-  const DEFAULTS = { perfLogging: false, fireAndForget: true, sabEnabled: true, sabCapacity: 8192, logLevel: 1 };
+  const DEFAULTS = { perfLogging: false, fireAndForget: true, sabEnabled: true, sabCapacity: 8192, logLevel: 1, daemonAsNmHost: false };
   const current = await browser.storage.local.get(DEFAULTS);
 
-  for (const key of ['perfLogging', 'fireAndForget', 'sabEnabled']) {
+  for (const key of ['perfLogging', 'fireAndForget', 'sabEnabled', 'daemonAsNmHost']) {
     document.getElementById(key).checked = current[key];
   }
   const sabInput = document.getElementById('sabCapacity');
@@ -47,7 +47,7 @@
     setTimeout(() => { el.style.display = 'none'; }, 1500);
   }
 
-  for (const key of ['perfLogging', 'fireAndForget', 'sabEnabled']) {
+  for (const key of ['perfLogging', 'fireAndForget', 'sabEnabled', 'daemonAsNmHost']) {
     document.getElementById(key).addEventListener('change', async (e) => {
       await browser.storage.local.set({ [key]: e.target.checked });
       showStatus(`${key} = ${e.target.checked}`);

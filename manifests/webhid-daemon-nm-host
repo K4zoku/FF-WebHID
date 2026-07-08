@@ -1,8 +1,0 @@
-#!/bin/sh
-# Wrapper script: launches webhid-daemon in --nm-host mode.
-# Use this as the NM host path in the native-messaging manifest when
-# running the daemon as a user process (requires udev rules for hidraw).
-#
-# Install to /usr/local/bin/webhid-daemon-nm-host and set the NM manifest
-# "path" field to point to this script.
-exec "$(dirname "$0")/webhid-daemon" --nm-host

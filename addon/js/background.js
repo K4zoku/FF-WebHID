@@ -13,6 +13,25 @@ function base64Encode(bytes) {
     : btoa(String.fromCharCode(...bytes));
 }
 
+// NM host names registered by the installer:
+// - webhid-native-messaging-host: thin forwarder → daemon Unix socket / pipe
+// - webhid-daemon-nm-host:        daemon speaks NM directly on stdin/stdout
+const NM_HOST_FORWARDER = "webhid-native-messaging-host";
+const NM_HOST_DAEMON    = "webhid-daemon-nm-host";
+
+let _daemonAsNmHost = false;
+let _nmHostName = NM_HOST_FORWARDER;
+
+// Load the daemon-as-NM-host setting before connecting. The first connect
+// must use the correct name or the user has to manually reload the addon
+// after toggling the setting.
+async function loadNmHostSetting() {
+  const global = await browser.storage.local.get({ daemonAsNmHost: false });
+  _daemonAsNmHost = global.daemonAsNmHost;
+  _nmHostName = _daemonAsNmHost ? NM_HOST_DAEMON : NM_HOST_FORWARDER;
+  logger.info('[bg] NM host:', _nmHostName);
+}
+
 const NativeMessaging = {
   port: null,
   _nextId: 1,
@@ -22,9 +41,9 @@ const NativeMessaging = {
 
   connect() {
     if (this.port) return Promise.resolve();
-    logger.debug('[nm] connecting to webhid-native-messaging-host...');
+    logger.debug(`[nm] connecting to ${_nmHostName}...`);
     try {
-      this.port = browser.runtime.connectNative("webhid-native-messaging-host");
+      this.port = browser.runtime.connectNative(_nmHostName);
       this._reconnectDelay = 1000;
       logger.debug('[nm] connected');
 
@@ -54,6 +73,21 @@ const NativeMessaging = {
       this._scheduleReconnect();
       return Promise.reject(error);
     }
+  },
+
+  // Tear down the current port so the next connect() picks up the new
+  // NM host name. Called when the `daemonAsNmHost` setting changes.
+  reconnectWithNewHost() {
+    if (this.port) {
+      try { this.port.disconnect(); } catch {}
+      this.port = null;
+    }
+    if (this._reconnectTimer) {
+      clearTimeout(this._reconnectTimer);
+      this._reconnectTimer = null;
+    }
+    this._reconnectDelay = 1000;
+    this.connect().catch(() => {});
   },
 
   _scheduleReconnect() {
@@ -153,12 +187,17 @@ const NativeMessaging = {
 // ---------------------------------------------------------------------------
 
 browser.runtime.onStartup.addListener(() => {
-  NativeMessaging.connect();
+  loadNmHostSetting().then(() => NativeMessaging.connect());
 });
 
 browser.runtime.onInstalled.addListener(() => {
-  NativeMessaging.connect();
+  loadNmHostSetting().then(() => NativeMessaging.connect());
 });
+
+// On first load of the background page (which fires neither onStartup nor
+// onInstalled in some Firefox versions during temporary load), pull the
+// setting and connect.
+loadNmHostSetting().then(() => NativeMessaging.connect());
 
 // ---------------------------------------------------------------------------
 // Security Headers (COOP/COEP): only when SAB data plane is enabled
@@ -175,6 +214,15 @@ browser.storage.onChanged.addListener((changes, area) => {
   if (area === 'local') {
     if (changes.sabEnabled) {
       _sabEnabled = changes.sabEnabled.newValue;
+    }
+    if (changes.daemonAsNmHost) {
+      const newName = changes.daemonAsNmHost.newValue ? NM_HOST_DAEMON : NM_HOST_FORWARDER;
+      if (newName !== _nmHostName) {
+        _daemonAsNmHost = changes.daemonAsNmHost.newValue;
+        _nmHostName = newName;
+        logger.info('[bg] NM host changed →', _nmHostName, '(reconnecting)');
+        NativeMessaging.reconnectWithNewHost();
+      }
     }
     // Reload from storage to pick up per-site overrides
     loadSabSetting();

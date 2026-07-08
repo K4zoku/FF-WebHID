@@ -13,7 +13,7 @@
 //! The only logic here is retrying the daemon socket connection with
 //! exponential backoff.
 
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader, BufWriter};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
 
 #[cfg(target_os = "linux")]
 const DEFAULT_SOCKET: &str = "/run/webhid/webhid.sock";

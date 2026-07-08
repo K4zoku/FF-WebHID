@@ -52,6 +52,24 @@ fn socket_mode(path: &str) -> u32 {
 #[cfg(target_os = "windows")]
 const DEFAULT_PIPE: &str = r"\\.\pipe\webhid";
 
+fn detect_nm_host_mode() -> Option<(String, String)> {
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() != 3 {
+        return None;
+    }
+    let manifest_path = &args[1];
+    let addon_id = &args[2];
+
+    if manifest_path.starts_with('-') || addon_id.starts_with('-') {
+        return None;
+    }
+    let p = std::path::Path::new(manifest_path);
+    if !p.is_file() {
+        return None;
+    }
+    Some((manifest_path.clone(), addon_id.clone()))
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     if std::env::args().any(|a| a == "--version" || a == "-V") {
@@ -61,12 +79,17 @@ async fn main() -> anyhow::Result<()> {
 
     init_logger();
 
-    // --nm-host mode: daemon acts as the native messaging host directly,
+    // NM-host mode: daemon acts as the native messaging host directly,
     // speaking the NM protocol on stdin/stdout (no separate NM host binary,
     // no IPC socket). This eliminates 1 IPC hop + 2 copies per frame.
     // Requires the daemon to run as the user (with udev rules for hidraw).
     // WS port is random to avoid conflicts with a root daemon instance.
-    let nm_host_mode = std::env::args().any(|a| a == "--nm-host");
+    //
+    // Detection is based on the 2 positional args Firefox passes to every
+    // native-messaging host (manifest path + addon ID), per the Mozilla spec.
+    // See `detect_nm_host_mode` above.
+    let nm_host_info = detect_nm_host_mode();
+    let nm_host_mode = nm_host_info.is_some();
 
     let ws_port: u16 = if nm_host_mode {
         // Bind to port 0 → OS assigns a random free port.
@@ -99,18 +122,21 @@ async fn main() -> anyhow::Result<()> {
         port_rx.await.unwrap_or(DEFAULT_WS_PORT)
     };
 
-    if nm_host_mode {
-        log::info!("running in --nm-host mode (stdin/stdout, no IPC socket)");
+    if let Some((manifest_path, addon_id)) = &nm_host_info {
+        log::info!("running in NM-host mode (stdin/stdout, no IPC socket)");
+        log::info!("started by add-on '{addon_id}' (manifest: {manifest_path})");
         log::info!("WebSocket server on port {actual_ws_port} (random)");
 
         // In NM-host mode, stdin/stdout ARE the IPC channel.
         // The daemon reads NmRequest from stdin and writes NmResponse to stdout,
         // exactly like the thin forwarder did — but without the extra hop.
+        // stdin only implements AsyncRead and stdout only implements AsyncWrite,
+        // so we pass them directly as separate halves (no `tokio::io::split`).
         let stdin = tokio::io::stdin();
         let stdout = tokio::io::stdout();
         let rx = event_tx.subscribe();
         let cid = 0; // single client in NM-host mode
-        client::handle(stdin, cid, device_mgr, rx, actual_ws_port).await?;
+        client::handle(stdin, stdout, cid, device_mgr, rx, actual_ws_port).await?;
         return Ok(());
     }
 
@@ -146,7 +172,8 @@ async fn main() -> anyhow::Result<()> {
                     let rx = event_tx.subscribe();
                     tokio::spawn(async move {
                         log::info!("[client {cid}] connected");
-                        if let Err(e) = client::handle(stream, cid, mgr, rx, actual_ws_port).await {
+                        let (reader, writer) = tokio::io::split(stream);
+                        if let Err(e) = client::handle(reader, writer, cid, mgr, rx, actual_ws_port).await {
                             log::warn!("[client {cid}] error: {e:#}");
                         }
                         log::info!("[client {cid}] disconnected");
@@ -179,7 +206,8 @@ async fn main() -> anyhow::Result<()> {
             let rx = event_tx.subscribe();
             tokio::spawn(async move {
                 log::info!("[client {cid}] connected");
-                if let Err(e) = client::handle(server, cid, mgr, rx, actual_ws_port).await {
+                let (reader, writer) = tokio::io::split(server);
+                if let Err(e) = client::handle(reader, writer, cid, mgr, rx, actual_ws_port).await {
                     log::warn!("[client {cid}] error: {e:#}");
                 }
                 log::info!("[client {cid}] disconnected");

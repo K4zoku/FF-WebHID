@@ -119,28 +119,42 @@ Eliminates the separate NM host binary and IPC socket — the daemon speaks nati
 
 **Requires:** udev rules installed (daemon runs as your user, not root).
 
+The daemon auto-detects NM-host mode by inspecting the two positional args Firefox passes to every native-messaging host on startup (manifest path + add-on ID, per the [Mozilla spec](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Native_messaging)). No `--nm-host` flag is needed; the NM manifest's `path` field points at the `webhid-daemon` binary directly.
+
+#### System-wide install
+
 ```sh
 # 1. Install udev rule (one-time)
-sudo cp manifests/99-webhid.rules /etc/udev/rules.d/
-sudo udevadm control --reload-rules && sudo udevadm trigger
+sudo make install-udev-rule
 
-# 2. Build and install daemon
-make build
-sudo install -Dm755 crates/target/release/webhid-daemon /usr/local/bin/webhid-daemon
+# 2. Install daemon binary + daemon-as-NM-host manifest
+sudo make install-daemon-nm-host-system
 
-# 3. Install wrapper script
-sudo install -Dm755 manifests/webhid-daemon-nm-host /usr/local/bin/webhid-daemon-nm-host
-
-# 4. Install NM manifest pointing to the wrapper
-sudo install -Dm644 manifests/webhid-native-messaging-host.json \
-  /usr/lib/mozilla/native-messaging-hosts/webhid-native-messaging-host.json
-# Edit the JSON to set "path" to "/usr/local/bin/webhid-daemon-nm-host"
-
-# 5. Stop root daemon if running
+# 3. Stop root daemon if running
 sudo systemctl disable --now webhid-daemon
+
+# 4. Enable "Daemon as NM host" in the addon settings
+#    (about:addons → WebHID → Options → Daemon as NM host)
+```
+
+#### User-local install (no root)
+
+```sh
+# 1. Install udev rule (one-time, needs root)
+sudo make install-udev-rule
+
+# 2. Install daemon + NM manifest into ~/.local
+make install-daemon-nm-host-user
+
+# 3. Stop root daemon if running
+sudo systemctl disable --now webhid-daemon
+
+# 4. Enable "Daemon as NM host" in the addon settings
 ```
 
 The daemon uses a random WebSocket port in this mode (avoids conflicts with any root daemon instance). The port is announced via the `handshake` event.
+
+The installed NM manifest (`webhid-daemon-nm-host.json`) uses the `"name": "webhid-daemon-nm-host"` identifier, distinct from the thin-forwarder manifest (`webhid-native-messaging-host`). The addon picks the correct name based on the "Daemon as NM host" toggle in its settings page.
 
 > **Note:** This mode is not available on Windows — Firefox NM host requires an `.exe` in the `path` field and doesn't support arguments. Use the NM host thin forwarder on Windows.
 

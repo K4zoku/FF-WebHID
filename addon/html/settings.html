@@ -11,6 +11,16 @@
 <h1>WebHID Settings</h1>
 <div class="setting">
   <div class="setting-info">
+    <h3>Daemon as NM host</h3>
+    <p>Talk to the daemon directly over native messaging (skip the <code>webhid-native-messaging</code> forwarder and Unix socket). Requires the <code>webhid-daemon-nm-host</code> native-messaging manifest to be installed and the daemon to run as your user (with the udev rule). Lower latency, but no root-daemon fallback. The addon reconnects automatically when toggled.</p>
+  </div>
+  <label class="toggle">
+    <input type="checkbox" id="daemonAsNmHost">
+    <span class="slider"></span>
+  </label>
+</div>
+<div class="setting">
+  <div class="setting-info">
     <h3>Fire-and-forget sendReport</h3>
     <p>Resolve sendReport Promise immediately without waiting for daemon ack (faster, but no error reporting on write failure)</p>
   </div>

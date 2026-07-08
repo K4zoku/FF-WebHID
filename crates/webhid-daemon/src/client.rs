@@ -19,14 +19,23 @@ use webhid::{protocol, IpcResponse, NmRequest, NmResponse};
 
 use crate::{device_mgr::DeviceManager, hid};
 
+/// Drive a single NM client connection.
+///
+/// `reader` and `writer` are accepted as separate parameters because the two
+/// supported transports split the read/write halves at the call site:
+///   - IPC mode (Unix socket / Windows named pipe) – a single bidirectional
+///     stream that the caller splits via `tokio::io::split`.
+///   - `--nm-host` mode – `tokio::io::stdin()` (AsyncRead only) and
+///     `tokio::io::stdout()` (AsyncWrite only) are distinct handles and
+///     cannot be unified into a single `AsyncRead + AsyncWrite` type.
 pub async fn handle(
-    stream: impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    reader: impl AsyncRead + Unpin + Send + 'static,
+    writer: impl AsyncWrite + Unpin + Send + 'static,
     client_id: u64,
     device_mgr: Arc<DeviceManager>,
     mut event_rx: broadcast::Receiver<IpcResponse>,
     ws_port: u16,
 ) -> anyhow::Result<()> {
-    let (reader, writer) = tokio::io::split(stream);
     let mut reader = BufReader::new(reader);
 
     let (tx, mut rx) = mpsc::channel::<NmResponse>(1024);
