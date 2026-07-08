@@ -1,37 +1,19 @@
-//! Bridge between the Firefox addon (native-messaging protocol on stdin/stdout)
-//! and the webhid-daemon (IPC protocol on a Unix domain socket).
+//! Thin byte forwarder between Firefox native-messaging stdin/stdout and the
+//! webhid-daemon Unix domain socket.
 //!
-//! Message flow
-//! ============
+//! All protocol intelligence lives in the daemon (which speaks `NmRequest` /
+//! `NmResponse` directly), so this binary is a pure pipe:
 //!
 //! ```text
-//!  Firefox addon
-//!    │  stdin  (NmRequest, length-prefixed JSON)
-//!    ▼
-//!  [stdin reader]──►[nm_to_ipc]──►[daemon writer]──► webhid-daemon
-//!                                                           │
-//!  Firefox addon                                    IpcResponse
-//!    ▲  stdout (NmResponse, length-prefixed JSON)           │
-//!    │                                                      │
-//!  [stdout writer]◄──[per-request waiter task]◄──[daemon reader]
-//!                     id>0 → ipc_to_nm (response)
-//!  [stdout writer]◄──────────────────────────────[daemon reader]
-//!                     id=0 → ipc_event_to_nm (event)
+//!   Firefox addon                  webhid-daemon
+//!   (stdin)  ──► length-prefixed ──► (socket)
+//!   (stdout) ◄── length-prefixed ◄── (socket)
 //! ```
 //!
-//! The main loop reads one NM request at a time from stdin and forwards it
-//! to the daemon, then spawns a per-request task that waits for the
-//! matching daemon response and forwards it to the stdout writer.  This
-//! decouples stdin reads from response waits, so a slow response never
-//! blocks the next request.  A parallel daemon-reader task routes
-//! unsolicited events (id=0) directly to the stdout channel.
+//! The only logic here is retrying the daemon socket connection with
+//! exponential backoff.
 
-use std::collections::HashMap;
-use tokio::io::{AsyncWriteExt, BufReader, BufWriter};
-use std::sync::Arc;
-
-use tokio::sync::{Mutex, mpsc, oneshot};
-use webhid::{IpcRequest, IpcResponse, NmRequest, NmResponse, protocol};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader, BufWriter};
 
 #[cfg(target_os = "linux")]
 const DEFAULT_SOCKET: &str = "/run/webhid/webhid.sock";
@@ -78,7 +60,7 @@ async fn main() -> anyhow::Result<()> {
     init_logger();
 
     #[cfg(unix)]
-    let (daemon_read, daemon_write) = {
+    let daemon = {
         use tokio::net::UnixStream;
         let candidates = candidate_sockets();
         let mut delay = 100u64;
@@ -108,278 +90,146 @@ async fn main() -> anyhow::Result<()> {
             delay = (delay * 2).min(2000);
         };
         log::info!("connected to daemon at {connected_path}");
-        stream.into_split()
+        stream
     };
 
     #[cfg(windows)]
-    let (daemon_read, daemon_write) = {
+    let daemon = {
         use tokio::net::windows::named_pipe::ClientOptions;
-        let pipe_name = std::env::var("WEBHID_PIPE")
-            .unwrap_or_else(|_| DEFAULT_PIPE.to_string());
+        let pipe_name =
+            std::env::var("WEBHID_PIPE").unwrap_or_else(|_| DEFAULT_PIPE.to_string());
         let mut delay = 100u64;
         let stream = loop {
             match ClientOptions::new().open(&pipe_name) {
                 Ok(s) => break s,
                 Err(e) => {
                     if delay > 30000 {
-                        return Err(anyhow::anyhow!("cannot connect to daemon pipe '{pipe_name}' after retries: {e}"));
+                        return Err(anyhow::anyhow!(
+                            "cannot connect to daemon pipe '{pipe_name}' after retries: {e}"
+                        ));
                     }
                     log::warn!("daemon connect failed ({e}), retry in {delay}ms");
                     tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
                     delay *= 2;
-                    if delay > 2000 { delay = 2000; }
+                    if delay > 2000 {
+                        delay = 2000;
+                    }
                 }
             }
         };
         log::info!("connected to daemon at {pipe_name}");
-        let (daemon_read, daemon_write) = tokio::io::split(stream);
-        (daemon_read, daemon_write)
+        stream
     };
 
     #[cfg(not(any(unix, windows)))]
-    let (daemon_read, daemon_write) = {
+    let daemon = {
         return Err(anyhow::anyhow!("IPC not supported on this platform"));
     };
 
-    // Serialise all writes to stdout through one task.  We previously
-    // batched up to 16 messages / 5ms before flushing, but that introduced
-    // up to 5ms of latency per response under load; when combined
-    // with the old sequential main loop it caused the roundtrip latency
-    // to climb monotonically as the page sent requests faster than the
-    // NM loop could drain them.  The stdout writer now flushes every
-    // message as soon as it arrives (the BufWriter still coalesces
-    // small writes at the kernel level via writev-style buffering).
-    let (stdout_tx, mut stdout_rx) = mpsc::channel::<NmResponse>(1024);
-    #[allow(unused_must_use)]
-    let _stdout_writer = tokio::spawn(async move {
-        let mut out = BufWriter::with_capacity(256 * 1024, tokio::io::stdout());
-        while let Some(msg) = stdout_rx.recv().await {
-            if let Err(e) = protocol::write_message(&mut out, &msg).await {
-                log::error!("stdout write: {e}");
-                break;
-            }
-            // Flush immediately so Firefox sees the response without
-            // waiting for a batch timer.  BufWriter still amortises
-            // the underlying write(2) syscalls.
-            if let Err(e) = out.flush().await {
-                log::error!("stdout flush: {e}");
-                break;
-            }
-        }
-        let _ = out.flush().await;
-        Ok::<(), anyhow::Error>(())
-    });
+    let (daemon_r, daemon_w) = daemon.into_split();
+    let mut daemon_r = BufReader::new(daemon_r);
+    let mut daemon_w = BufWriter::new(daemon_w);
 
-    // Pending request map: request_id → oneshot sender waiting for the reply.
-    let pending: Arc<Mutex<HashMap<u32, oneshot::Sender<IpcResponse>>>> =
-        Arc::new(Mutex::new(HashMap::new()));
+    let mut stdin = BufReader::new(tokio::io::stdin());
+    let mut stdout = BufWriter::with_capacity(256 * 1024, tokio::io::stdout());
 
-    // Daemon reader task – demultiplexes responses and events.
-    let pending_rx = Arc::clone(&pending);
-    let stdout_tx_ev = stdout_tx.clone();
-    let daemon_reader = tokio::spawn(async move {
-        let mut reader = BufReader::new(daemon_read);
+    // ── stdin → daemon ───────────────────────────────────────────────────
+    let forward_to_daemon = tokio::spawn(async move {
+        let mut buf = Vec::with_capacity(4096);
         loop {
-            match protocol::read_message::<_, IpcResponse>(&mut reader).await {
-                Ok(response) => {
-                    log::debug!("[daemon_reader] received response: {:?}", response);
-                    if response.id() == 0 {
-                        if let Some(nm) = ipc_event_to_nm(response) {
-                            log::debug!("[daemon_reader] forwarding event: {:?}", nm);
-                            let _ = stdout_tx_ev.send(nm).await;
-                        }
-                    } else {
-                        let sender = pending_rx.lock().await.remove(&response.id());
-                        if let Some(tx) = sender {
-                            let _ = tx.send(response);
-                        }
-                    }
-                }
+            match read_frame(&mut stdin, &mut buf).await {
+                Ok(false) => break, // EOF
+                Ok(true) => {}
                 Err(e) => {
-                    log::warn!("daemon disconnected: {e}");
-                    // Reject all pending requests so page callers don't hang.
-                    let mut pending = pending_rx.lock().await;
-                    let count = pending.len();
-                    for (_, tx) in pending.drain() {
-                        let _ = tx.send(IpcResponse::Error {
-                            id: 0,
-                            message: "daemon disconnected".to_string(),
-                        });
-                    }
-                    log::info!("rejected {count} pending requests due to daemon disconnect");
+                    log::info!("stdin read error: {e}");
                     break;
                 }
             }
-        }
-    });
-
-    // Protect the daemon write half with a mutex so both the main loop and
-    // (in the future) any concurrent task can send without races.
-    let daemon_writer = Arc::new(Mutex::new(BufWriter::new(daemon_write)));
-
-    // Concurrent main loop.
-    //
-    // The previous implementation processed one request at a time:
-    //   read stdin → send to daemon → await response → enqueue stdout → repeat
-    // This blocked the loop while waiting for each response, so requests
-    // piled up in the stdin buffer whenever the page sent them faster than
-    // the daemon could reply (e.g. image upload with rapid sendReport
-    // packets interleaved with input_report events).  The roundtrip latency
-    // climbed monotonically as the queue grew.
-    //
-    // The new loop spawns a task per request so reads from stdin and
-    // daemon writes are never blocked by an outstanding response.  The
-    // `pending` map plus the daemon reader task demultiplex responses
-    // back to the correct waiter.  The `stdout_tx` channel serialises
-    // all writes to Firefox.
-    let mut next_id: u32 = 1;
-    let mut stdin = BufReader::with_capacity(64 * 1024, tokio::io::stdin());
-
-    loop {
-        let nm_req: NmRequest = match protocol::read_message(&mut stdin).await {
-            Ok(r) => r,
-            Err(e) => {
-                log::info!("Firefox disconnected: {e}");
+            if let Err(e) = write_frame(&mut daemon_w, &buf).await {
+                log::warn!("daemon write error: {e}");
                 break;
             }
-        };
-        log::debug!("← Firefox: {nm_req:?}");
-        let firefox_id = nm_req.id();
-
-        let id = next_id;
-        next_id = next_id.wrapping_add(1).max(1);
-
-        let ipc_req = nm_to_ipc(nm_req, id);
-
-        // Register the oneshot *before* sending so we cannot miss a fast reply.
-        let (resp_tx, resp_rx) = oneshot::channel();
-        pending.lock().await.insert(id, resp_tx);
-
-        // Send request to daemon.
-        {
-            let mut w = daemon_writer.lock().await;
-            if let Err(e) = protocol::write_message(&mut *w, &ipc_req).await {
-                log::warn!("daemon write failed: {e}");
-                pending.lock().await.remove(&id);
-                let mut err_resp = NmResponse::err("daemon disconnected, please reload page");
-                err_resp.id = firefox_id;
-                let _ = stdout_tx.send(err_resp).await;
-                continue;
+            if let Err(e) = daemon_w.flush().await {
+                log::warn!("daemon flush error: {e}");
+                break;
             }
         }
+        log::debug!("stdin → daemon forwarder exited");
+    });
 
-        // Spawn a task that waits for the matching response and forwards
-        // it to the stdout channel.  This decouples reading the next
-        // stdin message from waiting for the current response.
-        let stdout_tx_clone = stdout_tx.clone();
-        tokio::spawn(async move {
-            let mut nm_resp = match resp_rx.await {
-                Ok(ipc_resp) => ipc_to_nm(ipc_resp),
-                Err(_) => NmResponse::err("daemon disconnected"),
-            };
-            nm_resp.id = firefox_id;
-            let _ = stdout_tx_clone.send(nm_resp).await;
-        });
-    }
-
-    // Wait for in-flight requests to drain so we don't drop responses
-    // the page is still waiting for.  Give them up to 5 seconds.
-    let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(5);
-    while pending.lock().await.len() > 0 {
-        if tokio::time::Instant::now() >= deadline {
-            log::warn!("drain timeout: {} requests still pending", pending.lock().await.len());
-            break;
+    // ── daemon → stdout ──────────────────────────────────────────────────
+    let forward_to_stdout = tokio::spawn(async move {
+        let mut buf = Vec::with_capacity(4096);
+        loop {
+            match read_frame(&mut daemon_r, &mut buf).await {
+                Ok(false) => break,
+                Ok(true) => {}
+                Err(e) => {
+                    log::warn!("daemon read error: {e}");
+                    break;
+                }
+            }
+            if let Err(e) = write_frame(&mut stdout, &buf).await {
+                log::warn!("stdout write error: {e}");
+                break;
+            }
+            if let Err(e) = stdout.flush().await {
+                log::warn!("stdout flush error: {e}");
+                break;
+            }
         }
-        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        log::debug!("daemon → stdout forwarder exited");
+    });
+
+    tokio::select! {
+        _ = forward_to_daemon => {},
+        _ = forward_to_stdout => {},
     }
 
-    daemon_reader.abort();
-    #[allow(unused_variables)]
-    let _ = _stdout_writer.abort();
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Raw length-prefixed frame helpers
+// ---------------------------------------------------------------------------
+
+/// Read a single length-prefixed frame into `buf`.
+///
+/// Returns:
+/// - `Ok(true)`  – a frame was read
+/// - `Ok(false)` – clean EOF
+/// - `Err(_)`    – I/O error
+async fn read_frame<R: AsyncRead + Unpin>(
+    reader: &mut R,
+    buf: &mut Vec<u8>,
+) -> anyhow::Result<bool> {
+    let mut len_bytes = [0u8; 4];
+    match reader.read_exact(&mut len_bytes).await {
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(false),
+        Err(e) => return Err(e.into()),
+    }
+
+    let len = u32::from_le_bytes(len_bytes) as usize;
+    buf.resize(len, 0);
+    reader.read_exact(buf).await?;
+    Ok(true)
+}
+
+/// Write a single length-prefixed frame.
+async fn write_frame<W: AsyncWrite + Unpin>(
+    writer: &mut W,
+    buf: &[u8],
+) -> anyhow::Result<()> {
+    let len = u32::try_from(buf.len())?;
+    writer.write_all(&len.to_le_bytes()).await?;
+    writer.write_all(buf).await?;
+    Ok(())
+}
 
 // ---------------------------------------------------------------------------
-// Protocol translation helpers
+// Logger
 // ---------------------------------------------------------------------------
-
-/// Convert a native-messaging request from Firefox into an IPC request for
-/// the daemon, attaching the given sequence `id`.
-fn nm_to_ipc(req: NmRequest, id: u32) -> IpcRequest {
-    match req {
-        NmRequest::Enumerate { .. } => IpcRequest::Enumerate { id },
-
-        NmRequest::Open { device_id, .. } => {
-            IpcRequest::Open { id, device_id }
-        }
-
-        NmRequest::Close { device_id, .. } => {
-            IpcRequest::Close { id, device_id }
-        }
-
-        NmRequest::SendReport { device_id, report_id, data, .. } => {
-            IpcRequest::SendReport { id, device_id, report_id, data }
-        }
-
-        NmRequest::ReceiveFeatureReport { device_id, report_id, .. } => {
-            IpcRequest::ReceiveFeatureReport { id, device_id, report_id }
-        }
-
-        NmRequest::SendFeatureReport { device_id, report_id, data, .. } => {
-            IpcRequest::SendFeatureReport { id, device_id, report_id, data }
-        }
-    }
-}
-
-/// Convert a daemon IPC response into the native-messaging format for Firefox.
-fn ipc_to_nm(resp: IpcResponse) -> NmResponse {
-    match resp {
-        IpcResponse::Devices { devices, .. } => NmResponse::ok_with_devices(devices),
-
-        IpcResponse::Opened { device_id, session_token, ws_port, .. } => {
-            NmResponse::ok_opened(device_id, session_token, ws_port)
-        }
-
-        IpcResponse::Ok { .. } => NmResponse::ok(),
-
-        IpcResponse::Data { data, .. } => NmResponse::ok_with_data(data),
-
-        IpcResponse::Error { message, .. } => NmResponse::err(message),
-
-        // Events should not arrive here (the reader task handles id=0).
-        other => {
-            log::warn!("unexpected event as response: {other:?}");
-            NmResponse::err("unexpected event")
-        }
-    }
-}
-
-/// Convert a daemon event (id=0) into a native-messaging push message, or
-/// return `None` if the event type is not forwarded to Firefox.
-fn ipc_event_to_nm(resp: IpcResponse) -> Option<NmResponse> {
-    match resp {
-        IpcResponse::DeviceConnected { device, .. } => Some(NmResponse::event_connect(device)),
-
-        IpcResponse::DeviceDisconnected { device, .. } => {
-            Some(NmResponse::event_disconnect(device))
-        }
-
-        IpcResponse::InputReport { device_id, report_id, data, .. } => {
-            Some(NmResponse::event_input_report(device_id, report_id, data))
-        }
-
-        IpcResponse::Hello { ws_port, .. } => {
-            Some(NmResponse {
-                event_type: Some("hello".into()),
-                ws_port: Some(ws_port),
-                ..Default::default()
-            })
-        }
-
-        _ => None,
-    }
-}
 
 fn init_logger() {
     let level = std::env::var("RUST_LOG")
@@ -399,197 +249,13 @@ impl log::Log for SimpleLogger {
     }
     fn log(&self, record: &log::Record) {
         if self.enabled(record.metadata()) {
-            eprintln!("[{:5} {}] {}", record.level(), record.target(), record.args());
+            eprintln!(
+                "[{:5} {}] {}",
+                record.level(),
+                record.target(),
+                record.args()
+            );
         }
     }
     fn flush(&self) {}
-}
-
-#[cfg(test)]
-mod tests {
-    use webhid::{NmRequest, IpcRequest, IpcResponse, DeviceInfo};
-
-    // ── nm_to_ipc ───────────────────────────────────────────────────────
-
-    #[test]
-    fn test_nm_to_ipc_enumerate() {
-        let req = NmRequest::Enumerate { id: None };
-        let ipc = super::nm_to_ipc(req, 1);
-        assert!(matches!(ipc, IpcRequest::Enumerate { id: 1 }));
-    }
-
-    #[test]
-    fn test_nm_to_ipc_open() {
-        let req = NmRequest::Open { id: None, device_id: "test-dev".into() };
-        let ipc = super::nm_to_ipc(req, 2);
-        assert!(matches!(ipc, IpcRequest::Open { id: 2, .. }));
-        if let IpcRequest::Open { device_id, .. } = &ipc {
-            assert_eq!(device_id, "test-dev");
-        }
-    }
-
-    #[test]
-    fn test_nm_to_ipc_close() {
-        let req = NmRequest::Close { id: Some(5), device_id: "dev".into() };
-        let ipc = super::nm_to_ipc(req, 4);
-        assert!(matches!(ipc, IpcRequest::Close { id: 4, .. }));
-        if let IpcRequest::Close { device_id, .. } = &ipc {
-            assert_eq!(device_id, "dev");
-        }
-    }
-
-    #[test]
-    fn test_nm_to_ipc_send_report() {
-        let req = NmRequest::SendReport {
-            id: None, device_id: "dev".into(), report_id: 1, data: vec![0x00, 0xFF],
-        };
-        let ipc = super::nm_to_ipc(req, 6);
-        assert!(matches!(ipc, IpcRequest::SendReport { id: 6, report_id: 1, .. }));
-        if let IpcRequest::SendReport { data, .. } = &ipc {
-            assert_eq!(data, &[0x00, 0xFF]);
-        }
-    }
-
-    #[test]
-    fn test_nm_to_ipc_receive_feature_report() {
-        let req = NmRequest::ReceiveFeatureReport {
-            id: Some(10), device_id: "dev".into(), report_id: 0,
-        };
-        let ipc = super::nm_to_ipc(req, 7);
-        assert!(matches!(ipc, IpcRequest::ReceiveFeatureReport { id: 7, report_id: 0, .. }));
-    }
-
-    #[test]
-    fn test_nm_to_ipc_send_feature_report() {
-        let req = NmRequest::SendFeatureReport {
-            id: None, device_id: "dev".into(), report_id: 2, data: vec![0xAA],
-        };
-        let ipc = super::nm_to_ipc(req, 8);
-        assert!(matches!(ipc, IpcRequest::SendFeatureReport { id: 8, report_id: 2, .. }));
-    }
-
-    // ── ipc_to_nm ───────────────────────────────────────────────────────
-
-    fn test_device() -> DeviceInfo {
-        DeviceInfo {
-            vendor_id: 0x1234, product_id: 0x5678,
-            product_name: Some("Test".into()), manufacturer: None,
-            serial_number: None, usage_page: None, usage: None,
-            device_id: "test-device-id".into(),
-            report_descriptor: None,
-        }
-    }
-
-    #[test]
-    fn test_ipc_to_nm_devices() {
-        let dev = test_device();
-        let resp = IpcResponse::Devices { id: 1, devices: vec![dev] };
-        let nm = super::ipc_to_nm(resp);
-        assert_eq!(nm.success, Some(true));
-        assert!(nm.devices.is_some());
-        let devs = nm.devices.unwrap();
-        assert_eq!(devs.len(), 1);
-        assert_eq!(devs[0].vendor_id, 0x1234);
-        assert_eq!(devs[0].product_id, 0x5678);
-        assert_eq!(devs[0].device_id, "test-device-id");
-    }
-
-    #[test]
-    fn test_ipc_to_nm_opened() {
-        let resp = IpcResponse::Opened {
-            id: 2, device_id: "dev".into(),
-            session_token: Some("tok123".into()), ws_port: Some(31337),
-        };
-        let nm = super::ipc_to_nm(resp);
-        assert_eq!(nm.success, Some(true));
-        assert_eq!(nm.device_id, Some("dev".into()));
-        assert!(nm.data.is_none());
-        assert_eq!(nm.session_token, Some("tok123".into()));
-        assert_eq!(nm.ws_port, Some(31337));
-    }
-
-    #[test]
-    fn test_ipc_to_nm_ok() {
-        let resp = IpcResponse::Ok { id: 3 };
-        let nm = super::ipc_to_nm(resp);
-        assert_eq!(nm.success, Some(true));
-        assert!(nm.error.is_none());
-    }
-
-    #[test]
-    fn test_ipc_to_nm_data() {
-        let resp = IpcResponse::Data { id: 4, data: vec![0xDE, 0xAD] };
-        let nm = super::ipc_to_nm(resp);
-        assert_eq!(nm.success, Some(true));
-        assert_eq!(nm.data, Some(vec![0xDE, 0xAD]));
-    }
-
-    #[test]
-    fn test_ipc_to_nm_error() {
-        let resp = IpcResponse::Error { id: 5, message: "permission denied".into() };
-        let nm = super::ipc_to_nm(resp);
-        assert_eq!(nm.success, Some(false));
-        assert_eq!(nm.error, Some("permission denied".into()));
-    }
-
-    #[test]
-    fn test_ipc_to_nm_unexpected_event() {
-        // Events (id=0) normally go through ipc_event_to_nm, not ipc_to_nm.
-        // If one arrives here, it should produce an error response.
-        let resp = IpcResponse::DeviceConnected { id: 0, device: test_device() };
-        let nm = super::ipc_to_nm(resp);
-        assert_eq!(nm.success, Some(false));
-        assert!(nm.error.is_some());
-    }
-
-    // ── ipc_event_to_nm ─────────────────────────────────────────────────
-
-    #[test]
-    fn test_ipc_event_to_nm_device_connected() {
-        let dev = test_device();
-        let resp = IpcResponse::DeviceConnected { id: 0, device: dev };
-        let nm = super::ipc_event_to_nm(resp).unwrap();
-        assert_eq!(nm.event_type, Some("connect".into()));
-        assert!(nm.device.is_some());
-        assert_eq!(nm.device.as_ref().unwrap().vendor_id, 0x1234);
-    }
-
-    #[test]
-    fn test_ipc_event_to_nm_device_disconnected() {
-        let dev = test_device();
-        let resp = IpcResponse::DeviceDisconnected { id: 0, device: dev };
-        let nm = super::ipc_event_to_nm(resp).unwrap();
-        assert_eq!(nm.event_type, Some("disconnect".into()));
-        assert!(nm.device.is_some());
-        assert_eq!(nm.device.as_ref().unwrap().vendor_id, 0x1234);
-    }
-
-    #[test]
-    fn test_ipc_event_to_nm_input_report() {
-        let resp = IpcResponse::InputReport {
-            id: 0, device_id: "dev".into(), report_id: 5, data: vec![0xAA, 0xBB],
-        };
-        let nm = super::ipc_event_to_nm(resp).unwrap();
-        assert_eq!(nm.event_type, Some("input_report".into()));
-        assert_eq!(nm.device_id, Some("dev".into()));
-        assert_eq!(nm.report_id, Some(5));
-        assert_eq!(nm.data, Some(vec![0xAA, 0xBB]));
-    }
-
-    #[test]
-    fn test_ipc_event_to_nm_hello() {
-        let resp = IpcResponse::Hello { id: 0, ws_port: 31337 };
-        let nm = super::ipc_event_to_nm(resp).unwrap();
-        assert_eq!(nm.event_type, Some("hello".into()));
-        assert_eq!(nm.ws_port, Some(31337));
-    }
-
-    #[test]
-    fn test_ipc_event_to_nm_non_event_returns_none() {
-        let resp = IpcResponse::Ok { id: 0 };
-        assert!(super::ipc_event_to_nm(resp).is_none());
-
-        let resp = IpcResponse::Error { id: 0, message: "x".into() };
-        assert!(super::ipc_event_to_nm(resp).is_none());
-    }
 }

@@ -1076,9 +1076,7 @@ dependencies = [
  "anyhow",
  "libc",
  "log",
- "serde_json",
  "tokio",
- "webhid",
 ]
 
 [[package]]
