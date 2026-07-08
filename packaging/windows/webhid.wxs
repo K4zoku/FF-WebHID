@@ -7,10 +7,10 @@
     [ProgramFiles64Folder]WebHID\
       webhid-daemon.exe
       webhid-native-messaging.exe
-      webhid_server.json   (NM manifest, [INSTALLDIR] resolved at install time)
+      webhid-native-messaging-host.json   (NM manifest, [INSTALLDIR] resolved at install time)
 
   Registry:
-    HKLM\SOFTWARE\Mozilla\NativeMessagingHosts\webhid_server  = [INSTALLDIR]webhid_server.json
+    HKLM\SOFTWARE\Mozilla\NativeMessagingHosts\webhid-native-messaging-host  = [INSTALLDIR]webhid-native-messaging-host.json
 
   Scheduled Task:
     "WebHID Daemon" — runs at logon, webhid-daemon.exe
@@ -61,13 +61,13 @@
           <File Id='NMExe' Source='$(var.BuildDir)\webhid-native-messaging.exe' KeyPath='yes'/>
         </Component>
         <Component Id='NMManifest' Guid='a1b2c3d4-1111-2222-3333-444455558888'>
-          <File Id='NMJson' Name='webhid_server.json'
-                Source='$(var.BuildDir)\webhid_server.json' KeyPath='yes'/>
+          <File Id='NMJson' Name='webhid-native-messaging-host.json'
+                Source='$(var.BuildDir)\webhid-native-messaging-host.json' KeyPath='yes'/>
         </Component>
         <Component Id='NMRegistry' Guid='a1b2c3d4-1111-2222-3333-444455559999'>
           <RegistryKey Root='HKLM'
-                       Key='SOFTWARE\Mozilla\NativeMessagingHosts\webhid_server'>
-            <RegistryValue Type='string' Value='[INSTALLDIR]webhid_server.json' KeyPath='yes'/>
+                       Key='SOFTWARE\Mozilla\NativeMessagingHosts\webhid-native-messaging-host'>
+            <RegistryValue Type='string' Value='[INSTALLDIR]webhid-native-messaging-host.json' KeyPath='yes'/>
           </RegistryKey>
         </Component>
       </Directory>

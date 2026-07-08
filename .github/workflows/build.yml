@@ -132,7 +132,7 @@ jobs:
           cp "$BIN_DIR/webhid-daemon" artifacts/usr/local/bin/
           cp "$BIN_DIR/webhid-native-messaging" artifacts/usr/local/bin/
           sed 's|{{NM_BIN}}|/usr/local/bin/webhid-native-messaging|g' \
-            manifests/webhid_server.json > artifacts/usr/local/lib/mozilla/native-messaging-hosts/webhid_server.json
+            manifests/webhid-native-messaging-host.json > artifacts/usr/local/lib/mozilla/native-messaging-hosts/webhid-native-messaging-host.json
           sed 's|{{DAEMON_BIN}}|/usr/local/bin/webhid-daemon|g' \
             manifests/webhid-daemon.service > artifacts/etc/systemd/system/webhid-daemon.service
 
@@ -143,7 +143,7 @@ jobs:
           cp crates/target/release/webhid-daemon artifacts/usr/local/bin/
           cp crates/target/release/webhid-native-messaging artifacts/usr/local/bin/
           sed 's|{{NM_BIN}}|/usr/local/bin/webhid-native-messaging|g' \
-            manifests/webhid_server.json > artifacts/usr/local/lib/mozilla/native-messaging-hosts/webhid_server.json
+            manifests/webhid-native-messaging-host.json > artifacts/usr/local/lib/mozilla/native-messaging-hosts/webhid-native-messaging-host.json
           sed 's|{{DAEMON_BIN}}|/usr/local/bin/webhid-daemon|g' \
             manifests/webhid-daemon.service > artifacts/etc/systemd/system/webhid-daemon.service
 
@@ -159,7 +159,7 @@ jobs:
           }
           Copy-Item "$binDir/webhid-daemon.exe" artifacts-portable/bin/
           Copy-Item "$binDir/webhid-native-messaging.exe" artifacts-portable/bin/
-          Copy-Item manifests/webhid_server.windows.json artifacts-portable/manifests/webhid_server.json
+          Copy-Item manifests/webhid-native-messaging-host.json artifacts-portable/manifests/webhid-native-messaging-host.json
 
       - name: Build MSI (Windows)
         if: runner.os == 'Windows'

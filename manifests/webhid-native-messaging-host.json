@@ -1,7 +1,7 @@
 {
-  "name": "webhid_server",
+  "name": "webhid-native-messaging-host",
   "description": "WebHID native messaging host",
-  "path": "C:\\Program Files\\WebHID\\webhid-native-messaging.exe",
+  "path": "{{NM_BIN}}",
   "type": "stdio",
   "allowed_extensions": ["webhid@k4zoku.dev"]
 }

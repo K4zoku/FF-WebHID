@@ -61,9 +61,9 @@ Copy-Item (Join-Path $Target 'webhid-native-messaging.exe') $Stage
 
 # Resolve NM manifest placeholder. WiX cannot do variable substitution
 # inside JSON file contents, so we replace it here.
-$nmTemplate = Get-Content (Join-Path $Manifests 'webhid_server.windows.template.json') -Raw
-$nmJson = $nmTemplate -replace '\{\{INSTALLDIR\}\}', 'C:\\Program Files\\WebHID\\'
-Set-Content -Path (Join-Path $Stage 'webhid_server.json') -Value $nmJson -Encoding ascii
+$nmTemplate = Get-Content (Join-Path $Manifests 'webhid-native-messaging-host.json') -Raw
+$nmJson = $nmTemplate -replace '\{\{NM_BIN\}\}', 'C:\\Program Files\\WebHID\\webhid-native-messaging.exe'
+Set-Content -Path (Join-Path $Stage 'webhid-native-messaging-host.json') -Value $nmJson -Encoding ascii
 
 # Locate wix.exe (WiX v6). Try PATH first, then a tools/ folder.
 # WiX v7+ requires accepting the OSMF EULA — we pin to v6 to avoid that.

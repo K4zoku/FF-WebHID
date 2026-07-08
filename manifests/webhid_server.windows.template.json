@@ -1,7 +1,0 @@
-{
-  "name": "webhid_server",
-  "description": "WebHID native messaging host",
-  "path": "{{INSTALLDIR}}webhid-native-messaging.exe",
-  "type": "stdio",
-  "allowed_extensions": ["webhid@k4zoku.dev"]
-}

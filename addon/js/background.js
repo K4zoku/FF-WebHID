@@ -9,9 +9,9 @@ const NativeMessaging = {
 
   connect() {
     if (this.port) return Promise.resolve();
-    logger.debug('[nm] connecting to webhid_server...');
+    logger.debug('[nm] connecting to webhid-native-messaging-host...');
     try {
-      this.port = browser.runtime.connectNative("webhid_server");
+      this.port = browser.runtime.connectNative("webhid-native-messaging-host");
       this._reconnectDelay = 1000;
       logger.debug('[nm] connected');
 

@@ -1,7 +1,0 @@
-{
-  "name": "webhid_server",
-  "description": "WebHID native messaging host – bridges the Firefox addon to webhid-daemon",
-  "path": "{{NM_BIN}}",
-  "type": "stdio",
-  "allowed_extensions": ["webhid@k4zoku.dev"]
-}
