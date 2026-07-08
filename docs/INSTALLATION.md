@@ -113,6 +113,37 @@ Install paths are configurable: `make install-system PREFIX=/usr` or `make insta
 
 > **udev rule**: The `99-webhid.rules` file grants console users access to `hidraw*` devices via `uaccess`. This is only needed for non-root daemons. Root daemons already have full access.
 
+### Daemon-as-NM-host mode (Linux/macOS, advanced)
+
+Eliminates the separate NM host binary and IPC socket — the daemon speaks native-messaging protocol directly on stdin/stdout. This reduces latency by ~100μs per frame (1 fewer IPC hop, 2 fewer allocations).
+
+**Requires:** udev rules installed (daemon runs as your user, not root).
+
+```sh
+# 1. Install udev rule (one-time)
+sudo cp manifests/99-webhid.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules && sudo udevadm trigger
+
+# 2. Build and install daemon
+make build
+sudo install -Dm755 crates/target/release/webhid-daemon /usr/local/bin/webhid-daemon
+
+# 3. Install wrapper script
+sudo install -Dm755 manifests/webhid-daemon-nm-host /usr/local/bin/webhid-daemon-nm-host
+
+# 4. Install NM manifest pointing to the wrapper
+sudo install -Dm644 manifests/webhid-native-messaging-host.json \
+  /usr/lib/mozilla/native-messaging-hosts/webhid-native-messaging-host.json
+# Edit the JSON to set "path" to "/usr/local/bin/webhid-daemon-nm-host"
+
+# 5. Stop root daemon if running
+sudo systemctl disable --now webhid-daemon
+```
+
+The daemon uses a random WebSocket port in this mode (avoids conflicts with any root daemon instance). The port is announced via the `handshake` event.
+
+> **Note:** This mode is not available on Windows — Firefox NM host requires an `.exe` in the `path` field and doesn't support arguments. Use the NM host thin forwarder on Windows.
+
 ---
 
 ## Windows
