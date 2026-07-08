@@ -19,11 +19,8 @@
   // ── Base64 helper (decode only — encode lives in background.js) ───────
 
   function base64Decode(str) {
-    const binary = atob(str);
-    const len = binary.length;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
-    return bytes;
+    // Uint8Array.fromBase64 (Firefox 133+, addon requires 142+)
+    return Uint8Array.fromBase64(str);
   }
 
   function createDeviceHash(device) {

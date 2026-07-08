@@ -181,9 +181,7 @@ function pushInputBatch(batch) {
 }
 
 function base64Encode(bytes) {
-  let binary = '';
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-  return btoa(binary);
+  return bytes.toBase64();
 }
 
 function pushInputBatchPostMessage(batch) {

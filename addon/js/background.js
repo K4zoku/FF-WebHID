@@ -4,11 +4,13 @@ let _deviceCache = [];
 // Base64 encode helper  (Uint8Array → base64 string — for NM requests only)
 // Decode happens at the final consumer (polyfill) to avoid structured-clone
 // copies of typed arrays across context boundaries.
+// Uses Uint8Array.fromBase64 / setFromBase64 (Firefox 133+, addon requires 142+).
 // ---------------------------------------------------------------------------
 
 function base64Encode(bytes) {
-  const binary = String.fromCharCode(...bytes);
-  return btoa(binary);
+  return Uint8Array.prototype.toBase64
+    ? bytes.toBase64()
+    : btoa(String.fromCharCode(...bytes));
 }
 
 const NativeMessaging = {
