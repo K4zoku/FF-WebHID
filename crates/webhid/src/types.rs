@@ -131,7 +131,7 @@ pub struct Field {
 // ---------------------------------------------------------------------------
 
 /// Request sent from the native-messaging process to the daemon.
-#[derive(Debug, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum IpcRequest {
     /// List every connected HID device.
