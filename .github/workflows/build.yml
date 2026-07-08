@@ -136,6 +136,22 @@ jobs:
           sed 's|{{DAEMON_BIN}}|/usr/local/bin/webhid-daemon|g' \
             manifests/webhid-daemon.service > artifacts/etc/systemd/system/webhid-daemon.service
 
+      - name: Build .deb (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          VER=$(grep -oP '"version":\s*"\K[^"]+' package.json)
+          DEB_ARCH=$(if [ "${{ matrix.arch }}" = "aarch64" ]; then echo "arm64"; else echo "amd64"; fi)
+          ./packaging/linux/debian/build-deb.sh "$VER" "$DEB_ARCH" "${{ matrix.rust_target }}"
+        shell: bash
+
+      - name: Build .rpm (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y rpm
+          VER=$(grep -oP '"version":\s*"\K[^"]+' package.json)
+          ./packaging/linux/rpm/build-rpm.sh "$VER" "${{ matrix.arch }}" "${{ matrix.rust_target }}"
+        shell: bash
+
       - name: Prepare Artifacts (macOS)
         if: runner.os == 'macOS'
         run: |
@@ -189,4 +205,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact_name }}
-          path: artifacts/
+          path: |
+            artifacts/
+            dist/*.deb
+            dist/*.rpm

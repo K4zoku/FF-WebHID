@@ -1,27 +1,35 @@
 #!/usr/bin/env bash
-# Build .deb packages for webhid (daemon + NM host) and webhid-addon.
-# Usage: ./build-deb.sh [version] [arch]
+# Build .deb package for webhid (daemon + NM host).
+# Usage: ./build-deb.sh [version] [arch] [rust_target]
+#   arch: amd64 (default) or arm64
+#   rust_target: empty (native) or aarch64-unknown-linux-gnu
 # Requires: cargo, dpkg-deb
 set -euo pipefail
 
 VERSION="${1:-}"
-ARCH="${2:-$(dpkg --print-architecture)}"
+ARCH="${2:-amd64}"
+RUST_TARGET="${3:-}"
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 
 if [ -z "$VERSION" ]; then
   VERSION=$(grep -oP '"version":\s*"\K[^"]+' "$REPO_ROOT/package.json")
 fi
 
-echo "==> Building webhid $VERSION for $ARCH"
+echo "==> Building webhid $VERSION for $ARCH (target: ${RUST_TARGET:-native})"
 
 # Build Rust binaries
 echo "==> cargo build --release"
-cargo build --release --manifest-path "$REPO_ROOT/crates/Cargo.toml"
+if [ -n "$RUST_TARGET" ]; then
+  cargo build --release --target "$RUST_TARGET" --manifest-path "$REPO_ROOT/crates/Cargo.toml"
+  BIN_DIR="$REPO_ROOT/crates/target/$RUST_TARGET/release"
+else
+  cargo build --release --manifest-path "$REPO_ROOT/crates/Cargo.toml"
+  BIN_DIR="$REPO_ROOT/crates/target/release"
+fi
 
 PKGDIR=$(mktemp -d)
 trap 'rm -rf "$PKGDIR"' EXIT
 
-# --- webhid (daemon + NM host) ---
 DEBROOT="$PKGDIR/webhid"
 mkdir -p "$DEBROOT/DEBIAN" \
          "$DEBROOT/usr/bin" \
@@ -31,8 +39,8 @@ mkdir -p "$DEBROOT/DEBIAN" \
          "$DEBROOT/usr/lib/waterfox/native-messaging-hosts" \
          "$DEBROOT/usr/share/licenses/webhid"
 
-cp "$REPO_ROOT/crates/target/release/webhid-daemon" "$DEBROOT/usr/bin/"
-cp "$REPO_ROOT/crates/target/release/webhid-native-messaging" "$DEBROOT/usr/bin/"
+cp "$BIN_DIR/webhid-daemon" "$DEBROOT/usr/bin/"
+cp "$BIN_DIR/webhid-native-messaging" "$DEBROOT/usr/bin/"
 
 sed "s|{{DAEMON_BIN}}|/usr/bin/webhid-daemon|g" \
   "$REPO_ROOT/manifests/webhid-daemon.service" > \
@@ -74,7 +82,8 @@ systemctl disable webhid-daemon.service 2>/dev/null || true
 EOF
 chmod 755 "$DEBROOT/DEBIAN/prerm"
 
-dpkg-deb --build --root-owner-group "$DEBROOT" \
-  "$REPO_ROOT/dist/webhid-${VERSION}-${ARCH}.deb"
+mkdir -p "$REPO_ROOT/dist"
+OUT="$REPO_ROOT/dist/webhid-${VERSION}-${ARCH}.deb"
+dpkg-deb --build --root-owner-group "$DEBROOT" "$OUT"
 
-echo "Done: dist/webhid-${VERSION}-${ARCH}.deb"
+echo "Done: $OUT"

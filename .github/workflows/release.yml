@@ -124,6 +124,22 @@ jobs:
           sed 's|{{DAEMON_BIN}}|/usr/local/bin/webhid-daemon|g' \
             manifests/webhid-daemon.service > artifacts/etc/systemd/system/webhid-daemon.service
 
+      - name: Build .deb (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          VER=$(grep -oP '"version":\s*"\K[^"]+' package.json)
+          DEB_ARCH=$(if [ "${{ matrix.arch }}" = "aarch64" ]; then echo "arm64"; else echo "amd64"; fi)
+          ./packaging/linux/debian/build-deb.sh "$VER" "$DEB_ARCH" "${{ matrix.rust_target }}"
+        shell: bash
+
+      - name: Build .rpm (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y rpm
+          VER=$(grep -oP '"version":\s*"\K[^"]+' package.json)
+          ./packaging/linux/rpm/build-rpm.sh "$VER" "${{ matrix.arch }}" "${{ matrix.rust_target }}"
+        shell: bash
+
       - name: Prepare Artifacts (macOS)
         if: runner.os == 'macOS'
         run: |
@@ -177,7 +193,10 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact_name }}
-          path: artifacts/
+          path: |
+            artifacts/
+            dist/*.deb
+            dist/*.rpm
 
   release:
     name: Create GitHub Release
@@ -248,14 +267,20 @@ jobs:
         run: |
           VER=${{ steps.tag.outputs.name }}
           cp dist/webhid-addon.xpi "dist/webhid-addon-${VER}.xpi"
-          cd artifacts-linux-x86_64     && zip -r "../webhid-linux-x86_64-${VER}.zip"     . && cd ..
-          cd artifacts-linux-aarch64     && zip -r "../webhid-linux-aarch64-${VER}.zip"   . && cd ..
-          cd artifacts-windows-x86_64   && zip -r "../webhid-windows-x86_64-${VER}.zip"   . && cd ..
-          cd artifacts-windows-aarch64  && zip -r "../webhid-windows-aarch64-${VER}.zip"  . && cd ..
-          cd artifacts-macos            && zip -r "../webhid-macos-universal-${VER}.zip"  . && cd ..
-          # MSI files are already named correctly, just move them
+          # Zip portable artifacts (exclude deb/rpm — uploaded separately)
+          cd artifacts-linux-x86_64   && zip -r "../webhid-linux-x86_64-${VER}.zip"   . -x "*.deb" "*.rpm" && cd ..
+          cd artifacts-linux-aarch64  && zip -r "../webhid-linux-aarch64-${VER}.zip"  . -x "*.deb" "*.rpm" && cd ..
+          cd artifacts-windows-x86_64 && zip -r "../webhid-windows-x86_64-${VER}.zip" . && cd ..
+          cd artifacts-windows-aarch64 && zip -r "../webhid-windows-aarch64-${VER}.zip" . && cd ..
+          cd artifacts-macos          && zip -r "../webhid-macos-universal-${VER}.zip" . && cd ..
+          # MSI files
           cp artifacts-windows-x86_64-msi/*.msi . 2>/dev/null || true
           cp artifacts-windows-aarch64-msi/*.msi . 2>/dev/null || true
+          # .deb and .rpm files
+          cp artifacts-linux-x86_64/*.deb . 2>/dev/null || true
+          cp artifacts-linux-aarch64/*.deb . 2>/dev/null || true
+          cp artifacts-linux-x86_64/*.rpm . 2>/dev/null || true
+          cp artifacts-linux-aarch64/*.rpm . 2>/dev/null || true
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
@@ -265,6 +290,8 @@ jobs:
             dist/webhid-addon-*.xpi
             webhid-*.zip
             webhid-*.msi
+            webhid-*.deb
+            webhid-*.rpm
 
       # - name: Upload to AMO
       #   uses: kewisch/action-web-ext@v2
