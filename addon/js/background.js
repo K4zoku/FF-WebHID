@@ -1,5 +1,22 @@
 let _deviceCache = [];
 
+// ---------------------------------------------------------------------------
+// Base64 helpers  (Uint8Array ↔ base64 string)
+// ---------------------------------------------------------------------------
+
+function base64Encode(bytes) {
+  const binary = String.fromCharCode(...bytes);
+  return btoa(binary);
+}
+
+function base64Decode(str) {
+  const binary = atob(str);
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
 const NativeMessaging = {
   port: null,
   _nextId: 1,
@@ -16,6 +33,11 @@ const NativeMessaging = {
       logger.debug('[nm] connected');
 
       this.port.onMessage.addListener((message) => {
+        // Decode base64 `data` back to a number array so downstream
+        // consumers (bridge / polyfill) see the same shape as before.
+        if (typeof message.data === 'string') {
+          message.data = Array.from(base64Decode(message.data));
+        }
         if (message.event_type) { this.onMessage(message); return; }
         if (message.id) {
           const p = this._pending.get(message.id);
@@ -75,59 +97,54 @@ const NativeMessaging = {
     return await this.sendRequest({ action: "enumerate" });
   },
 
-  // The hidraw path uniquely identifies one HID interface; a composite
-  // USB device exposes several of them, so we must open each one we want
-  // to read from explicitly (vid/pid alone would be ambiguous and would
-  // only open the first matching node).
   async openDevice(deviceId) {
     return await this.sendRequest({
       action: "open",
-      device_id: deviceId.split("").map((c) => c.charCodeAt(0)),
+      device_id: deviceId,
     });
   },
 
   async closeDevice(deviceId) {
     return await this.sendRequest({
       action: "close",
-      data: deviceId.split("").map((c) => c.charCodeAt(0)),
+      data: deviceId,
     });
   },
 
-  // device_id, report_id, and data are kept as separate fields so the
-  // native-messaging process can distinguish the path, report ID, and
-  // payload without guessing.  The daemon is responsible for prepending
-  // `report_id` to the buffer before calling `write(2)`.
   async sendReport(deviceId, reportId, data) {
     return await this.sendRequest({
       action: "sendreport",
-      device_id: deviceId.split("").map((c) => c.charCodeAt(0)),
+      device_id: deviceId,
       report_id: reportId,
-      data: Array.from(data),
+      data: base64Encode(data),
     });
   },
 
   async receiveFeatureReport(deviceId, reportId) {
     return await this.sendRequest({
       action: "receivefeaturereport",
-      device_id: deviceId.split("").map((c) => c.charCodeAt(0)),
+      device_id: deviceId,
       report_id: reportId,
     });
   },
 
-  // Same convention as sendReport: the daemon prepends `report_id`
-  // before issuing HIDIOCSFEATURE, so `data` is the payload only.
   async sendFeatureReport(deviceId, reportId, data) {
     return await this.sendRequest({
       action: "sendfeaturereport",
-      device_id: deviceId.split("").map((c) => c.charCodeAt(0)),
+      device_id: deviceId,
       report_id: reportId,
-      data: Array.from(data),
+      data: base64Encode(data),
     });
   },
 
   onMessage(message) {
     if (message.event_type) {
       if (message.event_type === "input_report") return;
+      // Decode base64 `data` back to a number array so content scripts
+      // (which expect ArrayLike for new Uint8Array(…)) keep working.
+      if (typeof message.data === 'string') {
+        message.data = Array.from(base64Decode(message.data));
+      }
       browser.tabs.query({}).then((tabs) => {
         for (const tab of tabs) {
           browser.tabs
@@ -236,12 +253,10 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true;
 
     case "sendreport":
-      // device_id, report_id and data arrive as separate fields from the
-      // content script (see HIDDevice.sendReport).
       NativeMessaging.sendReport(
         String.fromCharCode(...request.device_id),
         request.report_id || 0,
-        request.data,
+        base64Encode(request.data),
       )
         .then(sendResponse)
         .catch((e) => sendResponse({ success: false, error: e.message }));
@@ -260,7 +275,7 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
       NativeMessaging.sendFeatureReport(
         String.fromCharCode(...request.device_id),
         request.report_id || 0,
-        request.data,
+        base64Encode(request.data),
       )
         .then(sendResponse)
         .catch((e) => sendResponse({ success: false, error: e.message }));

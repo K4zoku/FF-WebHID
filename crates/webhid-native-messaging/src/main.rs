@@ -311,33 +311,26 @@ fn nm_to_ipc(req: NmRequest, id: u32) -> IpcRequest {
         NmRequest::Enumerate { .. } => IpcRequest::Enumerate { id },
 
         NmRequest::Open { device_id, .. } => {
-            let device_id = String::from_utf8_lossy(&device_id).into_owned();
             IpcRequest::Open { id, device_id }
         }
 
         NmRequest::Close { data, .. } => {
-            // `data` is the device path encoded as individual char codes.
-            let device_id = String::from_utf8_lossy(&data).into_owned();
-            IpcRequest::Close { id, device_id }
+            IpcRequest::Close { id, device_id: data }
         }
 
         NmRequest::Read { data, timeout, .. } => {
-            let device_id = String::from_utf8_lossy(&data).into_owned();
-            IpcRequest::Read { id, device_id, timeout_ms: timeout }
+            IpcRequest::Read { id, device_id: data, timeout_ms: timeout }
         }
 
         NmRequest::SendReport { device_id, report_id, data, .. } => {
-            let device_id = String::from_utf8_lossy(&device_id).into_owned();
             IpcRequest::SendReport { id, device_id, report_id, data }
         }
 
         NmRequest::ReceiveFeatureReport { device_id, report_id, .. } => {
-            let device_id = String::from_utf8_lossy(&device_id).into_owned();
             IpcRequest::ReceiveFeatureReport { id, device_id, report_id }
         }
 
         NmRequest::SendFeatureReport { device_id, report_id, data, .. } => {
-            let device_id = String::from_utf8_lossy(&device_id).into_owned();
             IpcRequest::SendFeatureReport { id, device_id, report_id, data }
         }
     }
@@ -349,9 +342,7 @@ fn ipc_to_nm(resp: IpcResponse) -> NmResponse {
         IpcResponse::Devices { devices, .. } => NmResponse::ok_with_devices(devices),
 
         IpcResponse::Opened { device_id, session_token, ws_port, .. } => {
-            // The addon decodes the device ID as `String.fromCharCode(...data)`,
-            // so we send the path as a byte array.
-            NmResponse::ok_opened(device_id.into_bytes(), session_token, ws_port)
+            NmResponse::ok_opened(device_id, session_token, ws_port)
         }
 
         IpcResponse::Ok { .. } => NmResponse::ok(),
@@ -379,7 +370,7 @@ fn ipc_event_to_nm(resp: IpcResponse) -> Option<NmResponse> {
         }
 
         IpcResponse::InputReport { device_id, report_id, data, .. } => {
-            Some(NmResponse::event_input_report(device_id.into_bytes(), report_id, data))
+            Some(NmResponse::event_input_report(device_id, report_id, data))
         }
 
         IpcResponse::Hello { ws_port, .. } => {
@@ -433,7 +424,7 @@ mod tests {
 
     #[test]
     fn test_nm_to_ipc_open() {
-        let req = NmRequest::Open { id: None, device_id: b"test-dev".to_vec() };
+        let req = NmRequest::Open { id: None, device_id: "test-dev".into() };
         let ipc = super::nm_to_ipc(req, 2);
         assert!(matches!(ipc, IpcRequest::Open { id: 2, .. }));
         if let IpcRequest::Open { device_id, .. } = &ipc {
@@ -442,19 +433,8 @@ mod tests {
     }
 
     #[test]
-    fn test_nm_to_ipc_open_non_utf8() {
-        let req = NmRequest::Open { id: None, device_id: vec![0xFF, 0xFE] };
-        let ipc = super::nm_to_ipc(req, 3);
-        if let IpcRequest::Open { device_id, .. } = &ipc {
-            assert_eq!(device_id.as_str(), std::string::String::from_utf8_lossy(&[0xFF, 0xFE]));
-        } else {
-            panic!("expected Open");
-        }
-    }
-
-    #[test]
     fn test_nm_to_ipc_close() {
-        let req = NmRequest::Close { id: Some(5), data: b"dev".to_vec() };
+        let req = NmRequest::Close { id: Some(5), data: "dev".into() };
         let ipc = super::nm_to_ipc(req, 4);
         assert!(matches!(ipc, IpcRequest::Close { id: 4, .. }));
         if let IpcRequest::Close { device_id, .. } = &ipc {
@@ -464,7 +444,7 @@ mod tests {
 
     #[test]
     fn test_nm_to_ipc_read() {
-        let req = NmRequest::Read { id: None, data: b"dev".to_vec(), timeout: 5000 };
+        let req = NmRequest::Read { id: None, data: "dev".into(), timeout: 5000 };
         let ipc = super::nm_to_ipc(req, 5);
         assert!(matches!(ipc, IpcRequest::Read { id: 5, timeout_ms: 5000, .. }));
     }
@@ -472,7 +452,7 @@ mod tests {
     #[test]
     fn test_nm_to_ipc_send_report() {
         let req = NmRequest::SendReport {
-            id: None, device_id: b"dev".to_vec(), report_id: 1, data: vec![0x00, 0xFF],
+            id: None, device_id: "dev".into(), report_id: 1, data: vec![0x00, 0xFF],
         };
         let ipc = super::nm_to_ipc(req, 6);
         assert!(matches!(ipc, IpcRequest::SendReport { id: 6, report_id: 1, .. }));
@@ -484,7 +464,7 @@ mod tests {
     #[test]
     fn test_nm_to_ipc_receive_feature_report() {
         let req = NmRequest::ReceiveFeatureReport {
-            id: Some(10), device_id: b"dev".to_vec(), report_id: 0,
+            id: Some(10), device_id: "dev".into(), report_id: 0,
         };
         let ipc = super::nm_to_ipc(req, 7);
         assert!(matches!(ipc, IpcRequest::ReceiveFeatureReport { id: 7, report_id: 0, .. }));
@@ -493,7 +473,7 @@ mod tests {
     #[test]
     fn test_nm_to_ipc_send_feature_report() {
         let req = NmRequest::SendFeatureReport {
-            id: None, device_id: b"dev".to_vec(), report_id: 2, data: vec![0xAA],
+            id: None, device_id: "dev".into(), report_id: 2, data: vec![0xAA],
         };
         let ipc = super::nm_to_ipc(req, 8);
         assert!(matches!(ipc, IpcRequest::SendFeatureReport { id: 8, report_id: 2, .. }));
@@ -533,7 +513,8 @@ mod tests {
         };
         let nm = super::ipc_to_nm(resp);
         assert_eq!(nm.success, Some(true));
-        assert_eq!(nm.data, Some(b"dev".to_vec()));
+        assert_eq!(nm.device_id, Some("dev".into()));
+        assert!(nm.data.is_none());
         assert_eq!(nm.session_token, Some("tok123".into()));
         assert_eq!(nm.ws_port, Some(31337));
     }
@@ -601,7 +582,7 @@ mod tests {
         };
         let nm = super::ipc_event_to_nm(resp).unwrap();
         assert_eq!(nm.event_type, Some("input_report".into()));
-        assert_eq!(nm.device_id, Some(b"dev".to_vec()));
+        assert_eq!(nm.device_id, Some("dev".into()));
         assert_eq!(nm.report_id, Some(5));
         assert_eq!(nm.data, Some(vec![0xAA, 0xBB]));
     }

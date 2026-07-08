@@ -608,7 +608,7 @@
       const response = await browser.runtime.sendMessage(msg);
 
       if (action === "open" && response.success && response.session_token) {
-        const deviceId = String.fromCharCode(...response.data);
+        const deviceId = response.device_id;
         logger.debug('[bridge] open ok deviceId=' + deviceId + ' wsPort=' + response.ws_port);
         const origin = window.location.origin;
         const siteKey = origin ? `site:${origin}` : null;
@@ -658,7 +658,7 @@
                 __webhid_bridge: 'evt',
                 event: {
                   event_type: 'webhid-sab',
-                  device_id: response.data,
+                  device_id: response.device_id,
                   sab: data.sab,
                   reportSize: payload.reportSize || 2048
                 }
@@ -670,7 +670,7 @@
                 __webhid_bridge: 'evt',
                 event: {
                   event_type: 'webhid-sab-disabled',
-                  device_id: response.data,
+                  device_id: response.device_id,
                 }
               }, '*');
             }
@@ -685,7 +685,7 @@
               __webhid_bridge: 'evt',
               event: {
                 event_type: 'input_report',
-                device_id: response.data,
+                device_id: response.device_id,
                 report_id: reportId,
                 data: payloadBytes,
               }
@@ -705,7 +705,7 @@
             }
             window.postMessage({
               __webhid_bridge: 'evt',
-              event: { event_type: 'disconnect', device_id: response.data }
+              event: { event_type: 'disconnect', device_id: response.device_id }
             }, '*');
             return;
           }
@@ -713,7 +713,7 @@
             logger.info('[bridge] worker reconnected for', deviceId);
             window.postMessage({
               __webhid_bridge: 'evt',
-              event: { event_type: 'connect', device_id: response.data }
+              event: { event_type: 'connect', device_id: response.device_id }
             }, '*');
             return;
           }
