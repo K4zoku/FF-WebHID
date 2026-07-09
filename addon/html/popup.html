@@ -20,6 +20,16 @@
   <h2>Settings</h2>
   <div class="setting">
     <div class="setting-info">
+      <h3>Control Plane</h3>
+      <p>Native Messaging or WebSocket (after NM handshake)</p>
+    </div>
+    <select id="controlPlane">
+      <option value="nm">Native Messaging</option>
+      <option value="ws">WebSocket</option>
+    </select>
+  </div>
+  <div class="setting">
+    <div class="setting-info">
       <h3>Data Plane</h3>
       <p>WebSocket (worker + SAB) or Native Messaging (via bridge)</p>
     </div>

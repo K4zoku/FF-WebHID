@@ -45,11 +45,26 @@ fn generate_session_token() -> Result<String, getrandom::Error> {
 pub struct DeviceManager {
     devices: Mutex<HashMap<String, Entry>>,
     event_tx: broadcast::Sender<IpcResponse>,
+    control_token: Mutex<Option<String>>,
 }
 
 impl DeviceManager {
     pub fn new(event_tx: broadcast::Sender<IpcResponse>) -> Self {
-        Self { devices: Mutex::new(HashMap::new()), event_tx }
+        Self { devices: Mutex::new(HashMap::new()), event_tx, control_token: Mutex::new(None) }
+    }
+
+    pub fn get_or_create_control_token(&self) -> String {
+        let mut guard = self.control_token.lock().unwrap();
+        if let Some(ref t) = *guard {
+            return t.clone();
+        }
+        let token = generate_session_token().unwrap_or_else(|_| "fallback_control_token".into());
+        *guard = Some(token.clone());
+        token
+    }
+
+    pub fn validate_control_token(&self, token: &str) -> bool {
+        self.control_token.lock().unwrap().as_deref() == Some(token)
     }
 
     pub fn enumerate(&self) -> anyhow::Result<Vec<DeviceInfo>> {

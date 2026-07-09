@@ -262,6 +262,13 @@ pub enum NmRequest {
         device_id: String,
         mode: String,
     },
+    /// Request control-plane token + WS port. Daemon generates a control
+    /// token (separate from per-device session tokens) that allows a
+    /// control-only WS connection (enumerate/close, no device data).
+    Handshake {
+        #[serde(default)]
+        id: Option<u32>,
+    },
 }
 
 impl NmRequest {
@@ -273,7 +280,8 @@ impl NmRequest {
             | Self::SendReport { id, .. }
             | Self::ReceiveFeatureReport { id, .. }
             | Self::SendFeatureReport { id, .. }
-            | Self::SetDataPlane { id, .. } => *id,
+            | Self::SetDataPlane { id, .. }
+            | Self::Handshake { id } => *id,
         }
     }
 }
@@ -299,6 +307,8 @@ pub struct NmResponse {
     pub data: Option<Vec<u8>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub control_token: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ws_port: Option<u16>,
     // Event fields

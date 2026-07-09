@@ -519,6 +519,64 @@
   const _workers = new Map();
   const _workerCallbacks = new Map();
   let _wsPort = null;
+  let _controlPlane = 'nm';
+  let _controlWs = null;
+  const _controlPending = new Map();
+  let _controlReqId = 1;
+
+  function _connectControlWs(token, wsPort) {
+    if (_controlWs) return;
+    try {
+      _controlWs = new WebSocket(`ws://127.0.0.1:${wsPort}`, [`webhid.${token}`]);
+      _controlWs.binaryType = 'arraybuffer';
+      _controlWs.onmessage = ({ data }) => {
+        if (typeof data !== 'string') return;
+        try {
+          const msg = JSON.parse(data);
+          if (msg.id && _controlPending.has(msg.id)) {
+            const { resolve } = _controlPending.get(msg.id);
+            _controlPending.delete(msg.id);
+            resolve(msg);
+          }
+        } catch {}
+      };
+      _controlWs.onclose = () => {
+        _controlWs = null;
+        for (const [, { resolve }] of _controlPending) resolve({ success: false, error: 'WS control closed' });
+        _controlPending.clear();
+      };
+      _controlWs.onerror = () => {};
+      logger.info('[bridge] control WS connected to ws://127.0.0.1:' + wsPort);
+    } catch (e) {
+      logger.warn('[bridge] control WS connect failed:', e.message);
+      _controlWs = null;
+    }
+  }
+
+  function _sendControlWs(action, payload) {
+    return new Promise((resolve) => {
+      if (!_controlWs || _controlWs.readyState !== WebSocket.OPEN) {
+        resolve({ success: false, error: 'WS control not connected' });
+        return;
+      }
+      const id = _controlReqId++;
+      _controlPending.set(id, { resolve });
+      _controlWs.send(JSON.stringify({ id, action, ...payload }));
+    });
+  }
+
+  // Init: send handshake to get control_token + ws_port, connect control WS.
+  (async () => {
+    try {
+      const resp = await browser.runtime.sendMessage({ action: 'handshake' });
+      if (resp.success && resp.control_token && resp.ws_port) {
+        _wsPort = resp.ws_port;
+        _connectControlWs(resp.control_token, resp.ws_port);
+      }
+    } catch (e) {
+      logger.warn('[bridge] handshake failed:', e.message);
+    }
+  })();
 
   window.addEventListener("message", async (event) => {
     if (!event.data || event.data.__webhid_bridge !== "req") return;
@@ -533,6 +591,7 @@
       try {
         const global = await browser.storage.local.get({
           dataPlane: 'ws',
+          controlPlane: 'nm',
           dispatchDataView: false,
           fireAndForget: true,
           logLevel: 1,
@@ -544,8 +603,10 @@
           const siteResult = await browser.storage.local.get(siteKey);
           const ss = siteResult[siteKey] || {};
           if (ss.dataPlane !== undefined) global.dataPlane = ss.dataPlane;
+          if (ss.controlPlane !== undefined) global.controlPlane = ss.controlPlane;
           if (ss.fireAndForget !== undefined) global.fireAndForget = ss.fireAndForget;
         }
+        _controlPlane = global.controlPlane;
         window.postMessage({ __webhid_bridge: "res", id, result: global }, "*");
       } catch (e) {
         window.postMessage({ __webhid_bridge: "res", id, result: {} }, "*");
@@ -638,8 +699,18 @@
     }
 
     // All other actions (enumerate / open / close / read / write) are forwarded
-    // to the background script via the native-messaging port.
+    // to the background script via the native-messaging port, or via WS
+    // control plane if enabled and connected.
     try {
+      // WS control plane: route enumerate/close via WS text frames.
+      // open always goes via NM (needs session_token per device).
+      if (_controlPlane === 'ws' && _controlWs && _controlWs.readyState === WebSocket.OPEN
+          && (action === 'enumerate' || action === 'close')) {
+        const response = await _sendControlWs(action, payload || {});
+        window.postMessage({ __webhid_bridge: "res", id, result: response }, "*");
+        return;
+      }
+
       const msg = Object.assign({ action }, payload || {});
       const response = await browser.runtime.sendMessage(msg);
 
@@ -838,6 +909,7 @@
     let pl = changes.perfLogging?.newValue;
     let ll = changes.logLevel?.newValue;
     let dp = changes.dataPlane?.newValue;
+    let cp = changes.controlPlane?.newValue;
     const ddv = changes.dispatchDataView?.newValue;
 
     // Check per-site settings changes (popup saves to `site:${origin}` key)
@@ -846,7 +918,13 @@
     if (siteKey && changes[siteKey]) {
       const ss = changes[siteKey].newValue || {};
       if (ss.dataPlane !== undefined) dp = ss.dataPlane;
+      if (ss.controlPlane !== undefined) cp = ss.controlPlane;
       if (ss.fireAndForget !== undefined) ff = ss.fireAndForget;
+    }
+
+    if (cp !== undefined) {
+      _controlPlane = cp;
+      logger.info('[bridge] control plane changed:', cp);
     }
 
     if (ff !== undefined || pl !== undefined || ll !== undefined) {
@@ -855,18 +933,18 @@
       }
     }
 
-    if (dp !== undefined || ddv !== undefined || ff !== undefined || pl !== undefined || ll !== undefined) {
+    if (dp !== undefined || cp !== undefined || ddv !== undefined || ff !== undefined || pl !== undefined || ll !== undefined) {
       const settings = {};
       if (dp !== undefined) settings.dataPlane = dp;
+      if (cp !== undefined) settings.controlPlane = cp;
       if (ddv !== undefined) settings.dispatchDataView = ddv;
       if (ff !== undefined) settings.fireAndForget = ff;
       if (ll !== undefined) settings.logLevel = ll;
       if (pl !== undefined) settings.perfLogging = pl;
       window.postMessage({ __webhid_bridge: "settings", settings }, "*");
 
-      // When dataPlane changes, tell the page to reopen any open devices
-      // so the bridge can spawn/skip the worker correctly.
-      if (dp !== undefined) {
+      // When dataPlane or controlPlane changes, tell the page to reopen devices.
+      if (dp !== undefined || cp !== undefined) {
         window.postMessage({
           __webhid_bridge: 'evt',
           event: { event_type: 'webhid-reopen-all' }

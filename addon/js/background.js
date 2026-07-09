@@ -177,6 +177,10 @@ const NativeMessaging = {
     });
   },
 
+  async handshake() {
+    return await this.sendRequest({ action: "handshake" });
+  },
+
   async sendReport(deviceId, reportId, data) {
     return await this.sendRequest({
       action: "sendreport",
@@ -319,6 +323,12 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
           sendResponse({ success: false, error: e.message });
         });
       return true; // keep channel open for async response
+
+    case "handshake":
+      NativeMessaging.handshake()
+        .then(sendResponse)
+        .catch((e) => sendResponse({ success: false, error: e.message }));
+      return true;
 
     case "open": {
       const tabId = sender.tab?.id;

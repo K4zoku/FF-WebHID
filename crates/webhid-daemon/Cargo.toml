@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 webhid = { path = "../webhid" }
+serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "net", "io-util", "io-std", "time", "signal", "macros"] }
 anyhow = { version = "1", default-features = false, features = ["std"] }
 log = { version = "0.4", features = ["std"] }

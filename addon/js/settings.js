@@ -3,6 +3,7 @@
     perfLogging: false,
     fireAndForget: true,
     dataPlane: 'ws',
+    controlPlane: 'nm',
     sabEnabled: true,
     sabCapacity: 8192,
     dispatchDataView: false,
@@ -27,6 +28,8 @@
 
   const dataPlaneSelect = document.getElementById('dataPlane');
   dataPlaneSelect.value = current.dataPlane;
+  const controlPlaneSelect = document.getElementById('controlPlane');
+  controlPlaneSelect.value = current.controlPlane;
   updateCascadingVisibility();
 
   function updateSabOutput() {
@@ -96,5 +99,9 @@
     await browser.storage.local.set({ dataPlane: e.target.value });
     updateCascadingVisibility();
     showStatus(`dataPlane = ${e.target.value}`);
+  });
+  controlPlaneSelect.addEventListener('change', async (e) => {
+    await browser.storage.local.set({ controlPlane: e.target.value });
+    showStatus(`controlPlane = ${e.target.value}`);
   });
 })();

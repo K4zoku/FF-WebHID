@@ -207,6 +207,16 @@ async fn dispatch(
             device_mgr.set_dataplane_mode(&device_id, &mode);
             NmResponse::ok()
         }
+
+        NmRequest::Handshake { .. } => {
+            let control_token = device_mgr.get_or_create_control_token();
+            NmResponse {
+                success: Some(true),
+                control_token: Some(control_token),
+                ws_port: Some(ws_port),
+                ..Default::default()
+            }
+        }
     };
     resp.id = id;
     resp

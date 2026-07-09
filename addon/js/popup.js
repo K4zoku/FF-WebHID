@@ -1,5 +1,5 @@
 (async () => {
-  const DEFAULTS = { dataPlane: 'ws', sabEnabled: true, sabCapacity: 8192, fireAndForget: true };
+  const DEFAULTS = { controlPlane: 'nm', dataPlane: 'ws', sabEnabled: true, sabCapacity: 8192, fireAndForget: true };
 
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
   let origin = '';
@@ -37,6 +37,8 @@
 
   const dataPlaneSelect = document.getElementById('dataPlane');
   dataPlaneSelect.value = settings.dataPlane;
+  const controlPlaneSelect = document.getElementById('controlPlane');
+  controlPlaneSelect.value = settings.controlPlane;
 
   document.getElementById('fireAndForget').checked = settings.fireAndForget;
   document.getElementById('sabEnabled').checked = settings.sabEnabled;
@@ -67,6 +69,9 @@
   dataPlaneSelect.addEventListener('change', (e) => {
     saveSetting('dataPlane', e.target.value);
     updateCascadingVisibility();
+  });
+  controlPlaneSelect.addEventListener('change', (e) => {
+    saveSetting('controlPlane', e.target.value);
   });
   document.getElementById('fireAndForget').addEventListener('change', (e) => {
     saveSetting('fireAndForget', e.target.checked);

@@ -723,6 +723,7 @@ dependencies = [
  "hidreport",
  "libc",
  "log",
+ "serde_json",
  "tokio",
  "tokio-tungstenite",
  "udev",

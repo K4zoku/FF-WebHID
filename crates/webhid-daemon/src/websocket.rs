@@ -145,20 +145,26 @@ async fn handle_websocket(
     let token = match token {
         Some(t) if t.len() == 32 && t.chars().all(|c| c.is_ascii_hexdigit()) => t,
         Some(_) => {
-            log::warn!("[ws] invalid session token format; closing");
+            log::warn!("[ws] invalid token format; closing");
             return Ok(());
         }
         None => {
-            log::warn!("[ws] no session token provided; closing");
+            log::warn!("[ws] no token provided; closing");
             return Ok(());
         }
     };
 
-    // Authenticate: look up the device_id for this token.
+    // Check if this is a control-only token first.
+    if device_mgr.validate_control_token(&token) {
+        log::info!("[ws] control-only connection accepted");
+        return handle_control_ws(ws_stream, device_mgr).await;
+    }
+
+    // Otherwise: device session token.
     let device_id = match device_mgr.get_device_by_token(&token) {
         Some(id) => id,
         None => {
-            log::warn!("[ws] unknown session token; closing");
+            log::warn!("[ws] unknown token; closing");
             return Ok(());
         }
     };
@@ -215,6 +221,14 @@ async fn handle_websocket(
                     let dev_id = device_id_for_receiver.clone();
                     tokio::spawn(async move {
                         handle_client_binary(&frame, &mgr, client_id_for_receiver, &dev_id, tx_clone).await;
+                    });
+                }
+                Ok(Message::Text(text)) => {
+                    let tx_clone = tx_for_receiver.clone();
+                    let mgr = Arc::clone(&device_mgr_for_receiver);
+                    let dev_id = device_id_for_receiver.clone();
+                    tokio::spawn(async move {
+                        handle_client_text(&text, &mgr, &dev_id, tx_clone).await;
                     });
                 }
                 Err(e) => {
@@ -322,6 +336,47 @@ async fn handle_websocket(
     log::info!("[ws] connection for {device_id} closed");
     device_mgr.set_ws_active(&device_id, false);
     device_mgr.set_dataplane_mode(&device_id, "nm");
+    Ok(())
+}
+
+/// Handle a control-only WS connection (enumerate/close, no device data).
+/// Text frames are JSON control messages; binary frames are rejected.
+async fn handle_control_ws(
+    ws_stream: tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
+    device_mgr: Arc<DeviceManager>,
+) -> anyhow::Result<()> {
+    use futures_util::StreamExt;
+    let (mut ws_sender, mut ws_receiver) = ws_stream.split();
+
+    let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
+
+    let outgoing = tokio::spawn(async move {
+        while let Some(msg) = rx.recv().await {
+            if ws_sender.send(msg).await.is_err() { break; }
+        }
+    });
+
+    while let Some(msg) = ws_receiver.next().await {
+        match msg {
+            Ok(Message::Text(text)) => {
+                let tx_clone = tx.clone();
+                let mgr = Arc::clone(&device_mgr);
+                tokio::spawn(async move {
+                    handle_client_text(&text, &mgr, "", tx_clone).await;
+                });
+            }
+            Ok(Message::Ping(data)) => { let _ = tx.send(Message::Pong(data)); }
+            Ok(Message::Close(_)) => break,
+            Ok(Message::Binary(_)) => {
+                log::warn!("[ws-control] binary frames not allowed on control connection");
+            }
+            Err(e) => { log::warn!("[ws-control] read error: {e}"); break; }
+            _ => {}
+        }
+    }
+
+    outgoing.abort();
+    log::info!("[ws-control] connection closed");
     Ok(())
 }
 
@@ -503,6 +558,47 @@ async fn handle_client_binary(
             let _ = tx.send(make_status_resp(0xFF, req_id, 1));
         }
     }
+}
+
+/// Handle a JSON text frame (control plane over WS).
+async fn handle_client_text(
+    text: &str,
+    device_mgr: &Arc<DeviceManager>,
+    device_id: &str,
+    tx: mpsc::UnboundedSender<Message>,
+) {
+    let req: serde_json::Value = match serde_json::from_str(text) {
+        Ok(v) => v,
+        Err(e) => {
+            let _ = tx.send(Message::Text(
+                serde_json::json!({ "error": format!("JSON parse: {e}") }).to_string().into(),
+            ));
+            return;
+        }
+    };
+
+    let id = req.get("id").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+    let action = req.get("action").and_then(|v| v.as_str()).unwrap_or("");
+
+    let result = match action {
+        "enumerate" => {
+            match device_mgr.enumerate() {
+                Ok(devices) => serde_json::json!({ "id": id, "success": true, "devices": devices }),
+                Err(e) => serde_json::json!({ "id": id, "success": false, "error": e.to_string() }),
+            }
+        }
+        "close" => {
+            match device_mgr.close(device_id, 0) {
+                Ok(()) => serde_json::json!({ "id": id, "success": true }),
+                Err(e) => serde_json::json!({ "id": id, "success": false, "error": e.to_string() }),
+            }
+        }
+        _ => {
+            serde_json::json!({ "id": id, "success": false, "error": format!("unknown action: {action}") })
+        }
+    };
+
+    let _ = tx.send(Message::Text(result.to_string().into()));
 }
 
 /// Build a `[resp_type][req_id_u32 LE][status_u8]` response frame.
