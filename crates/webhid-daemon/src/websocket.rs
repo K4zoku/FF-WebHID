@@ -79,7 +79,14 @@ pub async fn start_server(
     loop {
         match listener.accept().await {
             Ok((stream, addr)) => {
-                log::info!("[ws] client connected from {addr}");
+                // Disable Nagle's algorithm: HID input reports are small,
+                // latency-sensitive frames. Without TCP_NODELAY, Nagle + delayed
+                // ACK can add ~40ms latency to the first frame after idle and
+                // cause burst coalescing jitter.
+                if let Err(e) = stream.set_nodelay(true) {
+                    log::warn!("[ws] set_nodelay failed for {addr}: {e}");
+                }
+                log::info!("[ws] client connected from {addr} (TCP_NODELAY=on)");
                 let event_tx_clone = event_tx.clone();
                 let device_mgr_clone = Arc::clone(&device_mgr);
                 tokio::spawn(async move {
