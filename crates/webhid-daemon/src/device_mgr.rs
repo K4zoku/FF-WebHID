@@ -5,7 +5,6 @@ use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use hidapi::HidDevice;
-use rand::RngExt;
 
 use tokio::task::JoinHandle;
 use tokio::sync::broadcast;
@@ -26,10 +25,18 @@ struct Entry {
     ws_active: Arc<AtomicBool>,
 }
 
-fn generate_session_token() -> String {
-    let mut rng = rand::rng();
-    let bytes: [u8; 16] = rng.random();
-    hex::encode(bytes)
+const HEX_CHARS: &[u8; 16] = b"0123456789abcdef";
+
+fn generate_session_token() -> Result<String, getrandom::Error> {
+    let mut buf = [0u8; 16];
+    getrandom::fill(&mut buf)?;
+
+    let mut out = String::with_capacity(32);
+    for b in buf {
+        out.push(HEX_CHARS[(b >> 4) as usize] as char);
+        out.push(HEX_CHARS[(b & 0x0f) as usize] as char);
+    }
+    Ok(out)
 }
 
 pub struct DeviceManager {
@@ -70,7 +77,7 @@ impl DeviceManager {
             };
         }
 
-        let session_token = self::generate_session_token();
+        let session_token = self::generate_session_token()?;
         let stop_flag = Arc::new(AtomicBool::new(false));
         // Open a second handle for the reader task so it doesn't hold the
         // writer's mutex during poll(2).  hidapi allows multiple opens of
