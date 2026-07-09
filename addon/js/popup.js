@@ -157,9 +157,9 @@
 
       const name = dev ? (dev.product_name || dev.productName || 'Unknown') : 'Saved device';
       const type = guessDeviceType(name, dev?.usage_page, dev?.usage);
-      const vid = dev ? (dev.vendor_id || d.vendorId || 0) : 0;
-      const pid = dev ? (dev.product_id || d.productId || 0) : 0;
-      const manufacturer = dev ? (dev.manufacturer || d.manufacturerName || '') : '';
+      const vid = dev ? (dev.vendor_id || dev.vendorId || 0) : 0;
+      const pid = dev ? (dev.product_id || dev.productId || 0) : 0;
+      const manufacturer = dev ? (dev.manufacturer || dev.manufacturerName || '') : '';
 
       const card = document.createElement('div');
       card.className = 'device-card';

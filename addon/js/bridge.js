@@ -128,7 +128,7 @@
           return true;
         }
         if (request.action === "getOpenDeviceIds") {
-          sendResponse({ ids: Array.from(_workers.keys()) });
+          sendResponse({ ids: Array.from(_openDevices) });
           return true;
         }
       });
@@ -518,6 +518,7 @@
   // ---------------------------------------------------------------------------
   const _workers = new Map();
   const _workerCallbacks = new Map();
+  const _openDevices = new Set();
   let _wsPort = null;
   let _controlPlane = 'nm';
   let _controlWs = null;
@@ -716,6 +717,8 @@
 
       if (action === "open" && response.success && response.session_token) {
         const deviceId = response.device_id;
+        _openDevices.add(deviceId);
+        browser.runtime.sendMessage({ action: "device-count-changed", count: _openDevices.size }).catch(() => {});
         logger.debug('[bridge] open ok deviceId=' + deviceId + ' wsPort=' + response.ws_port);
         const origin = window.location.origin;
         const siteKey = origin ? `site:${origin}` : null;
@@ -766,7 +769,6 @@
           throw e;
         }
         _workers.set(deviceId, worker);
-        browser.runtime.sendMessage({ action: "device-count-changed", count: _workers.size }).catch(() => {});
 
         worker.onerror = (e) => {
           logger.error('[bridge] worker.onerror:', e.message || '(no msg)', 'file=', e.filename, 'line=', e.lineno);
@@ -866,11 +868,12 @@
       if (action === "close") {
         const deviceId = payload.device_id;
         logger.debug('[bridge] close deviceId=' + deviceId);
+        _openDevices.delete(deviceId);
+        browser.runtime.sendMessage({ action: "device-count-changed", count: _openDevices.size }).catch(() => {});
         const worker = _workers.get(deviceId);
         if (worker) {
           worker.terminate();
           _workers.delete(deviceId);
-          browser.runtime.sendMessage({ action: "device-count-changed", count: _workers.size }).catch(() => {});
         }
       }
 
