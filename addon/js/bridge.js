@@ -527,16 +527,25 @@
     logger.debug('[bridge] req action=' + action + ' id=' + id);
 
     // Settings fetch — page (MAIN world) has no browser.* APIs.
+    // Merge per-site overrides on top of global defaults.
     if (action === "getSettings") {
       try {
-        const s = await browser.storage.local.get({
+        const global = await browser.storage.local.get({
           dataPlane: 'ws',
           dispatchDataView: false,
           fireAndForget: true,
           logLevel: 1,
           perfLogging: false,
         });
-        window.postMessage({ __webhid_bridge: "res", id, result: s }, "*");
+        const origin = window.location.origin;
+        const siteKey = origin ? `site:${origin}` : null;
+        if (siteKey) {
+          const siteResult = await browser.storage.local.get(siteKey);
+          const ss = siteResult[siteKey] || {};
+          if (ss.dataPlane !== undefined) global.dataPlane = ss.dataPlane;
+          if (ss.fireAndForget !== undefined) global.fireAndForget = ss.fireAndForget;
+        }
+        window.postMessage({ __webhid_bridge: "res", id, result: global }, "*");
       } catch (e) {
         window.postMessage({ __webhid_bridge: "res", id, result: {} }, "*");
       }
@@ -645,6 +654,7 @@
         if (siteKey) {
           const siteResult = await browser.storage.local.get(siteKey);
           const ss = siteResult[siteKey] || {};
+          if (ss.dataPlane !== undefined) dataPlane = ss.dataPlane;
           if (ss.sabEnabled !== undefined) sabEnabled = ss.sabEnabled;
           if (ss.sabCapacity !== undefined) sabCapacity = ss.sabCapacity;
         }
@@ -815,11 +825,21 @@
 
   browser.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
-    const ff = changes.fireAndForget?.newValue;
-    const pl = changes.perfLogging?.newValue;
-    const ll = changes.logLevel?.newValue;
-    const dp = changes.dataPlane?.newValue;
+
+    let ff = changes.fireAndForget?.newValue;
+    let pl = changes.perfLogging?.newValue;
+    let ll = changes.logLevel?.newValue;
+    let dp = changes.dataPlane?.newValue;
     const ddv = changes.dispatchDataView?.newValue;
+
+    // Check per-site settings changes (popup saves to `site:${origin}` key)
+    const origin = window.location.origin;
+    const siteKey = origin ? `site:${origin}` : null;
+    if (siteKey && changes[siteKey]) {
+      const ss = changes[siteKey].newValue || {};
+      if (ss.dataPlane !== undefined) dp = ss.dataPlane;
+      if (ss.fireAndForget !== undefined) ff = ss.fireAndForget;
+    }
 
     if (ff !== undefined || pl !== undefined || ll !== undefined) {
       for (const worker of _workers.values()) {
@@ -835,6 +855,15 @@
       if (ll !== undefined) settings.logLevel = ll;
       if (pl !== undefined) settings.perfLogging = pl;
       window.postMessage({ __webhid_bridge: "settings", settings }, "*");
+
+      // When dataPlane changes, tell the page to reopen any open devices
+      // so the bridge can spawn/skip the worker correctly.
+      if (dp !== undefined) {
+        window.postMessage({
+          __webhid_bridge: 'evt',
+          event: { event_type: 'webhid-reopen-all' }
+        }, '*');
+      }
     }
   });
 })();

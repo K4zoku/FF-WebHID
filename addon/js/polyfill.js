@@ -241,6 +241,22 @@
   // startInputReportLoop is a standalone function, not a class method).
   const _sabUpdateFns = new WeakMap();
 
+  // When dataPlane changes, reopen all currently-open devices so the bridge
+  // can spawn/skip the worker and switch transport correctly.
+  window.addEventListener("message", (event) => {
+    if (!event.data || event.data.__webhid_bridge !== "evt") return;
+    const detail = event.data.event;
+    if (!detail || detail.event_type !== 'webhid-reopen-all') return;
+    logger.info('[webhid] data plane changed — reopening devices');
+    for (const dev of _deviceRegistry.values()) {
+      if (dev.opened) {
+        dev.close().then(() => dev.open()).catch((e) => {
+          logger.warn('[webhid] reopen failed:', e.message);
+        });
+      }
+    }
+  });
+
   function getOrCreateDevice(deviceInfo) {
     const id = deviceInfo.device_id;
     if (id && _deviceRegistry.has(id)) {
