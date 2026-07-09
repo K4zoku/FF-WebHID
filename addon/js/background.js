@@ -8,7 +8,7 @@ function registerDeviceTab(deviceId, tabId) {
   let tabs = _deviceTabMap.get(deviceId);
   if (!tabs) { tabs = new Set(); _deviceTabMap.set(deviceId, tabs); }
   tabs.add(tabId);
-  logger.debug(`[bg] register device ${deviceId} → tab ${tabId} (owners: ${tabs.size})`);
+  __webhid.logger.debug(`[bg] register device ${deviceId} → tab ${tabId} (owners: ${tabs.size})`);
 }
 
 function unregisterDeviceTab(deviceId, tabId) {
@@ -18,7 +18,7 @@ function unregisterDeviceTab(deviceId, tabId) {
   tabs.delete(tabId);
   if (tabs.size === 0) _deviceTabMap.delete(deviceId);
   else _deviceTabMap.set(deviceId, tabs);
-  logger.debug(`[bg] unregister device ${deviceId} ← tab ${tabId} (remaining: ${tabs.size})`);
+  __webhid.logger.debug(`[bg] unregister device ${deviceId} ← tab ${tabId} (remaining: ${tabs.size})`);
 }
 
 /** Drop every device→tab entry that points at `tabId` (called on tab close). */
@@ -38,19 +38,6 @@ function tabsForEvent(message) {
   return tabs && tabs.size > 0 ? [...tabs] : null;
 }
 
-// ---------------------------------------------------------------------------
-// Base64 encode helper  (Uint8Array → base64 string — for NM requests only)
-// Decode happens at the final consumer (polyfill) to avoid structured-clone
-// copies of typed arrays across context boundaries.
-// Uses Uint8Array.fromBase64 / setFromBase64 (Firefox 133+, addon requires 142+).
-// ---------------------------------------------------------------------------
-
-function base64Encode(bytes) {
-  return Uint8Array.prototype.toBase64
-    ? bytes.toBase64()
-    : btoa(String.fromCharCode(...bytes));
-}
-
 // NM host names registered by the installer:
 // - webhid.forwarder_nm_host: thin forwarder → daemon Unix socket / pipe
 // - webhid.daemon_nm_host:     daemon speaks NM directly on stdin/stdout
@@ -67,7 +54,7 @@ async function loadNmHostSetting() {
   const global = await browser.storage.local.get({ daemonAsNmHost: false });
   _daemonAsNmHost = global.daemonAsNmHost;
   _nmHostName = _daemonAsNmHost ? NM_HOST_DAEMON : NM_HOST_FORWARDER;
-  logger.info('[bg] NM host:', _nmHostName);
+  __webhid.logger.info('[bg] NM host:', _nmHostName);
 }
 
 const NativeMessaging = {
@@ -79,11 +66,11 @@ const NativeMessaging = {
 
   connect() {
     if (this.port) return Promise.resolve();
-    logger.debug(`[nm] connecting to ${_nmHostName}...`);
+    __webhid.logger.debug(`[nm] connecting to ${_nmHostName}...`);
     try {
       this.port = browser.runtime.connectNative(_nmHostName);
       this._reconnectDelay = 1000;
-      logger.debug('[nm] connected');
+      __webhid.logger.debug('[nm] connected');
 
       this.port.onMessage.addListener((message) => {
         // `data` arrives as a base64 string and is forwarded as-is;
@@ -94,11 +81,11 @@ const NativeMessaging = {
           const p = this._pending.get(message.id);
           if (p) { this._pending.delete(message.id); p.resolve(message); return; }
         }
-        logger.warn("webhid: NM response no matching pending:", message);
+        __webhid.logger.warn("webhid: NM response no matching pending:", message);
       });
 
       this.port.onDisconnect.addListener(() => {
-        logger.warn("[nm] disconnected; will retry in", this._reconnectDelay, "ms");
+        __webhid.logger.warn("[nm] disconnected; will retry in", this._reconnectDelay, "ms");
         this.port = null;
         for (const [id, p] of this._pending) p.resolve({ success: false, error: "NM disconnected" });
         this._pending.clear();
@@ -107,7 +94,7 @@ const NativeMessaging = {
 
       return Promise.resolve();
     } catch (error) {
-      logger.error("[nm] connect failed:", error);
+      __webhid.logger.error("[nm] connect failed:", error);
       this._scheduleReconnect();
       return Promise.reject(error);
     }
@@ -132,7 +119,7 @@ const NativeMessaging = {
     if (this._reconnectTimer) return;
     this._reconnectTimer = setTimeout(() => {
       this._reconnectTimer = null;
-      logger.debug("[nm] reconnecting...");
+      __webhid.logger.debug("[nm] reconnecting...");
       this.connect().catch(() => {});
     }, this._reconnectDelay);
     this._reconnectDelay = Math.min(this._reconnectDelay * 2, 10000);
@@ -147,7 +134,7 @@ const NativeMessaging = {
       }
 
       const id = this._nextId++;
-      logger.debug('[nm] sendRequest action=' + request.action + ' id=' + id);
+      __webhid.logger.debug('[nm] sendRequest action=' + request.action + ' id=' + id);
       this._pending.set(id, { resolve, reject });
 
       try {
@@ -186,7 +173,7 @@ const NativeMessaging = {
       action: "sendreport",
       device_id: deviceId,
       report_id: reportId,
-      data: base64Encode(data),
+      data: data.toBase64(),
     });
   },
 
@@ -203,7 +190,7 @@ const NativeMessaging = {
       action: "sendfeaturereport",
       device_id: deviceId,
       report_id: reportId,
-      data: base64Encode(data),
+      data: data.toBase64(),
     });
   },
 
@@ -267,13 +254,13 @@ browser.storage.onChanged.addListener((changes, area) => {
       if (newName !== _nmHostName) {
         _daemonAsNmHost = changes.daemonAsNmHost.newValue;
         _nmHostName = newName;
-        logger.info('[bg] NM host changed →', _nmHostName, '(reconnecting)');
+        __webhid.logger.info('[bg] NM host changed →', _nmHostName, '(reconnecting)');
         NativeMessaging.reconnectWithNewHost();
       }
     }
     // Reload from storage to pick up per-site overrides
     loadSabSetting();
-    logger.info('[bg] SAB data plane:', _sabEnabled);
+    __webhid.logger.info('[bg] SAB data plane:', _sabEnabled);
   }
 });
 

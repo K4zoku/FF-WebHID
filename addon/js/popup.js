@@ -1,6 +1,4 @@
 (async () => {
-  const DEFAULTS = { controlPlane: 'nm', dataPlane: 'ws', sabEnabled: true, sabCapacity: 8192, fireAndForget: true };
-
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
   let origin = '';
   if (tab && tab.url) {
@@ -19,7 +17,7 @@
   const siteDevicesKey = origin ? encodeURIComponent(origin) : null;
 
   async function loadSettings() {
-    const global = await browser.storage.local.get(DEFAULTS);
+    const global = await browser.storage.local.get(__webhid.GLOBAL_DEFAULTS);
     if (!siteKey) return global;
     const site = await browser.storage.local.get(siteKey);
     return { ...global, ...site[siteKey] };
@@ -100,24 +98,6 @@
     renderDevices();
   }
 
-  function guessDeviceType(name, usagePage, usage) {
-    if (usagePage === 0x01) {
-      if (usage === 0x01 || usage === 0x02) return 'mouse';
-      if (usage === 0x06 || usage === 0x07) return 'keyboard';
-      if (usage === 0x04 || usage === 0x08) return 'joystick';
-      if (usage === 0x05) return 'controller';
-    }
-    const n = (name || '').toLowerCase();
-    if (/mouse|trackball|trackpad|touchpad/i.test(n)) return 'mouse';
-    if (/keyboard|kbd/i.test(n)) return 'keyboard';
-    if (/joystick|flight.?stick|yoke|rudder|throttle/i.test(n)) return 'joystick';
-    if (/gamepad|controller|xbox|playstation|dualshock|dualsense|joycon|joy.con/i.test(n)) return 'controller';
-    if (/headset|headphone|earphone|\bmic(rophone)?\b|earbuds?/i.test(n)) return 'headset';
-    if (/speaker|soundbar|audio|\bdac\b|amplifier/i.test(n)) return 'speaker';
-    if (/webcam|camera|\bcam\b/i.test(n)) return 'camera';
-    return 'unknown';
-  }
-
   async function renderDevices() {
     const list = document.getElementById('device-list');
     const noDevices = document.getElementById('no-devices');
@@ -141,22 +121,10 @@
 
     let openCount = 0;
     for (const hash of hashes) {
-      const dev = cache.find(d => {
-        const vid = String(d.vendor_id || d.vendorId || 0);
-        const pid = String(d.product_id || d.productId || 0);
-        const serial = String(d.serial_number || d.serialNumber || '');
-        const id = String(d.device_id || d.path || '');
-        const ident = vid + ':' + pid + ':' + serial + ':' + id;
-        let h = 5381;
-        for (let i = 0; i < ident.length; i++) {
-          h = ((h << 5) + h) + ident.charCodeAt(i);
-          h = h & 0xFFFFFFFF;
-        }
-        return Math.abs(h).toString(16) === hash;
-      });
+      const dev = cache.find(d => __webhid.createDeviceHash(d) === hash);
 
       const name = dev ? (dev.product_name || dev.productName || 'Unknown') : 'Saved device';
-      const type = guessDeviceType(name, dev?.usage_page, dev?.usage);
+      const type = __webhid.guessDeviceType(dev || { product_name: name });
       const vid = dev ? (dev.vendor_id || dev.vendorId || 0) : 0;
       const pid = dev ? (dev.product_id || dev.productId || 0) : 0;
       const manufacturer = dev ? (dev.manufacturer || dev.manufacturerName || '') : '';

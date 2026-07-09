@@ -64,7 +64,7 @@
         style.textContent = theme + "\n" + css;
         this.shadowRoot.appendChild(style);
       } catch (e) {
-        logger.warn("[WebHID] Failed to load shadow styles", e);
+        __webhid.logger.warn("[WebHID] Failed to load shadow styles", e);
       }
     }
 
@@ -148,7 +148,7 @@
         tries++;
       }
       if (!this.shadowRoot) {
-        logger.error('[WebHID] shadowRoot not initialized; cannot show device picker');
+        __webhid.logger.error('[WebHID] shadowRoot not initialized; cannot show device picker');
         this.onDeviceCancelled();
         return;
       }
@@ -213,7 +213,7 @@
           this.devices = [];
           const errMsg = response?.error || "Unknown error";
           const userMsg = this._classifyError(errMsg);
-          logger.error('[WebHID] enumerate failed:', errMsg);
+          __webhid.logger.error('[WebHID] enumerate failed:', errMsg);
           this._showMessage(userMsg, true);
         }
       } catch (error) {
@@ -221,7 +221,7 @@
         this.devices = [];
         const errMsg = error?.message || String(error);
         const userMsg = this._classifyError(errMsg);
-        logger.error('[WebHID] enumerate exception:', errMsg);
+        __webhid.logger.error('[WebHID] enumerate exception:', errMsg);
         this._showMessage(userMsg, true);
       }
     }
@@ -253,24 +253,6 @@
       deviceList.appendChild(div);
     }
 
-    createDeviceHash(device) {
-      const vendorId = String(device.vendor_id || 0);
-      const productId = String(device.product_id || 0);
-      const serialNumber = String(device.serial_number || "");
-      const path = String(device.device_id || "");
-      const identifier = vendorId + ":" + productId + ":" + serialNumber + ":" + path;
-
-      // Simple DJB2 hash algorithm
-      let hash = 5381;
-      for (let i = 0; i < identifier.length; i++) {
-        hash = ((hash << 5) + hash) + identifier.charCodeAt(i);
-        hash = hash & 0xFFFFFFFF; // Convert to 32-bit integer
-      }
-
-      // Convert to positive hex string
-      return Math.abs(hash).toString(16);
-    }
-
     async getSavedDevices() {
       // Return cached hashes if available
       if (this._savedDevices !== null) {
@@ -291,7 +273,7 @@
 
     async deviceMatchesSaved(device) {
       const savedHashes = await this.getSavedDevices();
-      const deviceHash = this.createDeviceHash(device);
+      const deviceHash = __webhid.createDeviceHash(device);
       return savedHashes.includes(deviceHash);
     }
 
@@ -349,13 +331,13 @@
         // Create a stable group id. For single-device groups use the path so
         // external code relying on unique paths continues to work; for multi-
         // interface groups use a generated id prefixed with 'group:'.
-        const groupId = devices.length === 1 ? devices[0].device_id : `group:${this.createDeviceHash(devices[0])}`;
+        const groupId = devices.length === 1 ? devices[0].device_id : `group:${__webhid.createDeviceHash(devices[0])}`;
         this._deviceGroups[groupId] = devices.slice(); // store copy
 
         // Use the first device to determine icon/type/manufacturer
         const device = devices[0];
         const deviceId = groupId;
-        const type = this._guessDeviceType(device);
+        const type = __webhid.guessDeviceType(device);
         const iconUrl = browser.runtime.getURL(`res/${type}.svg`);
 
         const clone = tpl.content.cloneNode(true);
@@ -411,66 +393,6 @@
       radio.dispatchEvent(new Event("change", { bubbles: true }));
     }
 
-    getDeviceId(device) {
-      // Use the hidraw path as the stable, per-interface unique ID for
-      // single-interface items. For grouped items the id is generated during
-      // render and stored in _deviceGroups.
-      return device.device_id;
-    }
-
-    // Guess a generic device category from HID usage page (when the daemon
-    // provides it) and from the product name as a fallback.
-    // Returns one of: mouse | keyboard | controller | joystick | headset | speaker | camera | unknown
-    _guessDeviceType(device) {
-      // HID Usage Page 0x01: Generic Desktop Controls (most reliable)
-      if (device.usage_page === 0x01) {
-        const u = device.usage;
-        if (u === 0x01 || u === 0x02) return "mouse";      // Pointer, Mouse
-        if (u === 0x06 || u === 0x07) return "keyboard";   // Keyboard, Keypad
-        if (u === 0x04 || u === 0x08) return "joystick";   // Joystick, Multi-axis
-        if (u === 0x05) return "controller";               // Gamepad
-      }
-
-      // Name-based heuristics; order matters (joystick before controller)
-      const name = (device.product_name || "").toLowerCase();
-      if (/mouse|trackball|trackpad|touchpad/i.test(name))                         return "mouse";
-      if (/keyboard|kbd/i.test(name))                                              return "keyboard";
-      if (/joystick|flight.?stick|yoke|rudder|throttle/i.test(name))              return "joystick";
-      if (/gamepad|controller|xbox|playstation|dualshock|dualsense|joycon|joy.con/i.test(name)) return "controller";
-      if (/headset|headphone|earphone|\bmic(rophone)?\b|earbuds?/i.test(name))    return "headset";
-      if (/speaker|soundbar|audio|\bdac\b|amplifier/i.test(name))                 return "speaker";
-      if (/webcam|camera|\bcam\b/i.test(name))                                    return "camera";
-
-      return "unknown";
-    }
-
-    // Returns a Set of path values that share a display name with at least
-    // one other device in the list; used to trigger disambiguation labels.
-    _ambiguousPaths(devices) {
-      const nameCount = {};
-      for (const d of devices) {
-        const name = d.product_name || "Unknown Device";
-        nameCount[name] = (nameCount[name] || 0) + 1;
-      }
-      const ambiguous = new Set();
-      for (const d of devices) {
-        if (nameCount[d.product_name || "Unknown Device"] > 1) {
-          ambiguous.add(d.device_id);
-        }
-      }
-      return ambiguous;
-    }
-
-    hex(value) {
-      return "0x" + value.toString(16).toUpperCase().padStart(4, "0");
-    }
-
-    escapeHtml(text) {
-      const span = document.createElement("span");
-      span.textContent = text;
-      return span.innerHTML;
-    }
-
     onDeviceSelected(devices) {
           // Normalize to an array so consumers always receive an array of devices
           const devicesArr = Array.isArray(devices) ? devices : [devices];
@@ -485,7 +407,7 @@
             try {
               const saved = await this.getSavedDevices();
               for (const d of devicesArr) {
-                const h = this.createDeviceHash(d);
+                const h = __webhid.createDeviceHash(d);
                 if (!saved.includes(h)) saved.push(h);
               }
               this._savedDevices = saved;
@@ -547,9 +469,9 @@
         _controlPending.clear();
       };
       _controlWs.onerror = () => {};
-      logger.info('[bridge] control WS connected to ws://127.0.0.1:' + wsPort);
+      __webhid.logger.info('[bridge] control WS connected to ws://127.0.0.1:' + wsPort);
     } catch (e) {
-      logger.warn('[bridge] control WS connect failed:', e.message);
+      __webhid.logger.warn('[bridge] control WS connect failed:', e.message);
       _controlWs = null;
     }
   }
@@ -575,7 +497,7 @@
         _connectControlWs(resp.control_token, resp.ws_port);
       }
     } catch (e) {
-      logger.warn('[bridge] handshake failed:', e.message);
+      __webhid.logger.warn('[bridge] handshake failed:', e.message);
     }
   })();
 
@@ -584,20 +506,13 @@
 
     const { id, action, payload } = event.data;
     const isFireAndForget = event.data.fireAndForget === true;
-    logger.debug('[bridge] req action=' + action + ' id=' + id + (isFireAndForget ? ' (faf)' : ''));
+    __webhid.logger.debug('[bridge] req action=' + action + ' id=' + id + (isFireAndForget ? ' (faf)' : ''));
 
     // Settings fetch — page (MAIN world) has no browser.* APIs.
     // Merge per-site overrides on top of global defaults.
     if (action === "getSettings") {
       try {
-        const global = await browser.storage.local.get({
-          dataPlane: 'ws',
-          controlPlane: 'nm',
-          dispatchDataView: false,
-          fireAndForget: true,
-          logLevel: 1,
-          perfLogging: false,
-        });
+        const global = await browser.storage.local.get(__webhid.GLOBAL_DEFAULTS);
         const origin = window.location.origin;
         const siteKey = origin ? `site:${origin}` : null;
         if (siteKey) {
@@ -646,7 +561,7 @@
         worker.postMessage(wMsg, wTransfer);
         return;
       }
-      logger.warn('[bridge] no worker for', deviceId, '; falling back to NM');
+      __webhid.logger.warn('[bridge] no worker for', deviceId, '; falling back to NM');
       const fallbackAction =
         action === "worker-send" ? "sendreport" :
         action === "worker-sendFeature" ? "sendfeaturereport" :
@@ -719,16 +634,11 @@
         const deviceId = response.device_id;
         _openDevices.add(deviceId);
         browser.runtime.sendMessage({ action: "device-count-changed", count: _openDevices.size }).catch(() => {});
-        logger.debug('[bridge] open ok deviceId=' + deviceId + ' wsPort=' + response.ws_port);
+        __webhid.logger.debug('[bridge] open ok deviceId=' + deviceId + ' wsPort=' + response.ws_port);
         const origin = window.location.origin;
         const siteKey = origin ? `site:${origin}` : null;
 
-        const globalDefaults = await browser.storage.local.get({
-          dataPlane: 'ws',
-          sabEnabled: true,
-          sabCapacity: 8192,
-          logLevel: 1,
-        });
+        const globalDefaults = await browser.storage.local.get(__webhid.GLOBAL_DEFAULTS);
         let dataPlane = globalDefaults.dataPlane;
         let sabEnabled = globalDefaults.sabEnabled;
         let sabCapacity = globalDefaults.sabCapacity;
@@ -742,14 +652,14 @@
         }
 
         if (dataPlane === 'nm') {
-          logger.info('[bridge] NM mode for', deviceId, '(no worker spawned)');
+          __webhid.logger.info('[bridge] NM mode for', deviceId, '(no worker spawned)');
           browser.runtime.sendMessage({
             action: "setdataplane",
             device_id: deviceId,
             mode: "nm",
           }).catch(() => {});
         } else if (!sabEnabled) {
-          logger.info('[bridge] SAB disabled for', deviceId, '(worker without SAB)');
+          __webhid.logger.info('[bridge] SAB disabled for', deviceId, '(worker without SAB)');
           browser.runtime.sendMessage({
             action: "setdataplane",
             device_id: deviceId,
@@ -759,24 +669,29 @@
         {
         let worker;
         try {
-          const workerUrl = browser.runtime.getURL('js/worker.js');
-          const resp = await fetch(workerUrl);
-          const code = await resp.text();
-          const blob = new Blob([code], { type: 'application/javascript' });
+          const [loggerResp, workerResp] = await Promise.all([
+            fetch(browser.runtime.getURL('js/utils/logger.js')),
+            fetch(browser.runtime.getURL('js/worker.js')),
+          ]);
+          const [loggerCode, workerCode] = await Promise.all([
+            loggerResp.text(),
+            workerResp.text(),
+          ]);
+          const blob = new Blob([loggerCode + '\n' + workerCode], { type: 'application/javascript' });
           worker = new Worker(URL.createObjectURL(blob));
         } catch (e) {
-          logger.error('[bridge] worker spawn failed:', e);
+          __webhid.logger.error('[bridge] worker spawn failed:', e);
           throw e;
         }
         _workers.set(deviceId, worker);
 
         worker.onerror = (e) => {
-          logger.error('[bridge] worker.onerror:', e.message || '(no msg)', 'file=', e.filename, 'line=', e.lineno);
+          __webhid.logger.error('[bridge] worker.onerror:', e.message || '(no msg)', 'file=', e.filename, 'line=', e.lineno);
         };
 
         worker.onmessage = ({ data }) => {
           if (data.type === 'ready') {
-            logger.info('[bridge] worker ready for', deviceId, data.sab ? '(SAB)' : '(postMessage fallback)');
+            __webhid.logger.info('[bridge] worker ready for', deviceId, data.sab ? '(SAB)' : '(postMessage fallback)');
             if (data.sab) {
               // SAB path: polyfill drains via Atomics
               window.postMessage({
@@ -815,11 +730,11 @@
             return;
           }
           if (data.type === 'error') {
-            logger.error('[bridge] worker error:', data.error);
+            __webhid.logger.error('[bridge] worker error:', data.error);
             return;
           }
           if (data.type === 'closed') {
-            logger.warn('[bridge] worker WS closed for', deviceId, '; worker will auto-reconnect');
+            __webhid.logger.warn('[bridge] worker WS closed for', deviceId, '; worker will auto-reconnect');
             const cbMap = _workerCallbacks.get(worker);
             if (cbMap) {
               for (const [reqId, cb] of cbMap) cb({ type: 'sendResult', reqId, error: 'ws closed' });
@@ -832,7 +747,7 @@
             return;
           }
           if (data.type === 'ready' && _workers.has(deviceId)) {
-            logger.info('[bridge] worker reconnected for', deviceId);
+            __webhid.logger.info('[bridge] worker reconnected for', deviceId);
             window.postMessage({
               __webhid_bridge: 'evt',
               event: { event_type: 'connect', device_id: response.device_id }
@@ -844,7 +759,7 @@
             if (cbMap) {
               const cb = cbMap.get(data.reqId);
               if (cb) { cbMap.delete(data.reqId); cb(data); }
-              else logger.warn('[bridge] worker response for unknown reqId=', data.reqId, 'cbMap size=', cbMap.size);
+              else __webhid.logger.warn('[bridge] worker response for unknown reqId=', data.reqId, 'cbMap size=', cbMap.size);
             }
           }
         };
@@ -859,7 +774,7 @@
         });
 
         (async () => {
-          const s = await browser.storage.local.get({ fireAndForget: true, perfLogging: false, logLevel: 1 });
+          const s = await browser.storage.local.get(__webhid.GLOBAL_DEFAULTS);
           worker.postMessage({ type: 'settings', fireAndForget: s.fireAndForget, perfLogging: s.perfLogging, logLevel: s.logLevel });
         })();
         }
@@ -867,7 +782,7 @@
 
       if (action === "close") {
         const deviceId = payload.device_id;
-        logger.debug('[bridge] close deviceId=' + deviceId);
+        __webhid.logger.debug('[bridge] close deviceId=' + deviceId);
         _openDevices.delete(deviceId);
         browser.runtime.sendMessage({ action: "device-count-changed", count: _openDevices.size }).catch(() => {});
         const worker = _workers.get(deviceId);
@@ -898,7 +813,7 @@
       const evt = message.event;
       if (evt.event_type === "handshake") {
         _wsPort = evt.ws_port;
-        logger.info('[bridge] handshake: ws_port=' + _wsPort);
+        __webhid.logger.info('[bridge] handshake: ws_port=' + _wsPort);
         return;
       }
       window.postMessage({ __webhid_bridge: "evt", event: evt }, "*");
@@ -927,7 +842,7 @@
 
     if (cp !== undefined) {
       _controlPlane = cp;
-      logger.info('[bridge] control plane changed:', cp);
+      __webhid.logger.info('[bridge] control plane changed:', cp);
     }
 
     if (ff !== undefined || pl !== undefined || ll !== undefined) {

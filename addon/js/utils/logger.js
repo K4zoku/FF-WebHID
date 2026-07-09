@@ -7,8 +7,13 @@
 //
 // Usage:
 //   <script src="logger.js"></script>      // popup/settings/content scripts
-//   logger.info("hello")
-//   const t = perf.begin(); ... perf.end(t, "label")  // performance timing
+//   __webhid.logger.info("hello")
+//   const t = __webhid.perf.begin(); ... __webhid.perf.end(t, "label")
+//
+// IIFE-scoped: re-injection (MAIN world page reload) creates a new scope,
+// so `const` declarations never conflict with a previous injection.
+
+(function () {
 
 const LEVEL_ERROR = 0;
 const LEVEL_WARN = 1;
@@ -24,6 +29,8 @@ const logger = {
   debug: _nop,
   _level: LEVEL_WARN,
   _loaded: false,
+  applyLevel: _applyLevel,
+  applyPerf: _applyPerf,
 };
 
 function _applyLevel(level) {
@@ -89,6 +96,9 @@ _applyLevel(LEVEL_WARN);
 _applyPerf();
 _load();
 
-if (typeof self !== 'undefined') { self.logger = logger; self.perf = perf; }
-if (typeof window !== 'undefined') { window.logger = logger; window.perf = perf; }
+// Exports
+if (typeof self !== 'undefined') { self.__webhid = self.__webhid || {}; self.__webhid.logger = logger; self.__webhid.perf = perf; self.__webhid._nop = _nop; }
+if (typeof window !== 'undefined') { window.__webhid = window.__webhid || {}; window.__webhid.logger = logger; window.__webhid.perf = perf; window.__webhid._nop = _nop; }
 if (typeof module !== 'undefined' && module.exports) module.exports = { logger, perf };
+
+})();

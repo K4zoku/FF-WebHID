@@ -1,16 +1,5 @@
 (async () => {
-  const DEFAULTS = {
-    perfLogging: false,
-    fireAndForget: true,
-    dataPlane: 'ws',
-    controlPlane: 'nm',
-    sabEnabled: true,
-    sabCapacity: 8192,
-    dispatchDataView: false,
-    logLevel: 1,
-    daemonAsNmHost: false,
-  };
-  const current = await browser.storage.local.get(DEFAULTS);
+  const current = await browser.storage.local.get(__webhid.GLOBAL_DEFAULTS);
 
   for (const key of ['perfLogging', 'fireAndForget', 'sabEnabled', 'dispatchDataView', 'daemonAsNmHost']) {
     document.getElementById(key).checked = current[key];
@@ -60,14 +49,6 @@
     document.getElementById('sabEnabled-row').style.display = isWs ? '' : 'none';
     document.getElementById('sabCapacity-row').style.display = (isWs && sabOn) ? '' : 'none';
     document.getElementById('dispatchDataView-row').style.display = (isWs && sabOn) ? '' : 'none';
-    if (isWs && sabOn) {
-      const sabCapacityRow = document.getElementById('sabCapacity-row');
-      if (sabCapacityRow.classList.contains('sab-setting')) {
-        sabCapacityRow.style.display = '';
-      }
-    } else {
-      document.getElementById('sabCapacity-row').style.display = 'none';
-    }
   }
 
   function showStatus(msg) {

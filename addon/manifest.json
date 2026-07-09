@@ -37,6 +37,7 @@
       ],
       "js": [
         "js/utils/logger.js",
+        "js/utils/device-utils.js",
         "js/polyfill.js"
       ],
       "world": "MAIN"
@@ -47,6 +48,8 @@
       ],
       "js": [
         "js/utils/logger.js",
+        "js/utils/device-utils.js",
+        "js/utils/settings-defaults.js",
         "js/bridge.js"
       ]
     }
@@ -59,6 +62,8 @@
         "css/device-picker.css",
         "js/worker.js",
         "js/utils/logger.js",
+        "js/utils/device-utils.js",
+        "js/utils/settings-defaults.js",
         "html/popup.html",
         "js/popup.js",
         "css/popup.css"

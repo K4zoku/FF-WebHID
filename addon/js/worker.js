@@ -1,25 +1,11 @@
-// Inline logger: same level scheme as logger.js (0=error,1=warn,2=info,3=debug).
-// Worker is spawned from a blob URL so it can't importScripts the addon's
-// logger.js directly. The bridge sends the current logLevel in the `connect`
-// message; default to warn until that arrives.
-//
-// Level changes reassign the methods to either the real console function or
-// a no-op, so call sites never need `if (level >= X)` guards.
-const _nop = () => {};
-const logger = {
-  _level: 1,
-  error: _nop,
-  warn: _nop,
-  info: _nop,
-  debug: _nop,
-};
+// logger, perf, _nop are provided by logger.js (concat'd before this blob).
+// Destructure from self.__webhid (set by logger.js IIFE).
+// We override _applyPerf to add _perfLogging gating on top of log level.
+'use strict';
 
-let _perfLogging = false;
+const { logger, perf, _nop } = self.__webhid;
 
-const perf = {
-  begin: _nop,
-  end: _nop,
-};
+var _perfLogging = false;
 
 function _applyPerf() {
   if (_perfLogging && logger._level >= 3) {
@@ -30,17 +16,6 @@ function _applyPerf() {
     perf.end = _nop;
   }
 }
-
-function _applyLogLevel(level) {
-  logger._level = level;
-  logger.error = level >= 0 ? console.error.bind(console) : _nop;
-  logger.warn  = level >= 1 ? console.warn.bind(console)  : _nop;
-  logger.info  = level >= 2 ? console.info.bind(console)  : _nop;
-  logger.debug = level >= 3 ? console.debug.bind(console) : _nop;
-  _applyPerf();
-}
-_applyLogLevel(1);
-_applyPerf();
 
 // Detect SharedArrayBuffer availability. Some sites (e.g. usevia.app) block
 // COOP/COEP injection or set conflicting headers, making SAB unavailable.
@@ -63,7 +38,7 @@ self.onmessage = ({ data: msg }) => {
   if (msg.type === 'settings') {
     if (msg.fireAndForget !== undefined) _fireAndForget = msg.fireAndForget !== false;
     if (msg.perfLogging !== undefined) { _perfLogging = msg.perfLogging === true; _applyPerf(); }
-    if (msg.logLevel !== undefined) _applyLogLevel(msg.logLevel);
+    if (msg.logLevel !== undefined) { logger.applyLevel(msg.logLevel); _applyPerf(); }
     logger.debug('[worker] settings fireAndForget=' + _fireAndForget + ' perfLogging=' + _perfLogging + ' logLevel=' + logger._level);
     return;
   }
@@ -80,7 +55,7 @@ function connect(msg) {
   _connectMsg = msg;
   reportSize = msg.reportSize || 64;
   CAPACITY = msg.capacity || 8192;
-  if (msg.logLevel !== undefined) _applyLogLevel(msg.logLevel);
+  if (msg.logLevel !== undefined) { logger.applyLevel(msg.logLevel); _applyPerf(); }
   logger.debug('[worker] connect capacity=' + CAPACITY + ' reportSize=' + reportSize + ' SAB=' + SAB_AVAILABLE);
 
   if (SAB_AVAILABLE) {
@@ -202,7 +177,7 @@ function handleSend(msg, msgType) {
     return;
   }
   const reqId = _nextReqId++;
-    const payload = msg.data;
+  const payload = msg.data;
   const frame = new Uint8Array(6 + payload.length);
   frame[0] = msgType;
   frame[1] = reqId & 0xFF; frame[2] = (reqId >> 8) & 0xFF; frame[3] = (reqId >> 16) & 0xFF; frame[4] = (reqId >> 24) & 0xFF;
