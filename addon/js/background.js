@@ -344,9 +344,9 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true;
     }
 
-    case "setdatadaplane":
+    case "setdataplane":
       NativeMessaging.sendRequest({
-        action: "setdatadaplane",
+        action: "setdataplane",
         device_id: request.device_id,
         mode: request.mode,
       })

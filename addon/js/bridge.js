@@ -651,14 +651,14 @@
         if (dataPlane === 'nm') {
           logger.info('[bridge] NM mode for', deviceId, '(no worker spawned)');
           browser.runtime.sendMessage({
-            action: "setdatadaplane",
+            action: "setdataplane",
             device_id: deviceId,
             mode: "nm",
           }).catch(() => {});
         } else if (!sabEnabled) {
           logger.info('[bridge] SAB disabled for', deviceId, '(worker without SAB)');
           browser.runtime.sendMessage({
-            action: "setdatadaplane",
+            action: "setdataplane",
             device_id: deviceId,
             mode: "ws",
           }).catch(() => {});
