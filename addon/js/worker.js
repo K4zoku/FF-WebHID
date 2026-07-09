@@ -246,7 +246,10 @@ function handleReceiveFeature(msg) {
   frame[1] = reqId & 0xFF; frame[2] = (reqId >> 8) & 0xFF; frame[3] = (reqId >> 16) & 0xFF; frame[4] = (reqId >> 24) & 0xFF;
   frame[5] = msg.reportId;
   _pending.set(reqId, {
-    resolve: (data) => self.postMessage({ type: 'featureResult', reqId: msg.reqId, data }),
+    resolve: (data) => {
+      const transfer = (data instanceof Uint8Array) ? [data.buffer] : [];
+      self.postMessage({ type: 'featureResult', reqId: msg.reqId, data }, transfer);
+    },
     reject: (e) => self.postMessage({ type: 'featureResult', reqId: msg.reqId, error: String(e.message || e) }),
   });
   ws.send(frame);

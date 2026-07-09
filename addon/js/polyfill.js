@@ -135,10 +135,9 @@
     return new Promise((resolve) => {
       const id = ++_reqId;
       _pending[id] = resolve;
-      window.postMessage(
-        { __webhid_bridge: "req", id, action, payload: payload || {} },
-        "*",
-      );
+      const msg = { __webhid_bridge: "req", id, action, payload: payload || {} };
+      const transfer = (payload && payload.data instanceof Uint8Array) ? [payload.data.buffer] : [];
+      window.postMessage(msg, "*", transfer);
     });
   }
 
@@ -368,10 +367,10 @@
     async sendReport(reportId, data) {
       if (!this.opened)
         throw new DOMException("Device is not open", "InvalidStateError");
-      const buffer =
-        data instanceof DataView
-          ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
-          : new Uint8Array(data);
+      const view = data instanceof ArrayBuffer
+        ? new Uint8Array(data)
+        : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+      const buffer = view.slice();
       const t0 = perf.begin();
       try {
         if (!this.#hotPath && this.#sabListener) {
@@ -419,8 +418,8 @@
         });
         if (response.success && response.data) {
           logger.debug('[webhid] receiveFeatureReport done len=' + (typeof response.data === 'string' ? 'base64' : response.data.length));
-          const buf = typeof response.data === 'string' ? base64Decode(response.data) : new Uint8Array(response.data);
-          return new DataView(buf.buffer);
+          const buf = typeof response.data === 'string' ? base64Decode(response.data) : response.data;
+          return new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
         }
         throw new Error("receiveFeatureReport failed");
       } catch (error) {
@@ -431,10 +430,10 @@
     async sendFeatureReport(reportId, data) {
       if (!this.opened)
         throw new DOMException("Device is not open", "InvalidStateError");
-      const buffer =
-        data instanceof DataView
-          ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
-          : new Uint8Array(data);
+      const view = data instanceof ArrayBuffer
+        ? new Uint8Array(data)
+        : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+      const buffer = view.slice();
       logger.debug('[webhid] sendFeatureReport reportId=' + reportId + ' len=' + buffer.length + ' hotPath=' + this.#hotPath);
       try {
         const action = this.#hotPath ? "worker-sendFeature" : "sendfeaturereport";

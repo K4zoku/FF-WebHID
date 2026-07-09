@@ -545,11 +545,13 @@
           } else {
             result = data.error ? { success: false, error: data.error } : { success: true };
           }
-          window.postMessage({ __webhid_bridge: "res", id, result }, "*");
+          const transfer = (result.data instanceof Uint8Array) ? [result.data.buffer] : [];
+          window.postMessage({ __webhid_bridge: "res", id, result }, "*", transfer);
         });
         const wMsg = { type: wType, reqId: id, reportId: payload.report_id };
         if (action === "worker-send" || action === "worker-sendFeature") wMsg.data = payload.data;
-        worker.postMessage(wMsg);
+        const wTransfer = (wMsg.data instanceof Uint8Array) ? [wMsg.data.buffer] : [];
+        worker.postMessage(wMsg, wTransfer);
         return;
       }
       logger.warn('[bridge] no worker for', deviceId, '; falling back to NM');
