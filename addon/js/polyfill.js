@@ -119,8 +119,62 @@
     return savedHashes.includes(deviceHash);
   }
 
+  // ── Transport ────────────────────────────────────────────────────────────
+  //
+  // Two data-plane modes:
+  //   ws — page → bridge → worker → WebSocket → daemon (SAB or postMessage)
+  //   nm  — page → background (direct port) → NM host → daemon
+  //
+  // Handshake (enumerate / open / close / requestDevice) always goes via the
+  // bridge (window.postMessage) because the bridge owns the device picker UI.
+  // After open(), data-plane messages route based on the `dataPlane` setting.
+
+  let _dataPlane = 'ws';
+  let _dispatchDataView = false;
+  let _nmPort = null;
+
+  const _dataActions = new Set([
+    'worker-send', 'worker-sendFeature', 'worker-receiveFeature',
+    'sendreport', 'sendfeaturereport', 'receivefeaturereport',
+  ]);
+
+  async function _initTransport() {
+    const s = await browser.storage.local.get({
+      dataPlane: 'ws',
+      dispatchDataView: false,
+    });
+    _dataPlane = s.dataPlane;
+    _dispatchDataView = s.dispatchDataView;
+    if (_dataPlane === 'nm') _connectNmPort();
+  }
+
+  function _connectNmPort() {
+    try {
+      _nmPort = browser.runtime.connect();
+      _nmPort.onMessage.addListener((msg) => {
+        if (msg.event_type) { _handleNmEvent(msg); return; }
+        if (msg.__webhid_res !== undefined) {
+          const handler = _pending[msg.__webhid_res];
+          if (handler) { delete _pending[msg.__webhid_res]; handler(msg.result); }
+        }
+      });
+      _nmPort.onDisconnect.addListener(() => {
+        _nmPort = null;
+        if (_dataPlane === 'nm') setTimeout(_connectNmPort, 1000);
+      });
+    } catch (e) {
+      logger.warn('[webhid] NM direct port connect failed:', e.message);
+    }
+  }
+
+  function _handleNmEvent(event) {
+    const evt = { __webhid_bridge: 'evt', event };
+    const fakeEvent = { data: evt };
+    _bridgeListener(fakeEvent);
+  }
+
   // Listen for responses and events from the content script bridge.
-  window.addEventListener("message", (event) => {
+  const _bridgeListener = (event) => {
     if (!event.data) return;
     if (event.data.__webhid_bridge === "res") {
       const handler = _pending[event.data.id];
@@ -129,17 +183,38 @@
         handler(event.data.result);
       }
     }
+  };
+  window.addEventListener("message", _bridgeListener);
+
+  browser.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return;
+    if (changes.dataPlane) {
+      _dataPlane = changes.dataPlane.newValue;
+      if (_dataPlane === 'nm' && !_nmPort) _connectNmPort();
+      else if (_dataPlane === 'ws' && _nmPort) { _nmPort.disconnect(); _nmPort = null; }
+    }
+    if (changes.dispatchDataView) {
+      _dispatchDataView = changes.dispatchDataView.newValue;
+    }
   });
 
   function sendRequest(action, payload) {
     return new Promise((resolve) => {
       const id = ++_reqId;
       _pending[id] = resolve;
+
+      if (_dataPlane === 'nm' && _nmPort && _dataActions.has(action)) {
+        _nmPort.postMessage({ __webhid_req: id, action, payload: payload || {} });
+        return;
+      }
+
       const msg = { __webhid_bridge: "req", id, action, payload: payload || {} };
       const transfer = (payload && payload.data instanceof Uint8Array) ? [payload.data.buffer] : [];
       window.postMessage(msg, "*", transfer);
     });
   }
+
+  _initTransport();
 
   // ── Event classes ────────────────────────────────────────────────────────
 
@@ -608,12 +683,18 @@
         }
         const reportId  = reports[slotOffset + 2];
         const payloadLen = storedLen - 1;
-        const payload = new Uint8Array(payloadLen);
-        payload.set(reports.subarray(slotOffset + 3, slotOffset + 3 + payloadLen));
+        let dataView;
+        if (_dispatchDataView) {
+          dataView = new DataView(reports.buffer, reports.byteOffset + slotOffset + 3, payloadLen);
+        } else {
+          const payload = new Uint8Array(payloadLen);
+          payload.set(reports.subarray(slotOffset + 3, slotOffset + 3 + payloadLen));
+          dataView = new DataView(payload.buffer, 0, payloadLen);
+        }
         device.dispatchEvent(new HIDInputReportEvent('inputreport', {
           device,
           reportId,
-          data: new DataView(payload.buffer, 0, payloadLen),
+          data: dataView,
         }));
         tail = (tail + 1) % cap;
         Atomics.store(meta, 1, tail);

@@ -1,8 +1,17 @@
 (async () => {
-  const DEFAULTS = { perfLogging: false, fireAndForget: true, sabEnabled: true, sabCapacity: 8192, logLevel: 1, daemonAsNmHost: false };
+  const DEFAULTS = {
+    perfLogging: false,
+    fireAndForget: true,
+    dataPlane: 'ws',
+    sabEnabled: true,
+    sabCapacity: 8192,
+    dispatchDataView: false,
+    logLevel: 1,
+    daemonAsNmHost: false,
+  };
   const current = await browser.storage.local.get(DEFAULTS);
 
-  for (const key of ['perfLogging', 'fireAndForget', 'sabEnabled', 'daemonAsNmHost']) {
+  for (const key of ['perfLogging', 'fireAndForget', 'sabEnabled', 'dispatchDataView', 'daemonAsNmHost']) {
     document.getElementById(key).checked = current[key];
   }
   const sabInput = document.getElementById('sabCapacity');
@@ -16,6 +25,10 @@
   logLevelSelect.value = String(current.logLevel);
   updatePerfRowVisibility();
 
+  const dataPlaneSelect = document.getElementById('dataPlane');
+  dataPlaneSelect.value = current.dataPlane;
+  updateCascadingVisibility();
+
   function updateSabOutput() {
     sabOutput.textContent = sabInput.value;
   }
@@ -25,18 +38,32 @@
     sabInput.style.setProperty('--fill', ((val - 2048) / (32768 - 2048)) * 100 + '%');
   }
 
-  // Performance timing toggle only makes sense at Debug level (3).
   function updatePerfRowVisibility() {
     const isDebug = parseInt(logLevelSelect.value, 10) >= 3;
     perfRow.style.display = isDebug ? '' : 'none';
-    // If user switches away from Debug, disable perfLogging so worker/bridge
-    // don't waste cycles collecting timing data that will never be logged.
     if (!isDebug) {
       const cb = document.getElementById('perfLogging');
       if (cb.checked) {
         cb.checked = false;
         browser.storage.local.set({ perfLogging: false });
       }
+    }
+  }
+
+  function updateCascadingVisibility() {
+    const plane = dataPlaneSelect.value;
+    const sabOn = document.getElementById('sabEnabled').checked;
+    const isWs = plane === 'ws';
+    document.getElementById('sabEnabled-row').style.display = isWs ? '' : 'none';
+    document.getElementById('sabCapacity-row').style.display = (isWs && sabOn) ? '' : 'none';
+    document.getElementById('dispatchDataView-row').style.display = (isWs && sabOn) ? '' : 'none';
+    if (isWs && sabOn) {
+      const sabCapacityRow = document.getElementById('sabCapacity-row');
+      if (sabCapacityRow.classList.contains('sab-setting')) {
+        sabCapacityRow.style.display = '';
+      }
+    } else {
+      document.getElementById('sabCapacity-row').style.display = 'none';
     }
   }
 
@@ -47,10 +74,11 @@
     setTimeout(() => { el.style.display = 'none'; }, 1500);
   }
 
-  for (const key of ['perfLogging', 'fireAndForget', 'sabEnabled', 'daemonAsNmHost']) {
+  for (const key of ['perfLogging', 'fireAndForget', 'sabEnabled', 'dispatchDataView', 'daemonAsNmHost']) {
     document.getElementById(key).addEventListener('change', async (e) => {
       await browser.storage.local.set({ [key]: e.target.checked });
       showStatus(`${key} = ${e.target.checked}`);
+      updateCascadingVisibility();
     });
   }
   sabInput.addEventListener('input', () => { updateSabOutput(); updateSabFill(); });
@@ -63,5 +91,10 @@
     await browser.storage.local.set({ logLevel: val });
     updatePerfRowVisibility();
     showStatus(`logLevel = ${e.target.value}`);
+  });
+  dataPlaneSelect.addEventListener('change', async (e) => {
+    await browser.storage.local.set({ dataPlane: e.target.value });
+    updateCascadingVisibility();
+    showStatus(`dataPlane = ${e.target.value}`);
   });
 })();

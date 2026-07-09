@@ -615,13 +615,16 @@
         const origin = window.location.origin;
         const siteKey = origin ? `site:${origin}` : null;
 
-        let sabEnabled = true;
-        let sabCapacity = 8192;
-        let logLevel = 1;
-        const globalDefaults = await browser.storage.local.get({ sabEnabled: true, sabCapacity: 8192, logLevel: 1 });
-        sabEnabled = globalDefaults.sabEnabled;
-        sabCapacity = globalDefaults.sabCapacity;
-        logLevel = globalDefaults.logLevel;
+        const globalDefaults = await browser.storage.local.get({
+          dataPlane: 'ws',
+          sabEnabled: true,
+          sabCapacity: 8192,
+          logLevel: 1,
+        });
+        let dataPlane = globalDefaults.dataPlane;
+        let sabEnabled = globalDefaults.sabEnabled;
+        let sabCapacity = globalDefaults.sabCapacity;
+        let logLevel = globalDefaults.logLevel;
         if (siteKey) {
           const siteResult = await browser.storage.local.get(siteKey);
           const ss = siteResult[siteKey] || {};
@@ -629,8 +632,10 @@
           if (ss.sabCapacity !== undefined) sabCapacity = ss.sabCapacity;
         }
 
-        if (!sabEnabled) {
-          logger.info('[bridge] SAB disabled for', deviceId);
+        if (dataPlane === 'nm') {
+          logger.info('[bridge] NM direct-port mode for', deviceId, '(no worker spawned)');
+        } else if (!sabEnabled) {
+          logger.info('[bridge] SAB disabled for', deviceId, '(worker without SAB)');
         } else
         {
         let worker;

@@ -21,25 +21,25 @@
 </div>
 <div class="setting">
   <div class="setting-info">
-    <h3>Fire-and-forget sendReport</h3>
-    <p>Resolve sendReport Promise immediately without waiting for daemon ack (faster, but no error reporting on write failure)</p>
+    <h3>Data Plane</h3>
+    <p><strong>WebSocket</strong>: spawn a Web Worker per device, connect directly to the daemon's WS server. Supports SharedArrayBuffer for zero-copy input reports.<br><strong>Native Messaging</strong>: route all data (sendReport, input reports, feature reports) through the NM host via a direct port to the background script. No worker, no WS, no SAB. Lower overhead for benchmarking the NM path.</p>
   </div>
-  <label class="toggle">
-    <input type="checkbox" id="fireAndForget">
-    <span class="slider"></span>
-  </label>
+  <select id="dataPlane">
+    <option value="ws">WebSocket (worker + SAB)</option>
+    <option value="nm">Native Messaging (direct port)</option>
+  </select>
 </div>
-<div class="setting">
+<div class="setting" id="sabEnabled-row">
   <div class="setting-info">
-    <h3>SharedArrayBuffer data plane</h3>
-    <p>Use WebSocket + SharedArrayBuffer for high-performance input/output reports. Injects COOP/COEP headers which may break some sites. Disable for maximum site compatibility (falls back to slower postMessage path)</p>
+    <h3>SharedArrayBuffer</h3>
+    <p>Use a shared ring buffer between the Worker and the page for zero-copy input report delivery. Injects COOP/COEP headers which may break some sites. Disable to fall back to postMessage (with ArrayBuffer transfer).</p>
   </div>
   <label class="toggle">
     <input type="checkbox" id="sabEnabled">
     <span class="slider"></span>
   </label>
 </div>
-<div class="setting sab-setting">
+<div class="setting sab-setting" id="sabCapacity-row">
   <div class="setting-info">
     <h3>SAB Buffer Capacity (default)</h3>
     <p>Ring-buffer slots for input reports. Higher = fewer drops under heavy traffic. Per-site overrides in popup.</p>
@@ -62,6 +62,26 @@
       <span style="left: calc((32768 - 2048) * 100% / (32768 - 2048))">32K</span>
     </div>
   </div>
+</div>
+<div class="setting" id="dispatchDataView-row">
+  <div class="setting-info">
+    <h3>Dispatch DataView (zero-copy SAB drain)</h3>
+    <p>Dispatch <code>HIDInputReportEvent.data</code> as a <code>DataView</code> backed directly by the SharedArrayBuffer slot — no per-report allocation or copy. <strong>Warning</strong>: the event handler must not retain the <code>DataView</code> after returning, or data may be overwritten by the next report. Disable if a site misbehaves.</p>
+  </div>
+  <label class="toggle">
+    <input type="checkbox" id="dispatchDataView">
+    <span class="slider"></span>
+  </label>
+</div>
+<div class="setting">
+  <div class="setting-info">
+    <h3>Fire-and-forget sendReport</h3>
+    <p>Resolve sendReport Promise immediately without waiting for daemon ack (faster, but no error reporting on write failure)</p>
+  </div>
+  <label class="toggle">
+    <input type="checkbox" id="fireAndForget">
+    <span class="slider"></span>
+  </label>
 </div>
 <div class="setting">
   <div class="setting-info">

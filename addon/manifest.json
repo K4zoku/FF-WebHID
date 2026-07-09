@@ -16,6 +16,9 @@
   "host_permissions": [
     "<all_urls>"
   ],
+  "externally_connectable": {
+    "matches": ["<all_urls>"]
+  },
   "background": {
     "scripts": [
       "js/utils/logger.js",
