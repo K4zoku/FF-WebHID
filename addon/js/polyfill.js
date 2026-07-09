@@ -136,6 +136,27 @@
 
   let _dataPlane = 'ws';
   let _dispatchDataView = false;
+  let _perfLogging = false;
+
+  function _applyLoggerLevel(level) {
+    if (typeof logger === 'undefined') return;
+    logger._level = level;
+    logger.error = level >= 0 ? console.error.bind(console) : () => {};
+    logger.warn  = level >= 1 ? console.warn.bind(console)  : () => {};
+    logger.info  = level >= 2 ? console.info.bind(console)  : () => {};
+    logger.debug = level >= 3 ? console.debug.bind(console) : () => {};
+  }
+
+  function _applyPerf() {
+    const active = _perfLogging && (typeof logger !== 'undefined') && logger._level >= 3;
+    if (active) {
+      perf.begin = () => performance.now();
+      perf.end = (t0, label) => logger.debug(label + ' ' + (performance.now() - t0).toFixed(2) + 'ms');
+    } else {
+      perf.begin = () => {};
+      perf.end = () => {};
+    }
+  }
 
   // Listen for responses, events, and settings pushes from the bridge.
   window.addEventListener("message", (event) => {
@@ -152,6 +173,9 @@
       const s = event.data.settings;
       if (s.dataPlane !== undefined) _dataPlane = s.dataPlane;
       if (s.dispatchDataView !== undefined) _dispatchDataView = s.dispatchDataView;
+      if (s.logLevel !== undefined) _applyLoggerLevel(s.logLevel);
+      if (s.perfLogging !== undefined) _perfLogging = s.perfLogging;
+      _applyPerf();
     }
   });
 
@@ -170,6 +194,12 @@
     if (!s) return;
     if (s.dataPlane !== undefined) _dataPlane = s.dataPlane;
     if (s.dispatchDataView !== undefined) _dispatchDataView = s.dispatchDataView;
+    if (s.logLevel !== undefined && typeof logger !== 'undefined') {
+      logger._level = s.logLevel;
+      _applyLoggerLevel(s.logLevel);
+    }
+    if (s.perfLogging !== undefined) _perfLogging = s.perfLogging;
+    _applyPerf();
   });
 
   // ── Event classes ────────────────────────────────────────────────────────

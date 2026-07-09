@@ -344,6 +344,16 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true;
     }
 
+    case "setdatadaplane":
+      NativeMessaging.sendRequest({
+        action: "setdatadaplane",
+        device_id: request.device_id,
+        mode: request.mode,
+      })
+        .then(sendResponse)
+        .catch((e) => sendResponse({ success: false, error: e.message }));
+      return true;
+
     case "sendreport":
       NativeMessaging.sendReport(
         request.device_id,

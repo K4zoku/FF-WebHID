@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
@@ -125,24 +127,15 @@ pub struct Field {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum IpcRequest {
-    /// List every connected HID device.
     Enumerate { id: u32 },
-    /// Open a device by its stable `device_id` (returned by `Enumerate`).
-    /// The daemon maps this to the platform-specific raw path internally.
     Open { id: u32, device_id: String },
-    /// Release an open device.
     Close { id: u32, device_id: String },
-    /// Send a HID output report.  `data` is the report *payload only*;
-    /// the daemon is responsible for prepending the `report_id` byte
-    /// before handing the buffer to `write(2)`.  Use `report_id = 0`
-    /// for interfaces that don't use numbered reports (Linux hidraw
-    /// still requires the leading zero).
     SendReport { id: u32, device_id: String, report_id: u8, data: Vec<u8> },
-    /// Receive a HID feature report.
     ReceiveFeatureReport { id: u32, device_id: String, report_id: u8 },
-    /// Send a HID feature report.  `data` is the report *payload only*
-    /// (same convention as `SendReport`).
     SendFeatureReport { id: u32, device_id: String, report_id: u8, data: Vec<u8> },
+    /// Client tells the daemon which data-plane channel to use for a device.
+    /// `ws` = WebSocket (control + data over WS), `nm` = native messaging.
+    SetDataPlane { id: u32, device_id: String, mode: String },
 }
 
 impl IpcRequest {
@@ -153,7 +146,8 @@ impl IpcRequest {
             | Self::Close { id, .. }
             | Self::SendReport { id, .. }
             | Self::ReceiveFeatureReport { id, .. }
-            | Self::SendFeatureReport { id, .. } => *id,
+            | Self::SendFeatureReport { id, .. }
+            | Self::SetDataPlane { id, .. } => *id,
         }
     }
 }
@@ -171,7 +165,13 @@ pub enum IpcResponse {
     // Unsolicited events (id = 0)
     DeviceConnected { id: u32, device: DeviceInfo },
     DeviceDisconnected { id: u32, device: DeviceInfo },
-    InputReport { id: u32, device_id: String, report_id: u8, data: Vec<u8> },
+    InputReport {
+        id: u32,
+        device_id: String,
+        report_id: u8,
+        #[serde(with = "arc_bytes")]
+        data: Arc<[u8]>,
+    },
     /// Sent once when a client connects, announcing daemon capabilities
     /// (currently just the WebSocket data-plane port).
     Handshake { id: u32, ws_port: u16 },
@@ -255,6 +255,13 @@ pub enum NmRequest {
         #[serde(with = "base64_serde")]
         data: Vec<u8>,
     },
+    /// Tell the daemon to route events for `device_id` over WS or NM.
+    SetDataPlane {
+        #[serde(default)]
+        id: Option<u32>,
+        device_id: String,
+        mode: String,
+    },
 }
 
 impl NmRequest {
@@ -265,7 +272,8 @@ impl NmRequest {
             | Self::Close { id, .. }
             | Self::SendReport { id, .. }
             | Self::ReceiveFeatureReport { id, .. }
-            | Self::SendFeatureReport { id, .. } => *id,
+            | Self::SendFeatureReport { id, .. }
+            | Self::SetDataPlane { id, .. } => *id,
         }
     }
 }
@@ -663,5 +671,20 @@ mod tests {
         let json = r#"{"action":"close","device_id":"abc123"}"#;
         let req: NmRequest = serde_json::from_str(json).unwrap();
         assert!(matches!(req, NmRequest::Close { .. }));
+    }
+}
+
+/// Serde helper for `Arc<[u8]>` — serialize as `Vec<u8>`, deserialize from `Vec<u8>`.
+mod arc_bytes {
+    use std::sync::Arc;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S: Serializer>(bytes: &Arc<[u8]>, s: S) -> Result<S::Ok, S::Error> {
+        bytes.as_ref().serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Arc<[u8]>, D::Error> {
+        let v = Vec::<u8>::deserialize(d)?;
+        Ok(Arc::from(v))
     }
 }

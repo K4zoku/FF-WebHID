@@ -22,7 +22,10 @@ struct Entry {
     stop_flag: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
     session_token: Option<String>,
+    /// `true` when a WS client is connected and receiving input reports.
     ws_active: Arc<AtomicBool>,
+    /// `"ws"` or `"nm"` — controls which channel receives input reports.
+    dataplane_mode: Mutex<String>,
 }
 
 const HEX_CHARS: &[u8; 16] = b"0123456789abcdef";
@@ -95,6 +98,7 @@ impl DeviceManager {
             handle: None,
             session_token: Some(session_token.clone()),
             ws_active: Arc::clone(&ws_active),
+            dataplane_mode: Mutex::new("nm".to_string()),
         };
 
         map.insert(id.clone(), entry);
@@ -121,10 +125,10 @@ impl DeviceManager {
 
                 match read_result {
                     Ok(Ok(buf)) => {
-                        let (report_id, data) = if uses_numbered_reports {
-                            if !buf.is_empty() { (buf[0], buf[1..].to_vec()) } else { (0u8, Vec::new()) }
+                        let (report_id, data): (u8, Arc<[u8]>) = if uses_numbered_reports {
+                            if !buf.is_empty() { (buf[0], Arc::from(&buf[1..])) } else { (0u8, Arc::from(&[][..])) }
                         } else {
-                            (0u8, buf)
+                            (0u8, Arc::from(buf.as_slice()))
                         };
                         let _ = tx.send(IpcResponse::InputReport { id: 0, device_id: dev_id.clone(), report_id, data });
                     }
@@ -184,9 +188,19 @@ impl DeviceManager {
         }
     }
 
-    pub fn is_ws_active(&self, device_id: &str) -> bool {
+    pub fn set_dataplane_mode(&self, device_id: &str, mode: &str) {
         let map = self.devices.lock().unwrap();
-        map.get(device_id).map(|e| e.ws_active.load(Ordering::SeqCst)).unwrap_or(false)
+        if let Some(entry) = map.get(device_id) {
+            *entry.dataplane_mode.lock().unwrap() = mode.to_string();
+            log::info!("[device_mgr] {device_id} dataplane mode → {mode}");
+        }
+    }
+
+    pub fn dataplane_mode(&self, device_id: &str) -> String {
+        let map = self.devices.lock().unwrap();
+        map.get(device_id)
+            .map(|e| e.dataplane_mode.lock().unwrap().clone())
+            .unwrap_or_else(|| "nm".to_string())
     }
 
     pub fn close_client_devices(&self, client_id: u64) {
@@ -217,8 +231,8 @@ mod tests {
     fn test_ws_active_default_false() {
         let (tx, _) = broadcast::channel(16);
         let mgr = DeviceManager::new(tx);
-        assert!(!mgr.is_ws_active("nonexistent"));
-        assert!(!mgr.is_ws_active("test"));
+        assert_eq!(mgr.dataplane_mode("nonexistent"), "nm");
+        assert_eq!(mgr.dataplane_mode("test"), "nm");
     }
 
     #[test]

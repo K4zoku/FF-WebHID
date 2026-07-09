@@ -532,6 +532,8 @@
         const s = await browser.storage.local.get({
           dataPlane: 'ws',
           dispatchDataView: false,
+          logLevel: 1,
+          perfLogging: false,
         });
         window.postMessage({ __webhid_bridge: "res", id, result: s }, "*");
       } catch (e) {
@@ -647,9 +649,19 @@
         }
 
         if (dataPlane === 'nm') {
-          logger.info('[bridge] NM direct-port mode for', deviceId, '(no worker spawned)');
+          logger.info('[bridge] NM mode for', deviceId, '(no worker spawned)');
+          browser.runtime.sendMessage({
+            action: "setdatadaplane",
+            device_id: deviceId,
+            mode: "nm",
+          }).catch(() => {});
         } else if (!sabEnabled) {
           logger.info('[bridge] SAB disabled for', deviceId, '(worker without SAB)');
+          browser.runtime.sendMessage({
+            action: "setdatadaplane",
+            device_id: deviceId,
+            mode: "ws",
+          }).catch(() => {});
         } else
         {
         let worker;
@@ -805,19 +817,22 @@
     const ff = changes.fireAndForget?.newValue;
     const pl = changes.perfLogging?.newValue;
     const ll = changes.logLevel?.newValue;
-    if (ff === undefined && pl === undefined && ll === undefined) {
-      // Check for polyfill-relevant settings and push to page.
-      const dp = changes.dataPlane?.newValue;
-      const ddv = changes.dispatchDataView?.newValue;
-      if (dp === undefined && ddv === undefined) return;
+    const dp = changes.dataPlane?.newValue;
+    const ddv = changes.dispatchDataView?.newValue;
+
+    if (ff !== undefined || pl !== undefined || ll !== undefined) {
+      for (const worker of _workers.values()) {
+        worker.postMessage({ type: 'settings', fireAndForget: ff, perfLogging: pl, logLevel: ll });
+      }
+    }
+
+    if (dp !== undefined || ddv !== undefined || pl !== undefined || ll !== undefined) {
       const settings = {};
       if (dp !== undefined) settings.dataPlane = dp;
       if (ddv !== undefined) settings.dispatchDataView = ddv;
+      if (ll !== undefined) settings.logLevel = ll;
+      if (pl !== undefined) settings.perfLogging = pl;
       window.postMessage({ __webhid_bridge: "settings", settings }, "*");
-      return;
-    }
-    for (const worker of _workers.values()) {
-      worker.postMessage({ type: 'settings', fireAndForget: ff, perfLogging: pl, logLevel: ll });
     }
   });
 })();

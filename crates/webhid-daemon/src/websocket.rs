@@ -172,6 +172,7 @@ async fn handle_websocket(
     let mut event_rx = event_tx.subscribe();
 
     device_mgr.set_ws_active(&device_id, true);
+    device_mgr.set_dataplane_mode(&device_id, "ws");
 
     let (mut ws_sender, mut ws_receiver) = ws_stream.split();
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
@@ -245,7 +246,7 @@ async fn handle_websocket(
         .unwrap_or(DEFAULT_BATCH_FLUSH_MS);
 
     let mut sender_task = tokio::spawn(async move {
-        let mut batch: Vec<Vec<u8>> = Vec::with_capacity(8);
+        let mut batch: Vec<(u8, Arc<[u8]>)> = Vec::with_capacity(8);
 
         // Fixed-timer mode.
         if batch_ms > 0 {
@@ -320,6 +321,7 @@ async fn handle_websocket(
 
     log::info!("[ws] connection for {device_id} closed");
     device_mgr.set_ws_active(&device_id, false);
+    device_mgr.set_dataplane_mode(&device_id, "nm");
     Ok(())
 }
 
@@ -328,7 +330,7 @@ async fn handle_websocket(
 fn handle_event(
     event_result: Result<webhid::IpcResponse, broadcast::error::RecvError>,
     device_id: &str,
-    batch: &mut Vec<Vec<u8>>,
+    batch: &mut Vec<(u8, Arc<[u8]>)>,
     tx: &mpsc::UnboundedSender<Message>,
 ) -> bool {
     match event_result {
@@ -339,10 +341,7 @@ fn handle_event(
             ..
         }) => {
             if evt_device_id == device_id {
-                let mut full_report = Vec::with_capacity(1 + data.len());
-                full_report.push(report_id);
-                full_report.extend_from_slice(&data);
-                batch.push(full_report);
+                batch.push((report_id, data));
             }
         }
         Ok(_) => {}
@@ -367,7 +366,7 @@ fn handle_event(
 fn drain_available(
     rx: &mut broadcast::Receiver<webhid::IpcResponse>,
     device_id: &str,
-    batch: &mut Vec<Vec<u8>>,
+    batch: &mut Vec<(u8, Arc<[u8]>)>,
     tx: &mpsc::UnboundedSender<Message>,
 ) {
     loop {
@@ -393,14 +392,15 @@ fn drain_available(
     }
 }
 
-fn create_batch_frame(reports: &[Vec<u8>]) -> Vec<u8> {
-    let total_size: usize = reports.iter().map(|r| 2 + r.len()).sum();
+fn create_batch_frame(reports: &[(u8, Arc<[u8]>)]) -> Vec<u8> {
+    let total_size: usize = reports.iter().map(|(_, d)| 2 + 1 + d.len()).sum();
     let mut frame = Vec::with_capacity(total_size);
-    for report in reports {
-        let len = report.len() as u16;
+    for (report_id, data) in reports {
+        let len = (1 + data.len()) as u16;
         frame.push((len & 0xFF) as u8);
         frame.push(((len >> 8) & 0xFF) as u8);
-        frame.extend_from_slice(report);
+        frame.push(*report_id);
+        frame.extend_from_slice(data);
     }
     frame
 }
@@ -438,7 +438,7 @@ async fn handle_client_binary(
                 return;
             }
             let report_id = frame[5];
-            let payload = frame[6..].to_vec();
+            let payload: Arc<[u8]> = Arc::from(&frame[6..]);
 
             let dev_arc = match device_mgr.get_file_by_device_id(device_id) {
                 Ok(f) => f,
@@ -541,17 +541,17 @@ mod tests {
 
     #[test]
     fn test_batch_frame_single_report() {
-        let reports = vec![vec![0x01, 0xAA, 0xBB]];
+        let reports: Vec<(u8, Arc<[u8]>)> = vec![(0x01, Arc::from(&[0xAA, 0xBB][..]))];
         let frame = create_batch_frame(&reports);
-        // [len_u16 LE = 3, 0][report bytes]
+        // [len_u16 LE = 3][report_id=0x01][payload 0xAA, 0xBB]
         assert_eq!(frame, vec![0x03, 0x00, 0x01, 0xAA, 0xBB]);
     }
 
     #[test]
     fn test_batch_frame_multiple_reports() {
-        let reports = vec![
-            vec![0x01, 0xAA],
-            vec![0x02, 0xBB, 0xCC],
+        let reports: Vec<(u8, Arc<[u8]>)> = vec![
+            (0x01, Arc::from(&[0xAA][..])),
+            (0x02, Arc::from(&[0xBB, 0xCC][..])),
         ];
         let frame = create_batch_frame(&reports);
         // [2, 0, 0x01, 0xAA, 3, 0, 0x02, 0xBB, 0xCC]
@@ -560,10 +560,10 @@ mod tests {
 
     #[test]
     fn test_batch_frame_empty_report() {
-        let reports = vec![vec![]];
+        let reports: Vec<(u8, Arc<[u8]>)> = vec![(0x05, Arc::from(&[][..]))];
         let frame = create_batch_frame(&reports);
-        // [0, 0]
-        assert_eq!(frame, vec![0x00, 0x00]);
+        // [len=1, 0, report_id=0x05]
+        assert_eq!(frame, vec![0x01, 0x00, 0x05]);
     }
 
     // ── make_status_resp ────────────────────────────────────────────────

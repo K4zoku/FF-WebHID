@@ -69,7 +69,9 @@ pub async fn handle(
             match event_rx.recv().await {
                 Ok(ev) => {
                     if let webhid::IpcResponse::InputReport { ref device_id, .. } = ev {
-                        if device_mgr_for_events.is_ws_active(device_id) {
+                        // Skip input reports when the device is in WS mode —
+                        // they go through the WebSocket data plane instead.
+                        if device_mgr_for_events.dataplane_mode(device_id) == "ws" {
                             continue;
                         }
                     }
@@ -200,6 +202,11 @@ async fn dispatch(
                 }
             }
         },
+
+        NmRequest::SetDataPlane { device_id, mode, .. } => {
+            device_mgr.set_dataplane_mode(&device_id, &mode);
+            NmResponse::ok()
+        }
     };
     resp.id = id;
     resp
@@ -220,7 +227,7 @@ fn ipc_event_to_nm(ev: IpcResponse) -> Option<NmResponse> {
             report_id,
             data,
             ..
-        } => Some(NmResponse::event_input_report(device_id, report_id, data)),
+        } => Some(NmResponse::event_input_report(device_id, report_id, data.to_vec())),
 
         IpcResponse::Handshake { ws_port, .. } => Some(NmResponse {
             event_type: Some("handshake".into()),
