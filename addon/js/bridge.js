@@ -405,6 +405,9 @@
   const _openDevices = new Set();
   const _sessionTokens = new Map();
   const _workerReady = new Set();
+  const _wsData = new Map();
+  const _wsDataCallbacks = new Map();
+  let _wsDataReqId = 1;
   let _wsPort = null;
   let _controlPlane = 'nm';
   let _controlWs = null;
@@ -438,6 +441,116 @@
       __webhid.logger.warn('[bridge] control WS connect failed:', e.message);
       _controlWs = null;
     }
+  }
+
+  // Bridge-as-WS-data-plane: bridge connects WS directly, no worker.
+  // Input reports arrive via ws.onmessage → window.postMessage to page.
+  // sendReport/feature: bridge builds binary frame → ws.send.
+  function _spawnWsData(deviceId, session_token, wsPort) {
+    if (_wsData.has(deviceId)) return;
+    try {
+      const ws = new WebSocket(`ws://127.0.0.1:${wsPort}`, [`webhid.${session_token}`]);
+      ws.binaryType = 'arraybuffer';
+
+      ws.onopen = () => {
+        __webhid.logger.info('[bridge] WS data connected for', deviceId);
+        _workerReady.add(deviceId);
+        window.postMessage({
+          __webhid_bridge: 'evt',
+          event: { event_type: 'webhid-sab-disabled', device_id: deviceId }
+        }, '*');
+      };
+
+      ws.onmessage = ({ data: frame }) => {
+        __webhid.logger.debug('[bridge] ws.onmessage frame type=' + (frame && frame.constructor ? frame.constructor.name : typeof frame) + ' len=' + (frame && frame.byteLength != null ? frame.byteLength : '?'));
+        // Copy frame into a fresh Uint8Array to escape Firefox Xray wrapping.
+        // WebSocket binary data in a content script (isolated world) is Xray-
+        // wrapped; calling .subarray()/.set() on the Xray view triggers
+        // "Permission denied to access property 'constructor'". Indexed
+        // access through Xray is allowed, so we copy byte-by-byte into a
+        // plain (non-Xray) Uint8Array once, then all subsequent operations
+        // (subarray, set, slice) work normally.
+        const view = new Uint8Array(frame);
+        const batch = new Uint8Array(view.length);
+        for (let i = 0; i < view.length; i++) batch[i] = view[i];
+        if (batch.length > 0 && batch[0] >= 0x80 && batch.length <= 10) {
+          // Control response (sendReport ack, receiveFeature response)
+          const respType = batch[0];
+          const reqId = batch[1] | (batch[2] << 8) | (batch[3] << 16) | (batch[4] << 24);
+          const cbMap = _wsDataCallbacks.get(deviceId);
+          if (cbMap && cbMap.has(reqId)) {
+            const cb = cbMap.get(reqId);
+            cbMap.delete(reqId);
+            if (respType === 0x83) {
+              const status = batch[5];
+              if (status !== 0) { cb({ error: 'feature read failed' }); return; }
+              const len = batch[6] | (batch[7] << 8);
+              const out = new Uint8Array(len);
+              if (len > 0 && batch.length >= 8 + len) out.set(batch.subarray(8, 8 + len));
+              cb({ data: out });
+            } else {
+              const status = batch[5];
+              cb({ success: status === 0 });
+            }
+          }
+          return;
+        }
+        // Input report batch: [len_u16 LE][report_id][...payload]...
+        let offset = 0;
+        let reportCount = 0;
+        while (offset + 1 < batch.length) {
+          const len = batch[offset] | (batch[offset + 1] << 8);
+          offset += 2;
+          if (len === 0 || offset + len > batch.length) break;
+          const reportId = batch[offset];
+          const payloadLen = len - 1;
+          const buf = payloadLen > 0 ? new ArrayBuffer(payloadLen) : null;
+          if (buf) new Uint8Array(buf).set(batch.subarray(offset + 1, offset + len));
+          window.postMessage({
+            __webhid_bridge: 'evt',
+            event: {
+              event_type: 'input_report',
+              device_id: deviceId,
+              report_id: reportId,
+              data: buf,
+            }
+          }, '*', buf ? [buf] : []);
+          offset += len;
+          reportCount++;
+        }
+        if (reportCount > 0) __webhid.logger.debug('[bridge] -> page ' + reportCount + ' input_report(s) dev=' + deviceId);
+      };
+
+      ws.onerror = (e) => __webhid.logger.error('[bridge] WS data error:', e.message || e);
+      ws.onclose = () => {
+        __webhid.logger.warn('[bridge] WS data closed for', deviceId);
+        _wsData.delete(deviceId);
+        _workerReady.delete(deviceId);
+        window.postMessage({
+          __webhid_bridge: 'evt',
+          event: { event_type: 'disconnect', device_id: deviceId }
+        }, '*');
+      };
+
+      _wsData.set(deviceId, ws);
+      _wsDataCallbacks.set(deviceId, new Map());
+    } catch (e) {
+      __webhid.logger.error('[bridge] WS data spawn failed:', e.message);
+    }
+  }
+
+  function _wsDataSend(deviceId, msgType, reportId, payload) {
+    const ws = _wsData.get(deviceId);
+    if (!ws || ws.readyState !== WebSocket.OPEN) return null;
+    const reqId = _wsDataReqId++;
+    const frame = new Uint8Array(6 + (payload ? payload.length : 0));
+    frame[0] = msgType;
+    frame[1] = reqId & 0xFF; frame[2] = (reqId >> 8) & 0xFF;
+    frame[3] = (reqId >> 16) & 0xFF; frame[4] = (reqId >> 24) & 0xFF;
+    frame[5] = reportId;
+    if (payload) frame.set(payload, 6);
+    ws.send(frame);
+    return reqId;
   }
 
   async function _spawnWorker(deviceId, session_token, opts = {}) {
@@ -608,10 +721,40 @@
       return;
     }
 
-    // Hot-path actions: forward to the Worker (WebSocket) when available.
-    // Falls back to NM path if no worker exists (device not opened or WS died).
+    // Hot-path actions: use bridge WS data plane if available, else worker, else NM.
     if (action === "worker-send" || action === "worker-sendFeature" || action === "worker-receiveFeature") {
       const deviceId = payload.device_id;
+
+      // Bridge WS data plane (no worker).
+      if (_wsData.has(deviceId) && _workerReady.has(deviceId)) {
+        const msgType =
+          action === "worker-send" ? 0x01 :
+          action === "worker-sendFeature" ? 0x02 :
+          0x03;
+        const payloadBytes = payload.data instanceof Uint8Array ? payload.data
+            : payload.data instanceof ArrayBuffer ? new Uint8Array(payload.data)
+            : null;
+
+        if (!isFireAndForget || action === "worker-receiveFeature") {
+          const reqId = _wsDataSend(deviceId, msgType, payload.report_id || 0, payloadBytes);
+          if (reqId !== null) {
+            const cbMap = _wsDataCallbacks.get(deviceId);
+            cbMap.set(reqId, (data) => {
+              const result = data.error ? { success: false, error: data.error }
+                          : data.data ? { success: true, data: data.data }
+                          : { success: data.success !== false };
+              const transfer = (result.data instanceof Uint8Array) ? [result.data.buffer] : [];
+              window.postMessage({ __webhid_bridge: "res", id, result }, "*", transfer);
+            });
+            return;
+          }
+        } else {
+          _wsDataSend(deviceId, msgType, payload.report_id || 0, payloadBytes);
+          return;
+        }
+      }
+
+      // Worker WS data plane (legacy).
       const worker = _workers.get(deviceId);
       if (worker && _workerReady.has(deviceId)) {
         const wType =
@@ -735,12 +878,7 @@
         }).catch(() => {});
 
         if (dataPlane === 'ws') {
-          _spawnWorker(deviceId, response.session_token, {
-            wsPort: response.ws_port || _wsPort,
-            reportSize: payload.reportSize || 2048,
-            sabCapacity,
-            logLevel,
-          });
+          _spawnWsData(deviceId, response.session_token, response.ws_port || _wsPort);
         }
       }
 
@@ -750,12 +888,10 @@
         _openDevices.delete(deviceId);
         _sessionTokens.delete(deviceId);
         browser.runtime.sendMessage({ action: "device-count-changed", count: _openDevices.size }).catch(() => {});
+        const wsD = _wsData.get(deviceId);
+        if (wsD) { wsD.close(); _wsData.delete(deviceId); _wsDataCallbacks.delete(deviceId); _workerReady.delete(deviceId); }
         const worker = _workers.get(deviceId);
-        if (worker) {
-          worker.terminate();
-          _workers.delete(deviceId);
-          _workerReady.delete(deviceId);
-        }
+        if (worker) { worker.terminate(); _workers.delete(deviceId); _workerReady.delete(deviceId); }
       }
 
       window.postMessage({ __webhid_bridge: "res", id, result: response }, "*");
@@ -818,20 +954,20 @@
       }
     }
 
-    // Data plane switch: despawn/spawn workers, setdataplane on daemon.
-    // No close/reopen — device stays open on daemon, just the transport changes.
+    // Data plane switch: despawn workers/ws-data, respawn with new transport.
     if (dp !== undefined) {
-      for (const [id, worker] of _workers) {
-        worker.terminate();
-      }
+      for (const [id, worker] of _workers) { worker.terminate(); }
       _workers.clear();
       _workerCallbacks.clear();
+      for (const [id, ws] of _wsData) { ws.close(); }
+      _wsData.clear();
+      _wsDataCallbacks.clear();
       _workerReady.clear();
 
       if (dp === 'ws') {
         for (const id of _openDevices) {
           const token = _sessionTokens.get(id);
-          if (token) _spawnWorker(id, token).catch(() => {});
+          if (token) _spawnWsData(id, token, _wsPort);
         }
       }
       for (const id of _openDevices) {
