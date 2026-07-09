@@ -428,7 +428,7 @@
       const buffer = view.slice();
       const t0 = perf.begin();
       try {
-        if (!this.#hotPath && this.#sabListener) {
+        if (!this.#hotPath && this.#sabListener && _dataPlane !== 'nm') {
           await this.#waitForHotPath(2000);
         }
         const action = (_dataPlane === 'nm') ? "sendreport"
