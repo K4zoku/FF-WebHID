@@ -441,6 +441,8 @@
   const _workers = new Map();
   const _workerCallbacks = new Map();
   const _openDevices = new Set();
+  const _sessionTokens = new Map();
+  const _workerReady = new Set();
   let _wsPort = null;
   let _controlPlane = 'nm';
   let _controlWs = null;
@@ -474,6 +476,117 @@
       __webhid.logger.warn('[bridge] control WS connect failed:', e.message);
       _controlWs = null;
     }
+  }
+
+  async function _spawnWorker(deviceId, session_token, opts = {}) {
+    const wsPort = opts.wsPort || _wsPort;
+    const reportSize = opts.reportSize || 2048;
+    const sabCapacity = opts.sabCapacity || 8192;
+    const logLevel = opts.logLevel || 1;
+
+    let worker;
+    try {
+      const [loggerResp, workerResp] = await Promise.all([
+        fetch(browser.runtime.getURL('js/utils/logger.js')),
+        fetch(browser.runtime.getURL('js/worker.js')),
+      ]);
+      const [loggerCode, workerCode] = await Promise.all([
+        loggerResp.text(),
+        workerResp.text(),
+      ]);
+      const blob = new Blob([loggerCode + '\n' + workerCode], { type: 'application/javascript' });
+      worker = new Worker(URL.createObjectURL(blob));
+    } catch (e) {
+      __webhid.logger.error('[bridge] worker spawn failed:', e);
+      return null;
+    }
+
+    _workers.set(deviceId, worker);
+
+    worker.onerror = (e) => {
+      __webhid.logger.error('[bridge] worker.onerror:', e.message || '(no msg)', 'file=', e.filename, 'line=', e.lineno);
+    };
+
+    const wid = deviceId;
+    worker.onmessage = ({ data }) => {
+      if (data.type === 'ready') {
+        _workerReady.add(wid);
+        __webhid.logger.info('[bridge] worker ready for', wid, data.sab ? '(SAB)' : '(postMessage fallback)');
+        if (data.sab) {
+          window.postMessage({
+            __webhid_bridge: 'evt',
+            event: {
+              event_type: 'webhid-sab',
+              device_id: wid,
+              sab: data.sab,
+              reportSize,
+            }
+          }, '*');
+        } else {
+          window.postMessage({
+            __webhid_bridge: 'evt',
+            event: {
+              event_type: 'webhid-sab-disabled',
+              device_id: wid,
+            }
+          }, '*');
+        }
+        return;
+      }
+      if (data.type === 'inputReport') {
+        const transfer = data.data instanceof ArrayBuffer ? [data.data] : [];
+        window.postMessage({
+          __webhid_bridge: 'evt',
+          event: {
+            event_type: 'input_report',
+            device_id: wid,
+            report_id: data.reportId,
+            data: data.data,
+          }
+        }, '*', transfer);
+        return;
+      }
+      if (data.type === 'error') {
+        __webhid.logger.error('[bridge] worker error:', data.error);
+        return;
+      }
+      if (data.type === 'closed') {
+        _workerReady.delete(wid);
+        __webhid.logger.warn('[bridge] worker WS closed for', wid, '; worker will auto-reconnect');
+        const cbMap = _workerCallbacks.get(worker);
+        if (cbMap) {
+          for (const [reqId, cb] of cbMap) cb({ type: 'sendResult', reqId, error: 'ws closed' });
+          cbMap.clear();
+        }
+        window.postMessage({
+          __webhid_bridge: 'evt',
+          event: { event_type: 'disconnect', device_id: wid }
+        }, '*');
+        return;
+      }
+      if (data.type === 'sendResult' || data.type === 'featureResult') {
+        const cbMap = _workerCallbacks.get(worker);
+        if (cbMap) {
+          const cb = cbMap.get(data.reqId);
+          if (cb) { cbMap.delete(data.reqId); cb(data); }
+          else __webhid.logger.warn('[bridge] worker response for unknown reqId=', data.reqId, 'cbMap size=', cbMap.size);
+        }
+      }
+    };
+
+    worker.postMessage({
+      type: 'connect',
+      token: session_token,
+      wsPort,
+      reportSize,
+      capacity: sabCapacity,
+      logLevel,
+    });
+
+    const s = await browser.storage.local.get(__webhid.GLOBAL_DEFAULTS);
+    worker.postMessage({ type: 'settings', fireAndForget: s.fireAndForget, perfLogging: s.perfLogging, logLevel: s.logLevel });
+
+    return worker;
   }
 
   function _sendControlWs(action, payload) {
@@ -535,7 +648,7 @@
     if (action === "worker-send" || action === "worker-sendFeature" || action === "worker-receiveFeature") {
       const deviceId = payload.device_id;
       const worker = _workers.get(deviceId);
-      if (worker) {
+      if (worker && _workerReady.has(deviceId)) {
         const wType =
           action === "worker-send" ? "send" :
           action === "worker-sendFeature" ? "sendFeature" :
@@ -633,6 +746,7 @@
       if (action === "open" && response.success && response.session_token) {
         const deviceId = response.device_id;
         _openDevices.add(deviceId);
+        _sessionTokens.set(deviceId, response.session_token);
         browser.runtime.sendMessage({ action: "device-count-changed", count: _openDevices.size }).catch(() => {});
         __webhid.logger.debug('[bridge] open ok deviceId=' + deviceId + ' wsPort=' + response.ws_port);
         const origin = window.location.origin;
@@ -640,143 +754,28 @@
 
         const globalDefaults = await browser.storage.local.get(__webhid.GLOBAL_DEFAULTS);
         let dataPlane = globalDefaults.dataPlane;
-        let sabEnabled = globalDefaults.sabEnabled;
         let sabCapacity = globalDefaults.sabCapacity;
         let logLevel = globalDefaults.logLevel;
         if (siteKey) {
           const siteResult = await browser.storage.local.get(siteKey);
           const ss = siteResult[siteKey] || {};
           if (ss.dataPlane !== undefined) dataPlane = ss.dataPlane;
-          if (ss.sabEnabled !== undefined) sabEnabled = ss.sabEnabled;
           if (ss.sabCapacity !== undefined) sabCapacity = ss.sabCapacity;
         }
 
-        if (dataPlane === 'nm') {
-          __webhid.logger.info('[bridge] NM mode for', deviceId, '(no worker spawned)');
-          browser.runtime.sendMessage({
-            action: "setdataplane",
-            device_id: deviceId,
-            mode: "nm",
-          }).catch(() => {});
-        } else if (!sabEnabled) {
-          __webhid.logger.info('[bridge] SAB disabled for', deviceId, '(worker without SAB)');
-          browser.runtime.sendMessage({
-            action: "setdataplane",
-            device_id: deviceId,
-            mode: "ws",
-          }).catch(() => {});
-        } else
-        {
-        let worker;
-        try {
-          const [loggerResp, workerResp] = await Promise.all([
-            fetch(browser.runtime.getURL('js/utils/logger.js')),
-            fetch(browser.runtime.getURL('js/worker.js')),
-          ]);
-          const [loggerCode, workerCode] = await Promise.all([
-            loggerResp.text(),
-            workerResp.text(),
-          ]);
-          const blob = new Blob([loggerCode + '\n' + workerCode], { type: 'application/javascript' });
-          worker = new Worker(URL.createObjectURL(blob));
-        } catch (e) {
-          __webhid.logger.error('[bridge] worker spawn failed:', e);
-          throw e;
-        }
-        _workers.set(deviceId, worker);
+        browser.runtime.sendMessage({
+          action: "setdataplane",
+          device_id: deviceId,
+          mode: dataPlane,
+        }).catch(() => {});
 
-        worker.onerror = (e) => {
-          __webhid.logger.error('[bridge] worker.onerror:', e.message || '(no msg)', 'file=', e.filename, 'line=', e.lineno);
-        };
-
-        worker.onmessage = ({ data }) => {
-          if (data.type === 'ready') {
-            __webhid.logger.info('[bridge] worker ready for', deviceId, data.sab ? '(SAB)' : '(postMessage fallback)');
-            if (data.sab) {
-              // SAB path: polyfill drains via Atomics
-              window.postMessage({
-                __webhid_bridge: 'evt',
-                event: {
-                  event_type: 'webhid-sab',
-                  device_id: response.device_id,
-                  sab: data.sab,
-                  reportSize: payload.reportSize || 2048
-                }
-              }, '*');
-            } else {
-              // postMessage fallback: SAB unavailable, worker will send
-              // inputReport messages directly
-              window.postMessage({
-                __webhid_bridge: 'evt',
-                event: {
-                  event_type: 'webhid-sab-disabled',
-                  device_id: response.device_id,
-                }
-              }, '*');
-            }
-            return;
-          }
-          if (data.type === 'inputReport') {
-            const transfer = data.data instanceof ArrayBuffer ? [data.data] : [];
-            window.postMessage({
-              __webhid_bridge: 'evt',
-              event: {
-                event_type: 'input_report',
-                device_id: response.device_id,
-                report_id: data.reportId,
-                data: data.data,
-              }
-            }, '*', transfer);
-            return;
-          }
-          if (data.type === 'error') {
-            __webhid.logger.error('[bridge] worker error:', data.error);
-            return;
-          }
-          if (data.type === 'closed') {
-            __webhid.logger.warn('[bridge] worker WS closed for', deviceId, '; worker will auto-reconnect');
-            const cbMap = _workerCallbacks.get(worker);
-            if (cbMap) {
-              for (const [reqId, cb] of cbMap) cb({ type: 'sendResult', reqId, error: 'ws closed' });
-              cbMap.clear();
-            }
-            window.postMessage({
-              __webhid_bridge: 'evt',
-              event: { event_type: 'disconnect', device_id: response.device_id }
-            }, '*');
-            return;
-          }
-          if (data.type === 'ready' && _workers.has(deviceId)) {
-            __webhid.logger.info('[bridge] worker reconnected for', deviceId);
-            window.postMessage({
-              __webhid_bridge: 'evt',
-              event: { event_type: 'connect', device_id: response.device_id }
-            }, '*');
-            return;
-          }
-          if (data.type === 'sendResult' || data.type === 'featureResult') {
-            const cbMap = _workerCallbacks.get(worker);
-            if (cbMap) {
-              const cb = cbMap.get(data.reqId);
-              if (cb) { cbMap.delete(data.reqId); cb(data); }
-              else __webhid.logger.warn('[bridge] worker response for unknown reqId=', data.reqId, 'cbMap size=', cbMap.size);
-            }
-          }
-        };
-
-        worker.postMessage({
-          type: 'connect',
-          token: response.session_token,
-          wsPort: response.ws_port || _wsPort,
-          reportSize: payload.reportSize || 2048,
-          capacity: sabCapacity,
-          logLevel: logLevel,
-        });
-
-        (async () => {
-          const s = await browser.storage.local.get(__webhid.GLOBAL_DEFAULTS);
-          worker.postMessage({ type: 'settings', fireAndForget: s.fireAndForget, perfLogging: s.perfLogging, logLevel: s.logLevel });
-        })();
+        if (dataPlane === 'ws') {
+          _spawnWorker(deviceId, response.session_token, {
+            wsPort: response.ws_port || _wsPort,
+            reportSize: payload.reportSize || 2048,
+            sabCapacity,
+            logLevel,
+          });
         }
       }
 
@@ -784,11 +783,13 @@
         const deviceId = payload.device_id;
         __webhid.logger.debug('[bridge] close deviceId=' + deviceId);
         _openDevices.delete(deviceId);
+        _sessionTokens.delete(deviceId);
         browser.runtime.sendMessage({ action: "device-count-changed", count: _openDevices.size }).catch(() => {});
         const worker = _workers.get(deviceId);
         if (worker) {
           worker.terminate();
           _workers.delete(deviceId);
+          _workerReady.delete(deviceId);
         }
       }
 
@@ -851,6 +852,32 @@
       }
     }
 
+    // Data plane switch: despawn/spawn workers, setdataplane on daemon.
+    // No close/reopen — device stays open on daemon, just the transport changes.
+    if (dp !== undefined) {
+      for (const [id, worker] of _workers) {
+        worker.terminate();
+      }
+      _workers.clear();
+      _workerCallbacks.clear();
+      _workerReady.clear();
+
+      if (dp === 'ws') {
+        for (const id of _openDevices) {
+          const token = _sessionTokens.get(id);
+          if (token) _spawnWorker(id, token).catch(() => {});
+        }
+      }
+      for (const id of _openDevices) {
+        browser.runtime.sendMessage({
+          action: "setdataplane",
+          device_id: id,
+          mode: dp,
+        }).catch(() => {});
+      }
+      __webhid.logger.info('[bridge] data plane changed:', dp, 'open devices:', _openDevices.size);
+    }
+
     if (dp !== undefined || cp !== undefined || ddv !== undefined || ff !== undefined || pl !== undefined || ll !== undefined) {
       const settings = {};
       if (dp !== undefined) settings.dataPlane = dp;
@@ -860,14 +887,6 @@
       if (ll !== undefined) settings.logLevel = ll;
       if (pl !== undefined) settings.perfLogging = pl;
       window.postMessage({ __webhid_bridge: "settings", settings }, "*");
-
-      // When dataPlane or controlPlane changes, tell the page to reopen devices.
-      if (dp !== undefined || cp !== undefined) {
-        window.postMessage({
-          __webhid_bridge: 'evt',
-          event: { event_type: 'webhid-reopen-all' }
-        }, '*');
-      }
     }
   });
 })();
