@@ -31,7 +31,7 @@ cargo build --manifest-path crates/Cargo.toml
 # Release
 make build                # or: make build CARGO_ARGS=--frozen
 
-# Addon XPI (builds WASM + zips addon/)
+# Addon XPI (zips addon/)
 make build-addon
 ```
 
@@ -61,9 +61,9 @@ Override socket path: `WEBHID_SOCKET=/tmp/webhid-dev.sock RUST_LOG=debug crates/
 
 ```sh
 mkdir -p ~/.mozilla/native-messaging-hosts
-cat > ~/.mozilla/native-messaging-hosts/webhid_server.json << EOF
+cat > ~/.mozilla/native-messaging-hosts/webhid.forwarder_nm_host.json << EOF
 {
-  "name": "webhid_server",
+  "name": "webhid.forwarder_nm_host",
   "description": "WebHID native messaging host",
   "path": "$(pwd)/crates/target/debug/webhid-native-messaging",
   "type": "stdio",
@@ -72,11 +72,21 @@ cat > ~/.mozilla/native-messaging-hosts/webhid_server.json << EOF
 EOF
 ```
 
-Restart browser after writing this file. Path must be absolute.
+For daemon-as-NM-host mode, point `path` to the daemon binary directly:
 
-> For a proper install (release binary + manifest + systemd user service in one
-> step), use `make install-user` instead; it substitutes the `{{NM_BIN}}`
-> placeholder in the template manifest with the real install path.
+```sh
+cat > ~/.mozilla/native-messaging-hosts/webhid.daemon_nm_host.json << EOF
+{
+  "name": "webhid.daemon_nm_host",
+  "description": "WebHID daemon as native-messaging host",
+  "path": "$(pwd)/crates/target/debug/webhid-daemon",
+  "type": "stdio",
+  "allowed_extensions": ["webhid@k4zoku.dev"]
+}
+EOF
+```
+
+Restart browser after writing these files. Paths must be absolute.
 
 ### Environment variables
 
@@ -84,9 +94,24 @@ Restart browser after writing this file. Path must be absolute.
 |---|---|---|
 | `WEBHID_SOCKET` | `/run/webhid/webhid.sock` (Linux) / `/tmp/webhid.sock` (macOS) | IPC socket path |
 | `WEBHID_WS_PORT` | `31337` | WebSocket server port |
-| `WEBHID_WS_BATCH_MS` | `0` | Input report flush policy. `0` = adaptive (drain + burst coalescing with 100μs window; sparse reports flush immediately, bursts batch together). `1`+ = fixed N ms timer. |
+| `WEBHID_WS_BATCH_MS` | `0` | Input report flush policy. `0` = adaptive (drain + burst coalescing with 100μs window). `1`+ = fixed N ms timer. |
 | `WEBHID_IPC_PORT` | `31338` | TCP IPC port (Windows only, replaces Unix socket) |
 | `RUST_LOG` | `info` | Log level |
+
+### Addon settings (development)
+
+| Setting | Values | Default | Description |
+|---|---|---|---|
+| `controlPlane` | `nm` / `ws` | `nm` | Control plane: NM or WS text frames |
+| `dataPlane` | `ws` / `nm` | `ws` | Data plane: WS worker+SAB or NM via bridge |
+| `sabEnabled` | bool | `true` | SharedArrayBuffer for zero-copy input reports |
+| `sabCapacity` | 2048–32768 | `8192` | SAB ring buffer slots |
+| `fireAndForget` | bool | `true` | Resolve sendReport after `window.postMessage` (<0.1ms) |
+| `daemonAsNmHost` | bool | `false` | Use daemon-as-NM-host (skip forwarder + socket) |
+| `logLevel` | 0–3 | `1` | 0=error, 1=warn, 2=info, 3=debug |
+| `perfLogging` | bool | `false` | Timing logs (only effective at debug level) |
+
+All settings can be overridden per-site via the popup (saved to `site:<origin>` key in `browser.storage.local`).
 
 ## Testing
 
@@ -123,25 +148,33 @@ journalctl -u webhid-daemon -f
 FF-WebHID/
 ├── addon/                   Firefox extension (MV3)
 │   ├── manifest.json
-│   ├── background.js        NM bridge, auto-reconnect, COOP/COEP
-│   ├── webhid-polyfill.js   Content script (MAIN world): navigator.hid polyfill
-│   ├── webhid-bridge.js     Content script (isolated world): device picker, worker spawn
-│   ├── hid-worker.js        Web Worker: WebSocket, SAB ring buffer, fire-and-forget
-│   ├── settings.html/js     Settings page
-│   ├── webhid.css           Device picker styles
-│   ├── icons/ res/          Icons
+│   ├── js/
+│   │   ├── background.js    NM bridge, handshake, tab-targeted events, COOP/COEP
+│   │   ├── polyfill.js      MAIN world: navigator.hid, early fire-and-forget, SAB drain
+│   │   ├── bridge.js        Isolated world: control/data routing, WS control, worker spawn
+│   │   ├── worker.js        Web Worker: binary WS, SAB ring buffer, fire-and-forget
+│   │   ├── settings.js      Settings page logic
+│   │   ├── popup.js         Popup logic (per-site settings, device list)
+│   │   └── utils/logger.js  Level-based logger + perf timing
+│   ├── html/                Settings + popup HTML
+│   ├── css/                 Styles
+│   ├── icons/ res/          Icons + device type icons
 │
 ├── crates/                  Rust workspace
-│   ├── webhid/              Shared types + protocol
-│   ├── webhid-daemon/       System daemon (hidapi, WS server, hot-plug)
-│   └── webhid-native-messaging/  Firefox ↔ daemon bridge
+│   ├── webhid/              Shared types (NmRequest, NmResponse, IpcRequest, IpcResponse)
+│   ├── webhid-daemon/       System daemon (hidapi, WS server, adaptive batching, control WS)
+│   └── webhid-native-messaging/  Firefox ↔ daemon thin forwarder
 │
-├── manifests/               NM manifest + systemd units (system + user) + udev rule
-│                            (templates use {{DAEMON_BIN}}/{{NM_BIN}} placeholders,
-│                             sed-replaced at install time)
-├── packaging/               Arch Linux PKGBUILDs
+├── manifests/               NM manifests + systemd units + udev rule
+│   ├── webhid.forwarder_nm_host.json   Forwarder NM manifest ({{NM_BIN}})
+│   ├── webhid.daemon_nm_host.json      Daemon-as-NM-host manifest ({{DAEMON_BIN}})
+│   └── ...
+├── packaging/               Arch/Debian/RPM/Windows/macOS packaging
 ├── docs/
-│   └── ARCHITECTURE.md      System architecture
+│   ├── ARCHITECTURE.md      System architecture
+│   ├── DATA_PATH.md         Per-path copy/hop/latency analysis
+│   ├── DEVELOPMENT.md       This file
+│   └── INSTALLATION.md      Install guide + platform recommendations
 └── test/                    test_nm.py + browser test UI
 ```
 
@@ -159,10 +192,10 @@ cd packaging/webhid-addon && makepkg -si
 
 CI builds on Linux, Windows, and macOS. Platform-specific code is gated with `#[cfg]`:
 
-| Platform | IPC | Hot-plug | hidapi feature |
-|---|---|---|---|
-| Linux | Unix socket | udev monitor | `linux-static-hidraw` |
-| macOS | Unix socket | hidapi poll (2s) | `macos-shared-device` |
-| Windows | TCP localhost | hidapi poll (2s) | `windows-native` |
+| Platform | IPC | Hot-plug | hidapi feature | Daemon-as-NM-host |
+|---|---|---|---|---|
+| Linux | Unix socket | udev monitor | `linux-static-hidraw` | Yes (needs udev rule) |
+| macOS | Unix socket | hidapi poll (2s) | `macos-shared-device` | Yes |
+| Windows | Named pipe | hidapi poll (2s) | `windows-native` | Yes |
 
-No autostart; run the daemon manually or set up a service/agent.
+Daemon-as-NM-host works on all platforms. The daemon auto-detects NM mode via the 2 positional args Firefox passes (manifest path + addon ID).

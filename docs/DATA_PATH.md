@@ -225,28 +225,7 @@ Bridge sends `handshake` on init, connects control WS immediately after.
 
 ---
 
-## 7. Optimizations in Place
-
-| Optimization | Location | Effect |
-|-------------|----------|--------|
-| `Arc<[u8]>` for broadcast data | `types.rs`, `device_mgr.rs` | Zero-clone broadcast (refcount bump) |
-| `Arc::from(&frame[6..])` in `handle_client_binary` | `websocket.rs` | Zero-copy slice to Arc for spawn_blocking |
-| Batch Vec stores `(u8, Arc<[u8]>)` — no `full_report` alloc | `websocket.rs` | report_id prepended in `create_batch_frame` |
-| Adaptive WS flush (100μs coalescing) | `websocket.rs` | 0 latency for sparse, ≤100μs for bursts |
-| Binary WS protocol (not JSON) | `websocket.rs` + `worker.js` | No JSON overhead on data plane |
-| SAB ring buffer for input reports | `worker.js` + `polyfill.js` | Zero-copy W→P via `Atomics.notify` |
-| Early fire-and-forget (resolve after `window.postMessage`) | `polyfill.js` + `bridge.js` | Page latency <0.1ms for both WS and NM |
-| Control plane WS (text frames for enumerate/close) | `bridge.js` + `websocket.rs` | Eliminates NM roundtrip for control ops |
-| Control token (separate from device session token) | `device_mgr.rs` + `types.rs` | Control WS connects without device open |
-| Thread-local buffers in daemon | `hid.rs` (`WRITE_BUF`, `READ_BUF`) | Avoids per-call allocation |
-| DataPlane mode per device | `device_mgr.rs` | Events only sent to requested channel |
-| Tab-targeted event delivery | `background.js` | Eliminates N× `tabs.sendMessage` |
-| ArrayBuffer transfer (P→B, B→W, W→B, B→P) | `polyfill.js`, `bridge.js`, `worker.js` | Zero-copy realm hops for binary data |
-| Open device tracking independent of workers | `bridge.js` (`_openDevices` Set) | Badge counter works in NM mode |
-
----
-
-## 8. Key Findings
+## 7. Key Findings
 
 1. **Fire-and-forget page latency is <0.1ms for both WS and NM** — polyfill resolves immediately after `window.postMessage`, no callback/ack wait.
 

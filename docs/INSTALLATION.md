@@ -156,7 +156,7 @@ The daemon uses a random WebSocket port in this mode (avoids conflicts with any 
 
 The installed NM manifest (`webhid.daemon_nm_host.json`) uses the `"name": "webhid.daemon_nm_host"` identifier, distinct from the thin-forwarder manifest (`webhid.forwarder_nm_host`). The addon picks the correct name based on the "Daemon as NM host" toggle in its settings page.
 
-> **Note:** This mode is not available on Windows — Firefox NM host requires an `.exe` in the `path` field and doesn't support arguments. Use the NM host thin forwarder on Windows.
+> **Note:** On Windows, the NM manifest `path` field should point directly to `webhid-daemon.exe`. The daemon auto-detects NM-host mode via the 2 positional args Firefox passes (manifest path + addon ID). No wrapper script or `--nm-host` flag needed.
 
 ---
 
@@ -322,13 +322,13 @@ Then install the [browser extension](https://addons.mozilla.org/en-US/firefox/ad
 
 | Setting | Recommended | Reason |
 |---------|------------|--------|
-| Daemon as NM host | OFF | Windows NM host requires `.exe` in path field — daemon-as-NM-host not available |
-| Control Plane | NM (default) | WS control works but NM is simpler on Windows (no udev needed) |
+| Daemon as NM host | ON | Windows has no permission setup needed — just point NM manifest path to `webhid-daemon.exe`. Daemon auto-detects NM mode via Firefox's 2 positional args |
+| Control Plane | WS | Control ops via WS after handshake |
 | Data Plane | WS (default) | Binary WS + SAB for performance |
 | SAB | ON | Zero-copy input reports |
 | Fire-and-forget | ON | Page latency <0.1ms |
 
-**Setup**: Install MSI or portable zip. The installer auto-registers NM host + creates a Scheduled Task for the daemon.
+**Setup**: Install MSI or portable zip. For daemon-as-NM-host, register `webhid.daemon_nm_host.json` with `path` pointing to `webhid-daemon.exe` — no wrapper script needed, daemon auto-detects NM mode.
 
 ### macOS
 
