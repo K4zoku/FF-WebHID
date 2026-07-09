@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+webhid = { path = "../webhid" }
 tokio = { version = "1", features = ["rt", "net", "io-util", "time", "macros", "io-std"] }
 anyhow = { version = "1", default-features = false, features = ["std"] }
 log = { version = "0.4", features = ["std"] }

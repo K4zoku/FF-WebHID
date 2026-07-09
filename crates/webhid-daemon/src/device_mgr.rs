@@ -15,15 +15,11 @@ use webhid::{DeviceInfo, IpcResponse};
 use crate::hid;
 
 struct Entry {
-    #[allow(dead_code)]
-    info: DeviceInfo,
     device: Arc<Mutex<HidDevice>>,
     client_id: u64,
     stop_flag: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
     session_token: Option<String>,
-    /// `true` when a WS client is connected and receiving input reports.
-    ws_active: Arc<AtomicBool>,
     /// `"ws"` or `"nm"` — controls which channel receives input reports.
     dataplane_mode: Mutex<String>,
 }
@@ -58,7 +54,11 @@ impl DeviceManager {
         if let Some(ref t) = *guard {
             return t.clone();
         }
-        let token = generate_session_token().unwrap_or_else(|_| "fallback_control_token".into());
+        let token = generate_session_token().unwrap_or_else(|e| {
+            log::error!("failed to generate control token: {e}");
+            let fallback = format!("fallback_{}", std::process::id());
+            fallback
+        });
         *guard = Some(token.clone());
         token
     }
@@ -104,15 +104,12 @@ impl DeviceManager {
         let reader_device = hid::open_by_device_id(&id)?.2;
         let reader_arc = Arc::new(Mutex::new(reader_device));
         let writer_arc = Arc::new(Mutex::new(device));
-        let ws_active = Arc::new(AtomicBool::new(false));
         let entry = Entry {
-            info: info.clone(),
             device: Arc::clone(&writer_arc),
             client_id,
             stop_flag: Arc::clone(&stop_flag),
             handle: None,
             session_token: Some(session_token.clone()),
-            ws_active: Arc::clone(&ws_active),
             dataplane_mode: Mutex::new("nm".to_string()),
         };
 
@@ -194,13 +191,6 @@ impl DeviceManager {
         let map = self.devices.lock().unwrap();
         let entry = map.get(device_id).ok_or_else(|| anyhow!("'{device_id}' not open"))?;
         Ok(Arc::clone(&entry.device))
-    }
-
-    pub fn set_ws_active(&self, device_id: &str, active: bool) {
-        let map = self.devices.lock().unwrap();
-        if let Some(entry) = map.get(device_id) {
-            entry.ws_active.store(active, Ordering::SeqCst);
-        }
     }
 
     pub fn set_dataplane_mode(&self, device_id: &str, mode: &str) {

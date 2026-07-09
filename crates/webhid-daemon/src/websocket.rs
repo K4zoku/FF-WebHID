@@ -171,13 +171,8 @@ async fn handle_websocket(
 
     log::info!("[ws] authenticated token for device_id={device_id}");
 
-    // Subscribe to the broadcast channel BEFORE calling set_ws_active(true).
-    // If we set ws_active first, the client.rs event-forwarder starts skipping
-    // InputReport events (because is_ws_active == true). But the WS sender
-    // task hasn't subscribed yet, so those reports are lost forever.
     let mut event_rx = event_tx.subscribe();
 
-    device_mgr.set_ws_active(&device_id, true);
     device_mgr.set_dataplane_mode(&device_id, "ws");
 
     let (mut ws_sender, mut ws_receiver) = ws_stream.split();
@@ -200,11 +195,6 @@ async fn handle_websocket(
     // and the response is enqueued back to the page via `tx`.
     let tx_for_receiver = tx.clone();
     let device_mgr_for_receiver = Arc::clone(&device_mgr);
-    let client_id_for_receiver = 0u64; // WS connections are not bound to an IPC client_id
-    // Clone device_id before moving it into the receiver closure so the
-    // sender task below can still use the original.  `async move` captures
-    // by value, so without this clone the sender task's
-    // `device_id.clone()` would fail to compile (E0382).
     let device_id_for_receiver = device_id.clone();
     let mut receiver_task = tokio::spawn(async move {
         while let Some(msg) = ws_receiver.next().await {
@@ -220,7 +210,7 @@ async fn handle_websocket(
                     let mgr = Arc::clone(&device_mgr_for_receiver);
                     let dev_id = device_id_for_receiver.clone();
                     tokio::spawn(async move {
-                        handle_client_binary(&frame, &mgr, client_id_for_receiver, &dev_id, tx_clone).await;
+                        handle_client_binary(&frame, &mgr, &dev_id, tx_clone).await;
                     });
                 }
                 Ok(Message::Text(text)) => {
@@ -334,7 +324,6 @@ async fn handle_websocket(
     sender_task.abort();
 
     log::info!("[ws] connection for {device_id} closed");
-    device_mgr.set_ws_active(&device_id, false);
     device_mgr.set_dataplane_mode(&device_id, "nm");
     Ok(())
 }
@@ -466,7 +455,6 @@ fn create_batch_frame(reports: &[(u8, Arc<[u8]>)]) -> Vec<u8> {
 async fn handle_client_binary(
     frame: &[u8],
     device_mgr: &Arc<DeviceManager>,
-    _client_id: u64,
     device_id: &str,
     tx: mpsc::UnboundedSender<Message>,
 ) {

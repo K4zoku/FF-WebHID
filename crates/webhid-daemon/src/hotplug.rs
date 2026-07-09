@@ -1,5 +1,40 @@
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+use std::collections::HashMap;
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+use std::sync::Mutex;
 use tokio::sync::broadcast;
 use webhid::IpcResponse;
+
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+static DEVICE_CACHE: Mutex<Option<HashMap<String, webhid::DeviceInfo>>> = Mutex::new(None);
+
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+fn refresh_and_diff(event_tx: &broadcast::Sender<IpcResponse>) {
+    let current: HashMap<String, webhid::DeviceInfo> = match crate::hid::enumerate() {
+        Ok(devs) => devs.into_iter().map(|d| (d.device_id.clone(), d)).collect(),
+        Err(_) => return,
+    };
+    let mut cache = DEVICE_CACHE.lock().unwrap();
+    let cache = cache.get_or_insert_with(HashMap::new);
+
+    for (id, info) in &current {
+        if !cache.contains_key(id) {
+            log::info!("device connected: {:04x}:{:04x} ({})", info.vendor_id, info.product_id, info.device_id);
+            let _ = event_tx.send(IpcResponse::DeviceConnected { id: 0, device: info.clone() });
+        }
+    }
+    let removed: Vec<_> = cache.keys().filter(|id| !current.contains_key(*id)).cloned().collect();
+    for id in &removed {
+        if let Some(info) = cache.get(id) {
+            log::info!("device disconnected: {:04x}:{:04x} ({})", info.vendor_id, info.product_id, info.device_id);
+            let _ = event_tx.send(IpcResponse::DeviceDisconnected { id: 0, device: info.clone() });
+        }
+    }
+    cache.retain(|id, _| current.contains_key(id));
+    for (id, info) in current {
+        cache.insert(id, info);
+    }
+}
 
 pub fn start(event_tx: broadcast::Sender<IpcResponse>) {
     #[cfg(target_os = "linux")]
@@ -116,38 +151,6 @@ fn start_udev(event_tx: broadcast::Sender<IpcResponse>) -> anyhow::Result<()> {
 #[cfg(target_os = "windows")]
 #[allow(non_snake_case, non_upper_case_globals)]
 fn run_windows(event_tx: broadcast::Sender<IpcResponse>) {
-    use std::collections::HashMap;
-    use std::sync::Mutex;
-
-    static DEVICE_CACHE: Mutex<Option<HashMap<String, webhid::DeviceInfo>>> = Mutex::new(None);
-
-    fn refresh_and_diff(event_tx: &broadcast::Sender<IpcResponse>) {
-        let current: HashMap<String, webhid::DeviceInfo> = match crate::hid::enumerate() {
-            Ok(devs) => devs.into_iter().map(|d| (d.device_id.clone(), d)).collect(),
-            Err(_) => return,
-        };
-        let mut cache = DEVICE_CACHE.lock().unwrap();
-        let cache = cache.get_or_insert_with(HashMap::new);
-
-        for (id, info) in &current {
-            if !cache.contains_key(id) {
-                log::info!("device connected: {:04x}:{:04x} ({})", info.vendor_id, info.product_id, info.device_id);
-                let _ = event_tx.send(IpcResponse::DeviceConnected { id: 0, device: info.clone() });
-            }
-        }
-        let removed: Vec<_> = cache.keys().filter(|id| !current.contains_key(*id)).cloned().collect();
-        for id in &removed {
-            if let Some(info) = cache.get(id) {
-                log::info!("device disconnected: {:04x}:{:04x} ({})", info.vendor_id, info.product_id, info.device_id);
-                let _ = event_tx.send(IpcResponse::DeviceDisconnected { id: 0, device: info.clone() });
-            }
-        }
-        cache.retain(|id, _| current.contains_key(id));
-        for (id, info) in current {
-            cache.insert(id, info);
-        }
-    }
-
     // Seed cache
     if let Ok(devices) = crate::hid::enumerate() {
         let mut cache = DEVICE_CACHE.lock().unwrap();
@@ -296,8 +299,6 @@ fn run_windows(event_tx: broadcast::Sender<IpcResponse>) {
 
 #[cfg(target_os = "macos")]
 fn run_macos(event_tx: broadcast::Sender<IpcResponse>) {
-    use std::collections::HashMap;
-    use std::sync::Mutex;
     use core_foundation_sys::base::*;
     use core_foundation_sys::runloop::*;
     use core_foundation_sys::string::*;
@@ -326,37 +327,6 @@ fn run_macos(event_tx: broadcast::Sender<IpcResponse>) {
     type IOReturn = i32;
     type IOOptionBits = u32;
     const KIO_HID_OPTIONS_TYPE_NONE: IOOptionBits = 0;
-
-    // We can't easily get DeviceInfo from the raw IOHIDDeviceRef in the callback
-    // without linking against IOKit framework properly.  Instead, we do a full
-    // enumerate + diff on every callback; same as poll but event-driven (no
-    // sleep, instant response).
-    fn refresh_and_diff(event_tx: &broadcast::Sender<IpcResponse>) {
-        let current: HashMap<String, webhid::DeviceInfo> = match crate::hid::enumerate() {
-            Ok(devs) => devs.into_iter().map(|d| (d.device_id.clone(), d)).collect(),
-            Err(_) => return,
-        };
-        let mut cache = DEVICE_CACHE.lock().unwrap();
-        let cache = cache.get_or_insert_with(HashMap::new);
-
-        for (id, info) in &current {
-            if !cache.contains_key(id) {
-                log::info!("device connected: {:04x}:{:04x} ({})", info.vendor_id, info.product_id, info.device_id);
-                let _ = event_tx.send(IpcResponse::DeviceConnected { id: 0, device: info.clone() });
-            }
-        }
-        let removed: Vec<_> = cache.keys().filter(|id| !current.contains_key(*id)).cloned().collect();
-        for id in &removed {
-            if let Some(info) = cache.get(id) {
-                log::info!("device disconnected: {:04x}:{:04x} ({})", info.vendor_id, info.product_id, info.device_id);
-                let _ = event_tx.send(IpcResponse::DeviceDisconnected { id: 0, device: info.clone() });
-            }
-        }
-        cache.retain(|id, _| current.contains_key(id));
-        for (id, info) in current {
-            cache.insert(id, info);
-        }
-    }
 
     // Seed cache
     if let Ok(devices) = crate::hid::enumerate() {

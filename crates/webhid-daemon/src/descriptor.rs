@@ -15,7 +15,10 @@ use webhid::types::{Collection, Report, Field as WebHidField};
 pub fn parse_report_descriptor(bytes: &[u8]) -> Vec<Collection> {
     let rdesc = match ReportDescriptor::try_from(bytes) {
         Ok(d) => d,
-        Err(_) => return vec![],
+        Err(_) => {
+            log::warn!("failed to parse report descriptor ({} bytes)", bytes.len());
+            return vec![];
+        }
     };
 
     let mut tree = CollectionTreeBuilder::new();
