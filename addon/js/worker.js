@@ -24,6 +24,7 @@ const SAB_AVAILABLE = typeof SharedArrayBuffer !== 'undefined';
 
 let CAPACITY = self.__webhid.GLOBAL_DEFAULTS.sabCapacity;
 let sab = null, meta = null, data = null, reportSize = 64, ws = null;
+let _sabEnabled = true;
 const _pending = new Map();
 let _nextReqId = 1;
 let _fireAndForget = self.__webhid.GLOBAL_DEFAULTS.fireAndForget;
@@ -37,9 +38,10 @@ self.onmessage = ({ data: msg }) => {
   if (msg.type === 'connect') return connect(msg);
   if (msg.type === 'settings') {
     if (msg.fireAndForget !== undefined) _fireAndForget = msg.fireAndForget !== false;
+    if (msg.sabEnabled !== undefined) _sabEnabled = msg.sabEnabled === true;
     if (msg.perfLogging !== undefined) { _perfLogging = msg.perfLogging === true; _applyPerf(); }
     if (msg.logLevel !== undefined) { logger.applyLevel(msg.logLevel); _applyPerf(); }
-    logger.debug('[worker] settings fireAndForget=' + _fireAndForget + ' perfLogging=' + _perfLogging + ' logLevel=' + logger._level);
+    logger.debug('[worker] settings fireAndForget=' + _fireAndForget + ' sabEnabled=' + _sabEnabled + ' perfLogging=' + _perfLogging + ' logLevel=' + logger._level);
     return;
   }
   if (msg.type === 'send') return handleSend(msg, MSG_SEND_REPORT);
@@ -94,7 +96,7 @@ function _doConnect() {
   ws.onmessage = ({ data: frame }) => {
     const batch = new Uint8Array(frame);
     if (batch.length > 0 && batch[0] >= 0x80 && batch.length <= 10) return handleControlResponse(batch);
-    if (SAB_AVAILABLE) {
+    if (_sabEnabled && SAB_AVAILABLE) {
       pushInputBatch(batch);
     } else {
       pushInputBatchPostMessage(batch);

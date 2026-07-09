@@ -101,6 +101,7 @@
 
   const _defs = globalThis.__webhid.GLOBAL_DEFAULTS;
   let _dataPlane = _defs.dataPlane;
+  let _sabEnabled = _defs.sabEnabled;
   let _perfLogging = _defs.perfLogging;
   let _fireAndForget = _defs.fireAndForget;
 
@@ -130,6 +131,12 @@
       const s = event.data.settings;
       if (s.dataPlane !== undefined) { _dataPlane = s.dataPlane; __webhid.logger.info('[webhid] data plane changed: ' + _dataPlane); }
       if (s.fireAndForget !== undefined) { _fireAndForget = s.fireAndForget; __webhid.logger.info('[webhid] fire-and-forget: ' + _fireAndForget); }
+      if (s.sabEnabled !== undefined) {
+        _sabEnabled = s.sabEnabled;
+        __webhid.logger.info('[webhid] SAB enabled: ' + _sabEnabled);
+        // Toggle drain behavior on all devices. Each device checks
+        // _sabEnabled in its input_report handler.
+      }
       if (s.logLevel !== undefined && __webhid.logger.applyLevel) __webhid.logger.applyLevel(s.logLevel);
       if (s.perfLogging !== undefined) _perfLogging = s.perfLogging;
       _applyPerf();
@@ -156,6 +163,7 @@
   sendRequest("getSettings", {}).then((s) => {
     if (!s) return;
     if (s.dataPlane !== undefined) _dataPlane = s.dataPlane;
+    if (s.sabEnabled !== undefined) _sabEnabled = s.sabEnabled;
     if (s.fireAndForget !== undefined) _fireAndForget = s.fireAndForget;
     if (s.logLevel !== undefined && __webhid.logger.applyLevel) __webhid.logger.applyLevel(s.logLevel);
     if (s.perfLogging !== undefined) _perfLogging = s.perfLogging;
@@ -470,7 +478,7 @@
           }
 
           if (event_type === "input_report") {
-            if (this.#sabDrainActive) return;
+            if (_sabEnabled && this.#sabDrainActive) return;
             if (evDeviceId && this.#deviceId && evDeviceId !== this.#deviceId) return;
             const dataBytes = typeof detail.data === 'string'
               ? base64Decode(detail.data)

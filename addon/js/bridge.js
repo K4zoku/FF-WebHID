@@ -549,7 +549,7 @@
     });
 
     const s = await browser.storage.local.get(__webhid.GLOBAL_DEFAULTS);
-    worker.postMessage({ type: 'settings', fireAndForget: s.fireAndForget, perfLogging: s.perfLogging, logLevel: s.logLevel });
+    worker.postMessage({ type: 'settings', fireAndForget: s.fireAndForget, sabEnabled: s.sabEnabled, perfLogging: s.perfLogging, logLevel: s.logLevel });
 
     return worker;
   }
@@ -794,6 +794,7 @@
     let ll = changes.logLevel?.newValue;
     let dp = changes.dataPlane?.newValue;
     let cp = changes.controlPlane?.newValue;
+    let se = changes.sabEnabled?.newValue;
 
     // Check per-site settings changes (popup saves to `site:${origin}` key)
     const origin = window.location.origin;
@@ -803,6 +804,7 @@
       if (ss.dataPlane !== undefined) dp = ss.dataPlane;
       if (ss.controlPlane !== undefined) cp = ss.controlPlane;
       if (ss.fireAndForget !== undefined) ff = ss.fireAndForget;
+      if (ss.sabEnabled !== undefined) se = ss.sabEnabled;
     }
 
     if (cp !== undefined) {
@@ -810,9 +812,9 @@
       __webhid.logger.info('[bridge] control plane changed:', cp);
     }
 
-    if (ff !== undefined || pl !== undefined || ll !== undefined) {
+    if (ff !== undefined || pl !== undefined || ll !== undefined || se !== undefined) {
       for (const worker of _workers.values()) {
-        worker.postMessage({ type: 'settings', fireAndForget: ff, perfLogging: pl, logLevel: ll });
+        worker.postMessage({ type: 'settings', fireAndForget: ff, sabEnabled: se, perfLogging: pl, logLevel: ll });
       }
     }
 
@@ -842,10 +844,11 @@
       __webhid.logger.info('[bridge] data plane changed:', dp, 'open devices:', _openDevices.size);
     }
 
-    if (dp !== undefined || cp !== undefined || ff !== undefined || pl !== undefined || ll !== undefined) {
+    if (dp !== undefined || cp !== undefined || se !== undefined || ff !== undefined || pl !== undefined || ll !== undefined) {
       const settings = {};
       if (dp !== undefined) settings.dataPlane = dp;
       if (cp !== undefined) settings.controlPlane = cp;
+      if (se !== undefined) settings.sabEnabled = se;
       if (ff !== undefined) settings.fireAndForget = ff;
       if (ll !== undefined) settings.logLevel = ll;
       if (pl !== undefined) settings.perfLogging = pl;
