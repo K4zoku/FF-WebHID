@@ -5,33 +5,29 @@
 
   // Device Picker Modal Class
   class WebHIDDevicePicker {
+    #savedDevices = null;
+    #deviceGroups = {};
+    #cssReady = null;
+
     constructor() {
       this.devices = [];
       this.filters = [];
       this.dialog = null;
-
-      this._savedDevices = null;
-      this._deviceGroups = {};
-
       this.shadowHost = null;
       this.shadowRoot = null;
-      this._cssReady = null;
 
-      this.init();
+      this.#init();
     }
 
-    init() {
-      this.injectShadowDOM();
-      this.setupEventListeners();
+    #init() {
+      this.#injectShadowDOM();
+      this.#setupEventListeners();
     }
 
-    injectShadowDOM() {
-      // Defer until document.body is available. Bridge may run during
-      // document parsing (readyState === 'loading') when body is null.
+    #injectShadowDOM() {
       const doInject = () => {
         if (document.getElementById("webhid-shadow-host")) return;
         if (!document.body) {
-          // Body not ready yet; retry on next tick.
           if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', doInject, { once: true });
           } else {
@@ -46,13 +42,13 @@
 
         this.shadowRoot = this.shadowHost.attachShadow({ mode: "closed" });
 
-        this._cssReady = this._loadCSS();
-        this._createTemplates();
+        this.#cssReady = this.#loadCSS();
+        this.#createTemplates();
       };
       doInject();
     }
 
-    async _loadCSS() {
+    async #loadCSS() {
       try {
         const [themeResp, cssResp] = await Promise.all([
           fetch(browser.runtime.getURL("css/theme.css")),
@@ -68,7 +64,7 @@
       }
     }
 
-    _createTemplates() {
+    #createTemplates() {
       if (this.shadowRoot.getElementById("webhid-modal-template")) return;
 
       const tpl = document.createElement("template");
@@ -108,7 +104,7 @@
       this.shadowRoot.appendChild(itemTpl);
     }
 
-    setupEventListeners() {
+    #setupEventListeners() {
       browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
         if (request.action === "show-device-picker") {
           this.show(request.filters || []);
@@ -117,13 +113,13 @@
         }
         if (request.action === "device-selected") {
           this.hide();
-          this.onDeviceSelected(request.device);
+          this.#onDeviceSelected(request.device);
           sendResponse({ success: true });
           return true;
         }
         if (request.action === "device-cancelled") {
           this.hide();
-          this.onDeviceCancelled();
+          this.#onDeviceCancelled();
           sendResponse({ success: true });
           return true;
         }
@@ -141,7 +137,6 @@
 
       this.filters = filters;
 
-      // Wait for shadowRoot to be injected (deferred until body ready).
       let tries = 0;
       while (!this.shadowRoot && tries < 100) {
         await new Promise(r => requestAnimationFrame(r));
@@ -149,11 +144,11 @@
       }
       if (!this.shadowRoot) {
         __webhid.logger.error('[WebHID] shadowRoot not initialized; cannot show device picker');
-        this.onDeviceCancelled();
+        this.#onDeviceCancelled();
         return;
       }
 
-      await this._cssReady;
+      await this.#cssReady;
 
       const tpl = this.shadowRoot.getElementById("webhid-modal-template");
       this.dialog = tpl.content.firstElementChild.cloneNode(true);
@@ -166,10 +161,10 @@
         this.dialog.remove();
         this.dialog = null;
         if (returnValue === "selected" && deviceId) {
-          const devices = this._deviceGroups[deviceId] || [];
-          this.onDeviceSelected(devices);
+          const devices = this.#deviceGroups[deviceId] || [];
+          this.#onDeviceSelected(devices);
         } else {
-          this.onDeviceCancelled();
+          this.#onDeviceCancelled();
         }
       });
 
@@ -191,7 +186,7 @@
         this.dialog.setAttribute("open", "");
       }
 
-      await this.loadDevices();
+      await this.#loadDevices();
     }
 
     hide() {
@@ -200,35 +195,29 @@
       }
     }
 
-    async loadDevices() {
+    async #loadDevices() {
       try {
-        const response = await browser.runtime.sendMessage({
-          action: "enumerate",
-        });
+        const response = await browser.runtime.sendMessage({ action: "enumerate" });
         if (response && response.success) {
           this.devices = response.devices || [];
-          await this.renderDevices();
+          await this.#renderDevices();
         } else {
-          // Daemon/NM returned an error; classify it for the user.
           this.devices = [];
           const errMsg = response?.error || "Unknown error";
-          const userMsg = this._classifyError(errMsg);
+          const userMsg = this.#classifyError(errMsg);
           __webhid.logger.error('[WebHID] enumerate failed:', errMsg);
-          this._showMessage(userMsg, true);
+          this.#showMessage(userMsg, true);
         }
       } catch (error) {
-        // NM host unreachable or crashed.
         this.devices = [];
         const errMsg = error?.message || String(error);
-        const userMsg = this._classifyError(errMsg);
+        const userMsg = this.#classifyError(errMsg);
         __webhid.logger.error('[WebHID] enumerate exception:', errMsg);
-        this._showMessage(userMsg, true);
+        this.#showMessage(userMsg, true);
       }
     }
 
-    // Map low-level error strings to human-readable messages so the user
-    // knows what to fix (install daemon, start service, fix udev rules, …).
-    _classifyError(errMsg) {
+    #classifyError(errMsg) {
       const e = (errMsg || "").toLowerCase();
       if (e.includes("nm disconnected") || e.includes("reconnecting"))
         return "Native messaging host is not responding. Please ensure the WebHID daemon is installed and running.";
@@ -241,8 +230,7 @@
       return "Failed to load devices: " + errMsg;
     }
 
-    // Replace the device list content with a single message (info or error).
-    _showMessage(message, isError = false) {
+    #showMessage(message, isError = false) {
       if (!this.dialog) return;
       const deviceList = this.dialog.querySelector("#webhidDeviceList");
       if (!deviceList) return;
@@ -253,53 +241,45 @@
       deviceList.appendChild(div);
     }
 
-    async getSavedDevices() {
-      // Return cached hashes if available
-      if (this._savedDevices !== null) {
-        return this._savedDevices;
+    async #getSavedDevices() {
+      if (this.#savedDevices !== null) {
+        return this.#savedDevices;
       }
-
       try {
         const result = await browser.runtime.sendMessage({
           action: "getSavedDevices",
           origin: window.location.origin,
         });
-        this._savedDevices = result.hashes || [];
-        return this._savedDevices;
+        this.#savedDevices = result.hashes || [];
+        return this.#savedDevices;
       } catch (error) {
         return [];
       }
     }
 
-    async deviceMatchesSaved(device) {
-      const savedHashes = await this.getSavedDevices();
+    async #deviceMatchesSaved(device) {
+      const savedHashes = await this.#getSavedDevices();
       const deviceHash = __webhid.createDeviceHash(device);
       return savedHashes.includes(deviceHash);
     }
 
-    async renderDevices() {
+    async #renderDevices() {
       if (!this.dialog) return;
       const deviceList = this.dialog.querySelector("#webhidDeviceList");
       if (!deviceList) return;
-      // Clear loading text (or any previous content) before rendering.
       deviceList.innerHTML = "";
 
       if (this.devices.length === 0) {
-        deviceList.innerHTML =
-          '<div class="webhid-no-devices">No HID devices found</div>';
+        deviceList.innerHTML = '<div class="webhid-no-devices">No HID devices found</div>';
         return;
       }
 
-      const filteredDevices = this.applyFilters(this.devices, this.filters);
+      const filteredDevices = this.#applyFilters(this.devices, this.filters);
       if (filteredDevices.length === 0) {
-        deviceList.innerHTML =
-          '<div class="webhid-no-devices">No devices match the specified filters</div>';
+        deviceList.innerHTML = '<div class="webhid-no-devices">No devices match the specified filters</div>';
         return;
       }
 
-      // Group devices by display name so ambiguous (same-name) devices are
-      // shown as a single picker item but selecting that item returns all
-      // underlying HID interfaces as an array.
       const groups = new Map();
       for (const device of filteredDevices) {
         const name = device.product_name || "Unknown Device";
@@ -307,34 +287,28 @@
         groups.get(name).push(device);
       }
 
-      // Use Promise.all to properly await all paired status checks in parallel
       const pairedStatuses = await Promise.all(
-        filteredDevices.map((device) => this.deviceMatchesSaved(device))
+        filteredDevices.map((device) => this.#deviceMatchesSaved(device))
       );
 
-      // Build device groups mapping for selection lookup
-      this._deviceGroups = {};
+      this.#deviceGroups = {};
 
       const tpl = this.shadowRoot.getElementById("webhid-device-item-template");
 
       for (const [name, devices] of groups.entries()) {
-        // Determine if any device in this group is paired (saved)
         let isPaired = false;
         const deviceIds = [];
         for (const d of devices) {
-          // Find index of this device in filteredDevices to read pairedStatuses
           const idx = filteredDevices.indexOf(d);
           if (idx >= 0 && pairedStatuses[idx]) isPaired = true;
           deviceIds.push(d.device_id);
         }
 
-        // Create a stable group id. For single-device groups use the path so
-        // external code relying on unique paths continues to work; for multi-
-        // interface groups use a generated id prefixed with 'group:'.
-        const groupId = devices.length === 1 ? devices[0].device_id : `group:${__webhid.createDeviceHash(devices[0])}`;
-        this._deviceGroups[groupId] = devices.slice(); // store copy
+        const groupId = devices.length === 1
+          ? devices[0].device_id
+          : `group:${__webhid.createDeviceHash(devices[0])}`;
+        this.#deviceGroups[groupId] = devices.slice();
 
-        // Use the first device to determine icon/type/manufacturer
         const device = devices[0];
         const deviceId = groupId;
         const type = __webhid.guessDeviceType(device);
@@ -368,7 +342,7 @@
       }
     }
 
-    applyFilters(devices, filters) {
+    #applyFilters(devices, filters) {
       if (!Array.isArray(filters) || filters.length === 0) {
         return devices;
       }
@@ -386,40 +360,28 @@
       });
     }
 
-    selectDevice(item) {
-      const radio = item.querySelector(".webhid-device-radio");
-      if (!radio) return;
-      radio.checked = true;
-      radio.dispatchEvent(new Event("change", { bubbles: true }));
+    #onDeviceSelected(devices) {
+      const devicesArr = Array.isArray(devices) ? devices : [devices];
+
+      const event = new CustomEvent("webhid-device-selected", {
+        detail: { devices: devicesArr },
+      });
+
+      (async () => {
+        try {
+          const saved = await this.#getSavedDevices();
+          for (const d of devicesArr) {
+            const h = __webhid.createDeviceHash(d);
+            if (!saved.includes(h)) saved.push(h);
+          }
+          this.#savedDevices = saved;
+        } catch (e) { /* ignore */ }
+      })();
+
+      window.dispatchEvent(event);
     }
 
-    onDeviceSelected(devices) {
-          // Normalize to an array so consumers always receive an array of devices
-          const devicesArr = Array.isArray(devices) ? devices : [devices];
-
-          // Dispatch event with the devices array and update local saved-hashes cache asynchronously.
-          const event = new CustomEvent("webhid-device-selected", {
-            detail: { devices: devicesArr },
-          });
-
-          // Update local saved devices cache so the UI reflects pairing state
-          (async () => {
-            try {
-              const saved = await this.getSavedDevices();
-              for (const d of devicesArr) {
-                const h = __webhid.createDeviceHash(d);
-                if (!saved.includes(h)) saved.push(h);
-              }
-              this._savedDevices = saved;
-            } catch (e) {
-              // ignore
-            }
-          })();
-
-          window.dispatchEvent(event);
-        }
-
-    onDeviceCancelled() {
+    #onDeviceCancelled() {
       const event = new CustomEvent("webhid-device-cancelled", { detail: {} });
       window.dispatchEvent(event);
     }
@@ -481,20 +443,23 @@
   async function _spawnWorker(deviceId, session_token, opts = {}) {
     const wsPort = opts.wsPort || _wsPort;
     const reportSize = opts.reportSize || 2048;
-    const sabCapacity = opts.sabCapacity || 8192;
-    const logLevel = opts.logLevel || 1;
+    const _defs = globalThis.__webhid.GLOBAL_DEFAULTS;
+    const sabCapacity = opts.sabCapacity || _defs.sabCapacity;
+    const logLevel = opts.logLevel || _defs.logLevel;
 
     let worker;
     try {
-      const [loggerResp, workerResp] = await Promise.all([
+      const [loggerResp, defaultsResp, workerResp] = await Promise.all([
         fetch(browser.runtime.getURL('js/utils/logger.js')),
+        fetch(browser.runtime.getURL('js/utils/settings-defaults.js')),
         fetch(browser.runtime.getURL('js/worker.js')),
       ]);
-      const [loggerCode, workerCode] = await Promise.all([
+      const [loggerCode, defaultsCode, workerCode] = await Promise.all([
         loggerResp.text(),
+        defaultsResp.text(),
         workerResp.text(),
       ]);
-      const blob = new Blob([loggerCode + '\n' + workerCode], { type: 'application/javascript' });
+      const blob = new Blob([loggerCode + '\n' + defaultsCode + '\n' + workerCode], { type: 'application/javascript' });
       worker = new Worker(URL.createObjectURL(blob));
     } catch (e) {
       __webhid.logger.error('[bridge] worker spawn failed:', e);

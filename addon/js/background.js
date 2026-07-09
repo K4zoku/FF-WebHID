@@ -44,14 +44,14 @@ function tabsForEvent(message) {
 const NM_HOST_FORWARDER = "webhid.forwarder_nm_host";
 const NM_HOST_DAEMON    = "webhid.daemon_nm_host";
 
-let _daemonAsNmHost = false;
+let _daemonAsNmHost = globalThis.__webhid.GLOBAL_DEFAULTS.daemonAsNmHost;
 let _nmHostName = NM_HOST_FORWARDER;
 
 // Load the daemon-as-NM-host setting before connecting. The first connect
 // must use the correct name or the user has to manually reload the addon
 // after toggling the setting.
 async function loadNmHostSetting() {
-  const global = await browser.storage.local.get({ daemonAsNmHost: false });
+  const global = await browser.storage.local.get({ daemonAsNmHost: globalThis.__webhid.GLOBAL_DEFAULTS.daemonAsNmHost });
   _daemonAsNmHost = global.daemonAsNmHost;
   _nmHostName = _daemonAsNmHost ? NM_HOST_DAEMON : NM_HOST_FORWARDER;
   __webhid.logger.info('[bg] NM host:', _nmHostName);
@@ -237,9 +237,9 @@ browser.tabs.onRemoved.addListener((tabId) => purgeTab(tabId));
 // Security Headers (COOP/COEP): only when SAB data plane is enabled
 // ---------------------------------------------------------------------------
 
-let _sabEnabled = true;
+let _sabEnabled = globalThis.__webhid.GLOBAL_DEFAULTS.sabEnabled;
 async function loadSabSetting() {
-  const global = await browser.storage.local.get({ sabEnabled: true });
+  const global = await browser.storage.local.get({ sabEnabled: globalThis.__webhid.GLOBAL_DEFAULTS.sabEnabled });
   _sabEnabled = global.sabEnabled;
 }
 loadSabSetting();

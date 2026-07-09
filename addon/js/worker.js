@@ -5,7 +5,7 @@
 
 const { logger, perf, _nop } = self.__webhid;
 
-var _perfLogging = false;
+var _perfLogging = self.__webhid.GLOBAL_DEFAULTS.perfLogging;
 
 function _applyPerf() {
   if (_perfLogging && logger._level >= 3) {
@@ -22,11 +22,11 @@ function _applyPerf() {
 // When that happens we fall back to postMessage for input report delivery.
 const SAB_AVAILABLE = typeof SharedArrayBuffer !== 'undefined';
 
-let CAPACITY = 8192;
+let CAPACITY = self.__webhid.GLOBAL_DEFAULTS.sabCapacity;
 let sab = null, meta = null, data = null, reportSize = 64, ws = null;
 const _pending = new Map();
 let _nextReqId = 1;
-let _fireAndForget = true;
+let _fireAndForget = self.__webhid.GLOBAL_DEFAULTS.fireAndForget;
 
 const MSG_SEND_REPORT = 0x01;
 const MSG_SEND_FEATURE_REPORT = 0x02;
@@ -142,10 +142,6 @@ function pushInputBatch(batch) {
     logger.debug('[worker] pushed ' + count + ' reports to SAB');
     Atomics.notify(meta, 0);
   }
-}
-
-function base64Encode(bytes) {
-  return bytes.toBase64();
 }
 
 function pushInputBatchPostMessage(batch) {

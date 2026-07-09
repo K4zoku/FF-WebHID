@@ -32,7 +32,7 @@ function guessDeviceType(device) {
   return "unknown";
 }
 
-if (typeof self !== 'undefined') { self.__webhid = self.__webhid || {}; self.__webhid.createDeviceHash = createDeviceHash; self.__webhid.guessDeviceType = guessDeviceType; }
-if (typeof window !== 'undefined') { window.__webhid = window.__webhid || {}; window.__webhid.createDeviceHash = createDeviceHash; window.__webhid.guessDeviceType = guessDeviceType; }
-if (typeof module !== 'undefined' && module.exports) module.exports = { createDeviceHash, guessDeviceType };
+globalThis.__webhid = globalThis.__webhid || {};
+globalThis.__webhid.createDeviceHash = createDeviceHash;
+globalThis.__webhid.guessDeviceType = guessDeviceType;
 })();

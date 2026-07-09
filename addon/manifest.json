@@ -19,6 +19,7 @@
   "background": {
     "scripts": [
       "js/utils/logger.js",
+      "js/utils/settings-defaults.js",
       "js/background.js"
     ]
   },
@@ -38,6 +39,7 @@
       "js": [
         "js/utils/logger.js",
         "js/utils/device-utils.js",
+        "js/utils/settings-defaults.js",
         "js/polyfill.js"
       ],
       "world": "MAIN"

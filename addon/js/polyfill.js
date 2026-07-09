@@ -56,10 +56,6 @@
     }
   }
 
-  async function getDeviceByHash(hash) {
-    const cache = await getDeviceCache();
-    return cache.get(hash) || null;
-  }
 
   async function saveDevice(deviceInfo) {
     try {
@@ -103,10 +99,11 @@
   // The page (MAIN world) has no `browser.*` APIs, so settings are fetched
   // via a bridge request and updated via bridge-pushed `settings` events.
 
-  let _dataPlane = 'ws';
-  let _dispatchDataView = false;
-  let _perfLogging = false;
-  let _fireAndForget = true;
+  const _defs = globalThis.__webhid.GLOBAL_DEFAULTS;
+  let _dataPlane = _defs.dataPlane;
+  let _dispatchDataView = _defs.dispatchDataView;
+  let _perfLogging = _defs.perfLogging;
+  let _fireAndForget = _defs.fireAndForget;
 
   function _applyPerf() {
     const active = _perfLogging && __webhid.logger._level >= 3;
@@ -172,19 +169,27 @@
   // ── Event classes ────────────────────────────────────────────────────────
 
   class HIDInputReportEvent extends Event {
+    #device;
+    #reportId;
+    #data;
     constructor(type, init) {
       super(type, init);
-      this.device = init.device;
-      this.reportId = init.reportId;
-      this.data = init.data;
+      this.#device = init.device;
+      this.#reportId = init.reportId;
+      this.#data = init.data;
     }
+    get device() { return this.#device; }
+    get reportId() { return this.#reportId; }
+    get data() { return this.#data; }
   }
 
   class HIDConnectionEvent extends Event {
+    #device;
     constructor(type, device) {
       super(type);
-      this.device = device;
+      this.#device = device;
     }
+    get device() { return this.#device; }
   }
 
   // ── Global device registry ────────────────────────────────────────────────
@@ -210,7 +215,7 @@
 
   class HIDDevice extends EventTarget {
     #inputReportListeners = new Map();
-    #inputReportEventWrappers = new Map();
+    #inputReportWrappers = new Set();
     #oninputreportListener = null;
     #parsedCollections = null;
     #opened = false;
@@ -218,7 +223,6 @@
     #inputLoopStarted = false;
     #sabDrainActive = false;
     #deviceId = null;
-    #internalId = null;
     #maxInputReportSize = 2048;
 
     #installSabListener() {
@@ -256,8 +260,7 @@
       this.vendorId = deviceInfo.vendor_id;
       this.productId = deviceInfo.product_id;
       this.productName = deviceInfo.product_name;
-      this.#deviceId = null;
-      this.#internalId = deviceInfo.device_id || null;
+      this.#deviceId = deviceInfo.device_id || null;
 
       this.#parsedCollections = deviceInfo.collections || [];
 
@@ -294,7 +297,6 @@
     }
 
     get opened() { return this.#opened; }
-    get deviceId() { return this.#deviceId; }
 
     get collections() {
       return this.#parsedCollections;
@@ -304,17 +306,16 @@
       if (this.opened) {
         throw new DOMException("Device is already open", "InvalidStateError");
       }
-      if (!this.#internalId) {
+      if (!this.#deviceId) {
         throw new DOMException("No device ID", "InvalidStateError");
       }
       try {
         const response = await sendRequest("open", {
-          device_id: this.#internalId,
+          device_id: this.#deviceId,
           reportSize: this.#maxInputReportSize,
         });
         if (response.success) {
           this.#opened = true;
-          this.#deviceId = response.device_id;
           __webhid.logger.info('[webhid] open deviceId=' + this.#deviceId + ' dataPlane=' + _dataPlane);
           this.#installSabListener();
           this.dispatchEvent(new Event("open"));
@@ -327,7 +328,7 @@
     }
 
     async close() {
-      if (!this.opened || !this.#deviceId) return;
+      if (!this.opened) return;
       __webhid.logger.debug('[webhid] close deviceId=' + this.#deviceId);
       try {
         const response = await sendRequest("close", {
@@ -341,7 +342,6 @@
             window.removeEventListener("message", this.#sabListener);
             this.#sabListener = null;
           }
-          this.#deviceId = null;
           this.dispatchEvent(new Event("close"));
         } else {
           throw new Error("Failed to close device");
@@ -441,7 +441,7 @@
     async forget() {
       if (this.opened) await this.close();
       await sendRequest("forgetDevice", {
-        device_id: this.#internalId,
+        device_id: this.#deviceId,
       });
     }
 
@@ -507,10 +507,7 @@
         // Use the listener's unique identity as key (listener.toString())
         const listenerKey = listener.toString();
         this.#inputReportListeners.set(listenerKey, listener);
-        this.#inputReportEventWrappers.set(wrapper, (event) => {
-          // Call the registered listener
-          listener(event);
-        });
+        this.#inputReportWrappers.add(wrapper);
 
         window.addEventListener("message", wrapper);
 
@@ -520,26 +517,21 @@
     removeEventListener(type, listener) {
       super.removeEventListener(type, listener);
       if (type === "inputreport") {
-        // For removeEventListener called from oninputreport setter (with null),
-        // the listener passed is the current one stored in #oninputreportListener
         if (!listener || !listener.toString()) {
-          // Clear all listeners when removing oninputreport
           this.#inputReportListeners.clear();
-          this.#inputReportEventWrappers.forEach((fn, wrapperKey) => {
-            window.removeEventListener("message", wrapperKey);
+          this.#inputReportWrappers.forEach((wrapper) => {
+            window.removeEventListener("message", wrapper);
           });
-          this.#inputReportEventWrappers.clear();
+          this.#inputReportWrappers.clear();
         } else {
-          // Remove specific listener
           const listenerKey = listener.toString();
           this.#inputReportListeners.delete(listenerKey);
 
-          // Remove window message listener if no wrappers left
           if (this.#inputReportListeners.size === 0) {
-            this.#inputReportEventWrappers.forEach((fn, wrapperKey) => {
-              window.removeEventListener("message", fn);
+            this.#inputReportWrappers.forEach((wrapper) => {
+              window.removeEventListener("message", wrapper);
             });
-            this.#inputReportEventWrappers.clear();
+            this.#inputReportWrappers.clear();
             this.#inputReportListeners.clear();
           }
         }

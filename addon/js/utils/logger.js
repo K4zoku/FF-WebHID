@@ -97,8 +97,9 @@ _applyPerf();
 _load();
 
 // Exports
-if (typeof self !== 'undefined') { self.__webhid = self.__webhid || {}; self.__webhid.logger = logger; self.__webhid.perf = perf; self.__webhid._nop = _nop; }
-if (typeof window !== 'undefined') { window.__webhid = window.__webhid || {}; window.__webhid.logger = logger; window.__webhid.perf = perf; window.__webhid._nop = _nop; }
-if (typeof module !== 'undefined' && module.exports) module.exports = { logger, perf };
+globalThis.__webhid = globalThis.__webhid || {};
+globalThis.__webhid.logger = logger;
+globalThis.__webhid.perf = perf;
+globalThis.__webhid._nop = _nop;
 
 })();
