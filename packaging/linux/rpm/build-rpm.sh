@@ -53,15 +53,15 @@ install -Dm644 /tmp/webhid-daemon.service \\
   %{buildroot}/usr/lib/systemd/system/webhid-daemon.service
 
 sed 's|{{NM_BIN}}|/usr/bin/webhid-native-messaging|g' \\
-  "$REPO_ROOT/manifests/webhid-native-messaging-host.json" > /tmp/webhid-nm.json
+  "$REPO_ROOT/manifests/webhid.forwarder_nm_host.json" > /tmp/webhid-nm.json
 sed 's|{{DAEMON_BIN}}|/usr/bin/webhid-daemon|g' \\
-  "$REPO_ROOT/manifests/webhid-daemon-nm-host.json" > /tmp/webhid-daemon-nm.json
+  "$REPO_ROOT/manifests/webhid.daemon_nm_host.json" > /tmp/webhid-daemon-nm.json
 
 for dir in mozilla librewolf waterfox; do
   install -Dm644 /tmp/webhid-nm.json \\
-    %{buildroot}/usr/lib/\$dir/native-messaging-hosts/webhid-native-messaging-host.json
+    %{buildroot}/usr/lib/\$dir/native-messaging-hosts/webhid.forwarder_nm_host.json
   install -Dm644 /tmp/webhid-daemon-nm.json \\
-    %{buildroot}/usr/lib/\$dir/native-messaging-hosts/webhid-daemon-nm-host.json
+    %{buildroot}/usr/lib/\$dir/native-messaging-hosts/webhid.daemon_nm_host.json
 done
 
 install -Dm644 "$REPO_ROOT/LICENSE" \\
@@ -81,12 +81,12 @@ install -Dm644 "$REPO_ROOT/LICENSE" \\
 /usr/bin/webhid-daemon
 /usr/bin/webhid-native-messaging
 /usr/lib/systemd/system/webhid-daemon.service
-/usr/lib/mozilla/native-messaging-hosts/webhid-native-messaging-host.json
-/usr/lib/mozilla/native-messaging-hosts/webhid-daemon-nm-host.json
-/usr/lib/librewolf/native-messaging-hosts/webhid-native-messaging-host.json
-/usr/lib/librewolf/native-messaging-hosts/webhid-daemon-nm-host.json
-/usr/lib/waterfox/native-messaging-hosts/webhid-native-messaging-host.json
-/usr/lib/waterfox/native-messaging-hosts/webhid-daemon-nm-host.json
+/usr/lib/mozilla/native-messaging-hosts/webhid.forwarder_nm_host.json
+/usr/lib/mozilla/native-messaging-hosts/webhid.daemon_nm_host.json
+/usr/lib/librewolf/native-messaging-hosts/webhid.forwarder_nm_host.json
+/usr/lib/librewolf/native-messaging-hosts/webhid.daemon_nm_host.json
+/usr/lib/waterfox/native-messaging-hosts/webhid.forwarder_nm_host.json
+/usr/lib/waterfox/native-messaging-hosts/webhid.daemon_nm_host.json
 EOF
 
 rpmbuild -bb \

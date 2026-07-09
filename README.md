@@ -24,7 +24,7 @@ For detailed installation instructions (system daemon, user-local setup, and bro
 ### Global settings
 
 Open `about:addons → WebHID → Options`:
-- **Daemon as NM host**: talk to the daemon directly over native messaging (skip the `webhid-native-messaging` forwarder and Unix socket). Requires the `webhid-daemon-nm-host` NM manifest to be installed and the daemon to run as your user with the udev rule (default OFF)
+- **Daemon as NM host**: talk to the daemon directly over native messaging (skip the `webhid-native-messaging` forwarder and Unix socket). Requires the `webhid.daemon_nm_host` NM manifest to be installed and the daemon to run as your user with the udev rule (default OFF)
 - **Fire-and-forget sendReport**: resolve Promise immediately, no daemon ack wait (default ON)
 - **SharedArrayBuffer data plane**: WS + SAB hot path for high-performance I/O (default ON; disable if a site breaks due to COOP/COEP)
 - **SAB Buffer Capacity**: ring-buffer slots (2048–32768, default 8192)

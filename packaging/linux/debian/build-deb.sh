@@ -42,16 +42,16 @@ sed "s|{{DAEMON_BIN}}|/usr/bin/webhid-daemon|g" \
   "$DEBROOT/usr/lib/systemd/system/webhid-daemon.service"
 
 sed "s|{{NM_BIN}}|/usr/bin/webhid-native-messaging|g" \
-  "$REPO_ROOT/manifests/webhid-native-messaging-host.json" > \
-  "$DEBROOT/usr/lib/mozilla/native-messaging-hosts/webhid-native-messaging-host.json"
+  "$REPO_ROOT/manifests/webhid.forwarder_nm_host.json" > \
+  "$DEBROOT/usr/lib/mozilla/native-messaging-hosts/webhid.forwarder_nm_host.json"
 sed "s|{{DAEMON_BIN}}|/usr/bin/webhid-daemon|g" \
-  "$REPO_ROOT/manifests/webhid-daemon-nm-host.json" > \
-  "$DEBROOT/usr/lib/mozilla/native-messaging-hosts/webhid-daemon-nm-host.json"
+  "$REPO_ROOT/manifests/webhid.daemon_nm_host.json" > \
+  "$DEBROOT/usr/lib/mozilla/native-messaging-hosts/webhid.daemon_nm_host.json"
 
 for dir in librewolf waterfox; do
-  cp "$DEBROOT/usr/lib/mozilla/native-messaging-hosts/webhid-native-messaging-host.json" \
+  cp "$DEBROOT/usr/lib/mozilla/native-messaging-hosts/webhid.forwarder_nm_host.json" \
      "$DEBROOT/usr/lib/$dir/native-messaging-hosts/"
-  cp "$DEBROOT/usr/lib/mozilla/native-messaging-hosts/webhid-daemon-nm-host.json" \
+  cp "$DEBROOT/usr/lib/mozilla/native-messaging-hosts/webhid.daemon_nm_host.json" \
      "$DEBROOT/usr/lib/$dir/native-messaging-hosts/"
 done
 

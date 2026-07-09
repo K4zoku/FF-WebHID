@@ -14,10 +14,10 @@ PREFIX      ?= /usr/local
 USER_PREFIX ?= $(HOME)/.local
 CARGO_ARGS  ?=
 
-NM_MANIFEST       := $(MANIFEST_DIR)/webhid-native-messaging-host.json
-NM_NAME           := webhid-native-messaging-host.json
-DAEMON_NM_MANIFEST:= $(MANIFEST_DIR)/webhid-daemon-nm-host.json
-DAEMON_NM_NAME    := webhid-daemon-nm-host.json
+NM_MANIFEST       := $(MANIFEST_DIR)/webhid.forwarder_nm_host.json
+NM_NAME           := webhid.forwarder_nm_host.json
+DAEMON_NM_MANIFEST:= $(MANIFEST_DIR)/webhid.daemon_nm_host.json
+DAEMON_NM_NAME    := webhid.daemon_nm_host.json
 
 SYSTEM_NM_DIR     ?= /usr/lib/mozilla/native-messaging-hosts
 SYSTEMD_DIR       ?= /etc/systemd/system

@@ -1,5 +1,5 @@
 {
-  "name": "webhid-native-messaging-host",
+  "name": "webhid.forwarder_nm_host",
   "description": "WebHID native messaging host",
   "path": "{{NM_BIN}}",
   "type": "stdio",

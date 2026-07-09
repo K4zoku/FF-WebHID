@@ -88,9 +88,9 @@ jobs:
           cp "$BIN_DIR/webhid-daemon" artifacts/usr/local/bin/
           cp "$BIN_DIR/webhid-native-messaging" artifacts/usr/local/bin/
           sed 's|{{NM_BIN}}|/usr/local/bin/webhid-native-messaging|g' \
-            manifests/webhid-native-messaging-host.json > artifacts/usr/local/lib/mozilla/native-messaging-hosts/webhid-native-messaging-host.json
+            manifests/webhid.forwarder_nm_host.json > artifacts/usr/local/lib/mozilla/native-messaging-hosts/webhid.forwarder_nm_host.json
           sed 's|{{DAEMON_BIN}}|/usr/local/bin/webhid-daemon|g' \
-            manifests/webhid-daemon-nm-host.json > artifacts/usr/local/lib/mozilla/native-messaging-hosts/webhid-daemon-nm-host.json
+            manifests/webhid.daemon_nm_host.json > artifacts/usr/local/lib/mozilla/native-messaging-hosts/webhid.daemon_nm_host.json
           sed 's|{{DAEMON_BIN}}|/usr/local/bin/webhid-daemon|g' \
             manifests/webhid-daemon.service > artifacts/etc/systemd/system/webhid-daemon.service
 
@@ -135,9 +135,9 @@ jobs:
             cp "$src_dir/webhid-daemon" "$out_dir/usr/local/bin/"
             cp "$src_dir/webhid-native-messaging" "$out_dir/usr/local/bin/"
             sed 's|{{NM_BIN}}|/usr/local/bin/webhid-native-messaging|g' \
-              manifests/webhid-native-messaging-host.json > "$out_dir/usr/local/lib/mozilla/native-messaging-hosts/webhid-native-messaging-host.json"
+              manifests/webhid.forwarder_nm_host.json > "$out_dir/usr/local/lib/mozilla/native-messaging-hosts/webhid.forwarder_nm_host.json"
             sed 's|{{DAEMON_BIN}}|/usr/local/bin/webhid-daemon|g' \
-              manifests/webhid-daemon-nm-host.json > "$out_dir/usr/local/lib/mozilla/native-messaging-hosts/webhid-daemon-nm-host.json"
+              manifests/webhid.daemon_nm_host.json > "$out_dir/usr/local/lib/mozilla/native-messaging-hosts/webhid.daemon_nm_host.json"
             sed 's|{{DAEMON_BIN}}|/usr/local/bin/webhid-daemon|g' \
               manifests/webhid-daemon.service > "$out_dir/etc/systemd/system/webhid-daemon.service"
           }
@@ -161,8 +161,8 @@ jobs:
             New-Item -ItemType Directory -Force -Path "$outDir/bin", "$outDir/manifests" | Out-Null
             Copy-Item "$binDir/webhid-daemon.exe" "$outDir/bin/"
             Copy-Item "$binDir/webhid-native-messaging.exe" "$outDir/bin/"
-            Copy-Item manifests/webhid-native-messaging-host.json "$outDir/manifests/webhid-native-messaging-host.json"
-            Copy-Item manifests/webhid-daemon-nm-host.json "$outDir/manifests/webhid-daemon-nm-host.json"
+            Copy-Item manifests/webhid.forwarder_nm_host.json "$outDir/manifests/webhid.forwarder_nm_host.json"
+            Copy-Item manifests/webhid.daemon_nm_host.json "$outDir/manifests/webhid.daemon_nm_host.json"
           }
           Stage-Windows "crates/target/x86_64-pc-windows-msvc/release" "artifacts-portable-x86_64"
           Stage-Windows "crates/target/aarch64-pc-windows-msvc/release" "artifacts-portable-aarch64"

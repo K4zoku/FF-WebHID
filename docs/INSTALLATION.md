@@ -154,7 +154,7 @@ sudo systemctl disable --now webhid-daemon
 
 The daemon uses a random WebSocket port in this mode (avoids conflicts with any root daemon instance). The port is announced via the `handshake` event.
 
-The installed NM manifest (`webhid-daemon-nm-host.json`) uses the `"name": "webhid-daemon-nm-host"` identifier, distinct from the thin-forwarder manifest (`webhid-native-messaging-host`). The addon picks the correct name based on the "Daemon as NM host" toggle in its settings page.
+The installed NM manifest (`webhid.daemon_nm_host.json`) uses the `"name": "webhid.daemon_nm_host"` identifier, distinct from the thin-forwarder manifest (`webhid.forwarder_nm_host`). The addon picks the correct name based on the "Daemon as NM host" toggle in its settings page.
 
 > **Note:** This mode is not available on Windows — Firefox NM host requires an `.exe` in the `path` field and doesn't support arguments. Use the NM host thin forwarder on Windows.
 
@@ -182,21 +182,21 @@ Download the Windows zip from [GitHub Releases](https://github.com/K4zoku/FF-Web
 2. **Register native messaging host**: create a registry key pointing to the NM manifest:
 
    ```powershell
-   # Create webhid-native-messaging-host.json with the correct path:
+   # Create webhid.forwarder_nm_host.json with the correct path:
    $installDir = "C:\Program Files\WebHID"
    $json = @"
    {
-     "name": "webhid-native-messaging-host",
+     "name": "webhid.forwarder_nm_host",
      "description": "WebHID native messaging host",
      "path": "$installDir\webhid-native-messaging.exe",
      "type": "stdio",
      "allowed_extensions": ["webhid@k4zoku.dev"]
    }
    "@
-   $json | Out-File "$installDir\webhid-native-messaging-host.json" -Encoding ASCII
+   $json | Out-File "$installDir\webhid.forwarder_nm_host.json" -Encoding ASCII
 
    # Register in registry:
-   reg add "HKLM\SOFTWARE\Mozilla\NativeMessagingHosts\webhid-native-messaging-host" /ve /t REG_SZ /d "$installDir\webhid-native-messaging-host.json" /f
+   reg add "HKLM\SOFTWARE\Mozilla\NativeMessagingHosts\webhid.forwarder_nm_host" /ve /t REG_SZ /d "$installDir\webhid.forwarder_nm_host.json" /f
    ```
 
 3. **Auto-start daemon**: create a Scheduled Task:
@@ -235,7 +235,7 @@ sudo cp webhid-native-messaging /usr/local/bin/
 
 # Install NM manifest
 sudo mkdir -p /usr/local/lib/mozilla/native-messaging-hosts
-sudo cp webhid-native-messaging-host.json /usr/local/lib/mozilla/native-messaging-hosts/
+sudo cp webhid.forwarder_nm_host.json /usr/local/lib/mozilla/native-messaging-hosts/
 
 # Create launchd plist for auto-start
 cat > ~/Library/LaunchAgents/dev.k4zoku.webhid-daemon.plist << EOF
@@ -260,11 +260,11 @@ EOF
 launchctl load ~/Library/LaunchAgents/dev.k4zoku.webhid-daemon.plist
 ```
 
-The NM manifest `webhid-native-messaging-host.json` should contain:
+The NM manifest `webhid.forwarder_nm_host.json` should contain:
 
 ```json
 {
-  "name": "webhid-native-messaging-host",
+  "name": "webhid.forwarder_nm_host",
   "description": "WebHID native messaging host",
   "path": "/usr/local/bin/webhid-native-messaging",
   "type": "stdio",

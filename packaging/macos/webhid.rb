@@ -21,10 +21,10 @@ class Webhid < Formula
     # Install NM manifest (macOS uses /usr/local/lib/mozilla/native-messaging-hosts)
     nm_dir = lib/"mozilla/native-messaging-hosts"
     nm_dir.mkpath
-    nm_json = nm_dir/"webhid-native-messaging-host.json"
+    nm_json = nm_dir/"webhid.forwarder_nm_host.json"
     nm_json.write <<~JSON
       {
-        "name": "webhid-native-messaging-host",
+        "name": "webhid.forwarder_nm_host",
         "description": "WebHID native messaging host",
         "path": "#{bin}/webhid-native-messaging",
         "type": "stdio",
@@ -35,8 +35,8 @@ class Webhid < Formula
     # Copy to LibreWolf and Waterfox paths
     (lib/"librewolf/native-messaging-hosts").mkpath
     (lib/"waterfox/native-messaging-hosts").mkpath
-    cp nm_json, lib/"librewolf/native-messaging-hosts/webhid-native-messaging-host.json"
-    cp nm_json, lib/"waterfox/native-messaging-hosts/webhid-native-messaging-host.json"
+    cp nm_json, lib/"librewolf/native-messaging-hosts/webhid.forwarder_nm_host.json"
+    cp nm_json, lib/"waterfox/native-messaging-hosts/webhid.forwarder_nm_host.json"
   end
 
   def caveats

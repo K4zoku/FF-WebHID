@@ -37,11 +37,11 @@ package() {
         SYSTEM_NM_DIR=/usr/lib/mozilla/native-messaging-hosts
 
     # Native-messaging manifest for other Gecko-based browsers
-    local _nm="$pkgdir/usr/lib/mozilla/native-messaging-hosts/webhid-native-messaging-host.json"
+    local _nm="$pkgdir/usr/lib/mozilla/native-messaging-hosts/webhid.forwarder_nm_host.json"
     install -Dm644 "$_nm" \
-        "$pkgdir/usr/lib/librewolf/native-messaging-hosts/webhid-native-messaging-host.json"
+        "$pkgdir/usr/lib/librewolf/native-messaging-hosts/webhid.forwarder_nm_host.json"
     install -Dm644 "$_nm" \
-        "$pkgdir/usr/lib/waterfox/native-messaging-hosts/webhid-native-messaging-host.json"
+        "$pkgdir/usr/lib/waterfox/native-messaging-hosts/webhid.forwarder_nm_host.json"
 
     install -Dm644 "$_root/LICENSE" \
         "$pkgdir/usr/share/licenses/$pkgname/LICENSE"

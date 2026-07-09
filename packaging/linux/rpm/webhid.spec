@@ -37,8 +37,8 @@ make install-system \
 # Copy NM manifest to LibreWolf and Waterfox paths
 for browser in librewolf waterfox; do
   install -Dm644 \
-    %{buildroot}%{_libdir}/mozilla/native-messaging-hosts/webhid-native-messaging-host.json \
-    %{buildroot}%{_libdir}/$browser/native-messaging-hosts/webhid-native-messaging-host.json
+    %{buildroot}%{_libdir}/mozilla/native-messaging-hosts/webhid.forwarder_nm_host.json \
+    %{buildroot}%{_libdir}/$browser/native-messaging-hosts/webhid.forwarder_nm_host.json
 done
 
 install -Dm644 LICENSE %{buildroot}%{_datadir}/licenses/%{name}/LICENSE
@@ -57,9 +57,9 @@ install -Dm644 LICENSE %{buildroot}%{_datadir}/licenses/%{name}/LICENSE
 %{_bindir}/webhid-daemon
 %{_bindir}/webhid-native-messaging
 %{_unitdir}/webhid-daemon.service
-%{_libdir}/mozilla/native-messaging-hosts/webhid-native-messaging-host.json
-%{_libdir}/librewolf/native-messaging-hosts/webhid-native-messaging-host.json
-%{_libdir}/waterfox/native-messaging-hosts/webhid-native-messaging-host.json
+%{_libdir}/mozilla/native-messaging-hosts/webhid.forwarder_nm_host.json
+%{_libdir}/librewolf/native-messaging-hosts/webhid.forwarder_nm_host.json
+%{_libdir}/waterfox/native-messaging-hosts/webhid.forwarder_nm_host.json
 
 %changelog
 * Fri Jul 11 2026 K4zoku <k4zoku@pm.me> - 1.6.5-1

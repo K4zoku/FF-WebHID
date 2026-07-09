@@ -7,12 +7,12 @@
     [ProgramFiles64Folder]WebHID\
       webhid-daemon.exe
       webhid-native-messaging.exe
-      webhid-native-messaging-host.json   (forwarder NM manifest)
-      webhid-daemon-nm-host.json          (daemon-as-NM-host manifest)
+      webhid.forwarder_nm_host.json   (forwarder NM manifest)
+      webhid.daemon_nm_host.json          (daemon-as-NM-host manifest)
 
   Registry:
-    HKLM\SOFTWARE\Mozilla\NativeMessagingHosts\webhid-native-messaging-host  = [INSTALLDIR]webhid-native-messaging-host.json
-    HKLM\SOFTWARE\Mozilla\NativeMessagingHosts\webhid-daemon-nm-host        = [INSTALLDIR]webhid-daemon-nm-host.json
+    HKLM\SOFTWARE\Mozilla\NativeMessagingHosts\webhid.forwarder_nm_host  = [INSTALLDIR]webhid.forwarder_nm_host.json
+    HKLM\SOFTWARE\Mozilla\NativeMessagingHosts\webhid.daemon_nm_host        = [INSTALLDIR]webhid.daemon_nm_host.json
 
   Scheduled Task:
     "WebHID Daemon": runs at logon, webhid-daemon.exe
@@ -63,23 +63,23 @@
           <File Id='NMExe' Source='$(var.BuildDir)\webhid-native-messaging.exe' KeyPath='yes'/>
         </Component>
         <Component Id='NMManifest' Guid='a1b2c3d4-1111-2222-3333-444455558888'>
-          <File Id='NMJson' Name='webhid-native-messaging-host.json'
-                Source='$(var.BuildDir)\webhid-native-messaging-host.json' KeyPath='yes'/>
+          <File Id='NMJson' Name='webhid.forwarder_nm_host.json'
+                Source='$(var.BuildDir)\webhid.forwarder_nm_host.json' KeyPath='yes'/>
         </Component>
         <Component Id='DaemonNmManifest' Guid='a1b2c3d4-1111-2222-3333-44445555888a'>
-          <File Id='DaemonNmJson' Name='webhid-daemon-nm-host.json'
-                Source='$(var.BuildDir)\webhid-daemon-nm-host.json' KeyPath='yes'/>
+          <File Id='DaemonNmJson' Name='webhid.daemon_nm_host.json'
+                Source='$(var.BuildDir)\webhid.daemon_nm_host.json' KeyPath='yes'/>
         </Component>
         <Component Id='NMRegistry' Guid='a1b2c3d4-1111-2222-3333-444455559999'>
           <RegistryKey Root='HKLM'
-                       Key='SOFTWARE\Mozilla\NativeMessagingHosts\webhid-native-messaging-host'>
-            <RegistryValue Type='string' Value='[INSTALLDIR]webhid-native-messaging-host.json' KeyPath='yes'/>
+                       Key='SOFTWARE\Mozilla\NativeMessagingHosts\webhid.forwarder_nm_host'>
+            <RegistryValue Type='string' Value='[INSTALLDIR]webhid.forwarder_nm_host.json' KeyPath='yes'/>
           </RegistryKey>
         </Component>
         <Component Id='DaemonNmRegistry' Guid='a1b2c3d4-1111-2222-3333-44445555999a'>
           <RegistryKey Root='HKLM'
-                       Key='SOFTWARE\Mozilla\NativeMessagingHosts\webhid-daemon-nm-host'>
-            <RegistryValue Type='string' Value='[INSTALLDIR]webhid-daemon-nm-host.json' KeyPath='yes'/>
+                       Key='SOFTWARE\Mozilla\NativeMessagingHosts\webhid.daemon_nm_host'>
+            <RegistryValue Type='string' Value='[INSTALLDIR]webhid.daemon_nm_host.json' KeyPath='yes'/>
           </RegistryKey>
         </Component>
       </Directory>

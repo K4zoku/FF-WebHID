@@ -52,10 +52,10 @@ function base64Encode(bytes) {
 }
 
 // NM host names registered by the installer:
-// - webhid-native-messaging-host: thin forwarder → daemon Unix socket / pipe
-// - webhid-daemon-nm-host:        daemon speaks NM directly on stdin/stdout
-const NM_HOST_FORWARDER = "webhid-native-messaging-host";
-const NM_HOST_DAEMON    = "webhid-daemon-nm-host";
+// - webhid.forwarder_nm_host: thin forwarder → daemon Unix socket / pipe
+// - webhid.daemon_nm_host:     daemon speaks NM directly on stdin/stdout
+const NM_HOST_FORWARDER = "webhid.forwarder_nm_host";
+const NM_HOST_DAEMON    = "webhid.daemon_nm_host";
 
 let _daemonAsNmHost = false;
 let _nmHostName = NM_HOST_FORWARDER;

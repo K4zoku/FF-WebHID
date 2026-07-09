@@ -60,13 +60,13 @@ Copy-Item (Join-Path $BinDir 'webhid-native-messaging.exe') $Stage
 $installExe = 'C:\\Program Files\\WebHID\\webhid-native-messaging.exe'
 $daemonExe  = 'C:\\Program Files\\WebHID\\webhid-daemon.exe'
 
-$nmTemplate = Get-Content (Join-Path $Manifests 'webhid-native-messaging-host.json') -Raw
+$nmTemplate = Get-Content (Join-Path $Manifests 'webhid.forwarder_nm_host.json') -Raw
 $nmJson = $nmTemplate -replace '\{\{NM_BIN\}\}', $installExe
-Set-Content -Path (Join-Path $Stage 'webhid-native-messaging-host.json') -Value $nmJson -Encoding ascii
+Set-Content -Path (Join-Path $Stage 'webhid.forwarder_nm_host.json') -Value $nmJson -Encoding ascii
 
-$daemonNmTemplate = Get-Content (Join-Path $Manifests 'webhid-daemon-nm-host.json') -Raw
+$daemonNmTemplate = Get-Content (Join-Path $Manifests 'webhid.daemon_nm_host.json') -Raw
 $daemonNmJson = $daemonNmTemplate -replace '\{\{DAEMON_BIN\}\}', $daemonExe
-Set-Content -Path (Join-Path $Stage 'webhid-daemon-nm-host.json') -Value $daemonNmJson -Encoding ascii
+Set-Content -Path (Join-Path $Stage 'webhid.daemon_nm_host.json') -Value $daemonNmJson -Encoding ascii
 
 $wix = Get-Command wix -ErrorAction SilentlyContinue
 if (-not $wix) {
