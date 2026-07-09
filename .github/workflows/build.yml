@@ -68,24 +68,38 @@ jobs:
         with:
           workspaces: crates -> target
 
-      - name: Build Rust binaries
+      - name: Build binaries (Linux)
         if: runner.os == 'Linux'
         run: cargo build --release --manifest-path crates/Cargo.toml
         shell: bash
 
-      - name: Prepare Artifacts (Linux)
-        if: runner.os == 'Linux'
+      - name: Build binaries (macOS)
+        if: runner.os == 'macOS'
         run: |
-          BIN_DIR="crates/target/release"
-          mkdir -p artifacts/usr/local/bin artifacts/usr/local/lib/mozilla/native-messaging-hosts artifacts/etc/systemd/system
-          cp "$BIN_DIR/webhid-daemon" artifacts/usr/local/bin/
-          cp "$BIN_DIR/webhid-native-messaging" artifacts/usr/local/bin/
-          sed 's|{{NM_BIN}}|/usr/local/bin/webhid-native-messaging|g' \
-            manifests/webhid-native-messaging-host.json > artifacts/usr/local/lib/mozilla/native-messaging-hosts/webhid-native-messaging-host.json
-          sed 's|{{DAEMON_BIN}}|/usr/local/bin/webhid-daemon|g' \
-            manifests/webhid-daemon-nm-host.json > artifacts/usr/local/lib/mozilla/native-messaging-hosts/webhid-daemon-nm-host.json
-          sed 's|{{DAEMON_BIN}}|/usr/local/bin/webhid-daemon|g' \
-            manifests/webhid-daemon.service > artifacts/etc/systemd/system/webhid-daemon.service
+          # Build all 3 variants on one macOS runner via cross-compile + lipo
+          rustup target add x86_64-apple-darwin aarch64-apple-darwin
+          cargo build --release --manifest-path crates/Cargo.toml \
+            --target x86_64-apple-darwin --target aarch64-apple-darwin
+
+          # Create universal binaries with lipo
+          mkdir -p crates/target/universal-apple-darwin/release
+          lipo -create \
+            crates/target/x86_64-apple-darwin/release/webhid-daemon \
+            crates/target/aarch64-apple-darwin/release/webhid-daemon \
+            -output crates/target/universal-apple-darwin/release/webhid-daemon
+          lipo -create \
+            crates/target/x86_64-apple-darwin/release/webhid-native-messaging \
+            crates/target/aarch64-apple-darwin/release/webhid-native-messaging \
+            -output crates/target/universal-apple-darwin/release/webhid-native-messaging
+
+      - name: Build binaries (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          rustup target add x86_64-pc-windows-msvc aarch64-pc-windows-msvc
+          cargo build --release `
+            --target x86_64-pc-windows-msvc --target aarch64-pc-windows-msvc `
+            --manifest-path crates/Cargo.toml
 
       - name: Build .deb (Linux)
         if: runner.os == 'Linux'
@@ -103,25 +117,33 @@ jobs:
           ./packaging/linux/rpm/build-rpm.sh "$VER" "${{ matrix.arch }}"
         shell: bash
 
+      - name: Build .msi (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 6.0.2
+          $env:PATH = "$env:USERPROFILE\.dotnet\tools;$env:PATH"
+          $pkg = Get-Content package.json -Raw | ConvertFrom-Json
+          ./packaging/windows/build-msi.ps1 -Version $pkg.version -Arch x86_64 -OutputDir artifacts-msi-x86_64
+          ./packaging/windows/build-msi.ps1 -Version $pkg.version -Arch aarch64 -OutputDir artifacts-msi-aarch64
+
+      - name: Prepare Artifacts (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          BIN_DIR="crates/target/release"
+          mkdir -p artifacts/usr/local/bin artifacts/usr/local/lib/mozilla/native-messaging-hosts artifacts/etc/systemd/system
+          cp "$BIN_DIR/webhid-daemon" artifacts/usr/local/bin/
+          cp "$BIN_DIR/webhid-native-messaging" artifacts/usr/local/bin/
+          sed 's|{{NM_BIN}}|/usr/local/bin/webhid-native-messaging|g' \
+            manifests/webhid-native-messaging-host.json > artifacts/usr/local/lib/mozilla/native-messaging-hosts/webhid-native-messaging-host.json
+          sed 's|{{DAEMON_BIN}}|/usr/local/bin/webhid-daemon|g' \
+            manifests/webhid-daemon-nm-host.json > artifacts/usr/local/lib/mozilla/native-messaging-hosts/webhid-daemon-nm-host.json
+          sed 's|{{DAEMON_BIN}}|/usr/local/bin/webhid-daemon|g' \
+            manifests/webhid-daemon.service > artifacts/etc/systemd/system/webhid-daemon.service
+
       - name: Prepare Artifacts (macOS)
         if: runner.os == 'macOS'
         run: |
-          # Build all 3 variants on one macOS runner via cross-compile + lipo
-          rustup target add x86_64-apple-darwin aarch64-apple-darwin
-          cargo build --release --target x86_64-apple-darwin --manifest-path crates/Cargo.toml
-          cargo build --release --target aarch64-apple-darwin --manifest-path crates/Cargo.toml
-
-          # Create universal binaries with lipo
-          mkdir -p crates/target/universal-apple-darwin/release
-          lipo -create \
-            crates/target/x86_64-apple-darwin/release/webhid-daemon \
-            crates/target/aarch64-apple-darwin/release/webhid-daemon \
-            -output crates/target/universal-apple-darwin/release/webhid-daemon
-          lipo -create \
-            crates/target/x86_64-apple-darwin/release/webhid-native-messaging \
-            crates/target/aarch64-apple-darwin/release/webhid-native-messaging \
-            -output crates/target/universal-apple-darwin/release/webhid-native-messaging
-
           stage_macos() {
             local src_dir="$1" out_dir="$2"
             mkdir -p "$out_dir/usr/local/bin" "$out_dir/usr/local/lib/mozilla/native-messaging-hosts" "$out_dir/etc/systemd/system"
@@ -139,15 +161,6 @@ jobs:
           stage_macos "crates/target/aarch64-apple-darwin/release" "artifacts-aarch64"
           stage_macos "crates/target/universal-apple-darwin/release" "artifacts-universal"
 
-      - name: Build Windows binaries (both archs)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          rustup target add x86_64-pc-windows-msvc aarch64-pc-windows-msvc
-          cargo build --release `
-            --target x86_64-pc-windows-msvc --target aarch64-pc-windows-msvc `
-            --manifest-path crates/Cargo.toml
-
       - name: Prepare Artifacts (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -161,44 +174,6 @@ jobs:
           }
           Stage-Windows "crates/target/x86_64-pc-windows-msvc/release" "artifacts-portable-x86_64"
           Stage-Windows "crates/target/aarch64-pc-windows-msvc/release" "artifacts-portable-aarch64"
-
-      - name: Build MSI (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          dotnet tool install --global wix --version 6.0.2
-          $env:PATH = "$env:USERPROFILE\.dotnet\tools;$env:PATH"
-          $pkg = Get-Content package.json -Raw | ConvertFrom-Json
-          ./packaging/windows/build-msi.ps1 -Version $pkg.version -Arch x86_64 -OutputDir artifacts-msi-x86_64
-          ./packaging/windows/build-msi.ps1 -Version $pkg.version -Arch aarch64 -OutputDir artifacts-msi-aarch64
-
-      - name: Upload Windows x86_64 portable
-        if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v7
-        with:
-          name: webhid-windows-x86_64
-          path: artifacts-portable-x86_64/
-
-      - name: Upload Windows x86_64 MSI
-        if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v7
-        with:
-          name: webhid-windows-x86_64-msi
-          path: artifacts-msi-x86_64/
-
-      - name: Upload Windows aarch64 portable
-        if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v7
-        with:
-          name: webhid-windows-aarch64
-          path: artifacts-portable-aarch64/
-
-      - name: Upload Windows aarch64 MSI
-        if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v7
-        with:
-          name: webhid-windows-aarch64-msi
-          path: artifacts-msi-aarch64/
 
       - name: Upload Artifacts (Linux)
         if: runner.os == 'Linux'
@@ -241,3 +216,31 @@ jobs:
         with:
           name: webhid-macos-universal
           path: artifacts-universal/
+
+      - name: Upload Windows x86_64 portable
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v7
+        with:
+          name: webhid-windows-x86_64
+          path: artifacts-portable-x86_64/
+
+      - name: Upload Windows x86_64 MSI
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v7
+        with:
+          name: webhid-windows-x86_64-msi
+          path: artifacts-msi-x86_64/
+
+      - name: Upload Windows aarch64 portable
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v7
+        with:
+          name: webhid-windows-aarch64
+          path: artifacts-portable-aarch64/
+
+      - name: Upload Windows aarch64 MSI
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v7
+        with:
+          name: webhid-windows-aarch64-msi
+          path: artifacts-msi-aarch64/
