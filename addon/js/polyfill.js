@@ -191,6 +191,12 @@
     });
   }
 
+  function sendFireAndForget(action, payload) {
+    const msg = { __webhid_bridge: "req", id: 0, action, payload: payload || {}, fireAndForget: true };
+    const transfer = (payload && payload.data instanceof Uint8Array) ? [payload.data.buffer] : [];
+    window.postMessage(msg, "*", transfer);
+  }
+
   // Fetch initial settings from the bridge (which has browser.storage access).
   sendRequest("getSettings", {}).then((s) => {
     if (!s) return;
@@ -451,8 +457,8 @@
         const action = (_dataPlane === 'nm') ? "sendreport"
           : (this.#hotPath ? "worker-send" : "sendreport");
         logger.debug('[webhid] sendReport reportId=' + reportId + ' len=' + buffer.length + ' hotPath=' + this.#hotPath);
-        if (_dataPlane === 'nm' && _fireAndForget) {
-          sendRequest(action, {
+        if (_fireAndForget) {
+          sendFireAndForget(action, {
             device_id: this.#deviceId,
             report_id: reportId,
             data: buffer,
@@ -521,8 +527,8 @@
       try {
         const action = (_dataPlane === 'nm') ? "sendfeaturereport"
           : (this.#hotPath ? "worker-sendFeature" : "sendfeaturereport");
-        if (_dataPlane === 'nm' && _fireAndForget) {
-          sendRequest(action, {
+        if (_fireAndForget) {
+          sendFireAndForget(action, {
             device_id: this.#deviceId,
             report_id: reportId,
             data: buffer,

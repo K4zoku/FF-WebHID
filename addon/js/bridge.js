@@ -524,7 +524,8 @@
     if (!event.data || event.data.__webhid_bridge !== "req") return;
 
     const { id, action, payload } = event.data;
-    logger.debug('[bridge] req action=' + action + ' id=' + id);
+    const isFireAndForget = event.data.fireAndForget === true;
+    logger.debug('[bridge] req action=' + action + ' id=' + id + (isFireAndForget ? ' (faf)' : ''));
 
     // Settings fetch — page (MAIN world) has no browser.* APIs.
     // Merge per-site overrides on top of global defaults.
@@ -562,21 +563,24 @@
           action === "worker-send" ? "send" :
           action === "worker-sendFeature" ? "sendFeature" :
           "receiveFeature";
-        let cbMap = _workerCallbacks.get(worker);
-        if (!cbMap) { cbMap = new Map(); _workerCallbacks.set(worker, cbMap); }
-        cbMap.set(id, (data) => {
-          let result;
-          if (data.type === 'featureResult') {
-            result = data.error ? { success: false, error: data.error } : { success: true, data: data.data };
-          } else {
-            result = data.error ? { success: false, error: data.error } : { success: true };
-          }
-          const transfer = (result.data instanceof Uint8Array) ? [result.data.buffer] : [];
-          window.postMessage({ __webhid_bridge: "res", id, result }, "*", transfer);
-        });
         const wMsg = { type: wType, reqId: id, reportId: payload.report_id };
         if (action === "worker-send" || action === "worker-sendFeature") wMsg.data = payload.data;
         const wTransfer = (wMsg.data instanceof Uint8Array) ? [wMsg.data.buffer] : [];
+
+        if (!isFireAndForget || action === "worker-receiveFeature") {
+          let cbMap = _workerCallbacks.get(worker);
+          if (!cbMap) { cbMap = new Map(); _workerCallbacks.set(worker, cbMap); }
+          cbMap.set(id, (data) => {
+            let result;
+            if (data.type === 'featureResult') {
+              result = data.error ? { success: false, error: data.error } : { success: true, data: data.data };
+            } else {
+              result = data.error ? { success: false, error: data.error } : { success: true };
+            }
+            const transfer = (result.data instanceof Uint8Array) ? [result.data.buffer] : [];
+            window.postMessage({ __webhid_bridge: "res", id, result }, "*", transfer);
+          });
+        }
         worker.postMessage(wMsg, wTransfer);
         return;
       }
@@ -587,6 +591,10 @@
         "receivefeaturereport";
       try {
         const msg = Object.assign({ action: fallbackAction }, payload || {});
+        if (isFireAndForget && action !== "worker-receiveFeature") {
+          browser.runtime.sendMessage(msg).catch(() => {});
+          return;
+        }
         const response = await browser.runtime.sendMessage(msg);
         window.postMessage({ __webhid_bridge: "res", id, result: response }, "*");
       } catch (error) {
