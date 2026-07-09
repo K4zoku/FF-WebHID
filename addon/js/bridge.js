@@ -526,6 +526,20 @@
     const { id, action, payload } = event.data;
     logger.debug('[bridge] req action=' + action + ' id=' + id);
 
+    // Settings fetch — page (MAIN world) has no browser.* APIs.
+    if (action === "getSettings") {
+      try {
+        const s = await browser.storage.local.get({
+          dataPlane: 'ws',
+          dispatchDataView: false,
+        });
+        window.postMessage({ __webhid_bridge: "res", id, result: s }, "*");
+      } catch (e) {
+        window.postMessage({ __webhid_bridge: "res", id, result: {} }, "*");
+      }
+      return;
+    }
+
     // Hot-path actions: forward to the Worker (WebSocket) when available.
     // Falls back to NM path if no worker exists (device not opened or WS died).
     if (action === "worker-send" || action === "worker-sendFeature" || action === "worker-receiveFeature") {
@@ -791,7 +805,17 @@
     const ff = changes.fireAndForget?.newValue;
     const pl = changes.perfLogging?.newValue;
     const ll = changes.logLevel?.newValue;
-    if (ff === undefined && pl === undefined && ll === undefined) return;
+    if (ff === undefined && pl === undefined && ll === undefined) {
+      // Check for polyfill-relevant settings and push to page.
+      const dp = changes.dataPlane?.newValue;
+      const ddv = changes.dispatchDataView?.newValue;
+      if (dp === undefined && ddv === undefined) return;
+      const settings = {};
+      if (dp !== undefined) settings.dataPlane = dp;
+      if (ddv !== undefined) settings.dispatchDataView = ddv;
+      window.postMessage({ __webhid_bridge: "settings", settings }, "*");
+      return;
+    }
     for (const worker of _workers.values()) {
       worker.postMessage({ type: 'settings', fireAndForget: ff, perfLogging: pl, logLevel: ll });
     }

@@ -14,36 +14,15 @@ const logger = {
   debug: _nop,
 };
 
-function _applyLogLevel(level) {
-  logger._level = level;
-  logger.error = level >= 0 ? console.error.bind(console) : _nop;
-  logger.warn  = level >= 1 ? console.warn.bind(console)  : _nop;
-  logger.info  = level >= 2 ? console.info.bind(console)  : _nop;
-  logger.debug = level >= 3 ? console.debug.bind(console) : _nop;
-  // Re-evaluate perf helpers since they depend on debug being active.
-  _applyPerf();
-}
-_applyLogLevel(1);
+let _perfLogging = false;
 
-// Performance timing: perf.begin() / perf.end("label") measures elapsed
-// time and logs it at debug level. When perf logging is disabled (either
-// logLevel < debug or the explicit perfLogging flag is off), both methods
-// are no-ops; zero overhead on the hot path.
 const perf = {
   begin: _nop,
   end: _nop,
 };
 
-let _perfLogging = false;
-
 function _applyPerf() {
   if (_perfLogging && logger._level >= 3) {
-    const marks = new Map();
-    perf.begin = () => {
-      const t = performance.now();
-      return () => t;  // return a closure that captures the start time
-    };
-    // Simpler: begin() returns a token, end(token, label) logs elapsed.
     perf.begin = () => performance.now();
     perf.end = (t0, label) => logger.debug(label + ' ' + (performance.now() - t0).toFixed(2) + 'ms');
   } else {
@@ -51,6 +30,16 @@ function _applyPerf() {
     perf.end = _nop;
   }
 }
+
+function _applyLogLevel(level) {
+  logger._level = level;
+  logger.error = level >= 0 ? console.error.bind(console) : _nop;
+  logger.warn  = level >= 1 ? console.warn.bind(console)  : _nop;
+  logger.info  = level >= 2 ? console.info.bind(console)  : _nop;
+  logger.debug = level >= 3 ? console.debug.bind(console) : _nop;
+  _applyPerf();
+}
+_applyLogLevel(1);
 _applyPerf();
 
 // Detect SharedArrayBuffer availability. Some sites (e.g. usevia.app) block

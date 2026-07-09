@@ -130,20 +130,14 @@
   // In `nm` mode the polyfill sends data actions as `sendreport` /
   // `sendfeaturereport` / `receivefeaturereport` (instead of `worker-*`),
   // which the bridge forwards to the background via runtime.sendMessage.
+  //
+  // The page (MAIN world) has no `browser.*` APIs, so settings are fetched
+  // via a bridge request and updated via bridge-pushed `settings` events.
 
   let _dataPlane = 'ws';
   let _dispatchDataView = false;
 
-  async function _initTransport() {
-    const s = await browser.storage.local.get({
-      dataPlane: 'ws',
-      dispatchDataView: false,
-    });
-    _dataPlane = s.dataPlane;
-    _dispatchDataView = s.dispatchDataView;
-  }
-
-  // Listen for responses and events from the content script bridge.
+  // Listen for responses, events, and settings pushes from the bridge.
   window.addEventListener("message", (event) => {
     if (!event.data) return;
     if (event.data.__webhid_bridge === "res") {
@@ -152,13 +146,13 @@
         delete _pending[event.data.id];
         handler(event.data.result);
       }
+      return;
     }
-  });
-
-  browser.storage.onChanged.addListener((changes, area) => {
-    if (area !== 'local') return;
-    if (changes.dataPlane) _dataPlane = changes.dataPlane.newValue;
-    if (changes.dispatchDataView) _dispatchDataView = changes.dispatchDataView.newValue;
+    if (event.data.__webhid_bridge === "settings") {
+      const s = event.data.settings;
+      if (s.dataPlane !== undefined) _dataPlane = s.dataPlane;
+      if (s.dispatchDataView !== undefined) _dispatchDataView = s.dispatchDataView;
+    }
   });
 
   function sendRequest(action, payload) {
@@ -171,7 +165,12 @@
     });
   }
 
-  _initTransport();
+  // Fetch initial settings from the bridge (which has browser.storage access).
+  sendRequest("getSettings", {}).then((s) => {
+    if (!s) return;
+    if (s.dataPlane !== undefined) _dataPlane = s.dataPlane;
+    if (s.dispatchDataView !== undefined) _dispatchDataView = s.dispatchDataView;
+  });
 
   // ── Event classes ────────────────────────────────────────────────────────
 
