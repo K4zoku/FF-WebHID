@@ -4,9 +4,10 @@
   Build the WebHID Windows MSI installer.
 
 .DESCRIPTION
-  - cargo build --release (daemon + native-messaging host)
-  - Resolves the NM manifest template ([INSTALLDIR] placeholder)
-  - Compiles the WiX source to webhid-windows-<arch>-v<version>.msi
+  Packages pre-built binaries + NM manifests into an MSI via WiX v6.
+  Binaries must already be built with:
+    cargo build --release --target x86_64-pc-windows-msvc
+    cargo build --release --target aarch64-pc-windows-msvc
 
 .PARAMETER Version
   MSI ProductVersion. Pulled from package.json if omitted.
@@ -14,23 +15,22 @@
 .PARAMETER Arch
   Target architecture: x86_64 (default) or aarch64.
 
+.PARAMETER BinDir
+  Directory containing pre-built binaries. Defaults to the cargo target dir for the given arch.
+
 .PARAMETER OutputDir
   Where to put the MSI. Default: dist\
-
-.EXAMPLE
-  .\build-msi.ps1
-  .\build-msi.ps1 -Arch aarch64
 #>
 [CmdletBinding()]
 param(
   [string]$Version,
   [string]$Arch = "x86_64",
+  [string]$BinDir,
   [string]$OutputDir = (Join-Path $PSScriptRoot '..\..\dist')
 )
 
 $ErrorActionPreference = 'Stop'
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$Crates   = Join-Path $RepoRoot 'crates'
 $Manifests = Join-Path $RepoRoot 'manifests'
 $WixSrc   = Join-Path $PSScriptRoot 'webhid.wxs'
 
@@ -38,35 +38,36 @@ if (-not $Version) {
   $pkg = Get-Content (Join-Path $RepoRoot 'package.json') -Raw | ConvertFrom-Json
   $Version = $pkg.version
 }
-Write-Host "==> WebHID MSI build, version $Version arch $Arch"
 
-# Stage binaries + manifest into a build dir that WiX references as $(var.BuildDir)
+$rustTarget = if ($Arch -eq "aarch64") { "aarch64-pc-windows-msvc" } else { "x86_64-pc-windows-msvc" }
+if (-not $BinDir) {
+  $BinDir = Join-Path $RepoRoot "crates\target\$rustTarget\release"
+}
+
+Write-Host "==> WebHID MSI build, version $Version arch $Arch (binaries from $BinDir)"
+
+if (-not (Test-Path (Join-Path $BinDir 'webhid-daemon.exe'))) {
+  throw "webhid-daemon.exe not found in $BinDir; build first with: cargo build --release --target $rustTarget"
+}
+
 $Stage = Join-Path $RepoRoot 'packaging\windows\stage'
 if (Test-Path $Stage) { Remove-Item $Stage -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $Stage | Out-Null
 
-Write-Host '==> cargo build --release'
-$rustTarget = if ($Arch -eq "aarch64") { "aarch64-pc-windows-msvc" } else { "" }
-if ($rustTarget) {
-  & cargo build --release --target $rustTarget --manifest-path (Join-Path $Crates 'Cargo.toml')
-  $Target = Join-Path $Crates "target\$rustTarget\release"
-} else {
-  & cargo build --release --manifest-path (Join-Path $Crates 'Cargo.toml')
-  $Target = Join-Path $Crates 'target\release'
-}
-if ($LASTEXITCODE -ne 0) { throw "cargo build failed (exit $LASTEXITCODE)" }
+Copy-Item (Join-Path $BinDir 'webhid-daemon.exe')           $Stage
+Copy-Item (Join-Path $BinDir 'webhid-native-messaging.exe') $Stage
 
-Copy-Item (Join-Path $Target 'webhid-daemon.exe')           $Stage
-Copy-Item (Join-Path $Target 'webhid-native-messaging.exe') $Stage
+$installExe = 'C:\\Program Files\\WebHID\\webhid-native-messaging.exe'
+$daemonExe  = 'C:\\Program Files\\WebHID\\webhid-daemon.exe'
 
-# Resolve NM manifest placeholder. WiX cannot do variable substitution
-# inside JSON file contents, so we replace it here.
 $nmTemplate = Get-Content (Join-Path $Manifests 'webhid-native-messaging-host.json') -Raw
-$nmJson = $nmTemplate -replace '\{\{NM_BIN\}\}', 'C:\\Program Files\\WebHID\\webhid-native-messaging.exe'
+$nmJson = $nmTemplate -replace '\{\{NM_BIN\}\}', $installExe
 Set-Content -Path (Join-Path $Stage 'webhid-native-messaging-host.json') -Value $nmJson -Encoding ascii
 
-# Locate wix.exe (WiX v6). Try PATH first, then a tools/ folder.
-# WiX v7+ requires accepting the OSMF EULA; we pin to v6 to avoid that.
+$daemonNmTemplate = Get-Content (Join-Path $Manifests 'webhid-daemon-nm-host.json') -Raw
+$daemonNmJson = $daemonNmTemplate -replace '\{\{DAEMON_BIN\}\}', $daemonExe
+Set-Content -Path (Join-Path $Stage 'webhid-daemon-nm-host.json') -Value $daemonNmJson -Encoding ascii
+
 $wix = Get-Command wix -ErrorAction SilentlyContinue
 if (-not $wix) {
   $toolsDir = Join-Path $RepoRoot 'tools'

@@ -7,10 +7,12 @@
     [ProgramFiles64Folder]WebHID\
       webhid-daemon.exe
       webhid-native-messaging.exe
-      webhid-native-messaging-host.json   (NM manifest, [INSTALLDIR] resolved at install time)
+      webhid-native-messaging-host.json   (forwarder NM manifest)
+      webhid-daemon-nm-host.json          (daemon-as-NM-host manifest)
 
   Registry:
     HKLM\SOFTWARE\Mozilla\NativeMessagingHosts\webhid-native-messaging-host  = [INSTALLDIR]webhid-native-messaging-host.json
+    HKLM\SOFTWARE\Mozilla\NativeMessagingHosts\webhid-daemon-nm-host        = [INSTALLDIR]webhid-daemon-nm-host.json
 
   Scheduled Task:
     "WebHID Daemon": runs at logon, webhid-daemon.exe
@@ -64,10 +66,20 @@
           <File Id='NMJson' Name='webhid-native-messaging-host.json'
                 Source='$(var.BuildDir)\webhid-native-messaging-host.json' KeyPath='yes'/>
         </Component>
+        <Component Id='DaemonNmManifest' Guid='a1b2c3d4-1111-2222-3333-44445555888a'>
+          <File Id='DaemonNmJson' Name='webhid-daemon-nm-host.json'
+                Source='$(var.BuildDir)\webhid-daemon-nm-host.json' KeyPath='yes'/>
+        </Component>
         <Component Id='NMRegistry' Guid='a1b2c3d4-1111-2222-3333-444455559999'>
           <RegistryKey Root='HKLM'
                        Key='SOFTWARE\Mozilla\NativeMessagingHosts\webhid-native-messaging-host'>
             <RegistryValue Type='string' Value='[INSTALLDIR]webhid-native-messaging-host.json' KeyPath='yes'/>
+          </RegistryKey>
+        </Component>
+        <Component Id='DaemonNmRegistry' Guid='a1b2c3d4-1111-2222-3333-44445555999a'>
+          <RegistryKey Root='HKLM'
+                       Key='SOFTWARE\Mozilla\NativeMessagingHosts\webhid-daemon-nm-host'>
+            <RegistryValue Type='string' Value='[INSTALLDIR]webhid-daemon-nm-host.json' KeyPath='yes'/>
           </RegistryKey>
         </Component>
       </Directory>
@@ -79,9 +91,11 @@
       <ComponentRef Id='DaemonBin'/>
       <ComponentRef Id='NMBin'/>
       <ComponentRef Id='NMManifest'/>
+      <ComponentRef Id='DaemonNmManifest'/>
     </ComponentGroup>
     <ComponentGroup Id='Registry'>
       <ComponentRef Id='NMRegistry'/>
+      <ComponentRef Id='DaemonNmRegistry'/>
     </ComponentGroup>
   </Fragment>
 </Wix>

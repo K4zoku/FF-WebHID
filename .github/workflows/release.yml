@@ -83,28 +83,21 @@ jobs:
           workspaces: crates -> target
 
       - name: Build Rust binaries
-        if: runner.os != 'macOS' && runner.os != 'Windows'
-        run: |
-          if [ -n "${{ matrix.rust_target }}" ]; then
-            cargo build --release --manifest-path crates/Cargo.toml --target ${{ matrix.rust_target }}
-          else
-            cargo build --release --manifest-path crates/Cargo.toml
-          fi
+        if: runner.os == 'Linux'
+        run: cargo build --release --manifest-path crates/Cargo.toml
         shell: bash
 
       - name: Prepare Artifacts (Linux)
         if: runner.os == 'Linux'
         run: |
-          if [ -n "${{ matrix.rust_target }}" ]; then
-            BIN_DIR="crates/target/${{ matrix.rust_target }}/release"
-          else
-            BIN_DIR="crates/target/release"
-          fi
+          BIN_DIR="crates/target/release"
           mkdir -p artifacts/usr/local/bin artifacts/usr/local/lib/mozilla/native-messaging-hosts artifacts/etc/systemd/system
           cp "$BIN_DIR/webhid-daemon" artifacts/usr/local/bin/
           cp "$BIN_DIR/webhid-native-messaging" artifacts/usr/local/bin/
           sed 's|{{NM_BIN}}|/usr/local/bin/webhid-native-messaging|g' \
             manifests/webhid-native-messaging-host.json > artifacts/usr/local/lib/mozilla/native-messaging-hosts/webhid-native-messaging-host.json
+          sed 's|{{DAEMON_BIN}}|/usr/local/bin/webhid-daemon|g' \
+            manifests/webhid-daemon-nm-host.json > artifacts/usr/local/lib/mozilla/native-messaging-hosts/webhid-daemon-nm-host.json
           sed 's|{{DAEMON_BIN}}|/usr/local/bin/webhid-daemon|g' \
             manifests/webhid-daemon.service > artifacts/etc/systemd/system/webhid-daemon.service
 
@@ -113,7 +106,7 @@ jobs:
         run: |
           VER=$(grep -oP '"version":\s*"\K[^"]+' package.json)
           DEB_ARCH=$(if [ "${{ matrix.arch }}" = "aarch64" ]; then echo "arm64"; else echo "amd64"; fi)
-          ./packaging/linux/debian/build-deb.sh "$VER" "$DEB_ARCH" "${{ matrix.rust_target }}"
+          ./packaging/linux/debian/build-deb.sh "$VER" "$DEB_ARCH"
         shell: bash
 
       - name: Build .rpm (Linux)
@@ -121,7 +114,7 @@ jobs:
         run: |
           sudo apt-get install -y rpm
           VER=$(grep -oP '"version":\s*"\K[^"]+' package.json)
-          ./packaging/linux/rpm/build-rpm.sh "$VER" "${{ matrix.arch }}" "${{ matrix.rust_target }}"
+          ./packaging/linux/rpm/build-rpm.sh "$VER" "${{ matrix.arch }}"
         shell: bash
 
       - name: Prepare Artifacts (macOS)
@@ -151,6 +144,8 @@ jobs:
             sed 's|{{NM_BIN}}|/usr/local/bin/webhid-native-messaging|g' \
               manifests/webhid-native-messaging-host.json > "$out_dir/usr/local/lib/mozilla/native-messaging-hosts/webhid-native-messaging-host.json"
             sed 's|{{DAEMON_BIN}}|/usr/local/bin/webhid-daemon|g' \
+              manifests/webhid-daemon-nm-host.json > "$out_dir/usr/local/lib/mozilla/native-messaging-hosts/webhid-daemon-nm-host.json"
+            sed 's|{{DAEMON_BIN}}|/usr/local/bin/webhid-daemon|g' \
               manifests/webhid-daemon.service > "$out_dir/etc/systemd/system/webhid-daemon.service"
           }
 
@@ -174,6 +169,7 @@ jobs:
             Copy-Item "$binDir/webhid-daemon.exe" "$outDir/bin/"
             Copy-Item "$binDir/webhid-native-messaging.exe" "$outDir/bin/"
             Copy-Item manifests/webhid-native-messaging-host.json "$outDir/manifests/webhid-native-messaging-host.json"
+            Copy-Item manifests/webhid-daemon-nm-host.json "$outDir/manifests/webhid-daemon-nm-host.json"
           }
           Stage-Windows "crates/target/x86_64-pc-windows-msvc/release" "artifacts-portable-x86_64"
           Stage-Windows "crates/target/aarch64-pc-windows-msvc/release" "artifacts-portable-aarch64"
