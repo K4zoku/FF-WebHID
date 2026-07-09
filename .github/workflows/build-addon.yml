@@ -29,3 +29,4 @@ jobs:
         with:
           name: webhid-addon
           path: dist/webhid-addon.xpi
+          archive: false

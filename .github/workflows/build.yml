@@ -186,15 +186,15 @@ jobs:
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.artifact_name }}-deb
           path: dist/*.deb
+          archive: false
 
       - name: Upload .rpm (Linux)
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.artifact_name }}-rpm
           path: dist/*.rpm
+          archive: false
 
       - name: Upload macOS x86_64
         if: runner.os == 'macOS'
@@ -228,8 +228,8 @@ jobs:
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v7
         with:
-          name: webhid-windows-x86_64-msi
-          path: artifacts-msi-x86_64/
+          path: artifacts-msi-x86_64/*.msi
+          archive: false
 
       - name: Upload Windows aarch64 portable
         if: runner.os == 'Windows'
@@ -242,5 +242,5 @@ jobs:
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v7
         with:
-          name: webhid-windows-aarch64-msi
-          path: artifacts-msi-aarch64/
+          path: artifacts-msi-aarch64/*.msi
+          archive: false
