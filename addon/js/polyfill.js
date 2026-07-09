@@ -121,22 +121,18 @@
 
   // ── Transport ────────────────────────────────────────────────────────────
   //
-  // Two data-plane modes:
+  // Two data-plane modes (both go through the content-script bridge —
+  // Firefox does not support `externally_connectable`, so the page cannot
+  // connect to the background directly):
   //   ws — page → bridge → worker → WebSocket → daemon (SAB or postMessage)
-  //   nm  — page → background (direct port) → NM host → daemon
+  //   nm  — page → bridge → background → NM host → daemon (no worker/WS/SAB)
   //
-  // Handshake (enumerate / open / close / requestDevice) always goes via the
-  // bridge (window.postMessage) because the bridge owns the device picker UI.
-  // After open(), data-plane messages route based on the `dataPlane` setting.
+  // In `nm` mode the polyfill sends data actions as `sendreport` /
+  // `sendfeaturereport` / `receivefeaturereport` (instead of `worker-*`),
+  // which the bridge forwards to the background via runtime.sendMessage.
 
   let _dataPlane = 'ws';
   let _dispatchDataView = false;
-  let _nmPort = null;
-
-  const _dataActions = new Set([
-    'worker-send', 'worker-sendFeature', 'worker-receiveFeature',
-    'sendreport', 'sendfeaturereport', 'receivefeaturereport',
-  ]);
 
   async function _initTransport() {
     const s = await browser.storage.local.get({
@@ -145,36 +141,10 @@
     });
     _dataPlane = s.dataPlane;
     _dispatchDataView = s.dispatchDataView;
-    if (_dataPlane === 'nm') _connectNmPort();
-  }
-
-  function _connectNmPort() {
-    try {
-      _nmPort = browser.runtime.connect();
-      _nmPort.onMessage.addListener((msg) => {
-        if (msg.event_type) { _handleNmEvent(msg); return; }
-        if (msg.__webhid_res !== undefined) {
-          const handler = _pending[msg.__webhid_res];
-          if (handler) { delete _pending[msg.__webhid_res]; handler(msg.result); }
-        }
-      });
-      _nmPort.onDisconnect.addListener(() => {
-        _nmPort = null;
-        if (_dataPlane === 'nm') setTimeout(_connectNmPort, 1000);
-      });
-    } catch (e) {
-      logger.warn('[webhid] NM direct port connect failed:', e.message);
-    }
-  }
-
-  function _handleNmEvent(event) {
-    const evt = { __webhid_bridge: 'evt', event };
-    const fakeEvent = { data: evt };
-    _bridgeListener(fakeEvent);
   }
 
   // Listen for responses and events from the content script bridge.
-  const _bridgeListener = (event) => {
+  window.addEventListener("message", (event) => {
     if (!event.data) return;
     if (event.data.__webhid_bridge === "res") {
       const handler = _pending[event.data.id];
@@ -183,31 +153,18 @@
         handler(event.data.result);
       }
     }
-  };
-  window.addEventListener("message", _bridgeListener);
+  });
 
   browser.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
-    if (changes.dataPlane) {
-      _dataPlane = changes.dataPlane.newValue;
-      if (_dataPlane === 'nm' && !_nmPort) _connectNmPort();
-      else if (_dataPlane === 'ws' && _nmPort) { _nmPort.disconnect(); _nmPort = null; }
-    }
-    if (changes.dispatchDataView) {
-      _dispatchDataView = changes.dispatchDataView.newValue;
-    }
+    if (changes.dataPlane) _dataPlane = changes.dataPlane.newValue;
+    if (changes.dispatchDataView) _dispatchDataView = changes.dispatchDataView.newValue;
   });
 
   function sendRequest(action, payload) {
     return new Promise((resolve) => {
       const id = ++_reqId;
       _pending[id] = resolve;
-
-      if (_dataPlane === 'nm' && _nmPort && _dataActions.has(action)) {
-        _nmPort.postMessage({ __webhid_req: id, action, payload: payload || {} });
-        return;
-      }
-
       const msg = { __webhid_bridge: "req", id, action, payload: payload || {} };
       const transfer = (payload && payload.data instanceof Uint8Array) ? [payload.data.buffer] : [];
       window.postMessage(msg, "*", transfer);
@@ -451,7 +408,8 @@
         if (!this.#hotPath && this.#sabListener) {
           await this.#waitForHotPath(2000);
         }
-        const action = this.#hotPath ? "worker-send" : "sendreport";
+        const action = (_dataPlane === 'nm') ? "sendreport"
+          : (this.#hotPath ? "worker-send" : "sendreport");
         logger.debug('[webhid] sendReport reportId=' + reportId + ' len=' + buffer.length + ' hotPath=' + this.#hotPath);
         const response = await sendRequest(action, {
           device_id: this.#deviceId,
@@ -486,7 +444,8 @@
         throw new DOMException("Device is not open", "InvalidStateError");
       logger.debug('[webhid] receiveFeatureReport reportId=' + reportId + ' hotPath=' + this.#hotPath);
       try {
-        const action = this.#hotPath ? "worker-receiveFeature" : "receivefeaturereport";
+        const action = (_dataPlane === 'nm') ? "receivefeaturereport"
+          : (this.#hotPath ? "worker-receiveFeature" : "receivefeaturereport");
         const response = await sendRequest(action, {
           device_id: this.#deviceId,
           report_id: reportId,
@@ -511,7 +470,8 @@
       const buffer = view.slice();
       logger.debug('[webhid] sendFeatureReport reportId=' + reportId + ' len=' + buffer.length + ' hotPath=' + this.#hotPath);
       try {
-        const action = this.#hotPath ? "worker-sendFeature" : "sendfeaturereport";
+        const action = (_dataPlane === 'nm') ? "sendfeaturereport"
+          : (this.#hotPath ? "worker-sendFeature" : "sendfeaturereport");
         const response = await sendRequest(action, {
           device_id: this.#deviceId,
           report_id: reportId,

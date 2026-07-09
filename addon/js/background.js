@@ -208,16 +208,9 @@ const NativeMessaging = {
     if (message.event_type === "input_report") return;
 
     const targets = tabsForEvent(message);
-    const send = (tabId) => {
-      const port = _externalPorts.get(tabId);
-      if (port) {
-        port.postMessage(message);
-      } else {
-        browser.tabs
-          .sendMessage(tabId, { action: "webhid-device-event", event: message })
-          .catch(() => {});
-      }
-    };
+    const send = (tabId) => browser.tabs
+      .sendMessage(tabId, { action: "webhid-device-event", event: message })
+      .catch(() => {});
     if (targets) {
       for (const tabId of targets) send(tabId);
     } else {
@@ -249,53 +242,6 @@ loadNmHostSetting().then(() => NativeMessaging.connect());
 // (and so a re-opened tab doesn't keep receiving events for a device it no
 // longer owns).
 browser.tabs.onRemoved.addListener((tabId) => purgeTab(tabId));
-
-// ---------------------------------------------------------------------------
-// External connections (NM direct-port mode)
-// ---------------------------------------------------------------------------
-
-/** tabId → Port (page → background direct, bypasses content script) */
-const _externalPorts = new Map();
-
-async function handleDataRequest(request, sender) {
-  const tabId = sender?.tab?.id;
-  switch (request.action) {
-    case "sendreport":
-      return await NativeMessaging.sendReport(
-        request.device_id, request.report_id || 0, request.data,
-      );
-    case "sendfeaturereport":
-      return await NativeMessaging.sendFeatureReport(
-        request.device_id, request.report_id || 0, request.data,
-      );
-    case "receivefeaturereport":
-      return await NativeMessaging.receiveFeatureReport(
-        request.device_id, request.report_id,
-      );
-    default:
-      return { success: false, error: `unknown data action: ${request.action}` };
-  }
-}
-
-browser.runtime.onConnectExternal.addListener((port) => {
-  const tabId = port.sender?.tab?.id;
-  if (tabId != null) _externalPorts.set(tabId, port);
-
-  port.onMessage.addListener(async (msg) => {
-    if (msg.__webhid_req !== undefined) {
-      try {
-        const result = await handleDataRequest(msg, port.sender);
-        port.postMessage({ __webhid_res: msg.__webhid_req, result });
-      } catch (e) {
-        port.postMessage({ __webhid_res: msg.__webhid_req, result: { success: false, error: e.message } });
-      }
-    }
-  });
-
-  port.onDisconnect.addListener(() => {
-    if (tabId != null) _externalPorts.delete(tabId);
-  });
-});
 
 // ---------------------------------------------------------------------------
 // Security Headers (COOP/COEP): only when SAB data plane is enabled

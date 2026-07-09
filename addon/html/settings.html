@@ -22,11 +22,11 @@
 <div class="setting">
   <div class="setting-info">
     <h3>Data Plane</h3>
-    <p><strong>WebSocket</strong>: spawn a Web Worker per device, connect directly to the daemon's WS server. Supports SharedArrayBuffer for zero-copy input reports.<br><strong>Native Messaging</strong>: route all data (sendReport, input reports, feature reports) through the NM host via a direct port to the background script. No worker, no WS, no SAB. Lower overhead for benchmarking the NM path.</p>
+    <p><strong>WebSocket</strong>: spawn a Web Worker per device, connect directly to the daemon's WS server. Supports SharedArrayBuffer for zero-copy input reports.<br><strong>Native Messaging</strong>: route all data (sendReport, input reports, feature reports) through the NM host via the content-script bridge. No worker, no WS, no SAB. For benchmarking the NM path.</p>
   </div>
   <select id="dataPlane">
     <option value="ws">WebSocket (worker + SAB)</option>
-    <option value="nm">Native Messaging (direct port)</option>
+    <option value="nm">Native Messaging (via bridge)</option>
   </select>
 </div>
 <div class="setting" id="sabEnabled-row">
