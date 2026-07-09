@@ -152,7 +152,7 @@ All layers auto-reconnect with exponential backoff:
 
 ## Message flow examples
 
-### `navigator.hid.getDevices()` — Control=NM
+### `navigator.hid.getDevices()` Control=NM
 
 ```
 page                  bridge.js         background.js     NM host      daemon
@@ -167,7 +167,7 @@ page                  bridge.js         background.js     NM host      daemon
  │◄──postMessage(res)──────│                │                │           │
 ```
 
-### `navigator.hid.getDevices()` — Control=WS
+### `navigator.hid.getDevices()` Control=WS
 
 ```
 page                  bridge.js                              daemon
@@ -178,7 +178,7 @@ page                  bridge.js                              daemon
  │◄──postMessage(res)──────│                                    │
 ```
 
-### `sendReport()` — WS fire-and-forget
+### `sendReport()` WS fire-and-forget
 
 ```
 page                  bridge.js         worker.js          daemon
@@ -188,7 +188,7 @@ page                  bridge.js         worker.js          daemon
  │                        │                │                  │ hidraw write
 ```
 
-### `sendReport()` — NM fire-and-forget
+### `sendReport()` NM fire-and-forget
 
 ```
 page                  bridge.js         background.js     NM host      daemon

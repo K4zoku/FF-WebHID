@@ -7,8 +7,8 @@ WebHID brings Human Interface Device (HID) support to Firefox on Linux, macOS, a
 ## Features
 
 - **Full WebHID polyfill**: implements `navigator.hid` API in Firefox
-- **Dual data plane**: WebSocket (worker + SAB) for max performance, or Native Messaging for simplicity — switchable per-site
-- **Dual control plane**: NM (default) or WS text frames (after NM handshake) — switchable independently from data plane
+- **Dual data plane**: WebSocket (worker + SAB) for max performance, or Native Messaging for simplicity -- switchable per-site
+- **Dual control plane**: NM (default) or WS text frames (after NM handshake) -- switchable independently from data plane
 - **Early fire-and-forget**: `sendReport` resolves in <0.1ms (both WS and NM modes), no ack wait
 - **Adaptive batching**: 0μs added latency for sparse reports, ≤100μs coalescing for 8kHz bursts
 - **Cross-platform HID**: Linux (hidraw + udev), macOS (IOHIDManager), Windows (native HID API)

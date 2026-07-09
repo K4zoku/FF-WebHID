@@ -115,7 +115,7 @@ Install paths are configurable: `make install-system PREFIX=/usr` or `make insta
 
 ### Daemon-as-NM-host mode (Linux/macOS, advanced)
 
-Eliminates the separate NM host binary and IPC socket — the daemon speaks native-messaging protocol directly on stdin/stdout. This reduces latency by ~100μs per frame (1 fewer IPC hop, 2 fewer allocations).
+Eliminates the separate NM host binary and IPC socket; the daemon speaks native-messaging protocol directly on stdin/stdout. This reduces latency by ~100μs per frame (1 fewer IPC hop, 2 fewer allocations).
 
 **Requires:** udev rules installed (daemon runs as your user, not root).
 
@@ -301,7 +301,7 @@ Then install the [browser extension](https://addons.mozilla.org/en-US/firefox/ad
 - **"Permission denied"** (Linux non-root): udev rule not installed. Run `sudo make install-udev-rule` or copy `99-webhid.rules` manually.
 - **Device picker shows "No HID devices found"**: daemon running but no HID devices detected. Check `hidapi` can enumerate: `ls /dev/hidraw*` (Linux).
 - **Site breaks after enabling SAB**: COOP/COEP conflict. Disable SAB Data Plane in the addon popup settings.
-- **Badge counter not showing**: ensure the device is opened via `navigator.hid.requestDevice()` — the counter tracks open devices, not paired ones.
+- **Badge counter not showing**: ensure the device is opened via `navigator.hid.requestDevice()`, the counter tracks open devices, not paired ones.
 - **NM data plane is slow**: enable Fire-and-forget in settings. If still slow, switch Data Plane to WebSocket.
 
 ## Recommended Settings per Platform
@@ -322,13 +322,13 @@ Then install the [browser extension](https://addons.mozilla.org/en-US/firefox/ad
 
 | Setting | Recommended | Reason |
 |---------|------------|--------|
-| Daemon as NM host | ON | Windows has no permission setup needed — just point NM manifest path to `webhid-daemon.exe`. Daemon auto-detects NM mode via Firefox's 2 positional args |
+| Daemon as NM host | ON | Windows has no permission setup needed, just point NM manifest path to `webhid-daemon.exe`. Daemon auto-detects NM mode via Firefox's 2 positional args |
 | Control Plane | WS | Control ops via WS after handshake |
 | Data Plane | WS (default) | Binary WS + SAB for performance |
 | SAB | ON | Zero-copy input reports |
 | Fire-and-forget | ON | Page latency <0.1ms |
 
-**Setup**: Install MSI or portable zip. For daemon-as-NM-host, register `webhid.daemon_nm_host.json` with `path` pointing to `webhid-daemon.exe` — no wrapper script needed, daemon auto-detects NM mode.
+**Setup**: Install MSI or portable zip. For daemon-as-NM-host, register `webhid.daemon_nm_host.json` with `path` pointing to `webhid-daemon.exe`, no wrapper script needed, daemon auto-detects NM mode.
 
 ### macOS
 
