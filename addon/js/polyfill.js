@@ -236,10 +236,10 @@
           this.#sabDrainActive = true;
           if (!this.#inputLoopStarted) {
             this.#inputLoopStarted = true;
-            startInputReportLoop(this, detail.sab, detail.reportSize);
+            startInputReportLoop(this, detail.sab, detail.reportSize, detail.wakePort);
           } else {
             const updateFn = _sabUpdateFns.get(this);
-            if (updateFn) updateFn(detail.sab, detail.reportSize);
+            if (updateFn) updateFn(detail.sab, detail.reportSize, detail.wakePort);
           }
         } else if (detail.event_type === "webhid-sab-disabled") {
           // SAB unavailable (COOP/COEP blocked). Input reports arrive via
@@ -463,7 +463,7 @@
             if (evDeviceId && this.#deviceId && evDeviceId === this.#deviceId) {
               if (!this.#inputLoopStarted) {
                 this.#inputLoopStarted = true;
-                startInputReportLoop(this, detail.sab, detail.reportSize);
+                startInputReportLoop(this, detail.sab, detail.reportSize, detail.wakePort);
               }
             }
             return;
@@ -555,7 +555,7 @@
   }
 
   // SAB drain loop. Uses Atomics.waitAsync + generation counter for SAB swaps.
-  function startInputReportLoop(device, sab, reportSize) {
+  function startInputReportLoop(device, sab, reportSize, wakePort) {
     let meta    = new Int32Array(sab, 0, 3);
     let reports = new Uint8Array(sab, 12);
     let cap     = (sab.byteLength - 12) / reportSize;
@@ -563,6 +563,7 @@
     let lastDropped = Atomics.load(meta, 2);
     let generation = 0;
     let _drainBuf = null;
+    let _wakePort = wakePort || null;
 
     const _yieldChan = new MessageChannel();
     let _yieldCb = null;
@@ -613,27 +614,37 @@
       const myGen = generation;
       const head = Atomics.load(meta, 0);
       if (head !== tail) drain();
-      const result = Atomics.waitAsync(meta, 0, Atomics.load(meta, 0));
-      if (result.async) {
-        result.value.then(() => {
+
+      if (_wakePort) {
+        _wakePort.onmessage = () => {
           if (myGen !== generation) return;
           drain();
           wait();
-        });
+        };
       } else {
-        if (myGen !== generation) return;
-        drain();
-        requestAnimationFrame(() => { if (myGen !== generation) return; wait(); });
+        const result = Atomics.waitAsync(meta, 0, Atomics.load(meta, 0));
+        if (result.async) {
+          result.value.then(() => {
+            if (myGen !== generation) return;
+            drain();
+            wait();
+          });
+        } else {
+          if (myGen !== generation) return;
+          drain();
+          requestAnimationFrame(() => { if (myGen !== generation) return; wait(); });
+        }
       }
     }
 
-    _sabUpdateFns.set(device, (newSab, newReportSize) => {
+    _sabUpdateFns.set(device, (newSab, newReportSize, newWakePort) => {
       meta = new Int32Array(newSab, 0, 3);
       reports = new Uint8Array(newSab, 12);
       reportSize = newReportSize;
       cap = (newSab.byteLength - 12) / reportSize;
       tail = Atomics.load(meta, 1);
       lastDropped = Atomics.load(meta, 2);
+      if (newWakePort) _wakePort = newWakePort;
       generation++;
       drain();
       wait();
