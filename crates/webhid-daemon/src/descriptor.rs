@@ -343,7 +343,7 @@ impl CollectionTreeBuilder {
     }
 
     fn add_report(&mut self, report: &impl hidreport::Report, rtype: &str) {
-        let rid: Option<u8> = report.report_id().as_ref().map(|id| (*id).into());
+        let rid: u8 = report.report_id().as_ref().map(|id| (*id).into()).unwrap_or(0);
         let items = convert_fields_aggregate(report.fields());
 
         if items.is_empty() {

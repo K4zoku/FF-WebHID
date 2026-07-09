@@ -9,39 +9,31 @@ use serde::{Deserialize, Serialize};
 pub struct DeviceInfo {
     pub vendor_id: u16,
     pub product_id: u16,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub product_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub manufacturer: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub serial_number: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub usage_page: Option<u16>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub usage: Option<u16>,
-    /// Stable, platform-independent device identifier.
-    /// Format: hash of (vid, pid, serial, interface_number, usage_page, usage, physical_location).
-    /// This is what the page sees as `deviceId` and what `open()` takes.
     pub device_id: String,
-    /// Parsed HID report descriptor collections tree, matching Chromium's
-    /// `HIDDevice.collections` shape exactly.  Always present after daemon-side
-    /// parsing; empty array when the descriptor is unavailable.
     #[serde(default)]
     pub collections: Vec<Collection>,
 }
 
 // ── Collections tree (parsed report descriptor) ───────────────────────────
 
-/// A single HID collection node, matching Chromium's `HIDCollectionInfo`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Collection {
-    /// Collection type (1 = Physical, 2 = Application, 3 = Logical, etc.).
     #[serde(rename = "type")]
     pub collection_type: u8,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub usage_page: Option<u16>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub usage: Option<u16>,
     #[serde(default)]
     pub children: Vec<Collection>,
@@ -53,28 +45,27 @@ pub struct Collection {
     pub feature_reports: Vec<Report>,
 }
 
-/// A single HID report within a collection, matching Chromium's `HIDReportInfo`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Report {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub report_id: Option<u8>,
+    #[serde(default)]
+    pub report_id: u8,
     #[serde(default)]
     pub items: Vec<Field>,
 }
 
-/// A single field (data item) within a HID report, matching Chromium's
-/// `HIDReportItem` exactly.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Field {
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub usages: Vec<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage_minimum: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage_maximum: Option<u32>,
+    #[serde(default)]
     pub report_size: u32,
+    #[serde(default)]
     pub report_count: u32,
     #[serde(default)]
     pub logical_minimum: i32,

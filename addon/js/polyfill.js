@@ -198,83 +198,6 @@
   }
 
 
-
-  // ── Collection normalization ─────────────────────────────────────────────
-  // Ensures collections from the daemon match Chromium's HID spec shape
-  // exactly, with all fields present (even if empty/default). Some web apps
-  // (e.g. SayoDevice) pass collections to WASM via wasm-bindgen, which panics
-  // if expected fields are missing.
-
-  function normalizeField(f) {
-    const isRange = f.isRange === true || f.is_range === true;
-    const usages = Array.isArray(f.usages) ? f.usages
-                 : Array.isArray(f.packed_usages) ? f.packed_usages
-                 : [];
-    let usageMinimum = f.usageMinimum !== undefined ? f.usageMinimum
-                     : f.usage_minimum !== undefined ? f.usage_minimum
-                     : undefined;
-    let usageMaximum = f.usageMaximum !== undefined ? f.usageMaximum
-                     : f.usage_maximum !== undefined ? f.usage_maximum
-                     : undefined;
-
-    if (isRange && usageMinimum == null && usageMaximum == null && usages.length > 1) {
-      const page = (usages[0] >> 16) & 0xFFFF;
-      const lo = usages[0] & 0xFFFF;
-      const hi = usages[usages.length - 1] & 0xFFFF;
-      usageMinimum = ((page << 16) | lo) >>> 0;
-      usageMaximum = ((page << 16) | hi) >>> 0;
-    }
-
-    return {
-      usages: isRange ? [] : usages,
-      usageMinimum: isRange ? (usageMinimum ?? 0) : undefined,
-      usageMaximum: isRange ? (usageMaximum ?? 0) : undefined,
-      reportSize: f.reportSize ?? f.size ?? f.size_bits ?? 0,
-      reportCount: f.reportCount ?? f.count ?? 0,
-      logicalMinimum: f.logicalMinimum ?? f.logical_minimum ?? 0,
-      logicalMaximum: f.logicalMaximum ?? f.logical_maximum ?? 0,
-      physicalMinimum: f.physicalMinimum ?? f.physical_minimum ?? 0,
-      physicalMaximum: f.physicalMaximum ?? f.physical_maximum ?? 0,
-      unitExponent: f.unitExponent ?? f.unit_exponent ?? 0,
-      unitSystem: f.unitSystem ?? f.unit_system ?? "none",
-      unitFactorLengthExponent: f.unitFactorLengthExponent ?? f.unit_factor_length_exponent ?? 0,
-      unitFactorMassExponent: f.unitFactorMassExponent ?? f.unit_factor_mass_exponent ?? 0,
-      unitFactorTimeExponent: f.unitFactorTimeExponent ?? f.unit_factor_time_exponent ?? 0,
-      unitFactorTemperatureExponent: f.unitFactorTemperatureExponent ?? f.unit_factor_temperature_exponent ?? 0,
-      unitFactorCurrentExponent: f.unitFactorCurrentExponent ?? f.unit_factor_current_exponent ?? 0,
-      unitFactorLuminousIntensityExponent: f.unitFactorLuminousIntensityExponent ?? f.unit_factor_luminous_intensity_exponent ?? 0,
-      isAbsolute: f.isAbsolute ?? f.is_absolute ?? false,
-      isArray: f.isArray ?? f.is_array ?? false,
-      isRange,
-      isConstant: f.isConstant ?? f.is_constant ?? false,
-      isLinear: f.isLinear ?? f.is_linear ?? false,
-      isVolatile: f.isVolatile ?? f.is_volatile ?? false,
-      isBufferedBytes: f.isBufferedBytes ?? f.is_buffered_bytes ?? false,
-      hasNull: f.hasNull ?? f.has_null ?? false,
-      hasPreferredState: f.hasPreferredState ?? f.has_preferred_state ?? false,
-      wrap: f.wrap ?? false,
-    };
-  }
-
-  function normalizeReport(r) {
-    return {
-      reportId: r.reportId ?? r.report_id ?? 0,
-      items: (r.items || r.fields || []).map(normalizeField),
-    };
-  }
-
-  function normalizeCollection(c) {
-    return {
-      type: c.type ?? c.collection_type ?? null,
-      usagePage: c.usagePage ?? c.usage_page ?? null,
-      usage: c.usage ?? null,
-      children: (c.children || []).map(normalizeCollection),
-      inputReports: (c.inputReports || []).map(normalizeReport),
-      outputReports: (c.outputReports || []).map(normalizeReport),
-      featureReports: (c.featureReports || []).map(normalizeReport),
-    };
-  }
-
   // ── Global device registry ────────────────────────────────────────────────
   // Tracks all HIDDevice instances so getDevices()/requestDevice() return
   // the SAME objects. Open state is shared across tabs (matches Chromium).
@@ -359,7 +282,7 @@
       this.#deviceId = null;
       this.#internalId = deviceInfo.device_id || null;
 
-      this.#parsedCollections = (deviceInfo.collections || []).map(normalizeCollection);
+      this.#parsedCollections = deviceInfo.collections || [];
 
       this.#maxInputReportSize = this.#calculateMaxInputReportSize();
     }

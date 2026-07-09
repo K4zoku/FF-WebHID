@@ -205,7 +205,6 @@ const NativeMessaging = {
 
   onMessage(message) {
     if (!message.event_type) return;
-    if (message.event_type === "input_report") return;
 
     const targets = tabsForEvent(message);
     const send = (tabId) => browser.tabs
