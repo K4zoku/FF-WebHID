@@ -1,7 +1,7 @@
 (async () => {
   const current = await browser.storage.local.get(__webhid.GLOBAL_DEFAULTS);
 
-  for (const key of ['perfLogging', 'fireAndForget', 'sabEnabled', 'dispatchDataView', 'daemonAsNmHost']) {
+  for (const key of ['perfLogging', 'fireAndForget', 'sabEnabled', 'daemonAsNmHost']) {
     document.getElementById(key).checked = current[key];
   }
   const sabInput = document.getElementById('sabCapacity');
@@ -48,7 +48,6 @@
     const isWs = plane === 'ws';
     document.getElementById('sabEnabled-row').style.display = isWs ? '' : 'none';
     document.getElementById('sabCapacity-row').style.display = (isWs && sabOn) ? '' : 'none';
-    document.getElementById('dispatchDataView-row').style.display = (isWs && sabOn) ? '' : 'none';
   }
 
   function showStatus(msg) {
@@ -58,7 +57,7 @@
     setTimeout(() => { el.style.display = 'none'; }, 1500);
   }
 
-  for (const key of ['perfLogging', 'fireAndForget', 'sabEnabled', 'dispatchDataView', 'daemonAsNmHost']) {
+  for (const key of ['perfLogging', 'fireAndForget', 'sabEnabled', 'daemonAsNmHost']) {
     document.getElementById(key).addEventListener('change', async (e) => {
       await browser.storage.local.set({ [key]: e.target.checked });
       showStatus(`${key} = ${e.target.checked}`);

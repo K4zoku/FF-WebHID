@@ -73,16 +73,6 @@
     </div>
   </div>
 </div>
-<div class="setting" id="dispatchDataView-row">
-  <div class="setting-info">
-    <h3>Dispatch DataView (zero-copy SAB drain)</h3>
-    <p>Dispatch <code>HIDInputReportEvent.data</code> as a <code>DataView</code> backed directly by the SharedArrayBuffer slot — no per-report allocation or copy. <strong>Warning</strong>: the event handler must not retain the <code>DataView</code> after returning, or data may be overwritten by the next report. Disable if a site misbehaves.</p>
-  </div>
-  <label class="toggle">
-    <input type="checkbox" id="dispatchDataView">
-    <span class="slider"></span>
-  </label>
-</div>
 <div class="setting">
   <div class="setting-info">
     <h3>Fire-and-forget sendReport</h3>

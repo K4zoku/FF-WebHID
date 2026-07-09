@@ -101,7 +101,6 @@
 
   const _defs = globalThis.__webhid.GLOBAL_DEFAULTS;
   let _dataPlane = _defs.dataPlane;
-  let _dispatchDataView = _defs.dispatchDataView;
   let _perfLogging = _defs.perfLogging;
   let _fireAndForget = _defs.fireAndForget;
 
@@ -130,7 +129,6 @@
     if (event.data.__webhid_bridge === "settings") {
       const s = event.data.settings;
       if (s.dataPlane !== undefined) { _dataPlane = s.dataPlane; __webhid.logger.info('[webhid] data plane changed: ' + _dataPlane); }
-      if (s.dispatchDataView !== undefined) _dispatchDataView = s.dispatchDataView;
       if (s.fireAndForget !== undefined) { _fireAndForget = s.fireAndForget; __webhid.logger.info('[webhid] fire-and-forget: ' + _fireAndForget); }
       if (s.logLevel !== undefined && __webhid.logger.applyLevel) __webhid.logger.applyLevel(s.logLevel);
       if (s.perfLogging !== undefined) _perfLogging = s.perfLogging;
@@ -158,7 +156,6 @@
   sendRequest("getSettings", {}).then((s) => {
     if (!s) return;
     if (s.dataPlane !== undefined) _dataPlane = s.dataPlane;
-    if (s.dispatchDataView !== undefined) _dispatchDataView = s.dispatchDataView;
     if (s.fireAndForget !== undefined) _fireAndForget = s.fireAndForget;
     if (s.logLevel !== undefined && __webhid.logger.applyLevel) __webhid.logger.applyLevel(s.logLevel);
     if (s.perfLogging !== undefined) _perfLogging = s.perfLogging;
@@ -565,6 +562,7 @@
     let tail    = Atomics.load(meta, 1);
     let lastDropped = Atomics.load(meta, 2);
     let generation = 0;
+    let _drainBuf = null;
 
     const _yieldChan = new MessageChannel();
     let _yieldCb = null;
@@ -586,14 +584,12 @@
         }
         const reportId  = reports[slotOffset + 2];
         const payloadLen = storedLen - 1;
-        let dataView;
-        if (_dispatchDataView) {
-          dataView = new DataView(reports.buffer, reports.byteOffset + slotOffset + 3, payloadLen);
-        } else {
-          const payload = new Uint8Array(payloadLen);
-          payload.set(reports.subarray(slotOffset + 3, slotOffset + 3 + payloadLen));
-          dataView = new DataView(payload.buffer, 0, payloadLen);
+        if (!_drainBuf || _drainBuf.byteLength < payloadLen) {
+          _drainBuf = new ArrayBuffer(Math.max(payloadLen, reportSize));
         }
+        const drainView = new Uint8Array(_drainBuf, 0, payloadLen);
+        drainView.set(reports.subarray(slotOffset + 3, slotOffset + 3 + payloadLen));
+        const dataView = new DataView(_drainBuf, 0, payloadLen);
         device.dispatchEvent(new HIDInputReportEvent('inputreport', {
           device,
           reportId,

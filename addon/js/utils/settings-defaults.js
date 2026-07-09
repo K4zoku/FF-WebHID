@@ -6,7 +6,6 @@ const GLOBAL_DEFAULTS = {
   controlPlane: 'nm',
   sabEnabled: true,
   sabCapacity: 8192,
-  dispatchDataView: false,
   logLevel: 1,
   daemonAsNmHost: false,
 };

@@ -794,7 +794,6 @@
     let ll = changes.logLevel?.newValue;
     let dp = changes.dataPlane?.newValue;
     let cp = changes.controlPlane?.newValue;
-    const ddv = changes.dispatchDataView?.newValue;
 
     // Check per-site settings changes (popup saves to `site:${origin}` key)
     const origin = window.location.origin;
@@ -843,11 +842,10 @@
       __webhid.logger.info('[bridge] data plane changed:', dp, 'open devices:', _openDevices.size);
     }
 
-    if (dp !== undefined || cp !== undefined || ddv !== undefined || ff !== undefined || pl !== undefined || ll !== undefined) {
+    if (dp !== undefined || cp !== undefined || ff !== undefined || pl !== undefined || ll !== undefined) {
       const settings = {};
       if (dp !== undefined) settings.dataPlane = dp;
       if (cp !== undefined) settings.controlPlane = cp;
-      if (ddv !== undefined) settings.dispatchDataView = ddv;
       if (ff !== undefined) settings.fireAndForget = ff;
       if (ll !== undefined) settings.logLevel = ll;
       if (pl !== undefined) settings.perfLogging = pl;
