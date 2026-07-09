@@ -236,10 +236,10 @@
           this.#sabDrainActive = true;
           if (!this.#inputLoopStarted) {
             this.#inputLoopStarted = true;
-            startInputReportLoop(this, detail.sab, detail.reportSize, detail.wakePort);
+            startInputReportLoop(this, detail.sab, detail.reportSize);
           } else {
             const updateFn = _sabUpdateFns.get(this);
-            if (updateFn) updateFn(detail.sab, detail.reportSize, detail.wakePort);
+            if (updateFn) updateFn(detail.sab, detail.reportSize);
           }
         } else if (detail.event_type === "webhid-sab-disabled") {
           // SAB unavailable (COOP/COEP blocked). Input reports arrive via
@@ -463,7 +463,7 @@
             if (evDeviceId && this.#deviceId && evDeviceId === this.#deviceId) {
               if (!this.#inputLoopStarted) {
                 this.#inputLoopStarted = true;
-                startInputReportLoop(this, detail.sab, detail.reportSize, detail.wakePort);
+                startInputReportLoop(this, detail.sab, detail.reportSize);
               }
             }
             return;
@@ -555,15 +555,13 @@
   }
 
   // SAB drain loop. Uses Atomics.waitAsync + generation counter for SAB swaps.
-  function startInputReportLoop(device, sab, reportSize, wakePort) {
+  function startInputReportLoop(device, sab, reportSize) {
     let meta    = new Int32Array(sab, 0, 3);
     let reports = new Uint8Array(sab, 12);
     let cap     = (sab.byteLength - 12) / reportSize;
     let tail    = Atomics.load(meta, 1);
     let lastDropped = Atomics.load(meta, 2);
     let generation = 0;
-    let _drainBuf = null;
-    let _wakePort = wakePort || null;
 
     const _yieldChan = new MessageChannel();
     let _yieldCb = null;
@@ -585,12 +583,9 @@
         }
         const reportId  = reports[slotOffset + 2];
         const payloadLen = storedLen - 1;
-        if (!_drainBuf || _drainBuf.byteLength < payloadLen) {
-          _drainBuf = new ArrayBuffer(Math.max(payloadLen, reportSize));
-        }
-        const drainView = new Uint8Array(_drainBuf, 0, payloadLen);
-        drainView.set(reports.subarray(slotOffset + 3, slotOffset + 3 + payloadLen));
-        const dataView = new DataView(_drainBuf, 0, payloadLen);
+        const payload = new Uint8Array(payloadLen);
+        payload.set(reports.subarray(slotOffset + 3, slotOffset + 3 + payloadLen));
+        const dataView = new DataView(payload.buffer, 0, payloadLen);
         device.dispatchEvent(new HIDInputReportEvent('inputreport', {
           device,
           reportId,
@@ -614,37 +609,27 @@
       const myGen = generation;
       const head = Atomics.load(meta, 0);
       if (head !== tail) drain();
-
-      if (_wakePort) {
-        _wakePort.onmessage = () => {
+      const result = Atomics.waitAsync(meta, 0, Atomics.load(meta, 0));
+      if (result.async) {
+        result.value.then(() => {
           if (myGen !== generation) return;
           drain();
           wait();
-        };
+        });
       } else {
-        const result = Atomics.waitAsync(meta, 0, Atomics.load(meta, 0));
-        if (result.async) {
-          result.value.then(() => {
-            if (myGen !== generation) return;
-            drain();
-            wait();
-          });
-        } else {
-          if (myGen !== generation) return;
-          drain();
-          requestAnimationFrame(() => { if (myGen !== generation) return; wait(); });
-        }
+        if (myGen !== generation) return;
+        drain();
+        requestAnimationFrame(() => { if (myGen !== generation) return; wait(); });
       }
     }
 
-    _sabUpdateFns.set(device, (newSab, newReportSize, newWakePort) => {
+    _sabUpdateFns.set(device, (newSab, newReportSize) => {
       meta = new Int32Array(newSab, 0, 3);
       reports = new Uint8Array(newSab, 12);
       reportSize = newReportSize;
       cap = (newSab.byteLength - 12) / reportSize;
       tail = Atomics.load(meta, 1);
       lastDropped = Atomics.load(meta, 2);
-      if (newWakePort) _wakePort = newWakePort;
       generation++;
       drain();
       wait();

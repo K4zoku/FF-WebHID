@@ -24,7 +24,6 @@ const SAB_AVAILABLE = typeof SharedArrayBuffer !== 'undefined';
 
 let CAPACITY = self.__webhid.GLOBAL_DEFAULTS.sabCapacity;
 let sab = null, meta = null, data = null, reportSize = 64, ws = null;
-let _wakePort = null;
 const _pending = new Map();
 let _nextReqId = 1;
 let _fireAndForget = self.__webhid.GLOBAL_DEFAULTS.fireAndForget;
@@ -36,7 +35,6 @@ const RESP_RECEIVE_FEATURE_REPORT = 0x83;
 
 self.onmessage = ({ data: msg }) => {
   if (msg.type === 'connect') return connect(msg);
-  if (msg.type === 'wakePort') { _wakePort = msg.port; return; }
   if (msg.type === 'settings') {
     if (msg.fireAndForget !== undefined) _fireAndForget = msg.fireAndForget !== false;
     if (msg.perfLogging !== undefined) { _perfLogging = msg.perfLogging === true; _applyPerf(); }
@@ -142,8 +140,7 @@ function pushInputBatch(batch) {
   }
   if (count > 0) {
     logger.debug('[worker] pushed ' + count + ' reports to SAB');
-    if (_wakePort) _wakePort.postMessage(0);
-    else Atomics.notify(meta, 0);
+    Atomics.notify(meta, 0);
   }
 }
 

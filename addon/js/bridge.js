@@ -478,8 +478,6 @@
         _workerReady.add(wid);
         __webhid.logger.info('[bridge] worker ready for', wid, data.sab ? '(SAB)' : '(postMessage fallback)');
         if (data.sab) {
-          const wakeChan = new MessageChannel();
-          worker.postMessage({ type: 'wakePort', port: wakeChan.port1 }, [wakeChan.port1]);
           window.postMessage({
             __webhid_bridge: 'evt',
             event: {
@@ -487,9 +485,8 @@
               device_id: wid,
               sab: data.sab,
               reportSize,
-              wakePort: wakeChan.port2,
             }
-          }, '*', [wakeChan.port2]);
+          }, '*');
         } else {
           window.postMessage({
             __webhid_bridge: 'evt',
