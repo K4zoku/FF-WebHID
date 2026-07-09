@@ -1,7 +1,6 @@
 (async () => {
-  const DEFAULTS = { fireAndForget: true, sabEnabled: true, sabCapacity: 8192 };
+  const DEFAULTS = { dataPlane: 'ws', sabEnabled: true, sabCapacity: 8192, fireAndForget: true };
 
-  // Get current tab URL
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
   let origin = '';
   if (tab && tab.url) {
@@ -16,11 +15,9 @@
   const siteLabel = document.getElementById('site-name');
   siteLabel.textContent = origin || '(no site)';
 
-  // Storage keys
   const siteKey = origin ? `site:${origin}` : null;
   const siteDevicesKey = origin ? encodeURIComponent(origin) : null;
 
-  // Load settings: site-specific overrides global defaults
   async function loadSettings() {
     const global = await browser.storage.local.get(DEFAULTS);
     if (!siteKey) return global;
@@ -37,6 +34,10 @@
   }
 
   const settings = await loadSettings();
+
+  const dataPlaneSelect = document.getElementById('dataPlane');
+  dataPlaneSelect.value = settings.dataPlane;
+
   document.getElementById('fireAndForget').checked = settings.fireAndForget;
   document.getElementById('sabEnabled').checked = settings.sabEnabled;
   const sabInput = document.getElementById('sabCapacity');
@@ -44,9 +45,6 @@
   sabInput.value = String(settings.sabCapacity);
   sabOutput.textContent = String(settings.sabCapacity);
   updateSabFill();
-
-  const sabCapacityRow = document.getElementById('sab-capacity-row');
-  sabCapacityRow.style.display = settings.sabEnabled ? '' : 'none';
 
   function updateSabOutput() {
     sabOutput.textContent = sabInput.value;
@@ -57,19 +55,31 @@
     sabInput.style.setProperty('--fill', ((val - 2048) / (32768 - 2048)) * 100 + '%');
   }
 
+  function updateCascadingVisibility() {
+    const isWs = dataPlaneSelect.value === 'ws';
+    const sabOn = document.getElementById('sabEnabled').checked;
+    document.getElementById('sabEnabled-row').style.display = isWs ? '' : 'none';
+    document.getElementById('sab-capacity-row').style.display = (isWs && sabOn) ? '' : 'none';
+  }
+
+  updateCascadingVisibility();
+
+  dataPlaneSelect.addEventListener('change', (e) => {
+    saveSetting('dataPlane', e.target.value);
+    updateCascadingVisibility();
+  });
   document.getElementById('fireAndForget').addEventListener('change', (e) => {
     saveSetting('fireAndForget', e.target.checked);
   });
   document.getElementById('sabEnabled').addEventListener('change', (e) => {
     saveSetting('sabEnabled', e.target.checked);
-    sabCapacityRow.style.display = e.target.checked ? '' : 'none';
+    updateCascadingVisibility();
   });
   sabInput.addEventListener('input', () => { updateSabOutput(); updateSabFill(); });
   sabInput.addEventListener('change', (e) => {
     saveSetting('sabCapacity', parseInt(e.target.value, 10));
   });
 
-  // Load saved devices for this site
   async function loadDevices() {
     if (!siteDevicesKey) return [];
     const result = await browser.storage.local.get(siteDevicesKey);
@@ -115,11 +125,9 @@
     }
     noDevices.style.display = 'none';
 
-    // Get device cache from background
     const response = await browser.runtime.sendMessage({ action: 'getDeviceCache' });
     const cache = (response && response.devices) || [];
 
-    // Get currently open device IDs from the tab's content script
     let openIds = new Set();
     try {
       const r = await browser.tabs.sendMessage(tab.id, { action: 'getOpenDeviceIds' });
@@ -144,9 +152,9 @@
 
       const name = dev ? (dev.product_name || dev.productName || 'Unknown') : 'Saved device';
       const type = guessDeviceType(name, dev?.usage_page, dev?.usage);
-      const vid = dev ? (dev.vendor_id || dev.vendorId || 0) : 0;
-      const pid = dev ? (dev.product_id || dev.productId || 0) : 0;
-      const manufacturer = dev ? (dev.manufacturer || dev.manufacturerName || '') : '';
+      const vid = dev ? (dev.vendor_id || d.vendorId || 0) : 0;
+      const pid = dev ? (dev.product_id || d.productId || 0) : 0;
+      const manufacturer = dev ? (dev.manufacturer || d.manufacturerName || '') : '';
 
       const card = document.createElement('div');
       card.className = 'device-card';

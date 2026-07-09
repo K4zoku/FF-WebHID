@@ -172,9 +172,9 @@
     }
     if (event.data.__webhid_bridge === "settings") {
       const s = event.data.settings;
-      if (s.dataPlane !== undefined) _dataPlane = s.dataPlane;
+      if (s.dataPlane !== undefined) { _dataPlane = s.dataPlane; logger.info('[webhid] data plane changed: ' + _dataPlane); }
       if (s.dispatchDataView !== undefined) _dispatchDataView = s.dispatchDataView;
-      if (s.fireAndForget !== undefined) _fireAndForget = s.fireAndForget;
+      if (s.fireAndForget !== undefined) { _fireAndForget = s.fireAndForget; logger.info('[webhid] fire-and-forget: ' + _fireAndForget); }
       if (s.logLevel !== undefined) _applyLoggerLevel(s.logLevel);
       if (s.perfLogging !== undefined) _perfLogging = s.perfLogging;
       _applyPerf();
@@ -203,6 +203,7 @@
     }
     if (s.perfLogging !== undefined) _perfLogging = s.perfLogging;
     _applyPerf();
+    logger.info('[webhid] data plane: ' + _dataPlane + ' (fire-and-forget: ' + _fireAndForget + ')');
   });
 
   // ── Event classes ────────────────────────────────────────────────────────
@@ -382,7 +383,7 @@
         if (response.success) {
           this.#opened = true;
           this.#deviceId = response.device_id;
-          logger.debug('[webhid] open deviceId=' + this.#deviceId);
+          logger.info('[webhid] open deviceId=' + this.#deviceId + ' dataPlane=' + _dataPlane);
           this.#installSabListener();
           this.dispatchEvent(new Event("open"));
           return true;
