@@ -532,6 +532,7 @@
         const s = await browser.storage.local.get({
           dataPlane: 'ws',
           dispatchDataView: false,
+          fireAndForget: true,
           logLevel: 1,
           perfLogging: false,
         });
@@ -826,10 +827,11 @@
       }
     }
 
-    if (dp !== undefined || ddv !== undefined || pl !== undefined || ll !== undefined) {
+    if (dp !== undefined || ddv !== undefined || ff !== undefined || pl !== undefined || ll !== undefined) {
       const settings = {};
       if (dp !== undefined) settings.dataPlane = dp;
       if (ddv !== undefined) settings.dispatchDataView = ddv;
+      if (ff !== undefined) settings.fireAndForget = ff;
       if (ll !== undefined) settings.logLevel = ll;
       if (pl !== undefined) settings.perfLogging = pl;
       window.postMessage({ __webhid_bridge: "settings", settings }, "*");

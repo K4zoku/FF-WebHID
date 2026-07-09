@@ -137,6 +137,7 @@
   let _dataPlane = 'ws';
   let _dispatchDataView = false;
   let _perfLogging = false;
+  let _fireAndForget = true;
 
   function _applyLoggerLevel(level) {
     if (typeof logger === 'undefined') return;
@@ -173,6 +174,7 @@
       const s = event.data.settings;
       if (s.dataPlane !== undefined) _dataPlane = s.dataPlane;
       if (s.dispatchDataView !== undefined) _dispatchDataView = s.dispatchDataView;
+      if (s.fireAndForget !== undefined) _fireAndForget = s.fireAndForget;
       if (s.logLevel !== undefined) _applyLoggerLevel(s.logLevel);
       if (s.perfLogging !== undefined) _perfLogging = s.perfLogging;
       _applyPerf();
@@ -194,6 +196,7 @@
     if (!s) return;
     if (s.dataPlane !== undefined) _dataPlane = s.dataPlane;
     if (s.dispatchDataView !== undefined) _dispatchDataView = s.dispatchDataView;
+    if (s.fireAndForget !== undefined) _fireAndForget = s.fireAndForget;
     if (s.logLevel !== undefined && typeof logger !== 'undefined') {
       logger._level = s.logLevel;
       _applyLoggerLevel(s.logLevel);
@@ -431,6 +434,15 @@
         const action = (_dataPlane === 'nm') ? "sendreport"
           : (this.#hotPath ? "worker-send" : "sendreport");
         logger.debug('[webhid] sendReport reportId=' + reportId + ' len=' + buffer.length + ' hotPath=' + this.#hotPath);
+        if (_dataPlane === 'nm' && _fireAndForget) {
+          sendRequest(action, {
+            device_id: this.#deviceId,
+            report_id: reportId,
+            data: buffer,
+          });
+          perf.end(t0, '[webhid] sendReport reportId=' + reportId);
+          return;
+        }
         const response = await sendRequest(action, {
           device_id: this.#deviceId,
           report_id: reportId,
@@ -492,6 +504,14 @@
       try {
         const action = (_dataPlane === 'nm') ? "sendfeaturereport"
           : (this.#hotPath ? "worker-sendFeature" : "sendfeaturereport");
+        if (_dataPlane === 'nm' && _fireAndForget) {
+          sendRequest(action, {
+            device_id: this.#deviceId,
+            report_id: reportId,
+            data: buffer,
+          });
+          return undefined;
+        }
         const response = await sendRequest(action, {
           device_id: this.#deviceId,
           report_id: reportId,
