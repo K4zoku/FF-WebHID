@@ -12,9 +12,14 @@ use tokio_tungstenite::tungstenite::Message;
 use crate::device_mgr::DeviceManager;
 use crate::hid;
 
-/// Default flush interval for batching input reports (milliseconds).
-/// 0 = flush immediately on receipt.
+/// Default flush policy: `0` = adaptive (drain + burst coalescing).
+/// Set `WEBHID_WS_BATCH_MS=N` (N > 0) to use a fixed N ms timer instead.
 const DEFAULT_BATCH_FLUSH_MS: u64 = 0;
+
+/// Coalescing window for adaptive burst batching (microseconds).
+/// When a burst is detected (>1 report drained in one cycle), the sender
+/// waits up to this duration for additional reports before flushing.
+const ADAPTIVE_COALESCE_US: u64 = 100;
 
 // ---------------------------------------------------------------------------
 // Wire format for client → daemon binary frames (page → device hot path)
@@ -221,6 +226,17 @@ async fn handle_websocket(
     });
 
     // --- Sender task ---
+    //
+    // Adaptive flushing (default, batch_ms == 0):
+    //   1. Block on recv() for the first report.
+    //   2. Drain all immediately-available reports via try_recv() (natural
+    //      coalescing from kernel poll).
+    //   3. If only 1 report was drained (sparse): flush immediately —
+    //      zero added latency.
+    //   4. If >1 reports were drained (burst): wait up to ADAPTIVE_COALESCE_US
+    //      for more, drain again, then flush — amortizes syscall overhead.
+    //
+    // Fixed-timer mode (batch_ms > 0): legacy behavior, flush every N ms.
     let tx_for_sender = tx.clone();
     let device_id_for_sender = device_id.clone();
     let batch_ms = std::env::var("WEBHID_WS_BATCH_MS")
@@ -230,16 +246,13 @@ async fn handle_websocket(
 
     let mut sender_task = tokio::spawn(async move {
         let mut batch: Vec<Vec<u8>> = Vec::with_capacity(8);
-        let mut flush_interval = if batch_ms > 0 {
-            Some(tokio::time::interval(Duration::from_millis(batch_ms)))
-        } else {
-            None
-        };
 
-        loop {
-            if let Some(ref mut interval) = flush_interval {
+        // Fixed-timer mode.
+        if batch_ms > 0 {
+            let mut flush_interval = tokio::time::interval(Duration::from_millis(batch_ms));
+            loop {
                 tokio::select! {
-                    _ = interval.tick() => {
+                    _ = flush_interval.tick() => {
                         if !batch.is_empty() {
                             let frame = create_batch_frame(&batch);
                             if tx_for_sender.send(Message::Binary(frame.into())).is_err() {
@@ -254,18 +267,43 @@ async fn handle_websocket(
                         }
                     }
                 }
-            } else {
-                let event_result = event_rx.recv().await;
-                if !handle_event(event_result, &device_id_for_sender, &mut batch, &tx_for_sender) {
+            }
+            return;
+        }
+
+        // Adaptive mode.
+        let coalesce = Duration::from_micros(ADAPTIVE_COALESCE_US);
+        loop {
+            // 1. Block for first event.
+            let event_result = event_rx.recv().await;
+            if !handle_event(event_result, &device_id_for_sender, &mut batch, &tx_for_sender) {
+                break;
+            }
+
+            // 2. Drain immediately-available events.
+            drain_available(&mut event_rx, &device_id_for_sender, &mut batch, &tx_for_sender);
+
+            // 3. Burst coalescing: if multiple reports accumulated, wait
+            //    briefly for more before flushing.
+            if batch.len() > 1 {
+                tokio::select! {
+                    _ = tokio::time::sleep(coalesce) => {}
+                    event_result = event_rx.recv() => {
+                        if !handle_event(event_result, &device_id_for_sender, &mut batch, &tx_for_sender) {
+                            break;
+                        }
+                        drain_available(&mut event_rx, &device_id_for_sender, &mut batch, &tx_for_sender);
+                    }
+                }
+            }
+
+            // 4. Flush.
+            if !batch.is_empty() {
+                let frame = create_batch_frame(&batch);
+                if tx_for_sender.send(Message::Binary(frame.into())).is_err() {
                     break;
                 }
-                if !batch.is_empty() {
-                    let frame = create_batch_frame(&batch);
-                    if tx_for_sender.send(Message::Binary(frame.into())).is_err() {
-                        break;
-                    }
-                    batch.clear();
-                }
+                batch.clear();
             }
         }
     });
@@ -321,6 +359,38 @@ fn handle_event(
         Err(broadcast::error::RecvError::Closed) => return false,
     }
     true
+}
+
+/// Drain all immediately-available events from the broadcast channel without
+/// blocking. Used by the adaptive sender to coalesce reports that arrived
+/// during the same poll iteration.
+fn drain_available(
+    rx: &mut broadcast::Receiver<webhid::IpcResponse>,
+    device_id: &str,
+    batch: &mut Vec<Vec<u8>>,
+    tx: &mpsc::UnboundedSender<Message>,
+) {
+    loop {
+        match rx.try_recv() {
+            Ok(ev) => {
+                if !handle_event(Ok(ev), device_id, batch, tx) {
+                    break;
+                }
+            }
+            Err(broadcast::error::TryRecvError::Empty) => break,
+            Err(broadcast::error::TryRecvError::Closed) => break,
+            Err(broadcast::error::TryRecvError::Lagged(n)) => {
+                log::warn!("[ws] drain lagged by {n} events");
+                if !batch.is_empty() {
+                    let frame = create_batch_frame(batch);
+                    if tx.send(Message::Binary(frame.into())).is_err() {
+                        break;
+                    }
+                    batch.clear();
+                }
+            }
+        }
+    }
 }
 
 fn create_batch_frame(reports: &[Vec<u8>]) -> Vec<u8> {
