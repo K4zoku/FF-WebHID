@@ -26,27 +26,22 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             arch: x86_64
             artifact_name: webhid-linux-x86_64
             apt_deps: libudev-dev zip
             rust_target: ""
-          - os: ubuntu-latest
+          - os: ubuntu-24.04-arm
             arch: aarch64
             artifact_name: webhid-linux-aarch64
-            apt_deps: libudev-dev zip gcc-aarch64-linux-gnu
-            rust_target: aarch64-unknown-linux-gnu
-          - os: windows-latest
-            arch: x86_64
-            artifact_name: webhid-windows-x86_64
+            apt_deps: libudev-dev zip
+            rust_target: ""
+          - os: windows-2022
+            arch: universal
+            artifact_name: webhid-windows
             apt_deps: ""
             rust_target: ""
-          - os: windows-latest
-            arch: aarch64
-            artifact_name: webhid-windows-aarch64
-            apt_deps: ""
-            rust_target: aarch64-pc-windows-msvc
-          - os: macos-latest
+          - os: macos-15
             arch: universal
             artifact_name: webhid-macos
             apt_deps: ""
@@ -57,28 +52,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
 
-      - name: Set up arm64 cross-compilation sources for libudev
-        if: runner.os == 'Linux' && matrix.rust_target == 'aarch64-unknown-linux-gnu'
-        run: |
-          sudo dpkg --add-architecture arm64
-          if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
-            sudo sed -i '/^Types:/a Architectures: amd64' /etc/apt/sources.list.d/ubuntu.sources
-          fi
-          CODENAME="$(lsb_release -cs)"
-          sudo tee /etc/apt/sources.list.d/arm64-ports.list >/dev/null <<EOF
-          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ ${CODENAME} main restricted universe multiverse
-          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ ${CODENAME}-updates main restricted universe multiverse
-          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ ${CODENAME}-security main restricted universe multiverse
-          EOF
-
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y ${{ matrix.apt_deps }}
-          if [ -n "${{ matrix.rust_target }}" ] && [ "${{ matrix.rust_target }}" = "aarch64-unknown-linux-gnu" ]; then
-            sudo apt-get install -y libudev-dev:arm64
-          fi
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -91,18 +69,12 @@ jobs:
           workspaces: crates -> target
 
       - name: Build Rust binaries
+        if: runner.os != 'macOS' && runner.os != 'Windows'
         run: |
           if [ -n "${{ matrix.rust_target }}" ]; then
-            if [ "${{ matrix.rust_target }}" = "aarch64-unknown-linux-gnu" ]; then
-              export PKG_CONFIG_ALLOW_CROSS=1
-              export PKG_CONFIG_LIBDIR=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig
-              export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
-              export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
-              export CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++
-            fi
             cargo build --release --target ${{ matrix.rust_target }} --manifest-path crates/Cargo.toml
           else
-            make build
+            cargo build --release --manifest-path crates/Cargo.toml
           fi
         shell: bash
 
@@ -173,19 +145,27 @@ jobs:
           stage_macos "crates/target/aarch64-apple-darwin/release" "artifacts-aarch64"
           stage_macos "crates/target/universal-apple-darwin/release" "artifacts-universal"
 
+      - name: Build Windows binaries (both archs)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          rustup target add x86_64-pc-windows-msvc aarch64-pc-windows-msvc
+          cargo build --release `
+            --target x86_64-pc-windows-msvc --target aarch64-pc-windows-msvc `
+            --manifest-path crates/Cargo.toml
+
       - name: Prepare Artifacts (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path artifacts-portable/bin, artifacts-portable/manifests
-          if ("${{ matrix.rust_target }}") {
-            $binDir = "crates/target/${{ matrix.rust_target }}/release"
-          } else {
-            $binDir = "crates/target/release"
+          function Stage-Windows($binDir, $outDir) {
+            New-Item -ItemType Directory -Force -Path "$outDir/bin", "$outDir/manifests" | Out-Null
+            Copy-Item "$binDir/webhid-daemon.exe" "$outDir/bin/"
+            Copy-Item "$binDir/webhid-native-messaging.exe" "$outDir/bin/"
+            Copy-Item manifests/webhid-native-messaging-host.json "$outDir/manifests/webhid-native-messaging-host.json"
           }
-          Copy-Item "$binDir/webhid-daemon.exe" artifacts-portable/bin/
-          Copy-Item "$binDir/webhid-native-messaging.exe" artifacts-portable/bin/
-          Copy-Item manifests/webhid-native-messaging-host.json artifacts-portable/manifests/webhid-native-messaging-host.json
+          Stage-Windows "crates/target/x86_64-pc-windows-msvc/release" "artifacts-portable-x86_64"
+          Stage-Windows "crates/target/aarch64-pc-windows-msvc/release" "artifacts-portable-aarch64"
 
       - name: Build MSI (Windows)
         if: runner.os == 'Windows'
@@ -194,21 +174,36 @@ jobs:
           dotnet tool install --global wix --version 6.0.2
           $env:PATH = "$env:USERPROFILE\.dotnet\tools;$env:PATH"
           $pkg = Get-Content package.json -Raw | ConvertFrom-Json
-          ./packaging/windows/build-msi.ps1 -Version $pkg.version -Arch ${{ matrix.arch }} -OutputDir artifacts-msi
+          ./packaging/windows/build-msi.ps1 -Version $pkg.version -Arch x86_64 -OutputDir artifacts-msi-x86_64
+          ./packaging/windows/build-msi.ps1 -Version $pkg.version -Arch aarch64 -OutputDir artifacts-msi-aarch64
 
-      - name: Upload Portable Artifacts (Windows)
+      - name: Upload Windows x86_64 portable
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.artifact_name }}
-          path: artifacts-portable/
+          name: webhid-windows-x86_64
+          path: artifacts-portable-x86_64/
 
-      - name: Upload MSI Artifacts (Windows)
+      - name: Upload Windows x86_64 MSI
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.artifact_name }}-msi
-          path: artifacts-msi/
+          name: webhid-windows-x86_64-msi
+          path: artifacts-msi-x86_64/
+
+      - name: Upload Windows aarch64 portable
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v7
+        with:
+          name: webhid-windows-aarch64
+          path: artifacts-portable-aarch64/
+
+      - name: Upload Windows aarch64 MSI
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v7
+        with:
+          name: webhid-windows-aarch64-msi
+          path: artifacts-msi-aarch64/
 
       - name: Upload Artifacts (Linux)
         if: runner.os == 'Linux'
