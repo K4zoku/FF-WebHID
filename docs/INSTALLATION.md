@@ -301,3 +301,53 @@ Then install the [browser extension](https://addons.mozilla.org/en-US/firefox/ad
 - **"Permission denied"** (Linux non-root): udev rule not installed. Run `sudo make install-udev-rule` or copy `99-webhid.rules` manually.
 - **Device picker shows "No HID devices found"**: daemon running but no HID devices detected. Check `hidapi` can enumerate: `ls /dev/hidraw*` (Linux).
 - **Site breaks after enabling SAB**: COOP/COEP conflict. Disable SAB Data Plane in the addon popup settings.
+- **Badge counter not showing**: ensure the device is opened via `navigator.hid.requestDevice()` — the counter tracks open devices, not paired ones.
+- **NM data plane is slow**: enable Fire-and-forget in settings. If still slow, switch Data Plane to WebSocket.
+
+## Recommended Settings per Platform
+
+### Linux
+
+| Setting | Recommended | Reason |
+|---------|------------|--------|
+| Daemon as NM host | ON (if running as user daemon) | Eliminates forwarder process + Unix socket |
+| Control Plane | WS | After NM handshake, control ops via WS text frames (5–15ms vs 15–40ms) |
+| Data Plane | WS (default) | Binary WS + SAB for max performance. Switch to NM if site breaks COOP/COEP |
+| SAB | ON | Zero-copy input reports via SharedArrayBuffer |
+| Fire-and-forget | ON | Page latency <0.1ms for sendReport |
+
+**Setup**: Install udev rule + daemon. If using daemon-as-NM-host, install `webhid.daemon_nm_host` manifest via `make install-daemon-nm-host-user`.
+
+### Windows
+
+| Setting | Recommended | Reason |
+|---------|------------|--------|
+| Daemon as NM host | OFF | Windows NM host requires `.exe` in path field — daemon-as-NM-host not available |
+| Control Plane | NM (default) | WS control works but NM is simpler on Windows (no udev needed) |
+| Data Plane | WS (default) | Binary WS + SAB for performance |
+| SAB | ON | Zero-copy input reports |
+| Fire-and-forget | ON | Page latency <0.1ms |
+
+**Setup**: Install MSI or portable zip. The installer auto-registers NM host + creates a Scheduled Task for the daemon.
+
+### macOS
+
+| Setting | Recommended | Reason |
+|---------|------------|--------|
+| Daemon as NM host | ON (if user daemon) | Eliminates forwarder + Unix socket |
+| Control Plane | WS | Control ops via WS after handshake |
+| Data Plane | WS (default) | SAB works well on macOS, no COOP/COEP issues typically |
+| SAB | ON | Zero-copy input reports |
+| Fire-and-forget | ON | Page latency <0.1ms |
+
+**Setup**: Install via Homebrew (`brew install webhid`) or manual. Grant HID permissions in System Settings → Privacy & Security if prompted.
+
+### Benchmarking / Debugging
+
+| Setting | Recommended | Reason |
+|---------|------------|--------|
+| Data Plane | NM | Isolates NM path performance (no worker/WS/SAB overhead) |
+| Control Plane | NM | Isolates NM control path |
+| Fire-and-forget | OFF | Measure actual NM roundtrip latency |
+| Log Level | Debug | See all message timings |
+| Performance timing | ON | Per-sendReport latency in console |

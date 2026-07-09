@@ -1,6 +1,6 @@
 # FF-WebHID — Data Path Analysis
 
-> Codebase: `84329e0`
+> Codebase: `6cec6bd` — control plane WS + data plane switcher + early fire-and-forget
 
 ---
 
@@ -26,7 +26,8 @@
 | `runtime.sendMessage` (B↔G) | 1 clone + IPC marshal | 1 process boundary | 50–200 μs |
 | `connectNative.postMessage` (G→N) | 1 JSON serialize + pipe write | 1 process spawn/pipe | 30–100 μs |
 | Unix socket write+read (N↔D, loopback) | 2 kernel copies | 1 process boundary | 5–15 μs |
-| WebSocket send+recv (W↔D, TCP loopback) | 1 WS encode + 2 kernel copies | 1 process boundary | 10–30 μs |
+| WebSocket send+recv (W↔D or B↔D, TCP loopback) | 1 WS encode + 2 kernel copies | 1 process boundary | 10–30 μs |
+| WS text frame (JSON control) | 1 JSON serialize/parse | 1 process boundary | 10–30 μs |
 | `JSON.stringify`/`parse` (small obj) | 1 alloc | — | 1–5 μs |
 | base64 encode/decode (64 B) | 1 alloc (+33% size) | — | 0.5–2 μs |
 | `spawn_blocking` thread switch | 0 (Arc move) | 1 thread pool dispatch | 5–20 μs |
@@ -52,13 +53,15 @@
 | I | Input report | WS + SAB | hidraw→D→WS→W→SAB→P |
 | J | Input report | WS, postMessage fallback | hidraw→D→WS→W→postMessage→B→P |
 | K | Input report | NM | hidraw→D→NM→G→B→P |
-| L | `enumerate` | — | P→B→G→NM→D→hidapi→NM→G→B→P |
-| M | `open` | — | P→B→G→NM→D→hidapi→NM→G→B→P + worker spawn + WS connect |
-| N | `close` | — | P→B→G→NM→D→NM→G→B→P + worker terminate |
+| L | `enumerate` | Control=NM | P→B→G→NM→D→hidapi→NM→G→B→P |
+| L2 | `enumerate` | Control=WS | P→B→WS(text)→D→hidapi→WS(text)→B→P |
+| M | `open` | Always NM | P→B→G→NM→D→hidapi→NM→G→B→P + worker/WS setup |
+| N | `close` | Control=NM | P→B→G→NM→D→NM→G→B→P + worker terminate |
+| N2 | `close` | Control=WS | P→B→WS(text)→D→WS(text)→B→P + worker terminate |
 | O | `requestDevice` | — | P→B (picker UI) → enumerate → user select → B→P |
 | P | `getDevices` | — | P→B→G→storage + enumerate (or cache hit) |
-| Q | `connect`/`disconnect` event | — | D→NM→G→B→P (tab-targeted) |
-| R | `handshake` event | — | D→NM→G→B (stores ws_port, broadcast) |
+| Q | `handshake` (NM) | — | B→G→NM→D→NM→G→B (returns control_token + ws_port) |
+| R | `connect`/`disconnect` event | — | D→NM→G→B→P (tab-targeted) |
 
 ---
 
@@ -78,24 +81,9 @@
 | 8 | `hid.rs` | `dev.write(&buf)` → hidraw | 1 (kernel) | 1 |
 | **Total** | | | **6** | **5** |
 
-**Page-side latency** (perf.begin → perf.end): **<0.1ms** — resolves immediately after `window.postMessage`, no callback wait.
+**Page-side latency**: **<0.1ms** — resolves immediately after `window.postMessage`, no callback wait.
 
-**End-to-end latency** (page → hidraw): **3–8ms** (WS encode + TCP + spawn_blocking + hidraw).
-
----
-
-### Path B — `sendReport` WS ack-wait
-
-Same as A steps 1–8, plus response:
-
-| Step | Location | Operation | Copies | Hops |
-|------|----------|-----------|--------|------|
-| 9 | `websocket.rs` | `make_status_resp` → `ws_sender.send` → D→W | 1 (alloc) + 1 (WS encode) + 1 (kernel) | 1 |
-| 10 | `worker.js` | `handleControlResponse` → `self.postMessage` → W→B | 1 (clone) | 1 |
-| 11 | `bridge.js` | `window.postMessage` → B→P | 1 (clone) | 1 |
-| **Total** | | | **6 + 5 = 11** | **5 + 3 = 8** |
-
-**Page-side latency**: **5–10ms** (full WS roundtrip).
+**End-to-end latency**: **3–8ms**.
 
 ---
 
@@ -112,129 +100,30 @@ Same as A steps 1–8, plus response:
 | 7 | `hid.rs` | `WRITE_BUF.extend` → `dev.write` | 1 (copy) + 1 (kernel) | 1 |
 | **Total** | | | **11** | **6** |
 
-**Page-side latency**: **<0.1ms** — resolves immediately after `window.postMessage`.
+**Page-side latency**: **<0.1ms**.
 
-**End-to-end latency**: **8–20ms** (NM pipe + JSON + base64 + hidraw).
-
----
-
-### Path D — `sendReport` NM ack-wait
-
-Same as C steps 1–7, plus response:
-
-| Step | Location | Operation | Copies | Hops |
-|------|----------|-----------|--------|------|
-| 8 | `client.rs` | `write_message` → JSON + base64 → socket → N | 1 (JSON) + 1 (b64) + 1 (kernel) | 1 |
-| 9 | NM host | `read_frame` → `write_vectored` → stdout → G | 2 (kernel) | 1 |
-| 10 | Firefox NM | JSON parse → clone → G | 1 (parse) + 1 (clone) | 1 |
-| 11 | `bridge.js` | `window.postMessage` → B→P | 1 (clone) | 1 |
-| **Total** | | | **11 + 8 = 19** | **6 + 4 = 10** |
-
-**Page-side latency**: **8–20ms** (full NM roundtrip).
-
----
-
-### Path E — `sendFeatureReport` WS fire-and-forget
-
-Identical to Path A.
-
-| Copies | Hops | Page latency | E2E latency |
-|--------|------|-------------|-------------|
-| 6 | 5 | <0.1ms | 3–8ms |
-
----
-
-### Path F — `sendFeatureReport` NM fire-and-forget
-
-Identical to Path C.
-
-| Copies | Hops | Page latency | E2E latency |
-|--------|------|-------------|-------------|
-| 11 | 6 | <0.1ms | 8–20ms |
-
----
-
-### Path G — `receiveFeatureReport` WS (roundtrip)
-
-#### Request (P → D)
-
-| Step | Location | Operation | Copies | Hops |
-|------|----------|-----------|--------|------|
-| 1 | `polyfill.js` | `sendRequest("worker-receiveFeature")` → P→B | 1 (clone, small obj) | 1 |
-| 2 | `bridge.js` | `worker.postMessage(wMsg)` → B→W | 1 (clone) | 1 |
-| 3 | `worker.js` | `frame = new Uint8Array(6); ws.send(frame)` → W→D | 1 (WS encode) + 1 (kernel) | 1 |
-| 4 | `websocket.rs` | `spawn_blocking` → `hid::read_feature_report` | 1 (kernel read) | 1 |
-| 5 | `hid.rs` | `dev.get_feature_report` → `buf[..n].to_vec()` | 1 (copy) | 0 |
-
-#### Response (D → P)
-
-| Step | Location | Operation | Copies | Hops |
-|------|----------|-----------|--------|------|
-| 6 | `websocket.rs` | `make_feature_read_resp` → frame | 1 (alloc+copy) | 0 |
-| 7 | `websocket.rs` | `ws_sender.send` → D→W | 1 (WS encode) + 1 (kernel TCP) | 1 |
-| 8 | `worker.js` | `new Uint8Array(frame)` → `handleControlResponse` | 1 (kernel→JS) | 0 |
-| 9 | `worker.js` | `out = new Uint8Array(len); out.set(subarray)` | 1 (alloc+copy) | 0 |
-| 10 | `worker.js` | `self.postMessage(data, [data.buffer])` → W→B | 0 (transfer) | 1 |
-| 11 | `bridge.js` | `window.postMessage(result, [data.buffer])` → B→P | 0 (transfer) | 1 |
-| 12 | `polyfill.js` | `buf = response.data` (already transferred) | 0 | 0 |
-| **Total** | | | **10** | **7** |
-
-**Page-side latency**: **6–12ms** (full roundtrip).
-
----
-
-### Path H — `receiveFeatureReport` NM (roundtrip)
-
-| Direction | Copies | Hops | Key ops |
-|-----------|--------|------|---------|
-| Request P→D | 6 | 4 | clone×2, JSON serialize, kernel pipe+socket, JSON parse |
-| Daemon read | 2 | 1 | kernel read, to_vec |
-| Response D→P | 8 | 4 | JSON+base64, kernel socket+pipe, JSON parse, clone×3, base64 decode |
-| **Total** | **16** | **9** | |
-
-**Page-side latency**: **15–30ms**.
+**End-to-end latency**: **8–20ms**.
 
 ---
 
 ### Path I — Input report WS + SAB (adaptive batching)
 
-The daemon's WS sender uses adaptive flushing: block on `recv()` for first report, drain available via `try_recv()`, flush immediately if 1 report (sparse) or coalesce with 100μs window if burst.
-
 | Step | Location | Operation | Copies | Hops |
 |------|----------|-----------|--------|------|
-| 1 | `device_mgr.rs` | `dev.read_timeout` → `Arc::from(&buf[1..])` | 1 (kernel) + 0 (Arc) | 1 (device→thread) |
-| 2 | `device_mgr.rs` | `tx.send(IpcResponse::InputReport{data: Arc})` → broadcast | 0 (Arc move) | 1 (broadcast) |
-| 3 | `websocket.rs` | `event_rx.recv()` → `batch.push((report_id, data))` | 0 (Arc clone = refcount) | 0 |
+| 1 | `device_mgr.rs` | `dev.read_timeout` → `Arc::from(&buf[1..])` | 1 (kernel) + 0 (Arc) | 1 |
+| 2 | `device_mgr.rs` | `tx.send(IpcResponse::InputReport{data: Arc})` → broadcast | 0 (Arc move) | 1 |
+| 3 | `websocket.rs` | `event_rx.recv()` → `batch.push((report_id, data))` | 0 (Arc clone) | 0 |
 | 4 | `websocket.rs` | `create_batch_frame` — prepend report_id + extend data | 1 (alloc+N×copy) | 0 |
 | 5 | `websocket.rs` | `ws_sender.send` → D→W | 1 (WS encode) + 1 (kernel TCP) | 1 |
-| 6 | `worker.js` | `new Uint8Array(frame)` | 1 (kernel→JS) | 0 |
-| 7 | `worker.js` | `data.set(subarray, slotStart+2)` → SAB slot | 1 (copy per report) | 0 |
-| 8 | `worker.js` | `Atomics.store + Atomics.notify` | 0 | 1 (wake) |
-| 9 | `polyfill.js` | `Atomics.waitAsync` resolves → drain | 0 | 1 (wake) |
-| 10 | `polyfill.js` | `new Uint8Array(reports.subarray(...))` → copy | 1 (alloc+copy per report) | 0 |
+| 6 | `worker.js` | `new Uint8Array(frame)` → SAB slot write | 1 (kernel→JS) + 1 (copy) | 0 |
+| 7 | `worker.js` | `Atomics.store + Atomics.notify` | 0 | 1 (wake) |
+| 8 | `polyfill.js` | `Atomics.waitAsync` resolves → drain → copy | 1 (alloc+copy per report) | 1 (wake) |
 | **Total (1 report)** | | | **8** | **5** |
-| **Total (N reports, burst)** | | | **6 + 2N** (amortized) | **5** |
 
-| Polling rate | Est. page latency | Frame rate | Added latency |
-|-------------|-------------------|------------|---------------|
-| 1 kHz (sparse) | 1–5 ms | ~1000/s | 0 μs (immediate flush) |
-| 8 kHz (burst) | 1.1–5.1 ms | ~2000–4000/s | ≤100 μs (coalescing) |
-
----
-
-### Path J — Input report WS postMessage fallback (SAB unavailable at runtime)
-
-Same as Path I steps 1–6, then:
-
-| Step | Location | Operation | Copies | Hops |
-|------|----------|-----------|--------|------|
-| 7 | `worker.js` | `buf = new ArrayBuffer(len); .set(subarray)` | 1 (alloc+copy) | 0 |
-| 8 | `worker.js` | `self.postMessage({data:buf}, [buf])` → W→B | 0 (transfer) | 1 |
-| 9 | `bridge.js` | `window.postMessage({data:buf}, '*', [buf])` → B→P | 0 (transfer) | 1 |
-| 10 | `polyfill.js` | `new Uint8Array(detail.data)` — view on transferred buffer | 0 (view) | 0 |
-| **Total** | | | **7** | **6** |
-
-**Page-side latency**: **2–6 ms**.
+| Polling rate | Est. latency | Added latency |
+|-------------|-------------|---------------|
+| 1 kHz (sparse) | 1–5 ms | 0 μs (immediate flush) |
+| 8 kHz (burst) | 1.1–5.1 ms | ≤100 μs (coalescing) |
 
 ---
 
@@ -243,55 +132,56 @@ Same as Path I steps 1–6, then:
 | Step | Location | Operation | Copies | Hops |
 |------|----------|-----------|--------|------|
 | 1–2 | daemon | Same as I steps 1–2 | 1 (kernel) + 0 (Arc) | 2 |
-| 3 | `client.rs` | `ipc_event_to_nm` → `data.to_vec()` (Arc → Vec for NM JSON) | 1 (clone) | 0 |
-| 4 | `client.rs` | `write_message` → JSON serialize + base64 encode | 1 (JSON) + 1 (b64) | 0 |
-| 5 | `client.rs` | `writer.write_all` → socket → N | 1 (kernel) | 1 |
-| 6 | NM host | `read_frame` → `write_vectored` → stdout → G | 2 (kernel) | 1 |
-| 7 | Firefox NM | JSON parse → clone → G | 1 (parse) + 1 (clone) | 1 |
-| 8 | `background.js` | `tabs.sendMessage` → G→B (tab-targeted) | 1 (clone+IPC) | 1 |
-| 9 | `bridge.js` | `window.postMessage` → B→P | 1 (clone) | 1 |
-| 10 | `polyfill.js` | `base64Decode(detail.data)` | 1 (decode) | 0 |
+| 3 | `client.rs` | `ipc_event_to_nm` → `data.to_vec()` | 1 (clone) | 0 |
+| 4 | `client.rs` | `write_message` → JSON + base64 | 1 (JSON) + 1 (b64) | 0 |
+| 5–6 | NM host + Firefox NM | socket → stdout → JSON parse → clone → G | 2 (kernel) + 1 (parse) + 1 (clone) | 2 |
+| 7 | `background.js` | `tabs.sendMessage` → G→B | 1 (clone+IPC) | 1 |
+| 8 | `bridge.js` | `window.postMessage` → B→P | 1 (clone) | 1 |
+| 9 | `polyfill.js` | `base64Decode(detail.data)` | 1 (decode) | 0 |
 | **Total** | | | **12** | **7** |
 
-**Page-side latency**: **8–18 ms**.
+**Latency**: **8–18 ms**.
 
 ---
 
-### Path L — `enumerate` (control plane roundtrip)
+### Path L2 — `enumerate` via WS control plane
 
-| Direction | Copies | Hops | Key ops |
-|-----------|--------|------|---------|
-| Request P→D | 5 | 4 | clone×2, JSON serialize, kernel pipe+socket |
-| Daemon enumerate | 0 | 1 | hidapi scan (opens every device for descriptor) |
-| Response D→P | 6 | 4 | JSON serialize, kernel socket+pipe, JSON parse, clone×2 |
-| **Total** | **11** | **9** | |
+| Step | Location | Operation | Copies | Hops |
+|------|----------|-----------|--------|------|
+| 1 | `polyfill.js` | `sendRequest("enumerate")` → P→B | 1 (clone, small obj) | 1 |
+| 2 | `bridge.js` | `_sendControlWs("enumerate")` → WS text frame → B→D | 1 (JSON serialize) | 1 |
+| 3 | `websocket.rs` | `handle_client_text` → `device_mgr.enumerate()` | 0 | 1 (hidapi) |
+| 4 | `websocket.rs` | `ws_sender.send(Text(json))` → D→B | 1 (JSON serialize) + 1 (kernel) | 1 |
+| 5 | `bridge.js` | `window.postMessage` → B→P | 1 (clone) | 1 |
+| **Total** | | | **5** | **5** |
 
-**Latency**: **15–40 ms**.
+**Latency**: **5–15 ms** (WS roundtrip + hidapi scan, no NM pipe).
 
 ---
 
-### Path M — `open`
+### Path M — `open` (always via NM)
 
 | Phase | Copies | Hops | Est. latency |
 |-------|--------|------|-------------|
-| Request P→D | 5 | 4 | 2–5 ms |
-| Daemon: hidapi open + reader thread spawn | 0 | 1 | 5–15 ms |
-| Response D→P | 6 | 4 | 2–5 ms |
-| Worker spawn + WS connect + SAB creation | 1 | 2 | 5–15 ms |
+| Request P→D (NM) | 5 | 4 | 2–5 ms |
+| Daemon: hidapi open + reader thread | 0 | 1 | 5–15 ms |
+| Response D→P (NM) | 6 | 4 | 2–5 ms |
+| Worker spawn + WS connect + SAB (if WS data plane) | 1 | 2 | 5–15 ms |
 | `setdataplane` → daemon | 2 | 2 | 1–3 ms |
 | **Total** | **14** | **13** | **15–45 ms** |
 
 ---
 
-### Path N — `close`
+### Path Q — `handshake` (NM, returns control token + WS port)
 
-| Phase | Copies | Hops | Est. latency |
-|-------|--------|------|-------------|
-| Request P→D | 5 | 4 | 2–5 ms |
-| Daemon: close + stop reader | 0 | 1 | 1–3 ms |
-| Response D→P | 5 | 4 | 2–5 ms |
-| Worker terminate | 0 | 1 | 1–2 ms |
-| **Total** | **10** | **10** | **10–20 ms** |
+| Direction | Copies | Hops | Est. latency |
+|-----------|--------|------|-------------|
+| B→G→NM→D | 3 | 3 | 2–5 ms |
+| D generates control_token | 0 | 0 | <0.1 ms |
+| D→NM→G→B | 4 | 3 | 2–5 ms |
+| **Total** | **7** | **6** | **5–10 ms** |
+
+Bridge sends `handshake` on init, connects control WS immediately after.
 
 ---
 
@@ -304,14 +194,14 @@ Same as Path I steps 1–6, then:
 | `sendFeatureReport` (page-side) | **<0.1 ms** | **5–10 ms** | **<0.1 ms** | **8–20 ms** |
 | `receiveFeatureReport` | — | **6–12 ms** | — | **15–30 ms** |
 | Input report (delivery) | **1–5 ms** (SAB) / **2–6 ms** (postMessage) | — | **8–18 ms** (NM) | — |
-| `enumerate` | — | — | — | **15–40 ms** |
-| `open` | — | — | — | **15–45 ms** |
-| `close` | — | — | — | **10–20 ms** |
-| `requestDevice` | — | — | — | **15–40 ms** (+ user) |
+| `enumerate` (Control=NM) | — | — | — | **15–40 ms** |
+| `enumerate` (Control=WS) | — | **5–15 ms** | — | — |
+| `close` (Control=NM) | — | — | — | **10–20 ms** |
+| `close` (Control=WS) | — | **3–8 ms** | — | — |
+| `open` (always NM) | — | — | — | **15–45 ms** |
+| `handshake` (NM) | — | — | — | **5–10 ms** |
 | `getDevices` (cache hit) | **<0.1 ms** | — | **<0.1 ms** | — |
 | `getDevices` (cache miss) | — | — | — | **15–40 ms** |
-| `connect`/`disconnect` event | — | — | — | **8–18 ms** |
-| `handshake` event | — | — | — | **5–15 ms** |
 
 ---
 
@@ -323,20 +213,19 @@ Same as Path I steps 1–6, then:
 | B: sendReport WS ack | 11 | 8 | WS roundtrip + worker→bridge→page |
 | C: sendReport NM faf | 11 | 6 | runtime.sendMessage + JSON/base64 + NM pipe |
 | D: sendReport NM ack | 19 | 10 | Full NM roundtrip + JSON + base64 |
-| E: sendFeature WS faf | 6 | 5 | Same as A |
-| F: sendFeature NM faf | 11 | 6 | Same as C |
-| G: receiveFeature WS | 10 | 7 | Roundtrip + 4 response copies |
-| H: receiveFeature NM | 16 | 9 | Roundtrip + JSON + base64 |
-| I: Input SAB | 8 (1 report) / ~2N+6 (burst) | 5 | SAB drain alloc + broadcast |
+| I: Input SAB | 8 | 5 | SAB drain alloc + broadcast |
 | J: Input postMessage | 7 | 6 | Transfer eliminates 2 clones |
 | K: Input NM | 12 | 7 | JSON + base64 + tabs.sendMessage |
-| L: enumerate | 11 | 9 | hidapi scan (opens every device) |
+| L: enumerate (NM) | 11 | 9 | hidapi scan |
+| L2: enumerate (WS) | 5 | 5 | hidapi scan (no NM pipe) |
 | M: open | 14 | 13 | hidapi open + worker spawn + WS + setdataplane |
-| N: close | 10 | 10 | NM roundtrip |
+| N: close (NM) | 10 | 10 | NM roundtrip |
+| N2: close (WS) | 4 | 5 | WS text roundtrip |
+| Q: handshake | 7 | 6 | NM roundtrip (one-time, on init) |
 
 ---
 
-## 7. Daemon Optimizations in Place
+## 7. Optimizations in Place
 
 | Optimization | Location | Effect |
 |-------------|----------|--------|
@@ -346,29 +235,29 @@ Same as Path I steps 1–6, then:
 | Adaptive WS flush (100μs coalescing) | `websocket.rs` | 0 latency for sparse, ≤100μs for bursts |
 | Binary WS protocol (not JSON) | `websocket.rs` + `worker.js` | No JSON overhead on data plane |
 | SAB ring buffer for input reports | `worker.js` + `polyfill.js` | Zero-copy W→P via `Atomics.notify` |
-| Fire-and-forget resolves after `window.postMessage` (not worker ack) | `polyfill.js` | Page latency <0.1ms for both WS and NM |
+| Early fire-and-forget (resolve after `window.postMessage`) | `polyfill.js` + `bridge.js` | Page latency <0.1ms for both WS and NM |
+| Control plane WS (text frames for enumerate/close) | `bridge.js` + `websocket.rs` | Eliminates NM roundtrip for control ops |
+| Control token (separate from device session token) | `device_mgr.rs` + `types.rs` | Control WS connects without device open |
 | Thread-local buffers in daemon | `hid.rs` (`WRITE_BUF`, `READ_BUF`) | Avoids per-call allocation |
-| DataPlane mode per device | `device_mgr.rs` | Events only sent to requested channel (NM or WS) |
+| DataPlane mode per device | `device_mgr.rs` | Events only sent to requested channel |
 | Tab-targeted event delivery | `background.js` | Eliminates N× `tabs.sendMessage` |
 | ArrayBuffer transfer (P→B, B→W, W→B, B→P) | `polyfill.js`, `bridge.js`, `worker.js` | Zero-copy realm hops for binary data |
-| Base64 for NM binary data | `types.rs` (`base64_serde`) | ~40–55% smaller than number-array |
+| Open device tracking independent of workers | `bridge.js` (`_openDevices` Set) | Badge counter works in NM mode |
 
 ---
 
 ## 8. Key Findings
 
-1. **Fire-and-forget page latency is now <0.1ms for both WS and NM** — polyfill resolves immediately after `window.postMessage`, no callback/ack wait. End-to-end latency (page → hidraw) differs: WS 3–8ms, NM 8–20ms.
+1. **Fire-and-forget page latency is <0.1ms for both WS and NM** — polyfill resolves immediately after `window.postMessage`, no callback/ack wait.
 
-2. **WS data plane is faster end-to-end** for sendReport (3–8ms vs 8–20ms) and input reports (1–5ms vs 8–18ms) due to binary WS + SAB vs JSON+base64+NM pipe.
+2. **Control plane WS reduces enumerate/close latency** from 15–40ms (NM) to 5–15ms (WS text frame roundtrip, no NM pipe).
 
-3. **NM data plane has fewer hops from page perspective** (no worker spawn, no SAB setup) — lower setup latency, simpler plumbing.
+3. **Control token enables early WS connection** — bridge sends `handshake` on init, gets control_token + ws_port, connects control WS before any device is opened.
 
-4. **`receiveFeatureReport` is the most expensive hot-path operation**: 10 copies (WS) / 16 copies (NM) due to full roundtrip + response-side serialization.
+4. **Open device tracking is independent of workers** — `_openDevices` Set tracks all open devices regardless of data plane mode, fixing badge counter in NM mode.
 
-5. **SAB drain allocates per report** (`polyfill.js`): `new Uint8Array(subarray)` per input report at 8kHz = 8000 allocs/s. Dispatch DataView optimization (zero-copy) is possible but requires careful lifecycle management.
+5. **WS data plane is faster end-to-end** for sendReport (3–8ms vs 8–20ms) and input reports (1–5ms vs 8–18ms).
 
-6. **Control plane (enumerate/open/close) is inherently slow** (~15–40ms) due to `runtime.sendMessage` overhead × 2 + NM JSON roundtrip.
+6. **Adaptive batching** keeps latency low for sparse reports (0μs) while amortizing syscalls during bursts (≤100μs).
 
-7. **Adaptive batching keeps latency low for sparse reports** while amortizing syscalls during bursts — 1kHz devices see 0μs added, 8kHz bursts coalesce 2–4 reports per frame with ≤100μs.
-
-8. **Daemon no longer broadcasts to both channels** — `dataplane_mode` per device ensures events go only to the requested channel (NM or WS), eliminating duplicate delivery.
+7. **Daemon no longer broadcasts to both channels** — `dataplane_mode` per device ensures events go only to the requested channel.
