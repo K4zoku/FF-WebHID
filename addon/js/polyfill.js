@@ -214,16 +214,11 @@
     #oninputreportListener = null;
     #parsedCollections = null;
     #opened = false;
-    #hotPath = false;
     #sabListener = null;
     #inputLoopStarted = false;
     #sabDrainActive = false;
     #deviceId = null;
     #internalId = null;
-    #manufacturer = null;
-    #serialNumber = null;
-    #usagePage = null;
-    #usage = null;
     #maxInputReportSize = 2048;
 
     #installSabListener() {
@@ -237,7 +232,6 @@
 
         if (detail.event_type === "webhid-sab") {
           // SAB path: start/update drain loop
-          this.#hotPath = true;
           this.#sabDrainActive = true;
           if (!this.#inputLoopStarted) {
             this.#inputLoopStarted = true;
@@ -247,10 +241,8 @@
             if (updateFn) updateFn(detail.sab, detail.reportSize);
           }
         } else if (detail.event_type === "webhid-sab-disabled") {
-          // SAB unavailable (COOP/COEP blocked). Enable hotPath for send/
-          // receive/feature routing via WS worker, but skip SAB drain loop.
-          // Input reports arrive via `input_report` events from the worker.
-          this.#hotPath = true;
+          // SAB unavailable (COOP/COEP blocked). Input reports arrive via
+          // `input_report` events from the worker.
           this.#sabDrainActive = false;
           this.#inputLoopStarted = true; // prevent SAB drain from starting later
         }
@@ -264,10 +256,6 @@
       this.vendorId = deviceInfo.vendor_id;
       this.productId = deviceInfo.product_id;
       this.productName = deviceInfo.product_name;
-      this.#manufacturer = deviceInfo.manufacturer || null;
-      this.#serialNumber = deviceInfo.serial_number || null;
-      this.#usagePage = deviceInfo.usage_page !== undefined ? deviceInfo.usage_page : null;
-      this.#usage = deviceInfo.usage !== undefined ? deviceInfo.usage : null;
       this.#deviceId = null;
       this.#internalId = deviceInfo.device_id || null;
 
@@ -308,19 +296,8 @@
     get opened() { return this.#opened; }
     get deviceId() { return this.#deviceId; }
 
-    // Return parsed collections (if available) or fallback to usage info.
     get collections() {
-      if (this.#parsedCollections) return this.#parsedCollections;
-      // Return a properly structured collection with empty report arrays
-      // to match the WebHID spec and prevent "items is undefined" errors
-      return [{
-        usagePage: this.#usagePage,
-        usage: this.usage,
-        inputReports: [],
-        outputReports: [],
-        featureReports: [],
-        children: []
-      }];
+      return this.#parsedCollections;
     }
 
     async open() {
@@ -358,7 +335,6 @@
         });
         if (response.success) {
           this.#opened = false;
-          this.#hotPath = false;
           this.#inputLoopStarted = false;
           this.#sabDrainActive = false;
           if (this.#sabListener) {
@@ -384,12 +360,8 @@
       const buffer = view.slice();
       const t0 = __webhid.perf.begin();
       try {
-        if (!this.#hotPath && this.#sabListener && _dataPlane !== 'nm') {
-          await this.#waitForHotPath(2000);
-        }
-        const action = (_dataPlane === 'nm') ? "sendreport"
-          : (this.#hotPath ? "worker-send" : "sendreport");
-        __webhid.logger.debug('[webhid] sendReport reportId=' + reportId + ' len=' + buffer.length + ' hotPath=' + this.#hotPath);
+        const action = _dataPlane === 'nm' ? "sendreport" : "worker-send";
+        __webhid.logger.debug('[webhid] sendReport reportId=' + reportId + ' len=' + buffer.length);
         if (_fireAndForget) {
           sendFireAndForget(action, {
             device_id: this.#deviceId,
@@ -414,26 +386,11 @@
       }
     }
 
-    #waitForHotPath(timeoutMs) {
-      return new Promise((resolve) => {
-        if (this.#hotPath) return resolve();
-        const start = Date.now();
-        const check = () => {
-          if (this.#hotPath) return resolve();
-          if (Date.now() - start >= timeoutMs) return resolve();
-          setTimeout(check, 10);
-        };
-        check();
-      });
-    }
-
     async receiveFeatureReport(reportId) {
       if (!this.opened)
         throw new DOMException("Device is not open", "InvalidStateError");
-      __webhid.logger.debug('[webhid] receiveFeatureReport reportId=' + reportId + ' hotPath=' + this.#hotPath);
       try {
-        const action = (_dataPlane === 'nm') ? "receivefeaturereport"
-          : (this.#hotPath ? "worker-receiveFeature" : "receivefeaturereport");
+        const action = _dataPlane === 'nm' ? "receivefeaturereport" : "worker-receiveFeature";
         const response = await sendRequest(action, {
           device_id: this.#deviceId,
           report_id: reportId,
@@ -456,10 +413,9 @@
         ? new Uint8Array(data)
         : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
       const buffer = view.slice();
-      __webhid.logger.debug('[webhid] sendFeatureReport reportId=' + reportId + ' len=' + buffer.length + ' hotPath=' + this.#hotPath);
+      __webhid.logger.debug('[webhid] sendFeatureReport reportId=' + reportId + ' len=' + buffer.length);
       try {
-        const action = (_dataPlane === 'nm') ? "sendfeaturereport"
-          : (this.#hotPath ? "worker-sendFeature" : "sendfeaturereport");
+        const action = _dataPlane === 'nm' ? "sendfeaturereport" : "worker-sendFeature";
         if (_fireAndForget) {
           sendFireAndForget(action, {
             device_id: this.#deviceId,
@@ -508,7 +464,6 @@
           // Handle SharedArrayBuffer loop initiation
           if (event_type === "webhid-sab") {
             if (evDeviceId && this.#deviceId && evDeviceId === this.#deviceId) {
-              this.#hotPath = true;
               if (!this.#inputLoopStarted) {
                 this.#inputLoopStarted = true;
                 startInputReportLoop(this, detail.sab, detail.reportSize);
