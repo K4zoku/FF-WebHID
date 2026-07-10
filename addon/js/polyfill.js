@@ -197,7 +197,7 @@
   const _deviceRegistry = new Map(); // internalId -> HIDDevice
 
   function getOrCreateDevice(deviceInfo) {
-    const id = deviceInfo.device_id;
+    const id = deviceInfo.deviceId;
     if (id && _deviceRegistry.has(id)) {
       return _deviceRegistry.get(id);
     }
@@ -220,14 +220,14 @@
 
     constructor(deviceInfo) {
       super();
-      this.vendorId = deviceInfo.vendor_id;
-      this.productId = deviceInfo.product_id;
-      this.productName = deviceInfo.product_name;
-      this.#deviceId = deviceInfo.device_id || null;
+      this.vendorId = deviceInfo.vendorId;
+      this.productId = deviceInfo.productId;
+      this.productName = deviceInfo.productName;
+      this.#deviceId = deviceInfo.deviceId || null;
 
       this.#parsedCollections = deviceInfo.collections || [];
 
-      this.#maxInputReportSize = deviceInfo.max_input_report_size || 64;
+      this.#maxInputReportSize = deviceInfo.maxInputReportSize || 64;
     }
 
     get opened() { return this.#opened; }
@@ -245,7 +245,7 @@
       }
       try {
         const response = await sendRequest("open", {
-          device_id: this.#deviceId,
+          deviceId: this.#deviceId,
           reportSize: this.#maxInputReportSize + 3,
         });
         if (response.success) {
@@ -265,7 +265,7 @@
       __webhid.logger.debug('[webhid] close deviceId=' + this.#deviceId);
       try {
         const response = await sendRequest("close", {
-          device_id: this.#deviceId,
+          deviceId: this.#deviceId,
         });
         if (response.success) {
           this.#opened = false;
@@ -296,16 +296,16 @@
         __webhid.logger.debug('[webhid] sendReport reportId=' + reportId + ' len=' + buffer.length);
         if (_fireAndForget) {
           sendFireAndForget(action, {
-            device_id: this.#deviceId,
-            report_id: reportId,
+            deviceId: this.#deviceId,
+            reportId: reportId,
             data: buffer,
           });
           __webhid.perf.end(t0, '[webhid] sendReport reportId=' + reportId);
           return;
         }
         const response = await sendRequest(action, {
-          device_id: this.#deviceId,
-          report_id: reportId,
+          deviceId: this.#deviceId,
+          reportId: reportId,
           data: buffer,
         });
         if (response.success) {
@@ -324,8 +324,8 @@
       try {
         const action = _dataPlane === 'nm' ? "receivefeaturereport" : "worker-receiveFeature";
         const response = await sendRequest(action, {
-          device_id: this.#deviceId,
-          report_id: reportId,
+          deviceId: this.#deviceId,
+          reportId: reportId,
         });
         if (response.success && response.data) {
           __webhid.logger.debug('[webhid] receiveFeatureReport done len=' + (typeof response.data === 'string' ? 'base64' : response.data.length));
@@ -350,15 +350,15 @@
         const action = _dataPlane === 'nm' ? "sendfeaturereport" : "worker-sendFeature";
         if (_fireAndForget) {
           sendFireAndForget(action, {
-            device_id: this.#deviceId,
-            report_id: reportId,
+            deviceId: this.#deviceId,
+            reportId: reportId,
             data: buffer,
           });
           return undefined;
         }
         const response = await sendRequest(action, {
-          device_id: this.#deviceId,
-          report_id: reportId,
+          deviceId: this.#deviceId,
+          reportId: reportId,
           data: buffer,
         });
         if (response.success) {
@@ -373,7 +373,7 @@
     async forget() {
       if (this.opened) await this.close();
       await sendRequest("forgetDevice", {
-        device_id: this.#deviceId,
+        deviceId: this.#deviceId,
       });
     }
 
@@ -389,17 +389,17 @@
             return;
           }
 
-          const event_type = detail.event_type;
+          const eventType = detail.eventType;
 
-          const evDeviceId = detail.device_id;
+          const evDeviceId = detail.deviceId;
 
-          if (event_type === "webhid-data-ready") {
+          if (eventType === "webhid-data-ready") {
             if (detail.port && !this.#port) {
               this.#port = detail.port;
               this.#port.onmessage = (portEvent) => {
                 const d = portEvent.data;
                 if (d.type === 'inputReport') {
-                  if (this.#deviceId && d.device_id && d.device_id !== this.#deviceId) return;
+                  if (this.#deviceId && d.deviceId && d.deviceId !== this.#deviceId) return;
                   let dataView;
                   if (d.data) {
                     dataView = new DataView(d.data);
@@ -423,7 +423,7 @@
             return;
           }
 
-          if (event_type === "input_report") {
+          if (eventType === "input_report") {
             if (evDeviceId && this.#deviceId && evDeviceId !== this.#deviceId) return;
             let dataView;
             if (typeof detail.data === 'string') {
@@ -434,32 +434,32 @@
             } else {
               dataView = new DataView(new ArrayBuffer(0));
             }
-            if (dataView.byteLength > 0 && detail.report_id !== 33) {
+            if (dataView.byteLength > 0 && detail.reportId !== 33) {
               let hex = '';
               for (let i = 0; i < Math.min(8, dataView.byteLength); i++) hex += dataView.getUint8(i).toString(16).padStart(2, '0') + ' ';
-              __webhid.logger.debug('[webhid] page inputReport device=' + (this.#deviceId || evDeviceId) + ' reportId=' + detail.report_id + ' len=' + dataView.byteLength + ' first8=' + hex);
+              __webhid.logger.debug('[webhid] page inputReport device=' + (this.#deviceId || evDeviceId) + ' reportId=' + detail.reportId + ' len=' + dataView.byteLength + ' first8=' + hex);
             }
             this.dispatchEvent(new HIDInputReportEvent('inputreport', {
               device: this,
-              reportId: detail.report_id,
+              reportId: detail.reportId,
               data: dataView,
             }));
             return;
           }
 
           // Handle connection events
-          if (event_type === "connect" || event_type === "connected") {
+          if (eventType === "connect" || eventType === "connected") {
             this.dispatchEvent(new HIDConnectionEvent("connect", this));
             return;
           }
 
           // Handle disconnection events
-          if (event_type === "disconnect" || event_type === "disconnected") {
+          if (eventType === "disconnect" || eventType === "disconnected") {
             this.dispatchEvent(new HIDConnectionEvent("disconnect", this));
             return;
           }
 
-          __webhid.logger.debug("[WebHID] wrapper: unknown event_type:", event_type);
+          __webhid.logger.debug("[WebHID] wrapper: unknown eventType:", eventType);
         };
 
         // Register this wrapper for the original listener

@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 /// Information about a connected HID device, derived from hidapi + sysfs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DeviceInfo {
     pub vendor_id: u16,
     pub product_id: u16,
@@ -127,7 +128,7 @@ pub struct Field {
 
 /// Request sent from the native-messaging process to the daemon.
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(tag = "type")]
+#[serde(tag = "type", rename_all = "camelCase")]
 pub enum IpcRequest {
     Enumerate { id: u32 },
     Open { id: u32, device_id: String },
@@ -156,7 +157,7 @@ impl IpcRequest {
 
 /// A response or unsolicited event sent from the daemon to the native-messaging process.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
+#[serde(tag = "type", rename_all = "camelCase")]
 pub enum IpcResponse {
     // Responses (id mirrors the matching request)
     Devices { id: u32, devices: Vec<DeviceInfo> },
@@ -217,11 +218,13 @@ pub enum NmRequest {
     Open {
         #[serde(default)]
         id: Option<u32>,
+        #[serde(rename = "deviceId")]
         device_id: String,
     },
     Close {
         #[serde(default)]
         id: Option<u32>,
+        #[serde(rename = "deviceId")]
         device_id: String,
     },
     /// `device_id` is the device path as a plain string; `data` is the
@@ -231,8 +234,9 @@ pub enum NmRequest {
     SendReport {
         #[serde(default)]
         id: Option<u32>,
+        #[serde(rename = "deviceId")]
         device_id: String,
-        #[serde(default)]
+        #[serde(default, rename = "reportId")]
         report_id: u8,
         #[serde(with = "base64_serde")]
         data: Vec<u8>,
@@ -242,7 +246,9 @@ pub enum NmRequest {
     ReceiveFeatureReport {
         #[serde(default)]
         id: Option<u32>,
+        #[serde(rename = "deviceId")]
         device_id: String,
+        #[serde(rename = "reportId")]
         report_id: u8,
     },
     /// `device_id` is the device path as a plain string; `data` is the
@@ -251,8 +257,9 @@ pub enum NmRequest {
     SendFeatureReport {
         #[serde(default)]
         id: Option<u32>,
+        #[serde(rename = "deviceId")]
         device_id: String,
-        #[serde(default)]
+        #[serde(default, rename = "reportId")]
         report_id: u8,
         #[serde(with = "base64_serde")]
         data: Vec<u8>,
@@ -261,6 +268,7 @@ pub enum NmRequest {
     SetDataPlane {
         #[serde(default)]
         id: Option<u32>,
+        #[serde(rename = "deviceId")]
         device_id: String,
         mode: String,
     },
@@ -294,6 +302,7 @@ impl NmRequest {
 /// strings (not number arrays).  This reduces JSON wire size by ~40–55 %
 /// compared to the previous number‑array encoding for HID payloads.
 #[derive(Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct NmResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<u32>,
@@ -673,14 +682,14 @@ mod tests {
         let req: NmRequest = serde_json::from_str(json).unwrap();
         assert!(matches!(req, NmRequest::Enumerate { id: None }));
 
-        let json = r#"{"action":"open","device_id":"test-dev"}"#;
+        let json = r#"{"action":"open","deviceId":"test-dev"}"#;
         let req: NmRequest = serde_json::from_str(json).unwrap();
         assert!(matches!(req, NmRequest::Open { .. }));
         if let NmRequest::Open { device_id, .. } = req {
             assert_eq!(device_id, "test-dev");
         }
 
-        let json = r#"{"action":"close","device_id":"abc123"}"#;
+        let json = r#"{"action":"close","deviceId":"abc123"}"#;
         let req: NmRequest = serde_json::from_str(json).unwrap();
         assert!(matches!(req, NmRequest::Close { .. }));
     }

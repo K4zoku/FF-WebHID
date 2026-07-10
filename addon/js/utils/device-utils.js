@@ -1,9 +1,9 @@
 (function () {
 function createDeviceHash(device) {
-  const vendorId = String(device.vendor_id || 0);
-  const productId = String(device.product_id || 0);
-  const serialNumber = String(device.serial_number || "");
-  const deviceId = String(device.device_id || "");
+  const vendorId = String(device.vendorId || 0);
+  const productId = String(device.productId || 0);
+  const serialNumber = String(device.serialNumber || "");
+  const deviceId = String(device.deviceId || "");
   const identifier = vendorId + ":" + productId + ":" + serialNumber + ":" + deviceId;
   let hash = 5381;
   for (let i = 0; i < identifier.length; i++) {
@@ -14,14 +14,14 @@ function createDeviceHash(device) {
 }
 
 function guessDeviceType(device) {
-  if (device.usage_page === 0x01) {
+  if (device.usagePage === 0x01) {
     const u = device.usage;
     if (u === 0x01 || u === 0x02) return "mouse";
     if (u === 0x06 || u === 0x07) return "keyboard";
     if (u === 0x04 || u === 0x08) return "joystick";
     if (u === 0x05) return "controller";
   }
-  const name = (device.product_name || "").toLowerCase();
+  const name = (device.productName || "").toLowerCase();
   if (/mouse|trackball|trackpad|touchpad/i.test(name))                         return "mouse";
   if (/keyboard|kbd/i.test(name))                                              return "keyboard";
   if (/joystick|flight.?stick|yoke|rudder|throttle/i.test(name))              return "joystick";

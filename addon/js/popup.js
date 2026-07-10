@@ -90,15 +90,15 @@
     for (const hash of hashes) {
       const dev = cache.find(d => __webhid.createDeviceHash(d) === hash);
 
-      const name = dev ? (dev.product_name || dev.productName || 'Unknown') : 'Saved device';
-      const type = __webhid.guessDeviceType(dev || { product_name: name });
-      const vid = dev ? (dev.vendor_id || dev.vendorId || 0) : 0;
-      const pid = dev ? (dev.product_id || dev.productId || 0) : 0;
-      const manufacturer = dev ? (dev.manufacturer || dev.manufacturerName || '') : '';
+      const name = dev ? (dev.productName || 'Unknown') : 'Saved device';
+      const type = __webhid.guessDeviceType(dev || { productName: name });
+      const vid = dev ? (dev.vendorId || 0) : 0;
+      const pid = dev ? (dev.productId || 0) : 0;
+      const manufacturer = dev ? (dev.manufacturer || '') : '';
 
       const card = document.createElement('div');
       card.className = 'device-card';
-      if (dev && openIds.has(dev.device_id)) card.classList.add('open');
+      if (dev && openIds.has(dev.deviceId)) card.classList.add('open');
 
       const icon = document.createElement('img');
       icon.className = 'device-icon';
@@ -135,7 +135,7 @@
       card.appendChild(btn);
 
       list.appendChild(card);
-      if (dev && openIds.has(dev.device_id)) openCount++;
+      if (dev && openIds.has(dev.deviceId)) openCount++;
     }
     document.getElementById('device-count').textContent = `(${openCount}/${hashes.length})`;
   }

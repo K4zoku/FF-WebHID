@@ -1,6 +1,6 @@
 let _deviceCache = [];
 
-/** device_id → Set<tabId> */
+/** deviceId → Set<tabId> */
 const _deviceTabMap = new Map();
 
 function registerDeviceTab(deviceId, tabId) {
@@ -32,9 +32,9 @@ function purgeTab(tabId) {
 /** Resolve the set of tabIds that should receive an event for `deviceId`. */
 function tabsForEvent(message) {
   // Handshake and other non-device-scoped events go to every tab.
-  const eventType = message.event_type;
-  if (eventType === 'handshake' || !message.device_id) return null; // null = broadcast
-  const tabs = _deviceTabMap.get(message.device_id);
+  const eventType = message.eventType;
+  if (eventType === 'handshake' || !message.deviceId) return null; // null = broadcast
+  const tabs = _deviceTabMap.get(message.deviceId);
   return tabs && tabs.size > 0 ? [...tabs] : null;
 }
 
@@ -76,7 +76,7 @@ const NativeMessaging = {
         // `data` arrives as a base64 string and is forwarded as-is;
         // decoding happens at the final consumer (polyfill) to avoid
         // structured-clone copies of typed arrays.
-        if (message.event_type) { this.onMessage(message); return; }
+        if (message.eventType) { this.onMessage(message); return; }
         if (message.id) {
           const p = this._pending.get(message.id);
           if (p) { this._pending.delete(message.id); p.resolve(message); return; }
@@ -153,14 +153,14 @@ const NativeMessaging = {
   async openDevice(deviceId) {
     return await this.sendRequest({
       action: "open",
-      device_id: deviceId,
+      deviceId: deviceId,
     });
   },
 
   async closeDevice(deviceId) {
     return await this.sendRequest({
       action: "close",
-      device_id: deviceId,
+      deviceId: deviceId,
     });
   },
 
@@ -171,8 +171,8 @@ const NativeMessaging = {
   async sendReport(deviceId, reportId, data) {
     return await this.sendRequest({
       action: "sendreport",
-      device_id: deviceId,
-      report_id: reportId,
+      deviceId: deviceId,
+      reportId: reportId,
       data: data.toBase64(),
     });
   },
@@ -180,22 +180,22 @@ const NativeMessaging = {
   async receiveFeatureReport(deviceId, reportId) {
     return await this.sendRequest({
       action: "receivefeaturereport",
-      device_id: deviceId,
-      report_id: reportId,
+      deviceId: deviceId,
+      reportId: reportId,
     });
   },
 
   async sendFeatureReport(deviceId, reportId, data) {
     return await this.sendRequest({
       action: "sendfeaturereport",
-      device_id: deviceId,
-      report_id: reportId,
+      deviceId: deviceId,
+      reportId: reportId,
       data: data.toBase64(),
     });
   },
 
   onMessage(message) {
-    if (!message.event_type) return;
+    if (!message.eventType) return;
 
     const targets = tabsForEvent(message);
     const send = (tabId) => browser.tabs
@@ -274,10 +274,10 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     case "open": {
       const tabId = sender.tab?.id;
-      NativeMessaging.openDevice(request.device_id)
+      NativeMessaging.openDevice(request.deviceId)
         .then((response) => {
-          if (response.success && response.device_id) {
-            registerDeviceTab(response.device_id, tabId);
+          if (response.success && response.deviceId) {
+            registerDeviceTab(response.deviceId, tabId);
           }
           sendResponse(response);
         })
@@ -287,9 +287,9 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     case "close": {
       const tabId = sender.tab?.id;
-      NativeMessaging.closeDevice(request.device_id)
+      NativeMessaging.closeDevice(request.deviceId)
         .then((response) => {
-          if (response.success) unregisterDeviceTab(request.device_id, tabId);
+          if (response.success) unregisterDeviceTab(request.deviceId, tabId);
           sendResponse(response);
         })
         .catch((e) => sendResponse({ success: false, error: e.message }));
@@ -299,7 +299,7 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
     case "setdataplane":
       NativeMessaging.sendRequest({
         action: "setdataplane",
-        device_id: request.device_id,
+        deviceId: request.deviceId,
         mode: request.mode,
       })
         .then(sendResponse)
@@ -308,8 +308,8 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     case "sendreport":
       NativeMessaging.sendReport(
-        request.device_id,
-        request.report_id || 0,
+        request.deviceId,
+        request.reportId || 0,
         request.data,
       )
         .then(sendResponse)
@@ -318,8 +318,8 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     case "receivefeaturereport":
       NativeMessaging.receiveFeatureReport(
-        request.device_id,
-        request.report_id,
+        request.deviceId,
+        request.reportId,
       )
         .then(sendResponse)
         .catch((e) => sendResponse({ success: false, error: e.message }));
@@ -327,8 +327,8 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     case "sendfeaturereport":
       NativeMessaging.sendFeatureReport(
-        request.device_id,
-        request.report_id || 0,
+        request.deviceId,
+        request.reportId || 0,
         request.data,
       )
         .then(sendResponse)
@@ -380,8 +380,8 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
           const result = await browser.storage.local.get(storageKey);
           let hashes = result[storageKey] || [];
           // Remove matching hash
-          if (request.device_id) {
-            hashes = hashes.filter(h => h !== request.device_id);
+          if (request.deviceId) {
+            hashes = hashes.filter(h => h !== request.deviceId);
             await browser.storage.local.set({ [storageKey]: hashes });
           }
           sendResponse({ success: true, hashes });

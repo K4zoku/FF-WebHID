@@ -282,7 +282,7 @@
 
       const groups = new Map();
       for (const device of filteredDevices) {
-        const name = device.product_name || "Unknown Device";
+        const name = device.productName || "Unknown Device";
         if (!groups.has(name)) groups.set(name, []);
         groups.get(name).push(device);
       }
@@ -301,11 +301,11 @@
         for (const d of devices) {
           const idx = filteredDevices.indexOf(d);
           if (idx >= 0 && pairedStatuses[idx]) isPaired = true;
-          deviceIds.push(d.device_id);
+          deviceIds.push(d.deviceId);
         }
 
         const groupId = devices.length === 1
-          ? devices[0].device_id
+          ? devices[0].deviceId
           : `group:${__webhid.createDeviceHash(devices[0])}`;
         this.#deviceGroups[groupId] = devices.slice();
 
@@ -348,11 +348,11 @@
       }
       return devices.filter((device) => {
         return filters.some((filter) => {
-          if (filter.vendorId && device.vendor_id !== filter.vendorId)
+          if (filter.vendorId && device.vendorId !== filter.vendorId)
             return false;
-          if (filter.productId && device.product_id !== filter.productId)
+          if (filter.productId && device.productId !== filter.productId)
             return false;
-          if (filter.usagePage && device.usage_page !== filter.usagePage)
+          if (filter.usagePage && device.usagePage !== filter.usagePage)
             return false;
           if (filter.usage && device.usage !== filter.usage) return false;
           return true;
@@ -489,7 +489,7 @@
     _workerPorts.delete(deviceId);
   }
 
-  async function _spawnWorker(deviceId, session_token, wsPort, opts = {}, gen) {
+  async function _spawnWorker(deviceId, sessionToken, wsPort, opts = {}, gen) {
     if (_workers.has(deviceId)) return;
     let worker;
     try {
@@ -538,7 +538,7 @@
         __webhid.logger.info('[bridge] MessageChannel created for', deviceId, '— input reports bypass bridge');
         window.postMessage({
           __webhid_bridge: 'evt',
-          event: { event_type: 'webhid-data-ready', device_id: deviceId, port: port2 }
+          event: { eventType: 'webhid-data-ready', deviceId: deviceId, port: port2 }
         }, '*', [port2]);
       } else if (data.type === 'closed') {
         __webhid.logger.warn('[bridge] worker closed for', deviceId);
@@ -547,7 +547,7 @@
         _workerPorts.delete(deviceId);
         window.postMessage({
           __webhid_bridge: 'evt',
-          event: { event_type: 'disconnect', device_id: deviceId }
+          event: { eventType: 'disconnect', deviceId: deviceId }
         }, '*');
       } else if (data.type === 'inputReport') {
         // Only reaches here if port not active (fallback path).
@@ -561,9 +561,9 @@
         window.postMessage({
           __webhid_bridge: 'evt',
           event: {
-            event_type: 'input_report',
-            device_id: deviceId,
-            report_id: data.reportId,
+            eventType: 'input_report',
+            deviceId: deviceId,
+            reportId: data.reportId,
             data: view,
           }
         }, '*', view ? [view.buffer] : []);
@@ -578,34 +578,34 @@
         }
       }
     };
-    worker.postMessage({ type: 'connect', wsPort, token: session_token, reportSize: opts.reportSize || 64 });
+    worker.postMessage({ type: 'connect', wsPort, token: sessionToken, reportSize: opts.reportSize || 64 });
   }
 
   // Spawn the WS data plane for a device. Always uses a Web Worker (off
   // main thread). If worker spawn fails, falls back to NM by telling the
   // daemon to use NM mode for this device — data then flows through the
   // normal NM path (page → bridge → background → NM host → daemon).
-  async function _spawnDataPlane(deviceId, session_token, wsPort, opts = {}) {
+  async function _spawnDataPlane(deviceId, sessionToken, wsPort, opts = {}) {
     const gen = (_spawnGen.get(deviceId) || 0) + 1;
     _spawnGen.set(deviceId, gen);
-    await _spawnWorker(deviceId, session_token, wsPort, opts, gen);
+    await _spawnWorker(deviceId, sessionToken, wsPort, opts, gen);
     // If worker spawn failed (worker not in map), fall back to NM.
     if (!_workers.has(deviceId) && _spawnGen.get(deviceId) === gen) {
       __webhid.logger.warn('[bridge] worker spawn failed for', deviceId, '; falling back to NM');
       browser.runtime.sendMessage({
-        action: 'setdataplane', device_id: deviceId, mode: 'nm'
+        action: 'setdataplane', deviceId: deviceId, mode: 'nm'
       }).catch(() => {});
     }
   }
 
-  // Init: send handshake to get ws_port. Only spawn control worker if
-  // control plane setting is 'ws'. If 'nm', just store ws_port for
+  // Init: send handshake to get wsPort. Only spawn control worker if
+  // control plane setting is 'ws'. If 'nm', just store wsPort for
   // data plane use (open() sends WS data plane via _spawnDataPlane).
   (async () => {
     try {
       const resp = await browser.runtime.sendMessage({ action: 'handshake' });
-      if (resp.success && resp.ws_port) {
-        _wsPort = resp.ws_port;
+      if (resp.success && resp.wsPort) {
+        _wsPort = resp.wsPort;
         const global = await browser.storage.local.get(__webhid.GLOBAL_DEFAULTS);
         let cp = global.controlPlane;
         const origin = window.location.origin;
@@ -616,8 +616,8 @@
           if (ss.controlPlane !== undefined) cp = ss.controlPlane;
         }
         _controlPlane = cp;
-        if (cp === 'ws' && resp.control_token) {
-          _spawnControlWorker(resp.control_token, resp.ws_port);
+        if (cp === 'ws' && resp.controlToken) {
+          _spawnControlWorker(resp.controlToken, resp.wsPort);
         }
       }
     } catch (e) {
@@ -658,8 +658,8 @@
     // Normalize NM actions → worker actions when device has a worker data
     // plane (happens when polyfill hasn't received dataPlane push yet).
     if ((action === "sendreport" || action === "sendfeaturereport" || action === "receivefeaturereport")
-        && payload && payload.device_id
-        && _workers.has(payload.device_id)) {
+        && payload && payload.deviceId
+        && _workers.has(payload.deviceId)) {
       action = action === "sendreport" ? "worker-send"
              : action === "sendfeaturereport" ? "worker-sendFeature"
              : "worker-receiveFeature";
@@ -667,7 +667,7 @@
 
     // Hot-path actions: use worker WS → NM (priority order).
     if (action === "worker-send" || action === "worker-sendFeature" || action === "worker-receiveFeature") {
-      const deviceId = payload.device_id;
+      const deviceId = payload.deviceId;
 
       // Worker WS data plane.
       const worker = _workers.get(deviceId);
@@ -676,7 +676,7 @@
           action === "worker-send" ? "send" :
           action === "worker-sendFeature" ? "sendFeature" :
           "receiveFeature";
-        const wMsg = { type: wType, reqId: id, reportId: payload.report_id };
+        const wMsg = { type: wType, reqId: id, reportId: payload.reportId };
         if (action === "worker-send" || action === "worker-sendFeature") wMsg.data = payload.data;
 
         if (!isFireAndForget || action === "worker-receiveFeature") {
@@ -700,7 +700,7 @@
           action === "worker-send" ? "send" :
           action === "worker-sendFeature" ? "sendFeature" :
           "receiveFeature";
-        const wMsg = { type: wType, reqId: id, reportId: payload.report_id };
+        const wMsg = { type: wType, reqId: id, reportId: payload.reportId };
         if (action === "worker-send" || action === "worker-sendFeature") wMsg.data = payload.data;
 
         if (!isFireAndForget || action === "worker-receiveFeature") {
@@ -778,7 +778,7 @@
     // worker if WS control plane is enabled and connected.
     try {
       // WS control plane: route enumerate/close via control worker.
-      // open always goes via NM (needs session_token per device).
+      // open always goes via NM (needs sessionToken per device).
       if (_controlPlane === 'ws' && _controlPort
           && (action === 'enumerate' || action === 'close')) {
         const response = await _sendControlCommand(action, payload || {});
@@ -789,12 +789,12 @@
       const msg = Object.assign({ action }, payload || {});
       const response = await browser.runtime.sendMessage(msg);
 
-      if (action === "open" && response.success && response.session_token) {
-        const deviceId = response.device_id;
+      if (action === "open" && response.success && response.sessionToken) {
+        const deviceId = response.deviceId;
         _openDevices.add(deviceId);
-        _sessionTokens.set(deviceId, response.session_token);
+        _sessionTokens.set(deviceId, response.sessionToken);
         browser.runtime.sendMessage({ action: "device-count-changed", count: _openDevices.size }).catch(() => {});
-        __webhid.logger.debug('[bridge] open ok deviceId=' + deviceId + ' wsPort=' + response.ws_port);
+        __webhid.logger.debug('[bridge] open ok deviceId=' + deviceId + ' wsPort=' + response.wsPort);
         const origin = window.location.origin;
         const siteKey = origin ? `site:${origin}` : null;
 
@@ -808,17 +808,17 @@
 
         browser.runtime.sendMessage({
           action: "setdataplane",
-          device_id: deviceId,
+          deviceId: deviceId,
           mode: dataPlane,
         }).catch(() => {});
 
         if (dataPlane === 'ws') {
-          _spawnDataPlane(deviceId, response.session_token, response.ws_port || _wsPort);
+          _spawnDataPlane(deviceId, response.sessionToken, response.wsPort || _wsPort);
         }
       }
 
       if (action === "close") {
-        const deviceId = payload.device_id;
+        const deviceId = payload.deviceId;
         __webhid.logger.debug('[bridge] close deviceId=' + deviceId);
         _openDevices.delete(deviceId);
         _sessionTokens.delete(deviceId);
@@ -845,9 +845,9 @@
   browser.runtime.onMessage.addListener((message) => {
     if (message.action === "webhid-device-event" && message.event) {
       const evt = message.event;
-      if (evt.event_type === "handshake") {
-        _wsPort = evt.ws_port;
-        __webhid.logger.info('[bridge] handshake: ws_port=' + _wsPort);
+      if (evt.eventType === "handshake") {
+        _wsPort = evt.wsPort;
+        __webhid.logger.info('[bridge] handshake: wsPort=' + _wsPort);
         return;
       }
       window.postMessage({ __webhid_bridge: "evt", event: evt }, "*");
@@ -904,9 +904,9 @@
       __webhid.logger.info('[bridge] control plane changed:', cp);
       if (cp === 'ws' && _wsPort && !_controlWorker) {
         const resp = await browser.runtime.sendMessage({ action: 'handshake' });
-        if (resp.success && resp.control_token && resp.ws_port) {
-          _wsPort = resp.ws_port;
-          _spawnControlWorker(resp.control_token, resp.ws_port);
+        if (resp.success && resp.controlToken && resp.wsPort) {
+          _wsPort = resp.wsPort;
+          _spawnControlWorker(resp.controlToken, resp.wsPort);
         }
       } else if (cp === 'nm' && _controlWorker) {
         _terminateControlWorker();
@@ -926,7 +926,7 @@
       for (const id of _openDevices) {
         browser.runtime.sendMessage({
           action: "setdataplane",
-          device_id: id,
+          deviceId: id,
           mode: dp,
         }).catch(() => {});
       }
