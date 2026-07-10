@@ -443,21 +443,7 @@
 
           const evDeviceId = detail.device_id;
 
-          // Handle SharedArrayBuffer loop initiation
-          if (event_type === "webhid-sab") {
-            if (evDeviceId && this.#deviceId && evDeviceId === this.#deviceId) {
-              if (!this.#inputLoopStarted) {
-                this.#inputLoopStarted = true;
-                startInputReportLoop(this, detail.sab, detail.reportSize);
-              }
-            }
-            return;
-          }
-
-          if (event_type === "webhid-sab-disabled") {
-            // SAB unavailable; input reports arrive via input_report events.
-            // Already handled by #sabListener installed in open(). Just
-            // suppress the "unknown event_type" warning.
+          if (event_type === "webhid-sab" || event_type === "webhid-sab-disabled") {
             return;
           }
 

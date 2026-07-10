@@ -924,6 +924,7 @@
         if (dataPlane === 'ws') {
           _spawnDataPlane(deviceId, response.session_token, response.ws_port || _wsPort, {
             sabEnabled, sabCapacity, logLevel,
+            reportSize: payload.reportSize || 64,
           });
         }
       }
