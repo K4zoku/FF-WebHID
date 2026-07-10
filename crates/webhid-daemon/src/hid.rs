@@ -106,6 +106,7 @@ fn info_from_hidapi_pub_with_desc(info: &HidDeviceInfo, desc: Vec<u8>) -> Option
     } else {
         vec![]
     };
+    let max_input_report_size = crate::descriptor::max_input_report_size(&collections);
     Some(DeviceInfo {
         vendor_id: info.vendor_id(),
         product_id: info.product_id(),
@@ -116,6 +117,7 @@ fn info_from_hidapi_pub_with_desc(info: &HidDeviceInfo, desc: Vec<u8>) -> Option
         usage: Some(info.usage()),
         device_id,
         collections,
+        max_input_report_size,
     })
 }
 

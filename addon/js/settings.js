@@ -27,7 +27,7 @@
 
   function updateSabFill() {
     const val = parseInt(sabInput.value, 10);
-    sabInput.style.setProperty('--fill', ((val - 2048) / (32768 - 2048)) * 100 + '%');
+    sabInput.style.setProperty('--fill', ((val - 64) / (4096 - 64)) * 100 + '%');
   }
 
   function updatePerfRowVisibility() {

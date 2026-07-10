@@ -417,3 +417,27 @@ impl CollectionTreeBuilder {
         })
     }
 }
+
+/// Walk a collections tree and return the maximum input report payload size in bytes.
+/// Each input report's size = sum of (report_size × report_count) for all items.
+/// Returns 0 if no input reports are found.
+pub fn max_input_report_size(collections: &[Collection]) -> u32 {
+    fn visit(collections: &[Collection]) -> u32 {
+        let mut max = 0u32;
+        for c in collections {
+            for r in &c.input_reports {
+                let bits: u32 = r.items.iter().map(|f| f.report_size * f.report_count).sum();
+                let bytes = bits.div_ceil(8);
+                if bytes > max {
+                    max = bytes;
+                }
+            }
+            let child_max = visit(&c.children);
+            if child_max > max {
+                max = child_max;
+            }
+        }
+        max
+    }
+    visit(collections)
+}

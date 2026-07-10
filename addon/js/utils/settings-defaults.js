@@ -5,7 +5,7 @@ const GLOBAL_DEFAULTS = {
   dataPlane: 'nm',
   controlPlane: 'nm',
   sabEnabled: true,
-  sabCapacity: 8192,
+  sabCapacity: 256,
   logLevel: 1,
   daemonAsNmHost: false,
 };

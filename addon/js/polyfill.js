@@ -275,36 +275,7 @@
 
       this.#parsedCollections = deviceInfo.collections || [];
 
-      this.#maxInputReportSize = this.#calculateMaxInputReportSize();
-    }
-
-    #calculateMaxInputReportSize() {
-      let max = 2048;
-      const visit = (c) => {
-        if (c.inputReports) {
-          for (const r of c.inputReports) {
-            // Sum the bit size of every item in the report (reportSize *
-            // reportCount for each item) to compute the total report payload
-            // size in bytes. Falls back to per-report legacy fields if no
-            // items are present.
-            let bits = 0;
-            if (Array.isArray(r.items) && r.items.length > 0) {
-              for (const it of r.items) {
-                const sz = it.reportSize || it.size || it.size_bits || 0;
-                const cnt = it.reportCount || it.count || 1;
-                bits += sz * cnt;
-              }
-            } else {
-              bits = (r.size_bits || r.reportSize || r.size || 0) * 8;
-            }
-            const size = Math.ceil(bits / 8);
-            if (size > max) max = size;
-          }
-        }
-        if (c.children) c.children.forEach(visit);
-      };
-      this.collections.forEach(visit);
-      return max;
+      this.#maxInputReportSize = deviceInfo.max_input_report_size || 64;
     }
 
     get opened() { return this.#opened; }

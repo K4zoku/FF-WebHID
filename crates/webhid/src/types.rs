@@ -24,6 +24,8 @@ pub struct DeviceInfo {
     pub device_id: String,
     #[serde(default)]
     pub collections: Vec<Collection>,
+    #[serde(default)]
+    pub max_input_report_size: u32,
 }
 
 // ── Collections tree (parsed report descriptor) ───────────────────────────
