@@ -32,10 +32,11 @@
 <div class="setting">
   <div class="setting-info">
     <h3>Data Plane</h3>
-    <p><strong>WebSocket</strong>: bridge connects directly to the daemon's WS server and forwards input reports to the page via <code>postMessage</code> with ArrayBuffer transfer (1 alloc, 1 copy).<br><strong>Native Messaging</strong>: route all data (sendReport, input reports, feature reports) through the NM host via the content-script bridge. No WS. For benchmarking the NM path.</p>
+    <p><strong>WebSocket</strong>: bridge connects directly to the daemon's WS server and forwards input reports to the page via <code>postMessage</code> with ArrayBuffer transfer (1 alloc, 1 copy).<br><strong>WebSocket (Worker)</strong>: same as WebSocket, but the WS connection lives in a dedicated Web Worker. Offloads WS I/O from the content-script thread.<br><strong>Native Messaging</strong>: route all data (sendReport, input reports, feature reports) through the NM host via the content-script bridge. No WS. For benchmarking the NM path.</p>
   </div>
   <select id="dataPlane">
     <option value="ws">WebSocket (postMessage transfer)</option>
+    <option value="ws-worker">WebSocket (Worker)</option>
     <option value="nm">Native Messaging (via bridge)</option>
   </select>
 </div>

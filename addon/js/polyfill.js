@@ -135,15 +135,23 @@
       const id = ++_reqId;
       _pending[id] = resolve;
       const msg = { __webhid_bridge: "req", id, action, payload: payload || {} };
-      const transfer = (payload && payload.data instanceof Uint8Array) ? [payload.data.buffer] : [];
-      window.postMessage(msg, "*", transfer);
+      const xfers = [];
+      if (payload && payload.data instanceof Uint8Array) {
+        msg.__transfer = true;
+        xfers.push(payload.data.buffer);
+      }
+      window.postMessage(msg, "*", xfers.length ? xfers : undefined);
     });
   }
 
   function sendFireAndForget(action, payload) {
     const msg = { __webhid_bridge: "req", id: 0, action, payload: payload || {}, fireAndForget: true };
-    const transfer = (payload && payload.data instanceof Uint8Array) ? [payload.data.buffer] : [];
-    window.postMessage(msg, "*", transfer);
+    const xfers = [];
+    if (payload && payload.data instanceof Uint8Array) {
+      msg.__transfer = true;
+      xfers.push(payload.data.buffer);
+    }
+    window.postMessage(msg, "*", xfers.length ? xfers : undefined);
   }
 
   // Fetch initial settings from the bridge (which has browser.storage access).
@@ -390,6 +398,11 @@
               : detail.data
                 ? new Uint8Array(detail.data)
                 : new Uint8Array(0);
+            if (dataBytes.length > 0 && detail.report_id !== 33) {
+              let hex = '';
+              for (let i = 0; i < Math.min(8, dataBytes.length); i++) hex += dataBytes[i].toString(16).padStart(2, '0') + ' ';
+              __webhid.logger.debug('[webhid] page inputReport device=' + (this.#deviceId || evDeviceId) + ' reportId=' + detail.report_id + ' len=' + dataBytes.length + ' first8=' + hex);
+            }
             this.dispatchEvent(new HIDInputReportEvent('inputreport', {
               device: this,
               reportId: detail.report_id,
