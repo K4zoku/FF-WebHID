@@ -402,15 +402,10 @@
   // ---------------------------------------------------------------------------
   const _openDevices = new Set();
   const _sessionTokens = new Map();
-  const _wsData = new Map();
-  const _wsDataCallbacks = new Map();
   const _workers = new Map();
   const _workerCallbacks = new Map();
   const _workerReady = new Set();
   const _workerQueues = new Map();
-  // Per-device reconnect state: deviceId → { token, wsPort, timer, delay }
-  const _reconnect = new Map();
-  let _wsDataReqId = 1;
   let _wsPort = null;
   let _controlPlane = 'nm';
   let _controlWs = null;
@@ -447,24 +442,11 @@
     }
   }
 
-  // Tear down the data-plane connection for a device and cancel any pending
-  // reconnect or in-flight spawn. Increments spawn generation so that async
-  // _spawnWorker fetching knows it's stale.
+  // Tear down the data-plane worker for a device. Increments spawn generation
+  // so that any async _spawnWorker fetch in flight knows it's stale.
   function _despawnDataPlane(deviceId) {
     const gen = (_spawnGen.get(deviceId) || 0) + 1;
     _spawnGen.set(deviceId, gen);
-    const rc = _reconnect.get(deviceId);
-    if (rc) {
-      if (rc.timer) clearTimeout(rc.timer);
-      _reconnect.delete(deviceId);
-    }
-    const ws = _wsData.get(deviceId);
-    if (ws) {
-      ws.onclose = null;  // suppress auto-reconnect on deliberate close
-      ws.close();
-      _wsData.delete(deviceId);
-    }
-    _wsDataCallbacks.delete(deviceId);
     const worker = _workers.get(deviceId);
     if (worker) { worker.terminate(); _workers.delete(deviceId); }
     _workerCallbacks.delete(deviceId);
@@ -555,152 +537,21 @@
     worker.postMessage({ type: 'connect', wsPort, token: session_token, reportSize: opts.reportSize || 64 });
   }
 
-  function _spawnDataPlane(deviceId, session_token, wsPort, opts = {}) {
-    const mode = opts.mode || 'ws';
-    if (mode === 'ws-worker') {
-      const gen = (_spawnGen.get(deviceId) || 0) + 1;
-      _spawnGen.set(deviceId, gen);
-      _spawnWorker(deviceId, session_token, wsPort, opts, gen);
-    } else {
-      if (_wsData.has(deviceId)) return;
-      _reconnect.set(deviceId, { token: session_token, wsPort, timer: null, delay: 500 });
-      _doWsConnect(deviceId);
+  // Spawn the WS data plane for a device. Always uses a Web Worker (off
+  // main thread). If worker spawn fails, falls back to NM by telling the
+  // daemon to use NM mode for this device — data then flows through the
+  // normal NM path (page → bridge → background → NM host → daemon).
+  async function _spawnDataPlane(deviceId, session_token, wsPort, opts = {}) {
+    const gen = (_spawnGen.get(deviceId) || 0) + 1;
+    _spawnGen.set(deviceId, gen);
+    await _spawnWorker(deviceId, session_token, wsPort, opts, gen);
+    // If worker spawn failed (worker not in map), fall back to NM.
+    if (!_workers.has(deviceId) && _spawnGen.get(deviceId) === gen) {
+      __webhid.logger.warn('[bridge] worker spawn failed for', deviceId, '; falling back to NM');
+      browser.runtime.sendMessage({
+        action: 'setdataplane', device_id: deviceId, mode: 'nm'
+      }).catch(() => {});
     }
-  }
-
-  function _doWsConnect(deviceId) {
-    const rc = _reconnect.get(deviceId);
-    if (!rc) return;  // despawned
-    let ws;
-    try {
-      ws = new WebSocket(`ws://127.0.0.1:${rc.wsPort}`, [`webhid.${rc.token}`]);
-      ws.binaryType = 'arraybuffer';
-    } catch (e) {
-      __webhid.logger.error('[bridge] WS constructor threw for', deviceId, ':', e.message || e);
-      _scheduleReconnect(deviceId);
-      return;
-    }
-
-    ws.onopen = () => {
-      rc.delay = 500;  // reset backoff on success
-      __webhid.logger.info('[bridge] WS data connected for', deviceId);
-      _workerReady.add(deviceId);
-      window.postMessage({
-        __webhid_bridge: 'evt',
-        event: { event_type: 'webhid-data-ready', device_id: deviceId }
-      }, '*');
-    };
-
-    ws.onmessage = ({ data: frame }) => {
-      // Copy frame into a fresh Uint8Array to escape Firefox Xray wrapping.
-      // WebSocket binary data in a content script (isolated world) is Xray-
-      // wrapped; calling .subarray()/.set() on the Xray view triggers
-      // "Permission denied to access property 'constructor'". Indexed
-      // access through Xray is allowed, so we copy byte-by-byte into a
-      // plain (non-Xray) Uint8Array once, then all subsequent operations
-      // (subarray, set, slice) work normally.
-      const view = new Uint8Array(frame);
-      const batch = new Uint8Array(view.length);
-      for (let i = 0; i < view.length; i++) batch[i] = view[i];
-      if (batch.length > 0 && batch[0] >= 0x80 && batch.length <= 10) {
-        // Control response (sendReport ack, receiveFeature response)
-        const respType = batch[0];
-        const reqId = batch[1] | (batch[2] << 8) | (batch[3] << 16) | (batch[4] << 24);
-        const cbMap = _wsDataCallbacks.get(deviceId);
-        if (cbMap && cbMap.has(reqId)) {
-          const cb = cbMap.get(reqId);
-          cbMap.delete(reqId);
-          if (respType === 0x83) {
-            const status = batch[5];
-            if (status !== 0) { cb({ error: 'feature read failed' }); return; }
-            const len = batch[6] | (batch[7] << 8);
-            const out = new Uint8Array(len);
-            if (len > 0 && batch.length >= 8 + len) out.set(batch.subarray(8, 8 + len));
-            cb({ data: out });
-          } else {
-            const status = batch[5];
-            cb({ success: status === 0 });
-          }
-        }
-        return;
-      }
-      // Input report batch: [len_u16 LE][report_id][...payload]...
-      let offset = 0;
-      while (offset + 1 < batch.length) {
-        const len = batch[offset] | (batch[offset + 1] << 8);
-        offset += 2;
-        if (len === 0 || offset + len > batch.length) break;
-        const reportId = batch[offset];
-        const payloadLen = len - 1;
-        const view = payloadLen > 0 ? new Uint8Array(payloadLen) : null;
-        if (view) {
-          view.set(batch.subarray(offset + 1, offset + len));
-          if (reportId !== 33) {
-            let hex = '';
-            for (let i = 0; i < Math.min(8, view.length); i++) hex += view[i].toString(16).padStart(2, '0') + ' ';
-            __webhid.logger.debug('[bridge] ws→page inputReport device=' + deviceId + ' reportId=' + reportId + ' len=' + payloadLen + ' first8=' + hex);
-          }
-        }
-        window.postMessage({
-          __webhid_bridge: 'evt',
-          event: {
-            event_type: 'input_report',
-            device_id: deviceId,
-            report_id: reportId,
-            data: view,
-          }
-        }, '*', view ? [view.buffer] : []);
-        offset += len;
-      }
-    };
-
-    ws.onerror = (e) => __webhid.logger.error('[bridge] WS data error for', deviceId, ':', e.message || e);
-    ws.onclose = () => {
-      __webhid.logger.warn('[bridge] WS data closed for', deviceId, '; will auto-reconnect');
-      _wsData.delete(deviceId);
-      _workerReady.delete(deviceId);
-      // Reject any pending control requests so callers don't hang.
-      const cbMap = _wsDataCallbacks.get(deviceId);
-      if (cbMap) {
-        for (const [, cb] of cbMap) cb({ error: 'ws closed' });
-        cbMap.clear();
-      }
-      window.postMessage({
-        __webhid_bridge: 'evt',
-        event: { event_type: 'disconnect', device_id: deviceId }
-      }, '*');
-      _scheduleReconnect(deviceId);
-    };
-
-    _wsData.set(deviceId, ws);
-    if (!_wsDataCallbacks.has(deviceId)) _wsDataCallbacks.set(deviceId, new Map());
-  }
-
-  function _scheduleReconnect(deviceId) {
-    const rc = _reconnect.get(deviceId);
-    if (!rc) return;  // despawned
-    if (rc.timer) return;
-    __webhid.logger.info('[bridge] scheduling WS reconnect for', deviceId, 'in', rc.delay, 'ms');
-    rc.timer = setTimeout(() => {
-      rc.timer = null;
-      if (!_reconnect.has(deviceId)) return;  // despawned while waiting
-      _doWsConnect(deviceId);
-    }, rc.delay);
-    rc.delay = Math.min(rc.delay * 2, 5000);
-  }
-
-  function _wsDataSend(deviceId, msgType, reportId, payload) {
-    const ws = _wsData.get(deviceId);
-    if (!ws || ws.readyState !== WebSocket.OPEN) return null;
-    const reqId = _wsDataReqId++;
-    const frame = new Uint8Array(6 + (payload ? payload.length : 0));
-    frame[0] = msgType;
-    frame[1] = reqId & 0xFF; frame[2] = (reqId >> 8) & 0xFF;
-    frame[3] = (reqId >> 16) & 0xFF; frame[4] = (reqId >> 24) & 0xFF;
-    frame[5] = reportId;
-    if (payload) frame.set(payload, 6);
-    ws.send(frame);
-    return reqId;
   }
 
   function _sendControlWs(action, payload) {
@@ -773,17 +624,17 @@
       return;
     }
 
-    // Normalize NM actions → worker actions when device has WS/worker data
+    // Normalize NM actions → worker actions when device has a worker data
     // plane (happens when polyfill hasn't received dataPlane push yet).
     if ((action === "sendreport" || action === "sendfeaturereport" || action === "receivefeaturereport")
         && payload && payload.device_id
-        && (_workers.has(payload.device_id) || _wsData.has(payload.device_id))) {
+        && _workers.has(payload.device_id)) {
       action = action === "sendreport" ? "worker-send"
              : action === "sendfeaturereport" ? "worker-sendFeature"
              : "worker-receiveFeature";
     }
 
-    // Hot-path actions: use worker WS → bridge WS → NM (priority order).
+    // Hot-path actions: use worker WS → NM (priority order).
     if (action === "worker-send" || action === "worker-sendFeature" || action === "worker-receiveFeature") {
       const deviceId = payload.device_id;
 
@@ -812,35 +663,6 @@
         return;
       }
 
-      // Bridge WS data plane (no worker).
-      if (_wsData.has(deviceId) && _workerReady.has(deviceId)) {
-        const msgType =
-          action === "worker-send" ? 0x01 :
-          action === "worker-sendFeature" ? 0x02 :
-          0x03;
-        const payloadBytes = payload.data instanceof Uint8Array ? payload.data
-            : payload.data instanceof ArrayBuffer ? new Uint8Array(payload.data)
-            : null;
-
-        if (!isFireAndForget || action === "worker-receiveFeature") {
-          const reqId = _wsDataSend(deviceId, msgType, payload.report_id || 0, payloadBytes);
-          if (reqId !== null) {
-            const cbMap = _wsDataCallbacks.get(deviceId);
-            cbMap.set(reqId, (data) => {
-              const result = data.error ? { success: false, error: data.error }
-                          : data.data ? { success: true, data: data.data }
-                          : { success: data.success !== false };
-              const transfer = (result.data instanceof Uint8Array) ? [result.data.buffer] : [];
-              window.postMessage({ __webhid_bridge: "res", id, result }, "*", transfer);
-            });
-            return;
-          }
-        } else {
-          _wsDataSend(deviceId, msgType, payload.report_id || 0, payloadBytes);
-          return;
-        }
-      }
-
       // Worker exists but not ready yet → queue for replay on ready.
       if (worker) {
         const wType =
@@ -867,7 +689,7 @@
         return;
       }
 
-      __webhid.logger.warn('[bridge] no WS data plane for', deviceId, '; falling back to NM');
+      __webhid.logger.warn('[bridge] no worker for', deviceId, '; falling back to NM');
       const fallbackAction =
         action === "worker-send" ? "sendreport" :
         action === "worker-sendFeature" ? "sendfeaturereport" :
@@ -953,15 +775,14 @@
           if (ss.dataPlane !== undefined) dataPlane = ss.dataPlane;
         }
 
-        const daemonMode = dataPlane === 'ws-worker' ? 'ws' : dataPlane;
         browser.runtime.sendMessage({
           action: "setdataplane",
           device_id: deviceId,
-          mode: daemonMode,
+          mode: dataPlane,
         }).catch(() => {});
 
-        if (dataPlane === 'ws' || dataPlane === 'ws-worker') {
-          _spawnDataPlane(deviceId, response.session_token, response.ws_port || _wsPort, { mode: dataPlane });
+        if (dataPlane === 'ws') {
+          _spawnDataPlane(deviceId, response.session_token, response.ws_port || _wsPort);
         }
       }
 
@@ -1061,22 +882,21 @@
       }
     }
 
-    // Data plane switch: despawn WS data/worker, respawn with new transport.
+    // Data plane switch: despawn worker, respawn with new transport.
     if (dp !== undefined) {
       for (const id of _openDevices) { _despawnDataPlane(id); }
 
-      if (dp === 'ws' || dp === 'ws-worker') {
+      if (dp === 'ws') {
         for (const id of _openDevices) {
           const token = _sessionTokens.get(id);
-          if (token) _spawnDataPlane(id, token, _wsPort, { mode: dp });
+          if (token) _spawnDataPlane(id, token, _wsPort);
         }
       }
-      const daemonMode = dp === 'ws-worker' ? 'ws' : dp;
       for (const id of _openDevices) {
         browser.runtime.sendMessage({
           action: "setdataplane",
           device_id: id,
-          mode: daemonMode,
+          mode: dp,
         }).catch(() => {});
       }
       __webhid.logger.info('[bridge] data plane changed:', dp, 'open devices:', _openDevices.size);
