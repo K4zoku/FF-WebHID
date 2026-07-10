@@ -288,7 +288,7 @@
       try {
         const response = await sendRequest("open", {
           device_id: this.#deviceId,
-          reportSize: this.#maxInputReportSize,
+          reportSize: this.#maxInputReportSize + 3,
         });
         if (response.success) {
           this.#opened = true;
