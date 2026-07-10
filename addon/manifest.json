@@ -64,6 +64,7 @@
         "js/utils/device-utils.js",
         "js/utils/settings-defaults.js",
         "js/worker.js",
+        "js/control.js",
         "html/popup.html",
         "js/popup.js",
         "css/popup.css"

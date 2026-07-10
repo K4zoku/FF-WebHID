@@ -409,38 +409,71 @@
   const _workerPorts = new Map(); // deviceId → true (port active, skip bridge re-forward)
   let _wsPort = null;
   let _controlPlane = 'nm';
-  let _controlWs = null;
+  let _controlWorker = null;
+  let _controlPort = null;
   const _controlPending = new Map();
   let _controlReqId = 1;
   const _spawnGen = new Map();
 
-  function _connectControlWs(token, wsPort) {
-    if (_controlWs) return;
+  async function _spawnControlWorker(token, wsPort) {
+    if (_controlWorker) return;
     try {
-      _controlWs = new WebSocket(`ws://127.0.0.1:${wsPort}`, [`webhid.${token}`]);
-      _controlWs.binaryType = 'arraybuffer';
-      _controlWs.onmessage = ({ data }) => {
-        if (typeof data !== 'string') return;
-        try {
-          const msg = JSON.parse(data);
-          if (msg.id && _controlPending.has(msg.id)) {
-            const { resolve } = _controlPending.get(msg.id);
-            _controlPending.delete(msg.id);
-            resolve(msg);
-          }
-        } catch {}
-      };
-      _controlWs.onclose = () => {
-        _controlWs = null;
+      const [loggerResp, defaultsResp, controlResp] = await Promise.all([
+        fetch(browser.runtime.getURL('js/utils/logger.js')),
+        fetch(browser.runtime.getURL('js/utils/settings-defaults.js')),
+        fetch(browser.runtime.getURL('js/control.js')),
+      ]);
+      const [loggerCode, defaultsCode, controlCode] = await Promise.all([
+        loggerResp.text(),
+        defaultsResp.text(),
+        controlResp.text(),
+      ]);
+      const blob = new Blob([loggerCode + '\n' + defaultsCode + '\n' + controlCode], { type: 'application/javascript' });
+      _controlWorker = new Worker(URL.createObjectURL(blob));
+    } catch (e) {
+      __webhid.logger.error('[bridge] control worker spawn failed:', e);
+      _controlWorker = null;
+      return;
+    }
+
+    const { port1, port2 } = new MessageChannel();
+    _controlPort = port1;
+
+    _controlPort.onmessage = ({ data }) => {
+      if (data.type === 'ready') {
+        __webhid.logger.info('[bridge] control worker ready');
+      } else if (data.type === 'closed') {
+        __webhid.logger.warn('[bridge] control worker WS closed; will auto-reconnect');
         for (const [, { resolve }] of _controlPending) resolve({ success: false, error: 'WS control closed' });
         _controlPending.clear();
-      };
-      _controlWs.onerror = () => {};
-      __webhid.logger.info('[bridge] control WS connected to ws://127.0.0.1:' + wsPort);
-    } catch (e) {
-      __webhid.logger.warn('[bridge] control WS connect failed:', e.message);
-      _controlWs = null;
-    }
+      } else if (data.type === 'response' && data.id && _controlPending.has(data.id)) {
+        const { resolve } = _controlPending.get(data.id);
+        _controlPending.delete(data.id);
+        resolve(data.result);
+      }
+    };
+
+    _controlWorker.postMessage({ type: 'connect', token, wsPort, logLevel: __webhid.logger._level }, [port2]);
+    __webhid.logger.info('[bridge] control worker spawned');
+  }
+
+  function _terminateControlWorker() {
+    if (_controlPort) { _controlPort.onmessage = null; _controlPort.close(); _controlPort = null; }
+    if (_controlWorker) { _controlWorker.postMessage({ type: 'disconnect' }); _controlWorker.terminate(); _controlWorker = null; }
+    for (const [, { resolve }] of _controlPending) resolve({ success: false, error: 'WS control closed' });
+    _controlPending.clear();
+  }
+
+  function _sendControlCommand(action, payload) {
+    return new Promise((resolve) => {
+      if (!_controlPort) {
+        resolve({ success: false, error: 'WS control not connected' });
+        return;
+      }
+      const id = _controlReqId++;
+      _controlPending.set(id, { resolve });
+      _controlPort.postMessage({ type: 'command', id, action, payload });
+    });
   }
 
   // Tear down the data-plane worker for a device. Increments spawn generation
@@ -565,19 +598,7 @@
     }
   }
 
-  function _sendControlWs(action, payload) {
-    return new Promise((resolve) => {
-      if (!_controlWs || _controlWs.readyState !== WebSocket.OPEN) {
-        resolve({ success: false, error: 'WS control not connected' });
-        return;
-      }
-      const id = _controlReqId++;
-      _controlPending.set(id, { resolve });
-      _controlWs.send(JSON.stringify({ id, action, ...payload }));
-    });
-  }
-
-  // Init: send handshake to get ws_port. Only connect control WS if
+  // Init: send handshake to get ws_port. Only spawn control worker if
   // control plane setting is 'ws'. If 'nm', just store ws_port for
   // data plane use (open() sends WS data plane via _spawnDataPlane).
   (async () => {
@@ -585,7 +606,6 @@
       const resp = await browser.runtime.sendMessage({ action: 'handshake' });
       if (resp.success && resp.ws_port) {
         _wsPort = resp.ws_port;
-        // Read control plane setting to decide if we need control WS
         const global = await browser.storage.local.get(__webhid.GLOBAL_DEFAULTS);
         let cp = global.controlPlane;
         const origin = window.location.origin;
@@ -597,7 +617,7 @@
         }
         _controlPlane = cp;
         if (cp === 'ws' && resp.control_token) {
-          _connectControlWs(resp.control_token, resp.ws_port);
+          _spawnControlWorker(resp.control_token, resp.ws_port);
         }
       }
     } catch (e) {
@@ -754,14 +774,14 @@
     }
 
     // All other actions (enumerate / open / close / read / write) are forwarded
-    // to the background script via the native-messaging port, or via WS
-    // control plane if enabled and connected.
+    // to the background script via the native-messaging port, or via control
+    // worker if WS control plane is enabled and connected.
     try {
-      // WS control plane: route enumerate/close via WS text frames.
+      // WS control plane: route enumerate/close via control worker.
       // open always goes via NM (needs session_token per device).
-      if (_controlPlane === 'ws' && _controlWs && _controlWs.readyState === WebSocket.OPEN
+      if (_controlPlane === 'ws' && _controlPort
           && (action === 'enumerate' || action === 'close')) {
-        const response = await _sendControlWs(action, payload || {});
+        const response = await _sendControlCommand(action, payload || {});
         window.postMessage({ __webhid_bridge: "res", id, result: response }, "*");
         return;
       }
@@ -876,20 +896,20 @@
       if (ll !== undefined) wMsg.logLevel = ll;
       if (pl !== undefined) wMsg.perfLogging = pl;
       for (const worker of _workers.values()) worker.postMessage(wMsg);
+      if (_controlWorker) _controlWorker.postMessage(wMsg);
     }
 
     if (cp !== undefined) {
       _controlPlane = cp;
       __webhid.logger.info('[bridge] control plane changed:', cp);
-      if (cp === 'ws' && _wsPort && !_controlWs) {
+      if (cp === 'ws' && _wsPort && !_controlWorker) {
         const resp = await browser.runtime.sendMessage({ action: 'handshake' });
         if (resp.success && resp.control_token && resp.ws_port) {
           _wsPort = resp.ws_port;
-          _connectControlWs(resp.control_token, resp.ws_port);
+          _spawnControlWorker(resp.control_token, resp.ws_port);
         }
-      } else if (cp === 'nm' && _controlWs) {
-        _controlWs.close();
-        _controlWs = null;
+      } else if (cp === 'nm' && _controlWorker) {
+        _terminateControlWorker();
       }
     }
 
