@@ -860,46 +860,65 @@
     const origin = window.location.origin;
     const siteKey = origin ? `site:${origin}` : null;
 
-    let ff, pl, ll, dp, cp;
-    if (changes.fireAndForget) ff = changes.fireAndForget.newValue;
-    if (changes.perfLogging) pl = changes.perfLogging.newValue;
-    if (changes.logLevel) ll = changes.logLevel.newValue;
-    if (changes.dataPlane) dp = changes.dataPlane.newValue;
-    if (changes.controlPlane) cp = changes.controlPlane.newValue;
-
-    if (siteKey && changes[siteKey]) {
-      const ss = changes[siteKey].newValue || {};
-      if (ss.dataPlane !== undefined) dp = ss.dataPlane;
-      if (ss.controlPlane !== undefined) cp = ss.controlPlane;
-      if (ss.fireAndForget !== undefined) ff = ss.fireAndForget;
-      if (ss.logLevel !== undefined) ll = ss.logLevel;
-      if (ss.perfLogging !== undefined) pl = ss.perfLogging;
-    }
-
-    // Push settings to the page first.
-    {
-      const settings = {};
-      if (dp !== undefined) settings.dataPlane = dp;
-      if (cp !== undefined) settings.controlPlane = cp;
-      if (ff !== undefined) settings.fireAndForget = ff;
-      if (ll !== undefined) settings.logLevel = ll;
-      if (pl !== undefined) settings.perfLogging = pl;
-      if (Object.keys(settings).length > 0) {
-        window.postMessage({ __webhid_bridge: "settings", settings }, "*");
+    // Compute effective settings BEFORE the change (what we currently have).
+    const before = await browser.storage.local.get(__webhid.GLOBAL_DEFAULTS);
+    if (siteKey) {
+      const siteResult = await browser.storage.local.get(siteKey);
+      const ss = siteResult[siteKey] || {};
+      for (const k of Object.keys(__webhid.GLOBAL_DEFAULTS)) {
+        if (ss[k] !== undefined) before[k] = ss[k];
       }
     }
 
-    // Forward fire-and-forget / logLevel / perfLogging to workers.
-    if (ff !== undefined || ll !== undefined || pl !== undefined) {
-      const wMsg = { type: 'settings' };
-      if (ff !== undefined) wMsg.fireAndForget = ff;
-      if (ll !== undefined) wMsg.logLevel = ll;
-      if (pl !== undefined) wMsg.perfLogging = pl;
-      for (const worker of _workers.values()) worker.postMessage(wMsg);
-      if (_controlWorker) _controlWorker.postMessage(wMsg);
+    // Determine which keys changed (global or site-level).
+    const changed = {};
+    for (const k of ['dataPlane', 'controlPlane', 'fireAndForget', 'logLevel', 'perfLogging']) {
+      if (changes[k]) changed[k] = changes[k].newValue;
+      if (siteKey && changes[siteKey]) {
+        const ss = changes[siteKey].newValue || {};
+        if (ss[k] !== undefined) changed[k] = ss[k];
+      }
     }
 
-    if (cp !== undefined) {
+    // Compute effective settings AFTER the change.
+    const after = { ...before };
+    for (const [k, v] of Object.entries(changed)) {
+      after[k] = v;
+    }
+
+    // Only act on settings whose EFFECTIVE value actually changed.
+    const effective = {};
+    for (const k of Object.keys(changed)) {
+      if (before[k] !== after[k]) {
+        effective[k] = after[k];
+      }
+    }
+
+    if (Object.keys(effective).length === 0) return;
+
+    // Push changed settings to the page.
+    {
+      const settings = {};
+      for (const k of Object.keys(effective)) {
+        settings[k] = effective[k];
+      }
+      window.postMessage({ __webhid_bridge: "settings", settings }, "*");
+    }
+
+    // Forward fire-and-forget / logLevel / perfLogging to workers (only if changed).
+    const workerMsg = { type: 'settings' };
+    let hasWorkerSettings = false;
+    if (effective.fireAndForget !== undefined) { workerMsg.fireAndForget = effective.fireAndForget; hasWorkerSettings = true; }
+    if (effective.logLevel !== undefined) { workerMsg.logLevel = effective.logLevel; hasWorkerSettings = true; }
+    if (effective.perfLogging !== undefined) { workerMsg.perfLogging = effective.perfLogging; hasWorkerSettings = true; }
+    if (hasWorkerSettings) {
+      for (const worker of _workers.values()) worker.postMessage(workerMsg);
+      if (_controlWorker) _controlWorker.postMessage(workerMsg);
+    }
+
+    // Control plane change: only act if effective value changed.
+    if (effective.controlPlane !== undefined) {
+      const cp = effective.controlPlane;
       _controlPlane = cp;
       __webhid.logger.info('[bridge] control plane changed:', cp);
       if (cp === 'ws' && _wsPort && !_controlWorker) {
@@ -913,8 +932,9 @@
       }
     }
 
-    // Data plane switch: despawn worker, respawn with new transport.
-    if (dp !== undefined) {
+    // Data plane change: only act if effective value changed.
+    if (effective.dataPlane !== undefined) {
+      const dp = effective.dataPlane;
       for (const id of _openDevices) { _despawnDataPlane(id); }
 
       if (dp === 'ws') {
