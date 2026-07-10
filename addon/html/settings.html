@@ -32,50 +32,12 @@
 <div class="setting">
   <div class="setting-info">
     <h3>Data Plane</h3>
-    <p><strong>WebSocket</strong>: spawn a Web Worker per device, connect directly to the daemon's WS server. Supports SharedArrayBuffer for zero-copy input reports.<br><strong>Native Messaging</strong>: route all data (sendReport, input reports, feature reports) through the NM host via the content-script bridge. No worker, no WS, no SAB. For benchmarking the NM path.</p>
+    <p><strong>WebSocket</strong>: bridge connects directly to the daemon's WS server and forwards input reports to the page via <code>postMessage</code> with ArrayBuffer transfer (1 alloc, 1 copy).<br><strong>Native Messaging</strong>: route all data (sendReport, input reports, feature reports) through the NM host via the content-script bridge. No WS. For benchmarking the NM path.</p>
   </div>
   <select id="dataPlane">
-    <option value="ws">WebSocket (worker + SAB)</option>
+    <option value="ws">WebSocket (postMessage transfer)</option>
     <option value="nm">Native Messaging (via bridge)</option>
   </select>
-</div>
-<div class="setting" id="sabEnabled-row">
-  <div class="setting-info">
-    <h3>SharedArrayBuffer</h3>
-    <p>Use a shared ring buffer between the Worker and the page for zero-copy input report delivery. Injects COOP/COEP headers which may break some sites. Disable to fall back to postMessage (with ArrayBuffer transfer).</p>
-  </div>
-  <label class="toggle">
-    <input type="checkbox" id="sabEnabled">
-    <span class="slider"></span>
-  </label>
-</div>
-<div class="setting sab-setting" id="sabCapacity-row">
-  <div class="setting-info">
-    <h3>SAB Buffer Capacity (default)</h3>
-    <p>Ring-buffer slots for input reports. Higher = fewer drops under heavy traffic. Per-site overrides in popup.</p>
-  </div>
-  <output id="sabCapacityOutput" class="sab-value">8192</output>
-  <div class="sab-slider-wrapper">
-    <input type="range" id="sabCapacity" min="64" max="4096" step="64" value="256" list="sab-markers">
-    <datalist id="sab-markers">
-      <option value="64">
-      <option value="128">
-      <option value="256">
-      <option value="512">
-      <option value="1024">
-      <option value="2048">
-      <option value="4096">
-    </datalist>
-    <div class="sab-labels">
-      <span style="left: calc((64 - 64) * 100% / (4096 - 64))">64</span>
-      <span style="left: calc((128 - 64) * 100% / (4096 - 64))">128</span>
-      <span style="left: calc((256 - 64) * 100% / (4096 - 64))">256</span>
-      <span style="left: calc((512 - 64) * 100% / (4096 - 64))">512</span>
-      <span style="left: calc((1024 - 64) * 100% / (4096 - 64))">1K</span>
-      <span style="left: calc((2048 - 64) * 100% / (4096 - 64))">2K</span>
-      <span style="left: calc((4096 - 64) * 100% / (4096 - 64))">4K</span>
-    </div>
-  </div>
 </div>
 <div class="setting">
   <div class="setting-info">

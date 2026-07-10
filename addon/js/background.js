@@ -233,22 +233,8 @@ loadNmHostSetting().then(() => NativeMessaging.connect());
 // longer owns).
 browser.tabs.onRemoved.addListener((tabId) => purgeTab(tabId));
 
-// ---------------------------------------------------------------------------
-// Security Headers (COOP/COEP): only when SAB data plane is enabled
-// ---------------------------------------------------------------------------
-
-let _sabEnabled = globalThis.__webhid.GLOBAL_DEFAULTS.sabEnabled;
-async function loadSabSetting() {
-  const global = await browser.storage.local.get({ sabEnabled: globalThis.__webhid.GLOBAL_DEFAULTS.sabEnabled });
-  _sabEnabled = global.sabEnabled;
-}
-loadSabSetting();
-
 browser.storage.onChanged.addListener((changes, area) => {
   if (area === 'local') {
-    if (changes.sabEnabled) {
-      _sabEnabled = changes.sabEnabled.newValue;
-    }
     if (changes.daemonAsNmHost) {
       const newName = changes.daemonAsNmHost.newValue ? NM_HOST_DAEMON : NM_HOST_FORWARDER;
       if (newName !== _nmHostName) {
@@ -258,39 +244,8 @@ browser.storage.onChanged.addListener((changes, area) => {
         NativeMessaging.reconnectWithNewHost();
       }
     }
-    // Reload from storage to pick up per-site overrides
-    loadSabSetting();
-    __webhid.logger.info('[bg] SAB data plane:', _sabEnabled);
   }
 });
-
-browser.webRequest.onHeadersReceived.addListener(
-  (details) => {
-    if (!_sabEnabled) return {};
-
-    // Only inject COOP/COEP on main-frame document requests. Injecting on
-    // sub-resources (scripts, images, fonts) breaks cross-origin loads on
-    // sites like usevia.app that pull from CDNs without CORP headers.
-    const isMainFrame = details.type === 'main_frame';
-    if (!isMainFrame) return {};
-
-    const headers = details.responseHeaders.filter(h =>
-      !['cross-origin-opener-policy',
-        'cross-origin-embedder-policy',
-        'cross-origin-resource-policy'].includes(h.name.toLowerCase())
-    );
-    headers.push(
-      { name: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
-      // credentialless is more permissive than require-corp: cross-origin
-      // resources without CORP headers are still allowed (loaded without
-      // credentials). This avoids breaking sites that load from CDNs.
-      { name: 'Cross-Origin-Embedder-Policy', value: 'credentialless' },
-    );
-    return { responseHeaders: headers };
-  },
-  { urls: ['http://*/*', 'https://*/*'] },
-  ['blocking', 'responseHeaders']
-);
 
 // ---------------------------------------------------------------------------
 // Message handler for content-script requests

@@ -4,8 +4,6 @@ const GLOBAL_DEFAULTS = {
   fireAndForget: true,
   dataPlane: 'nm',
   controlPlane: 'nm',
-  sabEnabled: true,
-  sabCapacity: 256,
   logLevel: 1,
   daemonAsNmHost: false,
 };

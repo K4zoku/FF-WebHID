@@ -39,48 +39,15 @@
   controlPlaneSelect.value = settings.controlPlane;
 
   document.getElementById('fireAndForget').checked = settings.fireAndForget;
-  document.getElementById('sabEnabled').checked = settings.sabEnabled;
-  const sabInput = document.getElementById('sabCapacity');
-  const sabOutput = document.getElementById('sabCapacityOutput');
-  sabInput.value = String(settings.sabCapacity);
-  sabOutput.textContent = String(settings.sabCapacity);
-  updateSabFill();
-
-  function updateSabOutput() {
-    sabOutput.textContent = sabInput.value;
-  }
-
-  function updateSabFill() {
-    const val = parseInt(sabInput.value, 10);
-    sabInput.style.setProperty('--fill', ((val - 64) / (4096 - 64)) * 100 + '%');
-  }
-
-  function updateCascadingVisibility() {
-    const isWs = dataPlaneSelect.value === 'ws';
-    const sabOn = document.getElementById('sabEnabled').checked;
-    document.getElementById('sabEnabled-row').style.display = isWs ? '' : 'none';
-    document.getElementById('sab-capacity-row').style.display = (isWs && sabOn) ? '' : 'none';
-  }
-
-  updateCascadingVisibility();
 
   dataPlaneSelect.addEventListener('change', (e) => {
     saveSetting('dataPlane', e.target.value);
-    updateCascadingVisibility();
   });
   controlPlaneSelect.addEventListener('change', (e) => {
     saveSetting('controlPlane', e.target.value);
   });
   document.getElementById('fireAndForget').addEventListener('change', (e) => {
     saveSetting('fireAndForget', e.target.checked);
-  });
-  document.getElementById('sabEnabled').addEventListener('change', (e) => {
-    saveSetting('sabEnabled', e.target.checked);
-    updateCascadingVisibility();
-  });
-  sabInput.addEventListener('input', () => { updateSabOutput(); updateSabFill(); });
-  sabInput.addEventListener('change', (e) => {
-    saveSetting('sabCapacity', parseInt(e.target.value, 10));
   });
 
   async function loadDevices() {

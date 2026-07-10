@@ -83,8 +83,8 @@
   // Two data-plane modes (both go through the content-script bridge —
   // Firefox does not support `externally_connectable`, so the page cannot
   // connect to the background directly):
-  //   ws — page → bridge → worker → WebSocket → daemon (SAB or postMessage)
-  //   nm  — page → bridge → background → NM host → daemon (no worker/WS/SAB)
+  //   ws — page → bridge → WebSocket → daemon (input reports via postMessage transfer)
+  //   nm  — page → bridge → background → NM host → daemon
   //
   // In `nm` mode the polyfill sends data actions as `sendreport` /
   // `sendfeaturereport` / `receivefeaturereport` (instead of `worker-*`),
@@ -95,7 +95,6 @@
 
   const _defs = globalThis.__webhid.GLOBAL_DEFAULTS;
   let _dataPlane = _defs.dataPlane;
-  let _sabEnabled = _defs.sabEnabled;
   let _perfLogging = _defs.perfLogging;
   let _fireAndForget = _defs.fireAndForget;
 
@@ -125,12 +124,6 @@
       const s = event.data.settings;
       if (s.dataPlane !== undefined) { _dataPlane = s.dataPlane; __webhid.logger.info('[webhid] data plane changed: ' + _dataPlane); }
       if (s.fireAndForget !== undefined) { _fireAndForget = s.fireAndForget; __webhid.logger.info('[webhid] fire-and-forget: ' + _fireAndForget); }
-      if (s.sabEnabled !== undefined) {
-        _sabEnabled = s.sabEnabled;
-        __webhid.logger.info('[webhid] SAB enabled: ' + _sabEnabled);
-        // Toggle drain behavior on all devices. Each device checks
-        // _sabEnabled in its input_report handler.
-      }
       if (s.logLevel !== undefined && __webhid.logger.applyLevel) __webhid.logger.applyLevel(s.logLevel);
       if (s.perfLogging !== undefined) _perfLogging = s.perfLogging;
       _applyPerf();
@@ -157,7 +150,6 @@
   sendRequest("getSettings", {}).then((s) => {
     if (!s) return;
     if (s.dataPlane !== undefined) _dataPlane = s.dataPlane;
-    if (s.sabEnabled !== undefined) _sabEnabled = s.sabEnabled;
     if (s.fireAndForget !== undefined) _fireAndForget = s.fireAndForget;
     if (s.logLevel !== undefined && __webhid.logger.applyLevel) __webhid.logger.applyLevel(s.logLevel);
     if (s.perfLogging !== undefined) _perfLogging = s.perfLogging;
@@ -196,11 +188,6 @@
   // the SAME objects. Open state is shared across tabs (matches Chromium).
   const _deviceRegistry = new Map(); // internalId -> HIDDevice
 
-  // WeakMap for SAB-swap callback (can't use private field since
-  // startInputReportLoop is a standalone function, not a class method).
-  const _sabUpdateFns = new WeakMap();
-  const _sabStopFns = new WeakMap();
-
   function getOrCreateDevice(deviceInfo) {
     const id = deviceInfo.device_id;
     if (id && _deviceRegistry.has(id)) {
@@ -219,46 +206,8 @@
     #oninputreportListener = null;
     #parsedCollections = null;
     #opened = false;
-    #sabListener = null;
-    #inputLoopStarted = false;
-    #sabDrainActive = false;
     #deviceId = null;
     #maxInputReportSize = 2048;
-
-    #installSabListener() {
-      if (this.#sabListener) return;
-      const listener = (event) => {
-        if (!event.data || event.data.__webhid_bridge !== "evt") return;
-        const detail = event.data.event;
-        if (!detail) return;
-        const evDeviceId = detail.device_id;
-        if (!evDeviceId || !this.#deviceId || evDeviceId !== this.#deviceId) return;
-
-        if (detail.event_type === "webhid-sab") {
-          // SAB path: start/update drain loop
-          this.#sabDrainActive = true;
-          if (!this.#inputLoopStarted) {
-            this.#inputLoopStarted = true;
-            startInputReportLoop(this, detail.sab, detail.reportSize);
-          } else {
-            const updateFn = _sabUpdateFns.get(this);
-            if (updateFn) updateFn(detail.sab, detail.reportSize);
-          }
-        } else if (detail.event_type === "webhid-sab-disabled") {
-          // SAB unavailable (COOP/COEP blocked or SAB toggled off in
-          // settings). Input reports arrive via `input_report` events from
-          // the worker/bridge. Stop the SAB drain loop by bumping its
-          // generation so pending waitAsync/rAF callbacks become no-ops.
-          this.#sabDrainActive = false;
-          this.#inputLoopStarted = true;
-          const stopFn = _sabStopFns.get(this);
-          if (stopFn) { stopFn(); _sabStopFns.delete(this); }
-          _sabUpdateFns.delete(this);
-        }
-      };
-      this.#sabListener = listener;
-      window.addEventListener("message", listener);
-    }
 
     constructor(deviceInfo) {
       super();
@@ -293,7 +242,6 @@
         if (response.success) {
           this.#opened = true;
           __webhid.logger.info('[webhid] open deviceId=' + this.#deviceId + ' dataPlane=' + _dataPlane);
-          this.#installSabListener();
           this.dispatchEvent(new Event("open"));
           return true;
         }
@@ -312,12 +260,6 @@
         });
         if (response.success) {
           this.#opened = false;
-          this.#inputLoopStarted = false;
-          this.#sabDrainActive = false;
-          if (this.#sabListener) {
-            window.removeEventListener("message", this.#sabListener);
-            this.#sabListener = null;
-          }
           this.dispatchEvent(new Event("close"));
         } else {
           throw new Error("Failed to close device");
@@ -437,12 +379,11 @@
 
           const evDeviceId = detail.device_id;
 
-          if (event_type === "webhid-sab" || event_type === "webhid-sab-disabled") {
+          if (event_type === "webhid-data-ready") {
             return;
           }
 
           if (event_type === "input_report") {
-            if (_sabEnabled && this.#sabDrainActive) return;
             if (evDeviceId && this.#deviceId && evDeviceId !== this.#deviceId) return;
             const dataBytes = typeof detail.data === 'string'
               ? Uint8Array.fromBase64(detail.data)
@@ -524,94 +465,6 @@
         this.#oninputreportListener = null;
       }
     }
-  }
-
-  // SAB drain loop. Uses Atomics.waitAsync + generation counter for SAB swaps.
-  function startInputReportLoop(device, sab, reportSize) {
-    let meta    = new Int32Array(sab, 0, 3);
-    let reports = new Uint8Array(sab, 12);
-    let cap     = (sab.byteLength - 12) / reportSize;
-    let tail    = Atomics.load(meta, 1);
-    let lastDropped = Atomics.load(meta, 2);
-    let generation = 0;
-
-    const _yieldChan = new MessageChannel();
-    let _yieldCb = null;
-    _yieldChan.port1.onmessage = () => { if (_yieldCb) { const cb = _yieldCb; _yieldCb = null; cb(); } };
-    const scheduleYield = (cb) => { _yieldCb = cb; _yieldChan.port2.postMessage(0); };
-
-    function drain() {
-      let head = Atomics.load(meta, 0);
-      let n = 0;
-      const BATCH = 64;
-      while (tail !== head && n < BATCH) {
-        const slotOffset = tail * reportSize;
-        const storedLen  = reports[slotOffset] | (reports[slotOffset + 1] << 8);
-        if (storedLen === 0) {
-          tail = (tail + 1) % cap;
-          Atomics.store(meta, 1, tail);
-          head = Atomics.load(meta, 0);
-          continue;
-        }
-        const reportId  = reports[slotOffset + 2];
-        const payloadLen = storedLen - 1;
-        const payload = new Uint8Array(payloadLen);
-        payload.set(reports.subarray(slotOffset + 3, slotOffset + 3 + payloadLen));
-        const dataView = new DataView(payload.buffer, 0, payloadLen);
-        device.dispatchEvent(new HIDInputReportEvent('inputreport', {
-          device,
-          reportId,
-          data: dataView,
-        }));
-        tail = (tail + 1) % cap;
-        Atomics.store(meta, 1, tail);
-        head = Atomics.load(meta, 0);
-        n++;
-      }
-      const dropped = Atomics.load(meta, 2);
-      if (dropped !== lastDropped) {
-        const delta = dropped - lastDropped;
-        lastDropped = dropped;
-        __webhid.logger.warn('[webhid] SAB DROPPED ' + delta + ' input reports (total=' + dropped + ')');
-      }
-      if (tail !== head) scheduleYield(drain);
-    }
-
-    function wait() {
-      const myGen = generation;
-      const head = Atomics.load(meta, 0);
-      if (head !== tail) drain();
-      const result = Atomics.waitAsync(meta, 0, Atomics.load(meta, 0));
-      if (result.async) {
-        result.value.then(() => {
-          if (myGen !== generation) return;
-          drain();
-          wait();
-        });
-      } else {
-        if (myGen !== generation) return;
-        drain();
-        requestAnimationFrame(() => { if (myGen !== generation) return; wait(); });
-      }
-    }
-
-    _sabUpdateFns.set(device, (newSab, newReportSize) => {
-      meta = new Int32Array(newSab, 0, 3);
-      reports = new Uint8Array(newSab, 12);
-      reportSize = newReportSize;
-      cap = (newSab.byteLength - 12) / reportSize;
-      tail = Atomics.load(meta, 1);
-      lastDropped = Atomics.load(meta, 2);
-      generation++;
-      drain();
-      wait();
-    });
-
-    _sabStopFns.set(device, () => {
-      generation++;
-    });
-
-    wait();
   }
 
   // ── HID (navigator.hid) ───────────────────────────────────────────────────

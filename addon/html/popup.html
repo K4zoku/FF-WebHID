@@ -31,50 +31,12 @@
   <div class="setting">
     <div class="setting-info">
       <h3>Data Plane</h3>
-      <p>WebSocket (worker + SAB) or Native Messaging (via bridge)</p>
+      <p>WebSocket (postMessage transfer) or Native Messaging (via bridge)</p>
     </div>
     <select id="dataPlane">
       <option value="ws">WebSocket</option>
       <option value="nm">Native Messaging</option>
     </select>
-  </div>
-  <div class="setting" id="sabEnabled-row">
-    <div class="setting-info">
-      <h3>SAB Data Plane</h3>
-      <p>SharedArrayBuffer zero-copy (injects COOP/COEP)</p>
-    </div>
-    <label class="toggle">
-      <input type="checkbox" id="sabEnabled">
-      <span class="slider"></span>
-    </label>
-  </div>
-  <div class="setting sab-setting" id="sab-capacity-row">
-    <div class="setting-info">
-      <h3>SAB Buffer Capacity</h3>
-      <p>Ring-buffer slots (higher = fewer drops under load)</p>
-    </div>
-    <output id="sabCapacityOutput" class="sab-value">256</output>
-    <div class="sab-slider-wrapper">
-      <input type="range" id="sabCapacity" min="64" max="4096" step="64" value="256" list="sab-markers">
-      <datalist id="sab-markers">
-        <option value="64">
-        <option value="128">
-        <option value="256">
-        <option value="512">
-        <option value="1024">
-        <option value="2048">
-        <option value="4096">
-      </datalist>
-      <div class="sab-labels">
-        <span style="left: calc((64 - 64) * 100% / (4096 - 64))">64</span>
-        <span style="left: calc((128 - 64) * 100% / (4096 - 64))">128</span>
-        <span style="left: calc((256 - 64) * 100% / (4096 - 64))">256</span>
-        <span style="left: calc((512 - 64) * 100% / (4096 - 64))">512</span>
-        <span style="left: calc((1024 - 64) * 100% / (4096 - 64))">1K</span>
-        <span style="left: calc((2048 - 64) * 100% / (4096 - 64))">2K</span>
-        <span style="left: calc((4096 - 64) * 100% / (4096 - 64))">4K</span>
-      </div>
-    </div>
   </div>
   <div class="setting">
     <div class="setting-info">

@@ -400,14 +400,13 @@
   // Content script  →  page:  postMessage({ __webhid_bridge: 'res', id, result })
   //                           postMessage({ __webhid_bridge: 'evt', event })
   // ---------------------------------------------------------------------------
-  const _workers = new Map();
-  const _workerCallbacks = new Map();
   const _openDevices = new Set();
   const _sessionTokens = new Map();
-  const _workerReady = new Set();
   const _wsData = new Map();
   const _wsDataCallbacks = new Map();
-  const _spawnGen = new Map();
+  const _workerReady = new Set();
+  // Per-device reconnect state: deviceId → { token, wsPort, timer, delay }
+  const _reconnect = new Map();
   let _wsDataReqId = 1;
   let _wsPort = null;
   let _controlPlane = 'nm';
@@ -444,132 +443,148 @@
     }
   }
 
-  // Despawn all data-plane connections (workers + ws-data) for a device.
-  // Increments the spawn generation so any in-flight async _spawnWorker
-  // knows it's stale and aborts before adding a zombie worker to _workers.
+  // Tear down the data-plane WS connection for a device and cancel any
+  // pending reconnect.
   function _despawnDataPlane(deviceId) {
-    const gen = (_spawnGen.get(deviceId) || 0) + 1;
-    _spawnGen.set(deviceId, gen);
-    const worker = _workers.get(deviceId);
-    if (worker) { worker.terminate(); _workers.delete(deviceId); }
-    _workerCallbacks.delete(deviceId);
+    const rc = _reconnect.get(deviceId);
+    if (rc) {
+      if (rc.timer) clearTimeout(rc.timer);
+      _reconnect.delete(deviceId);
+    }
     const ws = _wsData.get(deviceId);
-    if (ws) { ws.close(); _wsData.delete(deviceId); }
+    if (ws) {
+      ws.onclose = null;  // suppress auto-reconnect on deliberate close
+      ws.close();
+      _wsData.delete(deviceId);
+    }
     _wsDataCallbacks.delete(deviceId);
     _workerReady.delete(deviceId);
   }
 
-  // Spawn the WS data plane for a device. When SAB is enabled, use the
-  // worker path (worker owns the WS, pushes input reports into a SAB ring
-  // buffer that the page drains via Atomics). When SAB is disabled, use
-  // the bridge-direct path (bridge owns the WS, forwards input reports via
-  // window.postMessage transfer).
-  function _spawnDataPlane(deviceId, session_token, wsPort, opts = {}) {
-    const gen = (_spawnGen.get(deviceId) || 0) + 1;
-    _spawnGen.set(deviceId, gen);
-    const sabEnabled = opts.sabEnabled !== false;
-    if (sabEnabled && typeof SharedArrayBuffer !== 'undefined') {
-      __webhid.logger.info('[bridge] spawn worker (SAB) for', deviceId);
-      _spawnWorker(deviceId, session_token, opts, gen).catch((e) => {
-        __webhid.logger.error('[bridge] worker spawn failed, falling back to ws-data:', e.message);
-        if (_spawnGen.get(deviceId) === gen) _spawnWsData(deviceId, session_token, wsPort);
-      });
-    } else {
-      __webhid.logger.info('[bridge] spawn ws-data (no SAB) for', deviceId);
-      _spawnWsData(deviceId, session_token, wsPort);
-    }
+  // Spawn the WS data plane for a device. The bridge owns the WebSocket and
+  // forwards input reports to the page via window.postMessage with ArrayBuffer
+  // transfer (1 alloc, 1 copy — cheaper than SAB which needed 1 alloc + 2
+  // copies and required COOP/COEP injection).
+  // Auto-reconnects on close (exponential backoff 500ms → 5000ms).
+  function _spawnDataPlane(deviceId, session_token, wsPort) {
+    if (_wsData.has(deviceId)) return;
+    // Remember connect params so we can reconnect.
+    _reconnect.set(deviceId, { token: session_token, wsPort, timer: null, delay: 500 });
+    _doWsConnect(deviceId);
   }
 
-  // Bridge-as-WS-data-plane: bridge connects WS directly, no worker.
-  // Input reports arrive via ws.onmessage → window.postMessage to page.
-  // sendReport/feature: bridge builds binary frame → ws.send.
-  function _spawnWsData(deviceId, session_token, wsPort) {
-    if (_wsData.has(deviceId)) return;
+  function _doWsConnect(deviceId) {
+    const rc = _reconnect.get(deviceId);
+    if (!rc) return;  // despawned
+    let ws;
     try {
-      const ws = new WebSocket(`ws://127.0.0.1:${wsPort}`, [`webhid.${session_token}`]);
+      ws = new WebSocket(`ws://127.0.0.1:${rc.wsPort}`, [`webhid.${rc.token}`]);
       ws.binaryType = 'arraybuffer';
-
-      ws.onopen = () => {
-        __webhid.logger.info('[bridge] WS data connected for', deviceId);
-        _workerReady.add(deviceId);
-        window.postMessage({
-          __webhid_bridge: 'evt',
-          event: { event_type: 'webhid-sab-disabled', device_id: deviceId }
-        }, '*');
-      };
-
-      ws.onmessage = ({ data: frame }) => {
-        // Copy frame into a fresh Uint8Array to escape Firefox Xray wrapping.
-        // WebSocket binary data in a content script (isolated world) is Xray-
-        // wrapped; calling .subarray()/.set() on the Xray view triggers
-        // "Permission denied to access property 'constructor'". Indexed
-        // access through Xray is allowed, so we copy byte-by-byte into a
-        // plain (non-Xray) Uint8Array once, then all subsequent operations
-        // (subarray, set, slice) work normally.
-        const view = new Uint8Array(frame);
-        const batch = new Uint8Array(view.length);
-        for (let i = 0; i < view.length; i++) batch[i] = view[i];
-        if (batch.length > 0 && batch[0] >= 0x80 && batch.length <= 10) {
-          // Control response (sendReport ack, receiveFeature response)
-          const respType = batch[0];
-          const reqId = batch[1] | (batch[2] << 8) | (batch[3] << 16) | (batch[4] << 24);
-          const cbMap = _wsDataCallbacks.get(deviceId);
-          if (cbMap && cbMap.has(reqId)) {
-            const cb = cbMap.get(reqId);
-            cbMap.delete(reqId);
-            if (respType === 0x83) {
-              const status = batch[5];
-              if (status !== 0) { cb({ error: 'feature read failed' }); return; }
-              const len = batch[6] | (batch[7] << 8);
-              const out = new Uint8Array(len);
-              if (len > 0 && batch.length >= 8 + len) out.set(batch.subarray(8, 8 + len));
-              cb({ data: out });
-            } else {
-              const status = batch[5];
-              cb({ success: status === 0 });
-            }
-          }
-          return;
-        }
-        // Input report batch: [len_u16 LE][report_id][...payload]...
-        let offset = 0;
-        while (offset + 1 < batch.length) {
-          const len = batch[offset] | (batch[offset + 1] << 8);
-          offset += 2;
-          if (len === 0 || offset + len > batch.length) break;
-          const reportId = batch[offset];
-          const payloadLen = len - 1;
-          const buf = payloadLen > 0 ? new ArrayBuffer(payloadLen) : null;
-          if (buf) new Uint8Array(buf).set(batch.subarray(offset + 1, offset + len));
-          window.postMessage({
-            __webhid_bridge: 'evt',
-            event: {
-              event_type: 'input_report',
-              device_id: deviceId,
-              report_id: reportId,
-              data: buf,
-            }
-          }, '*', buf ? [buf] : []);
-          offset += len;
-        }
-      };
-
-      ws.onerror = (e) => __webhid.logger.error('[bridge] WS data error:', e.message || e);
-      ws.onclose = () => {
-        __webhid.logger.warn('[bridge] WS data closed for', deviceId);
-        _wsData.delete(deviceId);
-        _workerReady.delete(deviceId);
-        window.postMessage({
-          __webhid_bridge: 'evt',
-          event: { event_type: 'disconnect', device_id: deviceId }
-        }, '*');
-      };
-
-      _wsData.set(deviceId, ws);
-      _wsDataCallbacks.set(deviceId, new Map());
     } catch (e) {
-      __webhid.logger.error('[bridge] WS data spawn failed:', e.message);
+      __webhid.logger.error('[bridge] WS constructor threw for', deviceId, ':', e.message || e);
+      _scheduleReconnect(deviceId);
+      return;
     }
+
+    ws.onopen = () => {
+      rc.delay = 500;  // reset backoff on success
+      __webhid.logger.info('[bridge] WS data connected for', deviceId);
+      _workerReady.add(deviceId);
+      window.postMessage({
+        __webhid_bridge: 'evt',
+        event: { event_type: 'webhid-data-ready', device_id: deviceId }
+      }, '*');
+    };
+
+    ws.onmessage = ({ data: frame }) => {
+      // Copy frame into a fresh Uint8Array to escape Firefox Xray wrapping.
+      // WebSocket binary data in a content script (isolated world) is Xray-
+      // wrapped; calling .subarray()/.set() on the Xray view triggers
+      // "Permission denied to access property 'constructor'". Indexed
+      // access through Xray is allowed, so we copy byte-by-byte into a
+      // plain (non-Xray) Uint8Array once, then all subsequent operations
+      // (subarray, set, slice) work normally.
+      const view = new Uint8Array(frame);
+      const batch = new Uint8Array(view.length);
+      for (let i = 0; i < view.length; i++) batch[i] = view[i];
+      if (batch.length > 0 && batch[0] >= 0x80 && batch.length <= 10) {
+        // Control response (sendReport ack, receiveFeature response)
+        const respType = batch[0];
+        const reqId = batch[1] | (batch[2] << 8) | (batch[3] << 16) | (batch[4] << 24);
+        const cbMap = _wsDataCallbacks.get(deviceId);
+        if (cbMap && cbMap.has(reqId)) {
+          const cb = cbMap.get(reqId);
+          cbMap.delete(reqId);
+          if (respType === 0x83) {
+            const status = batch[5];
+            if (status !== 0) { cb({ error: 'feature read failed' }); return; }
+            const len = batch[6] | (batch[7] << 8);
+            const out = new Uint8Array(len);
+            if (len > 0 && batch.length >= 8 + len) out.set(batch.subarray(8, 8 + len));
+            cb({ data: out });
+          } else {
+            const status = batch[5];
+            cb({ success: status === 0 });
+          }
+        }
+        return;
+      }
+      // Input report batch: [len_u16 LE][report_id][...payload]...
+      let offset = 0;
+      while (offset + 1 < batch.length) {
+        const len = batch[offset] | (batch[offset + 1] << 8);
+        offset += 2;
+        if (len === 0 || offset + len > batch.length) break;
+        const reportId = batch[offset];
+        const payloadLen = len - 1;
+        const buf = payloadLen > 0 ? new ArrayBuffer(payloadLen) : null;
+        if (buf) new Uint8Array(buf).set(batch.subarray(offset + 1, offset + len));
+        window.postMessage({
+          __webhid_bridge: 'evt',
+          event: {
+            event_type: 'input_report',
+            device_id: deviceId,
+            report_id: reportId,
+            data: buf,
+          }
+        }, '*', buf ? [buf] : []);
+        offset += len;
+      }
+    };
+
+    ws.onerror = (e) => __webhid.logger.error('[bridge] WS data error for', deviceId, ':', e.message || e);
+    ws.onclose = () => {
+      __webhid.logger.warn('[bridge] WS data closed for', deviceId, '; will auto-reconnect');
+      _wsData.delete(deviceId);
+      _workerReady.delete(deviceId);
+      // Reject any pending control requests so callers don't hang.
+      const cbMap = _wsDataCallbacks.get(deviceId);
+      if (cbMap) {
+        for (const [, cb] of cbMap) cb({ error: 'ws closed' });
+        cbMap.clear();
+      }
+      window.postMessage({
+        __webhid_bridge: 'evt',
+        event: { event_type: 'disconnect', device_id: deviceId }
+      }, '*');
+      _scheduleReconnect(deviceId);
+    };
+
+    _wsData.set(deviceId, ws);
+    if (!_wsDataCallbacks.has(deviceId)) _wsDataCallbacks.set(deviceId, new Map());
+  }
+
+  function _scheduleReconnect(deviceId) {
+    const rc = _reconnect.get(deviceId);
+    if (!rc) return;  // despawned
+    if (rc.timer) return;
+    __webhid.logger.info('[bridge] scheduling WS reconnect for', deviceId, 'in', rc.delay, 'ms');
+    rc.timer = setTimeout(() => {
+      rc.timer = null;
+      if (!_reconnect.has(deviceId)) return;  // despawned while waiting
+      _doWsConnect(deviceId);
+    }, rc.delay);
+    rc.delay = Math.min(rc.delay * 2, 5000);
   }
 
   function _wsDataSend(deviceId, msgType, reportId, payload) {
@@ -584,128 +599,6 @@
     if (payload) frame.set(payload, 6);
     ws.send(frame);
     return reqId;
-  }
-
-  async function _spawnWorker(deviceId, session_token, opts = {}, gen = 0) {
-    const wsPort = opts.wsPort || _wsPort;
-    const reportSize = opts.reportSize || 2048;
-    const _defs = globalThis.__webhid.GLOBAL_DEFAULTS;
-    const sabCapacity = opts.sabCapacity || _defs.sabCapacity;
-    const logLevel = opts.logLevel !== undefined ? opts.logLevel : _defs.logLevel;
-    const sabEnabled = opts.sabEnabled !== false;
-
-    let worker;
-    try {
-      const [loggerResp, defaultsResp, workerResp] = await Promise.all([
-        fetch(browser.runtime.getURL('js/utils/logger.js')),
-        fetch(browser.runtime.getURL('js/utils/settings-defaults.js')),
-        fetch(browser.runtime.getURL('js/worker.js')),
-      ]);
-      const [loggerCode, defaultsCode, workerCode] = await Promise.all([
-        loggerResp.text(),
-        defaultsResp.text(),
-        workerResp.text(),
-      ]);
-      const blob = new Blob([loggerCode + '\n' + defaultsCode + '\n' + workerCode], { type: 'application/javascript' });
-      worker = new Worker(URL.createObjectURL(blob));
-    } catch (e) {
-      __webhid.logger.error('[bridge] worker spawn failed:', e);
-      return null;
-    }
-
-    // Abort if a newer spawn or despawn happened while we were fetching.
-    if (_spawnGen.get(deviceId) !== gen) {
-      __webhid.logger.info('[bridge] worker spawn stale (gen ' + gen + '), discarding for', deviceId);
-      worker.terminate();
-      return null;
-    }
-
-    _workers.set(deviceId, worker);
-
-    worker.onerror = (e) => {
-      __webhid.logger.error('[bridge] worker.onerror:', e.message || '(no msg)', 'file=', e.filename, 'line=', e.lineno);
-    };
-
-    const wid = deviceId;
-    worker.onmessage = ({ data }) => {
-      if (data.type === 'ready') {
-        _workerReady.add(wid);
-        __webhid.logger.info('[bridge] worker ready for', wid, data.sab ? '(SAB)' : '(postMessage fallback)');
-        if (data.sab) {
-          window.postMessage({
-            __webhid_bridge: 'evt',
-            event: {
-              event_type: 'webhid-sab',
-              device_id: wid,
-              sab: data.sab,
-              reportSize,
-            }
-          }, '*');
-        } else {
-          window.postMessage({
-            __webhid_bridge: 'evt',
-            event: {
-              event_type: 'webhid-sab-disabled',
-              device_id: wid,
-            }
-          }, '*');
-        }
-        return;
-      }
-      if (data.type === 'inputReport') {
-        const transfer = data.data instanceof ArrayBuffer ? [data.data] : [];
-        window.postMessage({
-          __webhid_bridge: 'evt',
-          event: {
-            event_type: 'input_report',
-            device_id: wid,
-            report_id: data.reportId,
-            data: data.data,
-          }
-        }, '*', transfer);
-        return;
-      }
-      if (data.type === 'error') {
-        __webhid.logger.error('[bridge] worker error:', data.error);
-        return;
-      }
-      if (data.type === 'closed') {
-        _workerReady.delete(wid);
-        __webhid.logger.warn('[bridge] worker WS closed for', wid, '; worker will auto-reconnect');
-        const cbMap = _workerCallbacks.get(worker);
-        if (cbMap) {
-          for (const [reqId, cb] of cbMap) cb({ type: 'sendResult', reqId, error: 'ws closed' });
-          cbMap.clear();
-        }
-        window.postMessage({
-          __webhid_bridge: 'evt',
-          event: { event_type: 'disconnect', device_id: wid }
-        }, '*');
-        return;
-      }
-      if (data.type === 'sendResult' || data.type === 'featureResult') {
-        const cbMap = _workerCallbacks.get(worker);
-        if (cbMap) {
-          const cb = cbMap.get(data.reqId);
-          if (cb) { cbMap.delete(data.reqId); cb(data); }
-          else __webhid.logger.warn('[bridge] worker response for unknown reqId=', data.reqId, 'cbMap size=', cbMap.size);
-        }
-      }
-    };
-
-    worker.postMessage({
-      type: 'connect',
-      token: session_token,
-      wsPort,
-      reportSize,
-      capacity: sabCapacity,
-      logLevel,
-    });
-
-    const s = await browser.storage.local.get(__webhid.GLOBAL_DEFAULTS);
-    worker.postMessage({ type: 'settings', fireAndForget: s.fireAndForget, sabEnabled, perfLogging: s.perfLogging, logLevel });
-
-    return worker;
   }
 
   function _sendControlWs(action, payload) {
@@ -777,11 +670,11 @@
       return;
     }
 
-    // Hot-path actions: use bridge WS data plane if available, else worker, else NM.
+    // Hot-path actions: use bridge WS data plane if available, else NM.
     if (action === "worker-send" || action === "worker-sendFeature" || action === "worker-receiveFeature") {
       const deviceId = payload.device_id;
 
-      // Bridge WS data plane (no worker).
+      // Bridge WS data plane.
       if (_wsData.has(deviceId) && _workerReady.has(deviceId)) {
         const msgType =
           action === "worker-send" ? 0x01 :
@@ -810,35 +703,7 @@
         }
       }
 
-      // Worker WS data plane (legacy).
-      const worker = _workers.get(deviceId);
-      if (worker && _workerReady.has(deviceId)) {
-        const wType =
-          action === "worker-send" ? "send" :
-          action === "worker-sendFeature" ? "sendFeature" :
-          "receiveFeature";
-        const wMsg = { type: wType, reqId: id, reportId: payload.report_id };
-        if (action === "worker-send" || action === "worker-sendFeature") wMsg.data = payload.data;
-        const wTransfer = (wMsg.data instanceof Uint8Array) ? [wMsg.data.buffer] : [];
-
-        if (!isFireAndForget || action === "worker-receiveFeature") {
-          let cbMap = _workerCallbacks.get(worker);
-          if (!cbMap) { cbMap = new Map(); _workerCallbacks.set(worker, cbMap); }
-          cbMap.set(id, (data) => {
-            let result;
-            if (data.type === 'featureResult') {
-              result = data.error ? { success: false, error: data.error } : { success: true, data: data.data };
-            } else {
-              result = data.error ? { success: false, error: data.error } : { success: true };
-            }
-            const transfer = (result.data instanceof Uint8Array) ? [result.data.buffer] : [];
-            window.postMessage({ __webhid_bridge: "res", id, result }, "*", transfer);
-          });
-        }
-        worker.postMessage(wMsg, wTransfer);
-        return;
-      }
-      __webhid.logger.warn('[bridge] no worker for', deviceId, '; falling back to NM');
+      __webhid.logger.warn('[bridge] no WS data plane for', deviceId, '; falling back to NM');
       const fallbackAction =
         action === "worker-send" ? "sendreport" :
         action === "worker-sendFeature" ? "sendfeaturereport" :
@@ -918,16 +783,10 @@
 
         const globalDefaults = await browser.storage.local.get(__webhid.GLOBAL_DEFAULTS);
         let dataPlane = globalDefaults.dataPlane;
-        let sabCapacity = globalDefaults.sabCapacity;
-        let logLevel = globalDefaults.logLevel;
-        let sabEnabled = globalDefaults.sabEnabled;
         if (siteKey) {
           const siteResult = await browser.storage.local.get(siteKey);
           const ss = siteResult[siteKey] || {};
           if (ss.dataPlane !== undefined) dataPlane = ss.dataPlane;
-          if (ss.sabCapacity !== undefined) sabCapacity = ss.sabCapacity;
-          if (ss.logLevel !== undefined) logLevel = ss.logLevel;
-          if (ss.sabEnabled !== undefined) sabEnabled = ss.sabEnabled;
         }
 
         browser.runtime.sendMessage({
@@ -937,10 +796,7 @@
         }).catch(() => {});
 
         if (dataPlane === 'ws') {
-          _spawnDataPlane(deviceId, response.session_token, response.ws_port || _wsPort, {
-            sabEnabled, sabCapacity, logLevel,
-            reportSize: payload.reportSize || 64,
-          });
+          _spawnDataPlane(deviceId, response.session_token, response.ws_port || _wsPort);
         }
       }
 
@@ -987,38 +843,27 @@
     const origin = window.location.origin;
     const siteKey = origin ? `site:${origin}` : null;
 
-    // Detect which settings changed. Global keys appear as top-level entries
-    // in `changes`; per-site overrides appear under `changes[siteKey]`. When
-    // both exist (rare — only on bulk imports), per-site wins.
-    let ff, pl, ll, dp, cp, se, sc;
+    let ff, pl, ll, dp, cp;
     if (changes.fireAndForget) ff = changes.fireAndForget.newValue;
     if (changes.perfLogging) pl = changes.perfLogging.newValue;
     if (changes.logLevel) ll = changes.logLevel.newValue;
     if (changes.dataPlane) dp = changes.dataPlane.newValue;
     if (changes.controlPlane) cp = changes.controlPlane.newValue;
-    if (changes.sabEnabled) se = changes.sabEnabled.newValue;
-    if (changes.sabCapacity) sc = changes.sabCapacity.newValue;
 
     if (siteKey && changes[siteKey]) {
       const ss = changes[siteKey].newValue || {};
       if (ss.dataPlane !== undefined) dp = ss.dataPlane;
       if (ss.controlPlane !== undefined) cp = ss.controlPlane;
       if (ss.fireAndForget !== undefined) ff = ss.fireAndForget;
-      if (ss.sabEnabled !== undefined) se = ss.sabEnabled;
-      if (ss.sabCapacity !== undefined) sc = ss.sabCapacity;
       if (ss.logLevel !== undefined) ll = ss.logLevel;
       if (ss.perfLogging !== undefined) pl = ss.perfLogging;
     }
 
-    // Send settings to the page FIRST, before any respawn. The polyfill
-    // must have the correct _sabEnabled / _fireAndForget values before the
-    // new data plane starts sending input_report events.
+    // Push settings to the page first.
     {
       const settings = {};
       if (dp !== undefined) settings.dataPlane = dp;
       if (cp !== undefined) settings.controlPlane = cp;
-      if (se !== undefined) settings.sabEnabled = se;
-      if (sc !== undefined) settings.sabCapacity = sc;
       if (ff !== undefined) settings.fireAndForget = ff;
       if (ll !== undefined) settings.logLevel = ll;
       if (pl !== undefined) settings.perfLogging = pl;
@@ -1031,101 +876,25 @@
       _controlPlane = cp;
       __webhid.logger.info('[bridge] control plane changed:', cp);
       if (cp === 'ws' && _wsPort && !_controlWs) {
-        // Switching to WS control: connect control WS
         const resp = await browser.runtime.sendMessage({ action: 'handshake' });
         if (resp.success && resp.control_token && resp.ws_port) {
           _wsPort = resp.ws_port;
           _connectControlWs(resp.control_token, resp.ws_port);
         }
       } else if (cp === 'nm' && _controlWs) {
-        // Switching to NM control: disconnect control WS
         _controlWs.close();
         _controlWs = null;
       }
     }
 
-    // Live-update workers for settings that don't require a respawn.
-    // fire-and-forget, perfLogging, logLevel are all read by the worker on
-    // every request, so toggling them via postMessage is sufficient and
-    // avoids the "interrupted" error that a respawn would cause.
-    if (ff !== undefined || pl !== undefined || ll !== undefined) {
-      for (const worker of _workers.values()) {
-        worker.postMessage({ type: 'settings', fireAndForget: ff, sabEnabled: undefined, perfLogging: pl, logLevel: ll });
-      }
-    }
-
-    // SAB toggle: despawn and respawn data plane to switch between
-    // worker+SAB (sabEnabled=true) and bridge-direct WS (sabEnabled=false).
-    if (se !== undefined) {
-      __webhid.logger.info('[bridge] SAB toggle:', se, 'respawning data plane');
-      for (const id of _openDevices) { _despawnDataPlane(id); }
-
-      // Read current effective settings (global + per-site) for respawn.
-      const global = await browser.storage.local.get(__webhid.GLOBAL_DEFAULTS);
-      let curDp = global.dataPlane;
-      let sabCap = global.sabCapacity;
-      let llv = global.logLevel;
-      if (siteKey) {
-        const siteResult = await browser.storage.local.get(siteKey);
-        const ss = siteResult[siteKey] || {};
-        if (ss.dataPlane !== undefined) curDp = ss.dataPlane;
-        if (ss.sabCapacity !== undefined) sabCap = ss.sabCapacity;
-        if (ss.logLevel !== undefined) llv = ss.logLevel;
-      }
-
-      if (curDp === 'ws') {
-        for (const id of _openDevices) {
-          const token = _sessionTokens.get(id);
-          if (token) _spawnDataPlane(id, token, _wsPort, { sabEnabled: se, sabCapacity: sabCap, logLevel: llv });
-        }
-      }
-    }
-
-    // sabCapacity change: only matters when SAB is active (worker path).
-    // Respawn to recreate the SAB ring buffer with the new capacity.
-    if (sc !== undefined && se === undefined) {
-      const global = await browser.storage.local.get(__webhid.GLOBAL_DEFAULTS);
-      let curDp = global.dataPlane;
-      let curSab = global.sabEnabled;
-      let llv = global.logLevel;
-      if (siteKey) {
-        const siteResult = await browser.storage.local.get(siteKey);
-        const ss = siteResult[siteKey] || {};
-        if (ss.dataPlane !== undefined) curDp = ss.dataPlane;
-        if (ss.sabEnabled !== undefined) curSab = ss.sabEnabled;
-        if (ss.logLevel !== undefined) llv = ss.logLevel;
-      }
-      if (curDp === 'ws' && curSab !== false && typeof SharedArrayBuffer !== 'undefined') {
-        __webhid.logger.info('[bridge] sabCapacity changed:', sc, 'respawning workers');
-        for (const id of _openDevices) { _despawnDataPlane(id); }
-        for (const id of _openDevices) {
-          const token = _sessionTokens.get(id);
-          if (token) _spawnDataPlane(id, token, _wsPort, { sabEnabled: true, sabCapacity: sc, logLevel: llv });
-        }
-      }
-    }
-
-    // Data plane switch: despawn workers/ws-data, respawn with new transport.
+    // Data plane switch: despawn WS data, respawn with new transport.
     if (dp !== undefined) {
       for (const id of _openDevices) { _despawnDataPlane(id); }
-
-      // Read current effective SAB setting for spawn.
-      const global = await browser.storage.local.get(__webhid.GLOBAL_DEFAULTS);
-      let seForSpawn = global.sabEnabled;
-      let sabCap = global.sabCapacity;
-      let llv = global.logLevel;
-      if (siteKey) {
-        const siteResult = await browser.storage.local.get(siteKey);
-        const ss = siteResult[siteKey] || {};
-        if (ss.sabEnabled !== undefined) seForSpawn = ss.sabEnabled;
-        if (ss.sabCapacity !== undefined) sabCap = ss.sabCapacity;
-        if (ss.logLevel !== undefined) llv = ss.logLevel;
-      }
 
       if (dp === 'ws') {
         for (const id of _openDevices) {
           const token = _sessionTokens.get(id);
-          if (token) _spawnDataPlane(id, token, _wsPort, { sabEnabled: seForSpawn, sabCapacity: sabCap, logLevel: llv });
+          if (token) _spawnDataPlane(id, token, _wsPort);
         }
       }
       for (const id of _openDevices) {

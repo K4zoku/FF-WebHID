@@ -1,14 +1,9 @@
 (async () => {
   const current = await browser.storage.local.get(__webhid.GLOBAL_DEFAULTS);
 
-  for (const key of ['perfLogging', 'fireAndForget', 'sabEnabled', 'daemonAsNmHost']) {
+  for (const key of ['perfLogging', 'fireAndForget', 'daemonAsNmHost']) {
     document.getElementById(key).checked = current[key];
   }
-  const sabInput = document.getElementById('sabCapacity');
-  const sabOutput = document.getElementById('sabCapacityOutput');
-  sabInput.value = String(current.sabCapacity);
-  sabOutput.textContent = String(current.sabCapacity);
-  updateSabFill();
 
   const logLevelSelect = document.getElementById('logLevel');
   const perfRow = document.getElementById('perfLogging-row');
@@ -19,16 +14,6 @@
   dataPlaneSelect.value = current.dataPlane;
   const controlPlaneSelect = document.getElementById('controlPlane');
   controlPlaneSelect.value = current.controlPlane;
-  updateCascadingVisibility();
-
-  function updateSabOutput() {
-    sabOutput.textContent = sabInput.value;
-  }
-
-  function updateSabFill() {
-    const val = parseInt(sabInput.value, 10);
-    sabInput.style.setProperty('--fill', ((val - 64) / (4096 - 64)) * 100 + '%');
-  }
 
   function updatePerfRowVisibility() {
     const isDebug = parseInt(logLevelSelect.value, 10) >= 3;
@@ -42,14 +27,6 @@
     }
   }
 
-  function updateCascadingVisibility() {
-    const plane = dataPlaneSelect.value;
-    const sabOn = document.getElementById('sabEnabled').checked;
-    const isWs = plane === 'ws';
-    document.getElementById('sabEnabled-row').style.display = isWs ? '' : 'none';
-    document.getElementById('sabCapacity-row').style.display = (isWs && sabOn) ? '' : 'none';
-  }
-
   function showStatus(msg) {
     const el = document.getElementById('status');
     el.textContent = msg;
@@ -57,18 +34,12 @@
     setTimeout(() => { el.style.display = 'none'; }, 1500);
   }
 
-  for (const key of ['perfLogging', 'fireAndForget', 'sabEnabled', 'daemonAsNmHost']) {
+  for (const key of ['perfLogging', 'fireAndForget', 'daemonAsNmHost']) {
     document.getElementById(key).addEventListener('change', async (e) => {
       await browser.storage.local.set({ [key]: e.target.checked });
       showStatus(`${key} = ${e.target.checked}`);
-      updateCascadingVisibility();
     });
   }
-  sabInput.addEventListener('input', () => { updateSabOutput(); updateSabFill(); });
-  sabInput.addEventListener('change', async (e) => {
-    await browser.storage.local.set({ sabCapacity: parseInt(e.target.value, 10) });
-    showStatus(`sabCapacity = ${e.target.value}`);
-  });
   logLevelSelect.addEventListener('change', async (e) => {
     const val = parseInt(e.target.value, 10);
     await browser.storage.local.set({ logLevel: val });
@@ -77,7 +48,6 @@
   });
   dataPlaneSelect.addEventListener('change', async (e) => {
     await browser.storage.local.set({ dataPlane: e.target.value });
-    updateCascadingVisibility();
     showStatus(`dataPlane = ${e.target.value}`);
   });
   controlPlaneSelect.addEventListener('change', async (e) => {
