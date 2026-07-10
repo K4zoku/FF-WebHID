@@ -10,12 +10,6 @@
   let _savedDevices = null;
   let _deviceInfoCache = null;
 
-  // ── Base64 helper (decode only — encode lives in background.js) ───────
-
-  function base64Decode(str) {
-    return Uint8Array.fromBase64(str);
-  }
-
   async function getSavedDevices() {
     // Return cached hashes if available
     if (_savedDevices !== null) {
@@ -379,7 +373,7 @@
         });
         if (response.success && response.data) {
           __webhid.logger.debug('[webhid] receiveFeatureReport done len=' + (typeof response.data === 'string' ? 'base64' : response.data.length));
-          const buf = typeof response.data === 'string' ? base64Decode(response.data) : response.data;
+          const buf = typeof response.data === 'string' ? Uint8Array.fromBase64(response.data) : response.data;
           return new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
         }
         throw new Error("receiveFeatureReport failed");
@@ -451,13 +445,13 @@
             if (_sabEnabled && this.#sabDrainActive) return;
             if (evDeviceId && this.#deviceId && evDeviceId !== this.#deviceId) return;
             const dataBytes = typeof detail.data === 'string'
-              ? base64Decode(detail.data)
+              ? Uint8Array.fromBase64(detail.data)
               : detail.data
                 ? new Uint8Array(detail.data)
                 : new Uint8Array(0);
             this.dispatchEvent(new HIDInputReportEvent('inputreport', {
               device: this,
-              reportId: detail.report_id || 0,
+              reportId: detail.report_id,
               data: new DataView(dataBytes.buffer, dataBytes.byteOffset, dataBytes.byteLength),
             }));
             return;

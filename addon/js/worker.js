@@ -55,8 +55,9 @@ let _reconnectDelay = 500;
 
 function connect(msg) {
   _connectMsg = msg;
-  reportSize = msg.reportSize || 64;
-  CAPACITY = msg.capacity || 8192;
+  reportSize = msg.reportSize;
+  CAPACITY = msg.capacity;
+  logger.debug('[worker] reportSize=', reportSize, 'capacity=', CAPACITY);
   if (msg.logLevel !== undefined) { logger.applyLevel(msg.logLevel); _applyPerf(); }
   logger.debug('[worker] connect capacity=' + CAPACITY + ' reportSize=' + reportSize + ' SAB=' + SAB_AVAILABLE);
 
