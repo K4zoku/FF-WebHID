@@ -509,7 +509,7 @@
         }, '*');
       } else if (data.type === 'inputReport') {
         const view = data.data ? new Uint8Array(data.data) : null;
-        if (view && data.reportId !== 33) {
+        if (view && __webhid.logger._level >= 3 && data.reportId !== 33) {
           let hex = '';
           for (let i = 0; i < Math.min(8, view.length); i++) hex += view[i].toString(16).padStart(2, '0') + ' ';
           __webhid.logger.debug('[bridge] worker→page inputReport device=' + deviceId + ' reportId=' + data.reportId + ' len=' + view.length + ' first8=' + hex);

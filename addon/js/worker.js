@@ -94,11 +94,13 @@ function pushInputBatch(batch) {
     const payloadLen = len - 1;
     if (payloadLen > 0) {
       const buf = new ArrayBuffer(payloadLen);
-      new Uint8Array(buf).set(batch.subarray(offset + 1, offset + len));
-      const b = new Uint8Array(buf);
-      let hex = '';
-      for (let i = 0; i < Math.min(8, b.length); i++) hex += b[i].toString(16).padStart(2, '0') + ' ';
-      logger.debug('[worker] inputReport reportId=' + reportId + ' len=' + payloadLen + ' first8=' + hex);
+      const view = new Uint8Array(buf);
+      view.set(batch.subarray(offset + 1, offset + len));
+      if (logger._level >= 3) {
+        let hex = '';
+        for (let i = 0; i < Math.min(8, view.length); i++) hex += view[i].toString(16).padStart(2, '0') + ' ';
+        logger.debug('[worker] inputReport reportId=' + reportId + ' len=' + payloadLen + ' first8=' + hex);
+      }
       self.postMessage({ type: 'inputReport', reportId, data: buf }, [buf]);
     } else {
       self.postMessage({ type: 'inputReport', reportId, data: null });

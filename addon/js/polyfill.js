@@ -393,20 +393,24 @@
 
           if (event_type === "input_report") {
             if (evDeviceId && this.#deviceId && evDeviceId !== this.#deviceId) return;
-            const dataBytes = typeof detail.data === 'string'
-              ? Uint8Array.fromBase64(detail.data)
-              : detail.data
-                ? new Uint8Array(detail.data)
-                : new Uint8Array(0);
-            if (dataBytes.length > 0 && detail.report_id !== 33) {
+            let dataView;
+            if (typeof detail.data === 'string') {
+              const buf = Uint8Array.fromBase64(detail.data);
+              dataView = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+            } else if (detail.data) {
+              dataView = new DataView(detail.data.buffer, detail.data.byteOffset, detail.data.byteLength);
+            } else {
+              dataView = new DataView(new ArrayBuffer(0));
+            }
+            if (dataView.byteLength > 0 && detail.report_id !== 33) {
               let hex = '';
-              for (let i = 0; i < Math.min(8, dataBytes.length); i++) hex += dataBytes[i].toString(16).padStart(2, '0') + ' ';
-              __webhid.logger.debug('[webhid] page inputReport device=' + (this.#deviceId || evDeviceId) + ' reportId=' + detail.report_id + ' len=' + dataBytes.length + ' first8=' + hex);
+              for (let i = 0; i < Math.min(8, dataView.byteLength); i++) hex += dataView.getUint8(i).toString(16).padStart(2, '0') + ' ';
+              __webhid.logger.debug('[webhid] page inputReport device=' + (this.#deviceId || evDeviceId) + ' reportId=' + detail.report_id + ' len=' + dataView.byteLength + ' first8=' + hex);
             }
             this.dispatchEvent(new HIDInputReportEvent('inputreport', {
               device: this,
               reportId: detail.report_id,
-              data: new DataView(dataBytes.buffer, dataBytes.byteOffset, dataBytes.byteLength),
+              data: dataView,
             }));
             return;
           }
