@@ -407,6 +407,7 @@
   const _workerReady = new Set();
   const _wsData = new Map();
   const _wsDataCallbacks = new Map();
+  const _spawnGen = new Map();
   let _wsDataReqId = 1;
   let _wsPort = null;
   let _controlPlane = 'nm';
@@ -443,18 +444,35 @@
     }
   }
 
+  // Despawn all data-plane connections (workers + ws-data) for a device.
+  // Increments the spawn generation so any in-flight async _spawnWorker
+  // knows it's stale and aborts before adding a zombie worker to _workers.
+  function _despawnDataPlane(deviceId) {
+    const gen = (_spawnGen.get(deviceId) || 0) + 1;
+    _spawnGen.set(deviceId, gen);
+    const worker = _workers.get(deviceId);
+    if (worker) { worker.terminate(); _workers.delete(deviceId); }
+    _workerCallbacks.delete(deviceId);
+    const ws = _wsData.get(deviceId);
+    if (ws) { ws.close(); _wsData.delete(deviceId); }
+    _wsDataCallbacks.delete(deviceId);
+    _workerReady.delete(deviceId);
+  }
+
   // Spawn the WS data plane for a device. When SAB is enabled, use the
   // worker path (worker owns the WS, pushes input reports into a SAB ring
   // buffer that the page drains via Atomics). When SAB is disabled, use
   // the bridge-direct path (bridge owns the WS, forwards input reports via
   // window.postMessage transfer).
   function _spawnDataPlane(deviceId, session_token, wsPort, opts = {}) {
+    const gen = (_spawnGen.get(deviceId) || 0) + 1;
+    _spawnGen.set(deviceId, gen);
     const sabEnabled = opts.sabEnabled !== false;
     if (sabEnabled && typeof SharedArrayBuffer !== 'undefined') {
       __webhid.logger.info('[bridge] spawn worker (SAB) for', deviceId);
-      _spawnWorker(deviceId, session_token, opts).catch((e) => {
+      _spawnWorker(deviceId, session_token, opts, gen).catch((e) => {
         __webhid.logger.error('[bridge] worker spawn failed, falling back to ws-data:', e.message);
-        _spawnWsData(deviceId, session_token, wsPort);
+        if (_spawnGen.get(deviceId) === gen) _spawnWsData(deviceId, session_token, wsPort);
       });
     } else {
       __webhid.logger.info('[bridge] spawn ws-data (no SAB) for', deviceId);
@@ -568,7 +586,7 @@
     return reqId;
   }
 
-  async function _spawnWorker(deviceId, session_token, opts = {}) {
+  async function _spawnWorker(deviceId, session_token, opts = {}, gen = 0) {
     const wsPort = opts.wsPort || _wsPort;
     const reportSize = opts.reportSize || 2048;
     const _defs = globalThis.__webhid.GLOBAL_DEFAULTS;
@@ -592,6 +610,13 @@
       worker = new Worker(URL.createObjectURL(blob));
     } catch (e) {
       __webhid.logger.error('[bridge] worker spawn failed:', e);
+      return null;
+    }
+
+    // Abort if a newer spawn or despawn happened while we were fetching.
+    if (_spawnGen.get(deviceId) !== gen) {
+      __webhid.logger.info('[bridge] worker spawn stale (gen ' + gen + '), discarding for', deviceId);
+      worker.terminate();
       return null;
     }
 
@@ -909,10 +934,7 @@
         _openDevices.delete(deviceId);
         _sessionTokens.delete(deviceId);
         browser.runtime.sendMessage({ action: "device-count-changed", count: _openDevices.size }).catch(() => {});
-        const wsD = _wsData.get(deviceId);
-        if (wsD) { wsD.close(); _wsData.delete(deviceId); _wsDataCallbacks.delete(deviceId); _workerReady.delete(deviceId); }
-        const worker = _workers.get(deviceId);
-        if (worker) { worker.terminate(); _workers.delete(deviceId); _workerReady.delete(deviceId); }
+        _despawnDataPlane(deviceId);
       }
 
       window.postMessage({ __webhid_bridge: "res", id, result: response }, "*");
@@ -946,22 +968,47 @@
   browser.storage.onChanged.addListener(async (changes, area) => {
     if (area !== 'local') return;
 
-    let ff = changes.fireAndForget?.newValue;
-    let pl = changes.perfLogging?.newValue;
-    let ll = changes.logLevel?.newValue;
-    let dp = changes.dataPlane?.newValue;
-    let cp = changes.controlPlane?.newValue;
-    let se = changes.sabEnabled?.newValue;
-
-    // Check per-site settings changes (popup saves to `site:${origin}` key)
     const origin = window.location.origin;
     const siteKey = origin ? `site:${origin}` : null;
+
+    // Detect which settings changed. Global keys appear as top-level entries
+    // in `changes`; per-site overrides appear under `changes[siteKey]`. When
+    // both exist (rare — only on bulk imports), per-site wins.
+    let ff, pl, ll, dp, cp, se, sc;
+    if (changes.fireAndForget) ff = changes.fireAndForget.newValue;
+    if (changes.perfLogging) pl = changes.perfLogging.newValue;
+    if (changes.logLevel) ll = changes.logLevel.newValue;
+    if (changes.dataPlane) dp = changes.dataPlane.newValue;
+    if (changes.controlPlane) cp = changes.controlPlane.newValue;
+    if (changes.sabEnabled) se = changes.sabEnabled.newValue;
+    if (changes.sabCapacity) sc = changes.sabCapacity.newValue;
+
     if (siteKey && changes[siteKey]) {
       const ss = changes[siteKey].newValue || {};
       if (ss.dataPlane !== undefined) dp = ss.dataPlane;
       if (ss.controlPlane !== undefined) cp = ss.controlPlane;
       if (ss.fireAndForget !== undefined) ff = ss.fireAndForget;
       if (ss.sabEnabled !== undefined) se = ss.sabEnabled;
+      if (ss.sabCapacity !== undefined) sc = ss.sabCapacity;
+      if (ss.logLevel !== undefined) ll = ss.logLevel;
+      if (ss.perfLogging !== undefined) pl = ss.perfLogging;
+    }
+
+    // Send settings to the page FIRST, before any respawn. The polyfill
+    // must have the correct _sabEnabled / _fireAndForget values before the
+    // new data plane starts sending input_report events.
+    {
+      const settings = {};
+      if (dp !== undefined) settings.dataPlane = dp;
+      if (cp !== undefined) settings.controlPlane = cp;
+      if (se !== undefined) settings.sabEnabled = se;
+      if (sc !== undefined) settings.sabCapacity = sc;
+      if (ff !== undefined) settings.fireAndForget = ff;
+      if (ll !== undefined) settings.logLevel = ll;
+      if (pl !== undefined) settings.perfLogging = pl;
+      if (Object.keys(settings).length > 0) {
+        window.postMessage({ __webhid_bridge: "settings", settings }, "*");
+      }
     }
 
     if (cp !== undefined) {
@@ -969,6 +1016,10 @@
       __webhid.logger.info('[bridge] control plane changed:', cp);
     }
 
+    // Live-update workers for settings that don't require a respawn.
+    // fire-and-forget, perfLogging, logLevel are all read by the worker on
+    // every request, so toggling them via postMessage is sufficient and
+    // avoids the "interrupted" error that a respawn would cause.
     if (ff !== undefined || pl !== undefined || ll !== undefined) {
       for (const worker of _workers.values()) {
         worker.postMessage({ type: 'settings', fireAndForget: ff, sabEnabled: undefined, perfLogging: pl, logLevel: ll });
@@ -979,18 +1030,11 @@
     // worker+SAB (sabEnabled=true) and bridge-direct WS (sabEnabled=false).
     if (se !== undefined) {
       __webhid.logger.info('[bridge] SAB toggle:', se, 'respawning data plane');
-      for (const [id, worker] of _workers) { worker.terminate(); }
-      _workers.clear();
-      _workerCallbacks.clear();
-      for (const [id, ws] of _wsData) { ws.close(); }
-      _wsData.clear();
-      _wsDataCallbacks.clear();
-      _workerReady.clear();
+      for (const id of _openDevices) { _despawnDataPlane(id); }
 
-      // Determine current data plane mode.
-      let curDp;
+      // Read current effective settings (global + per-site) for respawn.
       const global = await browser.storage.local.get(__webhid.GLOBAL_DEFAULTS);
-      curDp = global.dataPlane;
+      let curDp = global.dataPlane;
       let sabCap = global.sabCapacity;
       let llv = global.logLevel;
       if (siteKey) {
@@ -1009,20 +1053,37 @@
       }
     }
 
+    // sabCapacity change: only matters when SAB is active (worker path).
+    // Respawn to recreate the SAB ring buffer with the new capacity.
+    if (sc !== undefined && se === undefined) {
+      const global = await browser.storage.local.get(__webhid.GLOBAL_DEFAULTS);
+      let curDp = global.dataPlane;
+      let curSab = global.sabEnabled;
+      let llv = global.logLevel;
+      if (siteKey) {
+        const siteResult = await browser.storage.local.get(siteKey);
+        const ss = siteResult[siteKey] || {};
+        if (ss.dataPlane !== undefined) curDp = ss.dataPlane;
+        if (ss.sabEnabled !== undefined) curSab = ss.sabEnabled;
+        if (ss.logLevel !== undefined) llv = ss.logLevel;
+      }
+      if (curDp === 'ws' && curSab !== false && typeof SharedArrayBuffer !== 'undefined') {
+        __webhid.logger.info('[bridge] sabCapacity changed:', sc, 'respawning workers');
+        for (const id of _openDevices) { _despawnDataPlane(id); }
+        for (const id of _openDevices) {
+          const token = _sessionTokens.get(id);
+          if (token) _spawnDataPlane(id, token, _wsPort, { sabEnabled: true, sabCapacity: sc, logLevel: llv });
+        }
+      }
+    }
+
     // Data plane switch: despawn workers/ws-data, respawn with new transport.
     if (dp !== undefined) {
-      for (const [id, worker] of _workers) { worker.terminate(); }
-      _workers.clear();
-      _workerCallbacks.clear();
-      for (const [id, ws] of _wsData) { ws.close(); }
-      _wsData.clear();
-      _wsDataCallbacks.clear();
-      _workerReady.clear();
+      for (const id of _openDevices) { _despawnDataPlane(id); }
 
-      // Fetch current SAB setting for spawn.
-      let seForSpawn;
+      // Read current effective SAB setting for spawn.
       const global = await browser.storage.local.get(__webhid.GLOBAL_DEFAULTS);
-      seForSpawn = global.sabEnabled;
+      let seForSpawn = global.sabEnabled;
       let sabCap = global.sabCapacity;
       let llv = global.logLevel;
       if (siteKey) {
@@ -1047,17 +1108,6 @@
         }).catch(() => {});
       }
       __webhid.logger.info('[bridge] data plane changed:', dp, 'open devices:', _openDevices.size);
-    }
-
-    if (dp !== undefined || cp !== undefined || se !== undefined || ff !== undefined || pl !== undefined || ll !== undefined) {
-      const settings = {};
-      if (dp !== undefined) settings.dataPlane = dp;
-      if (cp !== undefined) settings.controlPlane = cp;
-      if (se !== undefined) settings.sabEnabled = se;
-      if (ff !== undefined) settings.fireAndForget = ff;
-      if (ll !== undefined) settings.logLevel = ll;
-      if (pl !== undefined) settings.perfLogging = pl;
-      window.postMessage({ __webhid_bridge: "settings", settings }, "*");
     }
   });
 })();

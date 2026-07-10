@@ -205,6 +205,7 @@
   // WeakMap for SAB-swap callback (can't use private field since
   // startInputReportLoop is a standalone function, not a class method).
   const _sabUpdateFns = new WeakMap();
+  const _sabStopFns = new WeakMap();
 
   function getOrCreateDevice(deviceInfo) {
     const id = deviceInfo.device_id;
@@ -252,9 +253,13 @@
         } else if (detail.event_type === "webhid-sab-disabled") {
           // SAB unavailable (COOP/COEP blocked or SAB toggled off in
           // settings). Input reports arrive via `input_report` events from
-          // the worker/bridge.
+          // the worker/bridge. Stop the SAB drain loop by bumping its
+          // generation so pending waitAsync/rAF callbacks become no-ops.
           this.#sabDrainActive = false;
-          this.#inputLoopStarted = true; // prevent SAB drain from starting later
+          this.#inputLoopStarted = true;
+          const stopFn = _sabStopFns.get(this);
+          if (stopFn) { stopFn(); _sabStopFns.delete(this); }
+          _sabUpdateFns.delete(this);
         }
       };
       this.#sabListener = listener;
@@ -649,6 +654,10 @@
       generation++;
       drain();
       wait();
+    });
+
+    _sabStopFns.set(device, () => {
+      generation++;
     });
 
     wait();
