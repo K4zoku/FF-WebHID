@@ -484,6 +484,7 @@ mod tests {
             usage: None,
             device_id: "abc".into(),
             collections: vec![],
+            max_input_report_size: 64,
         };
         let r = NmResponse::ok_with_devices(vec![dev]);
         assert_eq!(r.success, Some(true));
@@ -516,6 +517,7 @@ mod tests {
             vendor_id: 0x1234, product_id: 0x5678, product_name: None,
             manufacturer: None, serial_number: None, usage_page: None,
             usage: None, device_id: "dev1".into(), collections: vec![],
+            max_input_report_size: 64,
         });
         assert_eq!(r.event_type, Some("connect".into()));
         assert!(r.device.is_some());
@@ -528,6 +530,7 @@ mod tests {
             vendor_id: 0x4321, product_id: 0x8765, product_name: None,
             manufacturer: None, serial_number: None, usage_page: None,
             usage: None, device_id: "dev2".into(), collections: vec![],
+            max_input_report_size: 64,
         });
         assert_eq!(r.event_type, Some("disconnect".into()));
         assert!(r.device.is_some());
@@ -598,6 +601,7 @@ mod tests {
         assert_eq!(IpcResponse::DeviceConnected { id: 0, device: DeviceInfo {
             vendor_id: 0, product_id: 0, product_name: None, manufacturer: None,
             serial_number: None, usage_page: None, usage: None, device_id: "".into(),
+            max_input_report_size: 64,
             collections: vec![],
         }}.id(), 0);
         assert_eq!(IpcResponse::Handshake { id: 0, ws_port: 8080 }.id(), 0);
@@ -617,6 +621,7 @@ mod tests {
             usage: Some(0x01),
             device_id: "abc123def456".into(),
             collections: vec![],
+            max_input_report_size: 64,
         };
         let json = serde_json::to_string(&info).unwrap();
         let de: DeviceInfo = serde_json::from_str(&json).unwrap();
@@ -647,6 +652,7 @@ mod tests {
             vendor_id: 0x1234, product_id: 0x5678, product_name: None,
             manufacturer: None, serial_number: None, usage_page: None,
             usage: None, device_id: "dev".into(), collections: vec![],
+            max_input_report_size: 64,
         };
         let cases: Vec<IpcResponse> = vec![
             IpcResponse::Devices { id: 1, devices: vec![dev.clone()] },
