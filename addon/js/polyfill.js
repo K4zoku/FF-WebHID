@@ -216,6 +216,7 @@
     #opened = false;
     #deviceId = null;
     #maxInputReportSize = 2048;
+    #port = null; // MessagePort for direct worker→page input reports
 
     constructor(deviceInfo) {
       super();
@@ -268,6 +269,11 @@
         });
         if (response.success) {
           this.#opened = false;
+          if (this.#port) {
+            this.#port.onmessage = null;
+            this.#port.close();
+            this.#port = null;
+          }
           this.dispatchEvent(new Event("close"));
         } else {
           throw new Error("Failed to close device");
@@ -388,6 +394,32 @@
           const evDeviceId = detail.device_id;
 
           if (event_type === "webhid-data-ready") {
+            if (detail.port && !this.#port) {
+              this.#port = detail.port;
+              this.#port.onmessage = (portEvent) => {
+                const d = portEvent.data;
+                if (d.type === 'inputReport') {
+                  if (this.#deviceId && d.device_id && d.device_id !== this.#deviceId) return;
+                  let dataView;
+                  if (d.data) {
+                    dataView = new DataView(d.data);
+                  } else {
+                    dataView = new DataView(new ArrayBuffer(0));
+                  }
+                  if (dataView.byteLength > 0 && d.reportId !== 33) {
+                    let hex = '';
+                    for (let i = 0; i < Math.min(8, dataView.byteLength); i++) hex += dataView.getUint8(i).toString(16).padStart(2, '0') + ' ';
+                    __webhid.logger.debug('[webhid] port inputReport device=' + this.#deviceId + ' reportId=' + d.reportId + ' len=' + dataView.byteLength + ' first8=' + hex);
+                  }
+                  this.dispatchEvent(new HIDInputReportEvent('inputreport', {
+                    device: this,
+                    reportId: d.reportId,
+                    data: dataView,
+                  }));
+                }
+              };
+              __webhid.logger.info('[webhid] MessagePort connected for device=' + this.#deviceId + ' — direct worker→page input reports');
+            }
             return;
           }
 

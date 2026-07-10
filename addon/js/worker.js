@@ -10,9 +10,15 @@ let _fireAndForget = self.__webhid.GLOBAL_DEFAULTS.fireAndForget;
 const _pending = new Map();
 let _reconnectTimer = null;
 let _reconnectDelay = 500;
+let _port = null; // MessagePort for direct worker→page input reports
 
-self.onmessage = ({ data: msg }) => {
+self.onmessage = ({ data: msg, ports }) => {
   if (msg.type === 'connect') return connect(msg);
+  if (msg.type === 'setPort') {
+    _port = ports[0];
+    logger.debug('[worker] received MessagePort for direct input reports');
+    return;
+  }
   if (msg.type === 'settings') {
     if (msg.fireAndForget !== undefined) _fireAndForget = msg.fireAndForget !== false;
     if (msg.logLevel !== undefined) { logger.applyLevel(msg.logLevel); _applyPerf(); }
@@ -101,14 +107,22 @@ function pushInputBatch(batch) {
         for (let i = 0; i < Math.min(8, view.length); i++) hex += view[i].toString(16).padStart(2, '0') + ' ';
         logger.debug('[worker] inputReport reportId=' + reportId + ' len=' + payloadLen + ' first8=' + hex);
       }
-      self.postMessage({ type: 'inputReport', reportId, data: buf }, [buf]);
+      if (_port) {
+        _port.postMessage({ type: 'inputReport', reportId, data: buf }, [buf]);
+      } else {
+        self.postMessage({ type: 'inputReport', reportId, data: buf }, [buf]);
+      }
     } else {
-      self.postMessage({ type: 'inputReport', reportId, data: null });
+      if (_port) {
+        _port.postMessage({ type: 'inputReport', reportId, data: null });
+      } else {
+        self.postMessage({ type: 'inputReport', reportId, data: null });
+      }
     }
     offset += len;
     count++;
   }
-  if (count > 0) logger.debug('[worker] forwarded ' + count + ' reports via postMessage');
+  if (count > 0) logger.debug('[worker] forwarded ' + count + ' reports via ' + (_port ? 'MessagePort' : 'postMessage'));
 }
 
 function handleSend(msg, msgType) {

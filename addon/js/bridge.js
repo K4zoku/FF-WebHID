@@ -406,6 +406,7 @@
   const _workerCallbacks = new Map();
   const _workerReady = new Set();
   const _workerQueues = new Map();
+  const _workerPorts = new Map(); // deviceId → true (port active, skip bridge re-forward)
   let _wsPort = null;
   let _controlPlane = 'nm';
   let _controlWs = null;
@@ -452,6 +453,7 @@
     _workerCallbacks.delete(deviceId);
     _workerReady.delete(deviceId);
     _workerQueues.delete(deviceId);
+    _workerPorts.delete(deviceId);
   }
 
   async function _spawnWorker(deviceId, session_token, wsPort, opts = {}, gen) {
@@ -495,19 +497,28 @@
           }
           _workerQueues.delete(deviceId);
         }
+        // Create MessageChannel: port1 → worker (direct input reports),
+        // port2 → page (bypass bridge for input reports).
+        const { port1, port2 } = new MessageChannel();
+        worker.postMessage({ type: 'setPort' }, [port1]);
+        _workerPorts.set(deviceId, true);
+        __webhid.logger.info('[bridge] MessageChannel created for', deviceId, '— input reports bypass bridge');
         window.postMessage({
           __webhid_bridge: 'evt',
-          event: { event_type: 'webhid-data-ready', device_id: deviceId }
-        }, '*');
+          event: { event_type: 'webhid-data-ready', device_id: deviceId, port: port2 }
+        }, '*', [port2]);
       } else if (data.type === 'closed') {
         __webhid.logger.warn('[bridge] worker closed for', deviceId);
         _workers.delete(deviceId);
         _workerReady.delete(deviceId);
+        _workerPorts.delete(deviceId);
         window.postMessage({
           __webhid_bridge: 'evt',
           event: { event_type: 'disconnect', device_id: deviceId }
         }, '*');
       } else if (data.type === 'inputReport') {
+        // Only reaches here if port not active (fallback path).
+        if (_workerPorts.has(deviceId)) return;
         const view = data.data ? new Uint8Array(data.data) : null;
         if (view && __webhid.logger._level >= 3 && data.reportId !== 33) {
           let hex = '';
