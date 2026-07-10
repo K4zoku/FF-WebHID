@@ -102,24 +102,22 @@ Restart browser after writing these files. Paths must be absolute.
 
 | Setting | Values | Default | Description |
 |---|---|---|---|
-| `controlPlane` | `nm` / `ws` | `nm` | Control plane: NM or WS text frames |
-| `dataPlane` | `ws` / `nm` | `ws` | Data plane: WS worker+SAB or NM via bridge |
-| `sabEnabled` | bool | `true` | SharedArrayBuffer for zero-copy input reports |
-| `sabCapacity` | 2048–32768 | `8192` | SAB ring buffer slots |
+| `controlPlane` | `nm` / `ws` | `nm` | Control plane: NM or WS text frames via control worker |
+| `dataPlane` | `ws` / `nm` | `nm` | Data plane: WS worker (postMessage + MessageChannel) or NM via bridge |
 | `fireAndForget` | bool | `true` | Resolve sendReport after `window.postMessage` (<0.1ms) |
 | `daemonAsNmHost` | bool | `false` | Use daemon-as-NM-host (skip forwarder + socket) |
-| `logLevel` | 0–3 | `1` | 0=error, 1=warn, 2=info, 3=debug |
+| `logLevel` | 0 to 3 | `1` | 0=error, 1=warn, 2=info, 3=debug |
 | `perfLogging` | bool | `false` | Timing logs (only effective at debug level) |
 
 All settings can be overridden per-site via the popup (saved to `site:<origin>` key in `browser.storage.local`).
+
+The bridge's `storage.onChanged` listener computes effective settings (global merged with site override) before and after each change, and only acts when the effective value actually changes. This prevents unnecessary worker respawns when a global setting change does not affect the current site's effective value.
 
 ## Testing
 
 ### Layer 1: daemon IPC (no browser)
 
-```sh
-python3 test/test_nm.py
-```
+No automated test exists. The previous `test/test_nm.py` was removed (stale, pre-camelCase). Manual testing via the browser UI is the primary method.
 
 ### Layer 2: browser UI
 
@@ -149,10 +147,11 @@ FF-WebHID/
 ├── addon/                   Firefox extension (MV3)
 │   ├── manifest.json
 │   ├── js/
-│   │   ├── background.js    NM bridge, handshake, tab-targeted events, COOP/COEP
-│   │   ├── polyfill.js      MAIN world: navigator.hid, early fire-and-forget, SAB drain
-│   │   ├── bridge.js        Isolated world: control/data routing, WS control, worker spawn
-│   │   ├── worker.js        Web Worker: binary WS, SAB ring buffer, fire-and-forget
+│   │   ├── background.js    NM bridge, handshake, tab-targeted events, daemonAsNmHost
+│   │   ├── polyfill.js      MAIN world: navigator.hid, early fire-and-forget, MessageChannel input reports
+│   │   ├── bridge.js        Isolated world: control/data routing, control worker, data worker spawn, effective-settings handler
+│   │   ├── worker.js        Data Web Worker: binary WS, MessageChannel input reports, fire-and-forget
+│   │   ├── control.js       Control Web Worker: WS text frames, enumerate/close, auto-reconnect
 │   │   ├── settings.js      Settings page logic
 │   │   ├── popup.js         Popup logic (per-site settings, device list)
 │   │   └── utils/logger.js  Level-based logger + perf timing
@@ -161,7 +160,7 @@ FF-WebHID/
 │   ├── icons/ res/          Icons + device type icons
 │
 ├── crates/                  Rust workspace
-│   ├── webhid/              Shared types (NmRequest, NmResponse, IpcRequest, IpcResponse)
+│   ├── webhid/              Shared types (NmRequest, NmResponse, IpcRequest, IpcResponse) - all camelCase JSON
 │   ├── webhid-daemon/       System daemon (hidapi, WS server, adaptive batching, control WS)
 │   └── webhid-native-messaging/  Firefox ↔ daemon thin forwarder
 │
@@ -174,8 +173,9 @@ FF-WebHID/
 │   ├── ARCHITECTURE.md      System architecture
 │   ├── DATA_PATH.md         Per-path copy/hop/latency analysis
 │   ├── DEVELOPMENT.md       This file
-│   └── INSTALLATION.md      Install guide + platform recommendations
-└── test/                    test_nm.py + browser test UI
+│   ├── INSTALLATION.md      Install guide + platform recommendations
+│   └── BENCHMARK.md         Benchmark report (cold-start, 5 runs per mode)
+└── test/                    Browser test UI (test_nm.py removed)
 ```
 
 ## Packaging (Arch Linux)

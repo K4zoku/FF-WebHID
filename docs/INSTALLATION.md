@@ -300,7 +300,6 @@ Then install the [browser extension](https://addons.mozilla.org/en-US/firefox/ad
 - **"Cannot connect to the WebHID daemon"**: daemon not running. Start it with the commands above.
 - **"Permission denied"** (Linux non-root): udev rule not installed. Run `sudo make install-udev-rule` or copy `99-webhid.rules` manually.
 - **Device picker shows "No HID devices found"**: daemon running but no HID devices detected. Check `hidapi` can enumerate: `ls /dev/hidraw*` (Linux).
-- **Site breaks after enabling SAB**: COOP/COEP conflict. Disable SAB Data Plane in the addon popup settings.
 - **Badge counter not showing**: ensure the device is opened via `navigator.hid.requestDevice()`, the counter tracks open devices, not paired ones.
 - **NM data plane is slow**: enable Fire-and-forget in settings. If still slow, switch Data Plane to WebSocket.
 
@@ -311,9 +310,8 @@ Then install the [browser extension](https://addons.mozilla.org/en-US/firefox/ad
 | Setting | Recommended | Reason |
 |---------|------------|--------|
 | Daemon as NM host | ON (if running as user daemon) | Eliminates forwarder process + Unix socket |
-| Control Plane | WS | After NM handshake, control ops via WS text frames (5–15ms vs 15–40ms) |
-| Data Plane | WS (default) | Binary WS + SAB for max performance. Switch to NM if site breaks COOP/COEP |
-| SAB | ON | Zero-copy input reports via SharedArrayBuffer |
+| Control Plane | WS | After NM handshake, control ops via WS text frames through control worker (5 to 15ms vs 15 to 40ms) |
+| Data Plane | WS (default) | Binary WS via worker with MessageChannel for max performance. Switch to NM if WS is blocked. |
 | Fire-and-forget | ON | Page latency <0.1ms for sendReport |
 
 **Setup**: Install udev rule + daemon. If using daemon-as-NM-host, install `webhid.daemon_nm_host` manifest via `make install-daemon-nm-host-user`.
@@ -323,9 +321,8 @@ Then install the [browser extension](https://addons.mozilla.org/en-US/firefox/ad
 | Setting | Recommended | Reason |
 |---------|------------|--------|
 | Daemon as NM host | ON | Windows has no permission setup needed, just point NM manifest path to `webhid-daemon.exe`. Daemon auto-detects NM mode via Firefox's 2 positional args |
-| Control Plane | WS | Control ops via WS after handshake |
-| Data Plane | WS (default) | Binary WS + SAB for performance |
-| SAB | ON | Zero-copy input reports |
+| Control Plane | WS | Control ops via WS after handshake through control worker |
+| Data Plane | WS (default) | Binary WS via worker with MessageChannel for performance |
 | Fire-and-forget | ON | Page latency <0.1ms |
 
 **Setup**: Install MSI or portable zip. For daemon-as-NM-host, register `webhid.daemon_nm_host.json` with `path` pointing to `webhid-daemon.exe`, no wrapper script needed, daemon auto-detects NM mode.
@@ -335,9 +332,8 @@ Then install the [browser extension](https://addons.mozilla.org/en-US/firefox/ad
 | Setting | Recommended | Reason |
 |---------|------------|--------|
 | Daemon as NM host | ON (if user daemon) | Eliminates forwarder + Unix socket |
-| Control Plane | WS | Control ops via WS after handshake |
-| Data Plane | WS (default) | SAB works well on macOS, no COOP/COEP issues typically |
-| SAB | ON | Zero-copy input reports |
+| Control Plane | WS | Control ops via WS after handshake through control worker |
+| Data Plane | WS (default) | WS worker + MessageChannel works well on macOS |
 | Fire-and-forget | ON | Page latency <0.1ms |
 
 **Setup**: Install via Homebrew (`brew install webhid`) or manual. Grant HID permissions in System Settings → Privacy & Security if prompted.
@@ -346,7 +342,7 @@ Then install the [browser extension](https://addons.mozilla.org/en-US/firefox/ad
 
 | Setting | Recommended | Reason |
 |---------|------------|--------|
-| Data Plane | NM | Isolates NM path performance (no worker/WS/SAB overhead) |
+| Data Plane | NM | Isolates NM path performance (no worker/WS overhead) |
 | Control Plane | NM | Isolates NM control path |
 | Fire-and-forget | OFF | Measure actual NM roundtrip latency |
 | Log Level | Debug | See all message timings |
