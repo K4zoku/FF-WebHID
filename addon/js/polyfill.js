@@ -250,9 +250,9 @@
             if (updateFn) updateFn(detail.sab, detail.reportSize);
           }
         } else if (detail.event_type === "webhid-sab-disabled") {
-          // SAB unavailable (COOP/COEP blocked). Input reports arrive via
-          // `input_report` events from the worker.
-          __webhid.logger.info('[webhid] SAB disabled for dev=' + this.#deviceId + '; input via postMessage');
+          // SAB unavailable (COOP/COEP blocked or SAB toggled off in
+          // settings). Input reports arrive via `input_report` events from
+          // the worker/bridge.
           this.#sabDrainActive = false;
           this.#inputLoopStarted = true; // prevent SAB drain from starting later
         }
@@ -467,8 +467,6 @@
 
           const evDeviceId = detail.device_id;
 
-          __webhid.logger.debug('[webhid] wrapper evt type=' + event_type + ' evDev=' + evDeviceId + ' thisDev=' + this.#deviceId);
-
           // Handle SharedArrayBuffer loop initiation
           if (event_type === "webhid-sab") {
             if (evDeviceId && this.#deviceId && evDeviceId === this.#deviceId) {
@@ -490,7 +488,6 @@
           if (event_type === "input_report") {
             if (_sabEnabled && this.#sabDrainActive) return;
             if (evDeviceId && this.#deviceId && evDeviceId !== this.#deviceId) return;
-            __webhid.logger.debug('[webhid] input_report dev=' + this.#deviceId + ' rid=' + detail.report_id + ' dataLen=' + (detail.data ? (detail.data.byteLength != null ? detail.data.byteLength : detail.data.length || 0) : 0) + ' sabEnabled=' + _sabEnabled + ' drainActive=' + this.#sabDrainActive);
             const dataBytes = typeof detail.data === 'string'
               ? base64Decode(detail.data)
               : detail.data

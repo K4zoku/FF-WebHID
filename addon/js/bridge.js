@@ -443,6 +443,25 @@
     }
   }
 
+  // Spawn the WS data plane for a device. When SAB is enabled, use the
+  // worker path (worker owns the WS, pushes input reports into a SAB ring
+  // buffer that the page drains via Atomics). When SAB is disabled, use
+  // the bridge-direct path (bridge owns the WS, forwards input reports via
+  // window.postMessage transfer).
+  function _spawnDataPlane(deviceId, session_token, wsPort, opts = {}) {
+    const sabEnabled = opts.sabEnabled !== false;
+    if (sabEnabled && typeof SharedArrayBuffer !== 'undefined') {
+      __webhid.logger.info('[bridge] spawn worker (SAB) for', deviceId);
+      _spawnWorker(deviceId, session_token, opts).catch((e) => {
+        __webhid.logger.error('[bridge] worker spawn failed, falling back to ws-data:', e.message);
+        _spawnWsData(deviceId, session_token, wsPort);
+      });
+    } else {
+      __webhid.logger.info('[bridge] spawn ws-data (no SAB) for', deviceId);
+      _spawnWsData(deviceId, session_token, wsPort);
+    }
+  }
+
   // Bridge-as-WS-data-plane: bridge connects WS directly, no worker.
   // Input reports arrive via ws.onmessage → window.postMessage to page.
   // sendReport/feature: bridge builds binary frame → ws.send.
@@ -462,7 +481,6 @@
       };
 
       ws.onmessage = ({ data: frame }) => {
-        __webhid.logger.debug('[bridge] ws.onmessage frame type=' + (frame && frame.constructor ? frame.constructor.name : typeof frame) + ' len=' + (frame && frame.byteLength != null ? frame.byteLength : '?'));
         // Copy frame into a fresh Uint8Array to escape Firefox Xray wrapping.
         // WebSocket binary data in a content script (isolated world) is Xray-
         // wrapped; calling .subarray()/.set() on the Xray view triggers
@@ -497,7 +515,6 @@
         }
         // Input report batch: [len_u16 LE][report_id][...payload]...
         let offset = 0;
-        let reportCount = 0;
         while (offset + 1 < batch.length) {
           const len = batch[offset] | (batch[offset + 1] << 8);
           offset += 2;
@@ -516,9 +533,7 @@
             }
           }, '*', buf ? [buf] : []);
           offset += len;
-          reportCount++;
         }
-        if (reportCount > 0) __webhid.logger.debug('[bridge] -> page ' + reportCount + ' input_report(s) dev=' + deviceId);
       };
 
       ws.onerror = (e) => __webhid.logger.error('[bridge] WS data error:', e.message || e);
@@ -558,7 +573,8 @@
     const reportSize = opts.reportSize || 2048;
     const _defs = globalThis.__webhid.GLOBAL_DEFAULTS;
     const sabCapacity = opts.sabCapacity || _defs.sabCapacity;
-    const logLevel = opts.logLevel || _defs.logLevel;
+    const logLevel = opts.logLevel !== undefined ? opts.logLevel : _defs.logLevel;
+    const sabEnabled = opts.sabEnabled !== false;
 
     let worker;
     try {
@@ -662,7 +678,7 @@
     });
 
     const s = await browser.storage.local.get(__webhid.GLOBAL_DEFAULTS);
-    worker.postMessage({ type: 'settings', fireAndForget: s.fireAndForget, sabEnabled: s.sabEnabled, perfLogging: s.perfLogging, logLevel: s.logLevel });
+    worker.postMessage({ type: 'settings', fireAndForget: s.fireAndForget, sabEnabled, perfLogging: s.perfLogging, logLevel });
 
     return worker;
   }
@@ -709,9 +725,9 @@
         if (siteKey) {
           const siteResult = await browser.storage.local.get(siteKey);
           const ss = siteResult[siteKey] || {};
-          if (ss.dataPlane !== undefined) global.dataPlane = ss.dataPlane;
-          if (ss.controlPlane !== undefined) global.controlPlane = ss.controlPlane;
-          if (ss.fireAndForget !== undefined) global.fireAndForget = ss.fireAndForget;
+          for (const k of Object.keys(__webhid.GLOBAL_DEFAULTS)) {
+            if (ss[k] !== undefined) global[k] = ss[k];
+          }
         }
         _controlPlane = global.controlPlane;
         window.postMessage({ __webhid_bridge: "res", id, result: global }, "*");
@@ -864,11 +880,14 @@
         let dataPlane = globalDefaults.dataPlane;
         let sabCapacity = globalDefaults.sabCapacity;
         let logLevel = globalDefaults.logLevel;
+        let sabEnabled = globalDefaults.sabEnabled;
         if (siteKey) {
           const siteResult = await browser.storage.local.get(siteKey);
           const ss = siteResult[siteKey] || {};
           if (ss.dataPlane !== undefined) dataPlane = ss.dataPlane;
           if (ss.sabCapacity !== undefined) sabCapacity = ss.sabCapacity;
+          if (ss.logLevel !== undefined) logLevel = ss.logLevel;
+          if (ss.sabEnabled !== undefined) sabEnabled = ss.sabEnabled;
         }
 
         browser.runtime.sendMessage({
@@ -878,7 +897,9 @@
         }).catch(() => {});
 
         if (dataPlane === 'ws') {
-          _spawnWsData(deviceId, response.session_token, response.ws_port || _wsPort);
+          _spawnDataPlane(deviceId, response.session_token, response.ws_port || _wsPort, {
+            sabEnabled, sabCapacity, logLevel,
+          });
         }
       }
 
@@ -922,7 +943,7 @@
     }
   });
 
-  browser.storage.onChanged.addListener((changes, area) => {
+  browser.storage.onChanged.addListener(async (changes, area) => {
     if (area !== 'local') return;
 
     let ff = changes.fireAndForget?.newValue;
@@ -948,9 +969,43 @@
       __webhid.logger.info('[bridge] control plane changed:', cp);
     }
 
-    if (ff !== undefined || pl !== undefined || ll !== undefined || se !== undefined) {
+    if (ff !== undefined || pl !== undefined || ll !== undefined) {
       for (const worker of _workers.values()) {
-        worker.postMessage({ type: 'settings', fireAndForget: ff, sabEnabled: se, perfLogging: pl, logLevel: ll });
+        worker.postMessage({ type: 'settings', fireAndForget: ff, sabEnabled: undefined, perfLogging: pl, logLevel: ll });
+      }
+    }
+
+    // SAB toggle: despawn and respawn data plane to switch between
+    // worker+SAB (sabEnabled=true) and bridge-direct WS (sabEnabled=false).
+    if (se !== undefined) {
+      __webhid.logger.info('[bridge] SAB toggle:', se, 'respawning data plane');
+      for (const [id, worker] of _workers) { worker.terminate(); }
+      _workers.clear();
+      _workerCallbacks.clear();
+      for (const [id, ws] of _wsData) { ws.close(); }
+      _wsData.clear();
+      _wsDataCallbacks.clear();
+      _workerReady.clear();
+
+      // Determine current data plane mode.
+      let curDp;
+      const global = await browser.storage.local.get(__webhid.GLOBAL_DEFAULTS);
+      curDp = global.dataPlane;
+      let sabCap = global.sabCapacity;
+      let llv = global.logLevel;
+      if (siteKey) {
+        const siteResult = await browser.storage.local.get(siteKey);
+        const ss = siteResult[siteKey] || {};
+        if (ss.dataPlane !== undefined) curDp = ss.dataPlane;
+        if (ss.sabCapacity !== undefined) sabCap = ss.sabCapacity;
+        if (ss.logLevel !== undefined) llv = ss.logLevel;
+      }
+
+      if (curDp === 'ws') {
+        for (const id of _openDevices) {
+          const token = _sessionTokens.get(id);
+          if (token) _spawnDataPlane(id, token, _wsPort, { sabEnabled: se, sabCapacity: sabCap, logLevel: llv });
+        }
       }
     }
 
@@ -964,10 +1019,24 @@
       _wsDataCallbacks.clear();
       _workerReady.clear();
 
+      // Fetch current SAB setting for spawn.
+      let seForSpawn;
+      const global = await browser.storage.local.get(__webhid.GLOBAL_DEFAULTS);
+      seForSpawn = global.sabEnabled;
+      let sabCap = global.sabCapacity;
+      let llv = global.logLevel;
+      if (siteKey) {
+        const siteResult = await browser.storage.local.get(siteKey);
+        const ss = siteResult[siteKey] || {};
+        if (ss.sabEnabled !== undefined) seForSpawn = ss.sabEnabled;
+        if (ss.sabCapacity !== undefined) sabCap = ss.sabCapacity;
+        if (ss.logLevel !== undefined) llv = ss.logLevel;
+      }
+
       if (dp === 'ws') {
         for (const id of _openDevices) {
           const token = _sessionTokens.get(id);
-          if (token) _spawnWsData(id, token, _wsPort);
+          if (token) _spawnDataPlane(id, token, _wsPort, { sabEnabled: seForSpawn, sabCapacity: sabCap, logLevel: llv });
         }
       }
       for (const id of _openDevices) {
