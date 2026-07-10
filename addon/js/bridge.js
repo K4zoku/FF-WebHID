@@ -720,13 +720,28 @@
     });
   }
 
-  // Init: send handshake to get control_token + ws_port, connect control WS.
+  // Init: send handshake to get ws_port. Only connect control WS if
+  // control plane setting is 'ws'. If 'nm', just store ws_port for
+  // data plane use (open() sends WS data plane via _spawnDataPlane).
   (async () => {
     try {
       const resp = await browser.runtime.sendMessage({ action: 'handshake' });
-      if (resp.success && resp.control_token && resp.ws_port) {
+      if (resp.success && resp.ws_port) {
         _wsPort = resp.ws_port;
-        _connectControlWs(resp.control_token, resp.ws_port);
+        // Read control plane setting to decide if we need control WS
+        const global = await browser.storage.local.get(__webhid.GLOBAL_DEFAULTS);
+        let cp = global.controlPlane;
+        const origin = window.location.origin;
+        const siteKey = origin ? `site:${origin}` : null;
+        if (siteKey) {
+          const siteResult = await browser.storage.local.get(siteKey);
+          const ss = siteResult[siteKey] || {};
+          if (ss.controlPlane !== undefined) cp = ss.controlPlane;
+        }
+        _controlPlane = cp;
+        if (cp === 'ws' && resp.control_token) {
+          _connectControlWs(resp.control_token, resp.ws_port);
+        }
       }
     } catch (e) {
       __webhid.logger.warn('[bridge] handshake failed:', e.message);
@@ -1015,6 +1030,18 @@
     if (cp !== undefined) {
       _controlPlane = cp;
       __webhid.logger.info('[bridge] control plane changed:', cp);
+      if (cp === 'ws' && _wsPort && !_controlWs) {
+        // Switching to WS control: connect control WS
+        const resp = await browser.runtime.sendMessage({ action: 'handshake' });
+        if (resp.success && resp.control_token && resp.ws_port) {
+          _wsPort = resp.ws_port;
+          _connectControlWs(resp.control_token, resp.ws_port);
+        }
+      } else if (cp === 'nm' && _controlWs) {
+        // Switching to NM control: disconnect control WS
+        _controlWs.close();
+        _controlWs = null;
+      }
     }
 
     // Live-update workers for settings that don't require a respawn.
