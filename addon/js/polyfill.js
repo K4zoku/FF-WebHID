@@ -254,8 +254,7 @@
   });
 
   function _createHIDDevice(deviceInfo) {
-    const obj = Object.create(HIDDevice.prototype);
-    EventTarget.call(obj);
+    const obj = Reflect.construct(EventTarget, [], HIDDevice);
     _devState.set(obj, {
       deviceId: deviceInfo.deviceId,
       vendorId: deviceInfo.vendorId,
@@ -280,8 +279,9 @@
   }
 
   function HIDInputReportEvent(type, init) {
-    Event.call(this, type, init);
-    _evtState.set(this, { device: init?.device, reportId: init?.reportId, data: init?.data });
+    const obj = Reflect.construct(Event, [type, init], new.target || HIDInputReportEvent);
+    _evtState.set(obj, { device: init?.device, reportId: init?.reportId, data: init?.data });
+    return obj;
   }
   HIDInputReportEvent.prototype = Object.create(Event.prototype);
   HIDInputReportEvent.prototype.constructor = HIDInputReportEvent;
@@ -293,8 +293,9 @@
   });
 
   function HIDConnectionEvent(type, init) {
-    Event.call(this, type);
-    _evtState.set(this, { device: init?.device ?? init });
+    const obj = Reflect.construct(Event, [type], new.target || HIDConnectionEvent);
+    _evtState.set(obj, { device: init?.device ?? init });
+    return obj;
   }
   HIDConnectionEvent.prototype = Object.create(Event.prototype);
   HIDConnectionEvent.prototype.constructor = HIDConnectionEvent;
@@ -361,8 +362,7 @@
   });
 
   function _createHID() {
-    const obj = Object.create(HID.prototype);
-    EventTarget.call(obj);
+    const obj = Reflect.construct(EventTarget, [], HID);
     _hidState.set(obj, { onconnect: null, ondisconnect: null });
     return obj;
   }
