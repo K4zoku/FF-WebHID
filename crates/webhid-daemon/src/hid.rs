@@ -260,6 +260,7 @@ pub fn info_by_raw_path(raw_path: &str) -> Option<DeviceInfo> {
     let api = HidApi::new().ok()?;
     for info in api.device_list() {
         if info.path().to_string_lossy() == raw_path {
+            if is_blocked_pub(info) { return None; }
             return info_from_hidapi_pub(info);
         }
     }
