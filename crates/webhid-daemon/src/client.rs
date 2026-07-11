@@ -9,7 +9,6 @@ use crate::{device_mgr::DeviceManager, hid};
 pub async fn handle(
     reader: impl AsyncRead + Unpin + Send + 'static,
     writer: impl tokio::io::AsyncWrite + Unpin + Send + 'static,
-    client_id: u64,
     device_mgr: Arc<DeviceManager>,
     mut event_rx: broadcast::Receiver<IpcResponse>,
     ws_port: u16,
@@ -27,7 +26,7 @@ pub async fn handle(
         let mut writer = tokio::io::BufWriter::new(writer);
         while let Some(msg) = rx.recv().await {
             if let Err(e) = protocol::write_message(&mut writer, &msg).await {
-                log::warn!("[client {client_id}] write error: {e}");
+                log::warn!("[client] write error: {e}");
                 break;
             }
         }
@@ -51,7 +50,7 @@ pub async fn handle(
                     }
                 }
                 Err(broadcast::error::RecvError::Lagged(n)) => {
-                    log::warn!("[client {client_id}] dropped {n} events (lagged)");
+                    log::warn!("[client] dropped {n} events (lagged)");
                 }
                 Err(broadcast::error::RecvError::Closed) => break,
             }
@@ -63,12 +62,12 @@ pub async fn handle(
             Ok(r) => r,
             Err(e) => {
                 if e.kind() != std::io::ErrorKind::UnexpectedEof {
-                    log::warn!("[client {client_id}] read error: {e}");
+                    log::warn!("[client] read error: {e}");
                 }
                 break;
             }
         };
-        let response = dispatch(&device_mgr, client_id, request, ws_port).await;
+        let response = dispatch(&device_mgr, request, ws_port).await;
         if tx.send(response).await.is_err() {
             break;
         }
@@ -76,18 +75,15 @@ pub async fn handle(
 
     event_task.abort();
     writer_task.abort();
-    device_mgr.close_client_devices(client_id);
+    device_mgr.close_all_devices();
     Ok(())
 }
 
 async fn dispatch(
     device_mgr: &DeviceManager,
-    client_id: u64,
     req: NmRequest,
     ws_port: u16,
 ) -> NmMessage {
-    // For packed SendReport, reqId lives inside the TLV (not in req.id()).
-    // Extract it here so the response gets the right id.
     let id = if let NmRequest::SendReport { packed, .. } = &req {
         if packed.len() >= 5 {
             Some(u32::from_le_bytes([packed[1], packed[2], packed[3], packed[4]]))
@@ -101,23 +97,22 @@ async fn dispatch(
             Err(_) => NmResponse::err(500),
         },
 
-        NmRequest::Open { device_id, .. } => match device_mgr.open(device_id, client_id) {
+        NmRequest::Open { device_id, .. } => match device_mgr.open(device_id) {
             Ok((dev_id, session_token)) => {
                 NmResponse::ok_opened(dev_id, session_token, Some(ws_port))
             }
             Err(e) => {
                 let msg = e.to_string();
-                let code = if msg.contains("open by") { 403 }
-                           else if msg.contains("not found") || msg.contains("No such") { 404 }
+                let code = if msg.contains("not found") || msg.contains("No such") { 404 }
                            else { 500 };
                 NmResponse::err(code)
             }
         },
 
-        NmRequest::Close { device_id, .. } => match device_mgr.close(device_id, client_id) {
+        NmRequest::Close { device_id, .. } => match device_mgr.close(device_id) {
             Ok(()) => NmResponse::ok(),
             Err(e) => {
-                let code = if e.to_string().contains("not found") { 404 } else { 500 };
+                let code = if e.to_string().contains("not open") { 404 } else { 500 };
                 NmResponse::err(code)
             }
         },
@@ -125,7 +120,7 @@ async fn dispatch(
         NmRequest::SendReport { packed, .. } => {
             match parse_packed_send(&packed) {
                 Ok((_req_id, device_id, report_id, data)) => {
-                    match device_mgr.get_file(device_id, client_id) {
+                    match device_mgr.get_file(device_id) {
                         Err(_) => NmResponse::err(404),
                         Ok(dev_arc) => {
                             let data_owned = data.to_vec();
@@ -146,7 +141,7 @@ async fn dispatch(
         }
 
         NmRequest::ReceiveFeatureReport { device_id, report_id, .. } => {
-            match device_mgr.get_file(device_id, client_id) {
+            match device_mgr.get_file(device_id) {
                 Err(_) => NmResponse::err(404),
                 Ok(dev_arc) => {
                     let result = tokio::task::spawn_blocking(move || {
@@ -163,7 +158,7 @@ async fn dispatch(
         }
 
         NmRequest::SendFeatureReport { device_id, report_id, data, .. } => {
-            match device_mgr.get_file(device_id, client_id) {
+            match device_mgr.get_file(device_id) {
                 Err(_) => NmResponse::err(404),
                 Ok(dev_arc) => {
                     let result = tokio::task::spawn_blocking(move || {

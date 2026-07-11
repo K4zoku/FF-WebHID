@@ -596,7 +596,7 @@ async fn handle_client_text(
             }
         }
         "close" => {
-            match device_mgr.close(device_id, 0) {
+            match device_mgr.close(device_id) {
                 Ok(()) => serde_json::json!({ "n": id, "s": 204 }),
                 Err(_) => serde_json::json!({ "n": id, "s": 404 }),
             }

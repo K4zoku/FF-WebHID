@@ -1,5 +1,3 @@
-//! Tracks which devices are open and which client owns each one.
-
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,11 +14,9 @@ use crate::hid;
 
 struct Entry {
     device: Arc<Mutex<HidDevice>>,
-    client_id: u64,
     stop_flag: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
-    session_token: Option<String>,
-    /// `"ws"` or `"nm"`: controls which channel receives input reports.
+    refcount: u32,
     dataplane_mode: Mutex<String>,
 }
 
@@ -29,7 +25,6 @@ const HEX_CHARS: &[u8; 16] = b"0123456789abcdef";
 fn generate_session_token() -> Result<String, getrandom::Error> {
     let mut buf = [0u8; 16];
     getrandom::fill(&mut buf)?;
-
     let mut out = String::with_capacity(32);
     for b in buf {
         out.push(HEX_CHARS[(b >> 4) as usize] as char);
@@ -40,13 +35,19 @@ fn generate_session_token() -> Result<String, getrandom::Error> {
 
 pub struct DeviceManager {
     devices: Mutex<HashMap<u32, Entry>>,
+    tokens: Mutex<HashMap<String, u32>>,
     event_tx: broadcast::Sender<IpcResponse>,
     control_token: Mutex<Option<String>>,
 }
 
 impl DeviceManager {
     pub fn new(event_tx: broadcast::Sender<IpcResponse>) -> Self {
-        Self { devices: Mutex::new(HashMap::new()), event_tx, control_token: Mutex::new(None) }
+        Self {
+            devices: Mutex::new(HashMap::new()),
+            tokens: Mutex::new(HashMap::new()),
+            event_tx,
+            control_token: Mutex::new(None),
+        }
     }
 
     pub fn get_or_create_control_token(&self) -> String {
@@ -56,8 +57,7 @@ impl DeviceManager {
         }
         let token = generate_session_token().unwrap_or_else(|e| {
             log::error!("failed to generate control token: {e}");
-            let fallback = format!("fallback_{}", std::process::id());
-            fallback
+            format!("fallback_{}", std::process::id())
         });
         *guard = Some(token.clone());
         token
@@ -71,15 +71,18 @@ impl DeviceManager {
         hid::enumerate()
     }
 
-    pub fn open(&self, device_id: u32, client_id: u64) -> anyhow::Result<(u32, Option<String>)> {
+    pub fn open(&self, device_id: u32) -> anyhow::Result<(u32, Option<String>)> {
+        let session_token = generate_session_token()?;
+
         {
-            let map = self.devices.lock().unwrap();
-            if let Some(existing) = map.get(&device_id) {
-                return if existing.client_id == client_id {
-                    Ok((device_id, existing.session_token.clone()))
-                } else {
-                    Err(anyhow!("'{device_id:#x}' is open by a different client"))
-                };
+            let mut map = self.devices.lock().unwrap();
+            if let Some(entry) = map.get_mut(&device_id) {
+                entry.refcount += 1;
+                let rc = entry.refcount;
+                drop(map);
+                self.tokens.lock().unwrap().insert(session_token.clone(), device_id);
+                log::info!("[device_mgr] {device_id:#x} refcount → {rc} (existing session)");
+                return Ok((device_id, Some(session_token)));
             }
         }
 
@@ -87,39 +90,34 @@ impl DeviceManager {
         let id = info.device_id;
 
         let mut map = self.devices.lock().unwrap();
-        if let Some(existing) = map.get(&id) {
-            return if existing.client_id == client_id {
-                Ok((id, existing.session_token.clone()))
-            } else {
-                Err(anyhow!("'{id:#x}' is open by a different client"))
-            };
+        if let Some(entry) = map.get_mut(&id) {
+            entry.refcount += 1;
+            let rc = entry.refcount;
+            drop(map);
+            self.tokens.lock().unwrap().insert(session_token.clone(), id);
+            log::info!("[device_mgr] {id:#x} refcount → {rc} (existing session)");
+            return Ok((id, Some(session_token)));
         }
 
-        let session_token = self::generate_session_token()?;
         let stop_flag = Arc::new(AtomicBool::new(false));
-        // Open a second handle for the reader task so it doesn't hold the
-        // writer's mutex during poll(2).  hidapi allows multiple opens of
-        // the same device path.  Without this, every write blocks for up
-        // to 5 seconds waiting for the reader's read_timeout to expire.
         let reader_device = hid::open_by_device_id(id)?.2;
         let reader_arc = Arc::new(Mutex::new(reader_device));
         let writer_arc = Arc::new(Mutex::new(device));
         let entry = Entry {
             device: Arc::clone(&writer_arc),
-            client_id,
             stop_flag: Arc::clone(&stop_flag),
             handle: None,
-            session_token: Some(session_token.clone()),
+            refcount: 1,
             dataplane_mode: Mutex::new("nm".to_string()),
         };
 
         map.insert(id, entry);
+        self.tokens.lock().unwrap().insert(session_token.clone(), id);
 
         let dev_id = id;
         let dev_for_task = Arc::clone(&reader_arc);
         let stop_for_task = Arc::clone(&stop_flag);
         let tx = self.event_tx.clone();
-        let uses_numbered_reports = uses_numbered_reports;
 
         log::info!("[reader] starting for {dev_id:#x} (numbered_reports={uses_numbered_reports})");
         let handle = tokio::spawn(async move {
@@ -165,25 +163,28 @@ impl DeviceManager {
         Ok((id, Some(session_token)))
     }
 
-    pub fn close(&self, device_id: u32, client_id: u64) -> anyhow::Result<()> {
+    pub fn close(&self, device_id: u32) -> anyhow::Result<()> {
         let mut map = self.devices.lock().unwrap();
-        let entry = map.get(&device_id).ok_or_else(|| anyhow!("'{device_id:#x}' not open"))?;
-        if entry.client_id != client_id {
-            return Err(anyhow!("'{device_id:#x}' is not owned by this client"));
+        let entry = map.get_mut(&device_id).ok_or_else(|| anyhow!("'{device_id:#x}' not open"))?;
+        if entry.refcount > 1 {
+            entry.refcount -= 1;
+            log::info!("[device_mgr] {device_id:#x} refcount → {} (session closed, device stays open)", entry.refcount);
+            return Ok(());
         }
-        if let Some(mut entry) = map.remove(&device_id) {
-            entry.stop_flag.store(true, Ordering::SeqCst);
-            if let Some(handle) = entry.handle.take() { handle.abort(); }
-        }
+        let mut entry = map.remove(&device_id).unwrap();
+        entry.stop_flag.store(true, Ordering::SeqCst);
+        if let Some(handle) = entry.handle.take() { handle.abort(); }
+        drop(map);
+
+        let mut tokens = self.tokens.lock().unwrap();
+        tokens.retain(|_, &mut v| v != device_id);
+        log::info!("[device_mgr] {device_id:#x} closed (refcount → 0)");
         Ok(())
     }
 
-    pub fn get_file(&self, device_id: u32, client_id: u64) -> anyhow::Result<Arc<Mutex<HidDevice>>> {
+    pub fn get_file(&self, device_id: u32) -> anyhow::Result<Arc<Mutex<HidDevice>>> {
         let map = self.devices.lock().unwrap();
         let entry = map.get(&device_id).ok_or_else(|| anyhow!("'{device_id:#x}' not open"))?;
-        if entry.client_id != client_id {
-            return Err(anyhow!("'{device_id:#x}' is not owned by this client"));
-        }
         Ok(Arc::clone(&entry.device))
     }
 
@@ -208,22 +209,21 @@ impl DeviceManager {
             .unwrap_or_else(|| "nm".to_string())
     }
 
-    pub fn close_client_devices(&self, client_id: u64) {
+    pub fn close_all_devices(&self) {
         let mut map = self.devices.lock().unwrap();
-        let keys: Vec<u32> = map.iter().filter(|(_, e)| e.client_id == client_id).map(|(k, _)| *k).collect();
+        let keys: Vec<u32> = map.keys().copied().collect();
         for k in keys {
             if let Some(mut entry) = map.remove(&k) {
                 entry.stop_flag.store(true, Ordering::SeqCst);
                 if let Some(handle) = entry.handle.take() { handle.abort(); }
             }
         }
+        drop(map);
+        self.tokens.lock().unwrap().clear();
     }
 
     pub fn get_device_by_token(&self, token: &str) -> Option<u32> {
-        let map = self.devices.lock().unwrap();
-        map.iter()
-            .find(|(_, entry)| entry.session_token.as_deref() == Some(token))
-            .map(|(device_id, _)| *device_id)
+        self.tokens.lock().unwrap().get(token).copied()
     }
 }
 
@@ -233,7 +233,7 @@ mod tests {
     use tokio::sync::broadcast;
 
     #[test]
-    fn test_ws_active_default_false() {
+    fn test_dataplane_mode_default() {
         let (tx, _) = broadcast::channel(16);
         let mgr = DeviceManager::new(tx);
         assert_eq!(mgr.dataplane_mode(0xDEADBEEF), "nm");
@@ -241,11 +241,10 @@ mod tests {
     }
 
     #[test]
-    fn test_close_client_devices_no_devices() {
+    fn test_close_all_devices_no_devices() {
         let (tx, _) = broadcast::channel(16);
         let mgr = DeviceManager::new(tx);
-        // Should not panic
-        mgr.close_client_devices(42);
+        mgr.close_all_devices();
     }
 
     #[test]

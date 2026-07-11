@@ -135,8 +135,7 @@ async fn main() -> anyhow::Result<()> {
         let stdin = tokio::io::stdin();
         let stdout = tokio::io::stdout();
         let rx = event_tx.subscribe();
-        let cid = 0; // single client in NM-host mode
-        client::handle(stdin, stdout, cid, device_mgr, rx, actual_ws_port).await?;
+        client::handle(stdin, stdout, device_mgr, rx, actual_ws_port).await?;
         return Ok(());
     }
 
@@ -162,21 +161,18 @@ async fn main() -> anyhow::Result<()> {
         log::info!("webhid-daemon listening on {socket_path}");
         log::info!("WebSocket server on port {actual_ws_port}");
 
-        let mut next_client_id: u64 = 0;
         loop {
             match listener.accept().await {
                 Ok((stream, _addr)) => {
-                    next_client_id += 1;
-                    let cid = next_client_id;
                     let mgr = Arc::clone(&device_mgr);
                     let rx = event_tx.subscribe();
                     tokio::spawn(async move {
-                        log::info!("[client {cid}] connected");
+                        log::info!("[client] connected");
                         let (reader, writer) = tokio::io::split(stream);
-                        if let Err(e) = client::handle(reader, writer, cid, mgr, rx, actual_ws_port).await {
-                            log::warn!("[client {cid}] error: {e:#}");
+                        if let Err(e) = client::handle(reader, writer, mgr, rx, actual_ws_port).await {
+                            log::warn!("[client] error: {e:#}");
                         }
-                        log::info!("[client {cid}] disconnected");
+                        log::info!("[client] disconnected");
                     });
                 }
                 Err(e) => log::error!("accept error: {e}"),
@@ -193,24 +189,21 @@ async fn main() -> anyhow::Result<()> {
         log::info!("webhid-daemon listening on {pipe_name}");
         log::info!("WebSocket server on port {actual_ws_port}");
 
-        let mut next_client_id: u64 = 0;
         loop {
             let server = ServerOptions::new()
                 .first_pipe_instance(true)
                 .create(&pipe_name)?;
 
             server.connect().await?;
-            next_client_id += 1;
-            let cid = next_client_id;
             let mgr = Arc::clone(&device_mgr);
             let rx = event_tx.subscribe();
             tokio::spawn(async move {
-                log::info!("[client {cid}] connected");
+                log::info!("[client] connected");
                 let (reader, writer) = tokio::io::split(server);
-                if let Err(e) = client::handle(reader, writer, cid, mgr, rx, actual_ws_port).await {
-                    log::warn!("[client {cid}] error: {e:#}");
+                if let Err(e) = client::handle(reader, writer, mgr, rx, actual_ws_port).await {
+                    log::warn!("[client] error: {e:#}");
                 }
-                log::info!("[client {cid}] disconnected");
+                log::info!("[client] disconnected");
             });
         }
     }
