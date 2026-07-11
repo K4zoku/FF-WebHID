@@ -86,14 +86,11 @@ pub async fn start_server(
     loop {
         match listener.accept().await {
             Ok((stream, addr)) => {
-                // Disable Nagle's algorithm: HID input reports are small,
-                // latency-sensitive frames. Without TCP_NODELAY, Nagle + delayed
-                // ACK can add ~40ms latency to the first frame after idle and
-                // cause burst coalescing jitter.
-                if let Err(e) = stream.set_nodelay(true) {
+                let nodelay = stream.set_nodelay(true);
+                if let Err(e) = &nodelay {
                     log::warn!("[ws] set_nodelay failed for {addr}: {e}");
                 }
-                log::info!("[ws] client connected from {addr} (TCP_NODELAY=on)");
+                log::info!("[ws] client connected from {addr} (TCP_NODELAY={})", if nodelay.is_ok() { "on" } else { "off" });
                 let event_tx_clone = event_tx.clone();
                 let device_mgr_clone = Arc::clone(&device_mgr);
                 tokio::spawn(async move {
@@ -502,10 +499,10 @@ async fn handle_client_binary(
             let report_id = frame[5];
             let payload: Arc<[u8]> = Arc::from(&frame[6..]);
 
-            let dev_arc = match device_mgr.get_file_by_device_id(device_id) {
+            let dev_arc = match device_mgr.get_file(device_id) {
                 Ok(f) => f,
                 Err(e) => {
-                    log::warn!("[ws] get_file_by_device_id '{device_id}': {e}");
+                    log::warn!("[ws] get_file '{device_id}': {e}");
                     let resp_type = if msg_type == MSG_SEND_REPORT { RESP_SEND_REPORT } else { RESP_SEND_FEATURE_REPORT };
                     let _ = tx.send(make_status_resp(resp_type, req_id, 1));
                     return;
@@ -535,10 +532,10 @@ async fn handle_client_binary(
             }
             let report_id = frame[5];
 
-            let dev_arc = match device_mgr.get_file_by_device_id(device_id) {
+            let dev_arc = match device_mgr.get_file(device_id) {
                 Ok(f) => f,
                 Err(e) => {
-                    log::warn!("[ws] get_file_by_device_id '{device_id}': {e}");
+                    log::warn!("[ws] get_file '{device_id}': {e}");
                     let _ = tx.send(make_feature_read_resp(req_id, 1, &[]));
                     return;
                 }

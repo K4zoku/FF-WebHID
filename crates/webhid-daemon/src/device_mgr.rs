@@ -50,17 +50,15 @@ impl DeviceManager {
         }
     }
 
-    pub fn get_or_create_control_token(&self) -> String {
+    pub fn get_or_create_control_token(&self) -> anyhow::Result<String> {
         let mut guard = self.control_token.lock().unwrap();
         if let Some(ref t) = *guard {
-            return t.clone();
+            return Ok(t.clone());
         }
-        let token = generate_session_token().unwrap_or_else(|e| {
-            log::error!("failed to generate control token: {e}");
-            format!("fallback_{}", std::process::id())
-        });
+        let token = generate_session_token()
+            .map_err(|e| anyhow::anyhow!("failed to generate control token: {e}"))?;
         *guard = Some(token.clone());
-        token
+        Ok(token)
     }
 
     pub fn validate_control_token(&self, token: &str) -> bool {
@@ -183,12 +181,6 @@ impl DeviceManager {
     }
 
     pub fn get_file(&self, device_id: u32) -> anyhow::Result<Arc<Mutex<HidDevice>>> {
-        let map = self.devices.lock().unwrap();
-        let entry = map.get(&device_id).ok_or_else(|| anyhow!("'{device_id:#x}' not open"))?;
-        Ok(Arc::clone(&entry.device))
-    }
-
-    pub fn get_file_by_device_id(&self, device_id: u32) -> anyhow::Result<Arc<Mutex<HidDevice>>> {
         let map = self.devices.lock().unwrap();
         let entry = map.get(&device_id).ok_or_else(|| anyhow!("'{device_id:#x}' not open"))?;
         Ok(Arc::clone(&entry.device))
