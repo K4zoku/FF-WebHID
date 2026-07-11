@@ -16,9 +16,8 @@
   "background": {
     "scripts": [
       "js/utils/logger.js",
-      "js/utils/settings-defaults.js",
+      "js/utils/settings.js",
       "js/utils/http-status.js",
-      "js/utils/settings-store.js",
       "js/background.js"
     ]
   },
@@ -38,9 +37,8 @@
       "js": [
         "js/utils/logger.js",
         "js/utils/device-utils.js",
-        "js/utils/settings-defaults.js",
+        "js/utils/settings.js",
         "js/utils/http-status.js",
-        "js/utils/settings-store.js",
         "js/polyfill.js"
       ],
       "world": "MAIN"
@@ -52,9 +50,8 @@
       "js": [
         "js/utils/logger.js",
         "js/utils/device-utils.js",
-        "js/utils/settings-defaults.js",
+        "js/utils/settings.js",
         "js/utils/http-status.js",
-        "js/utils/settings-store.js",
         "js/bridge.js"
       ]
     }
@@ -66,9 +63,8 @@
         "css/theme.css",
         "css/device-picker.css",
         "js/utils/logger.js",
-        "js/utils/settings-defaults.js",
+        "js/utils/settings.js",
         "js/utils/http-status.js",
-        "js/utils/settings-store.js",
         "js/worker.js",
         "js/control.js"
       ],

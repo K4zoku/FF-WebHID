@@ -47,15 +47,19 @@ function tabsForEvent(message) {
 const NM_HOST_FORWARDER = "webhid.forwarder_nm_host";
 const NM_HOST_DAEMON = "webhid.daemon_nm_host";
 
-let _daemonAsNmHost = globalThis.__webhid.GLOBAL_DEFAULTS.daemonAsNmHost;
-let _nmHostName = NM_HOST_FORWARDER;
+const settings = __webhid.createSettingsStore(__webhid.GLOBAL_DEFAULTS);
+function _nmHostName() { return settings.daemonAsNmHost ? NM_HOST_DAEMON : NM_HOST_FORWARDER; }
 
 async function loadNmHostSetting() {
-  const global = await browser.storage.local.get({ daemonAsNmHost: globalThis.__webhid.GLOBAL_DEFAULTS.daemonAsNmHost });
-  _daemonAsNmHost = global.daemonAsNmHost;
-  _nmHostName = _daemonAsNmHost ? NM_HOST_DAEMON : NM_HOST_FORWARDER;
-  __webhid.logger.info('[bg] NM host:', _nmHostName);
+  const global = await browser.storage.local.get(__webhid.GLOBAL_DEFAULTS);
+  settings.set(global);
+  __webhid.logger.info('[bg] NM host:', _nmHostName());
 }
+
+settings.on('daemonAsNmHost', () => {
+  __webhid.logger.info('[bg] NM host changed:', _nmHostName());
+  NativeMessaging.reconnectWithNewHost();
+});
 
 function buildPackedSendReport(deviceId, reportId, data) {
   // deviceId: u32 number, 4 bytes LE
@@ -83,9 +87,9 @@ const NativeMessaging = {
 
   connect() {
     if (this.port) return Promise.resolve();
-    __webhid.logger.debug('[nm] connecting to ' + _nmHostName + '...');
+    __webhid.logger.debug('[nm] connecting to ' + _nmHostName() + '...');
     try {
-      this.port = browser.runtime.connectNative(_nmHostName);
+      this.port = browser.runtime.connectNative(_nmHostName());
       this._reconnectDelay = 1000;
       __webhid.logger.debug('[nm] connected');
 
@@ -234,18 +238,17 @@ browser.runtime.onInstalled.addListener(() => {
 loadNmHostSetting().then(() => NativeMessaging.connect());
 browser.tabs.onRemoved.addListener((tabId) => purgeTab(tabId));
 
+// Push storage changes into the settings store; SettingsStore.set() handles
+// diffing and fires the daemonAsNmHost listener only when value actually
+// changes (avoids the old _nmHostName !== newName check).
 browser.storage.onChanged.addListener((changes, area) => {
-  if (area === 'local') {
-    if (changes.daemonAsNmHost) {
-      const newName = changes.daemonAsNmHost.newValue ? NM_HOST_DAEMON : NM_HOST_FORWARDER;
-      if (newName !== _nmHostName) {
-        _daemonAsNmHost = changes.daemonAsNmHost.newValue;
-        _nmHostName = newName;
-        __webhid.logger.info('[bg] NM host changed:', _nmHostName);
-        NativeMessaging.reconnectWithNewHost();
-      }
-    }
+  if (area !== 'local') return;
+  const patch = {};
+  for (const k of Object.keys(__webhid.GLOBAL_DEFAULTS)) {
+    if (changes[k]) patch[k] = changes[k].newValue;
   }
+  if (Object.keys(patch).length === 0) return;
+  settings.set(patch);
 });
 
 browser.runtime.onMessage.addListener((request, sender, sendResponse) => {

@@ -394,19 +394,17 @@
   async function _spawnControlWorker(token, wsPort) {
     if (_controlWorker) return;
     try {
-      const [loggerResp, defaultsResp, storeResp, controlResp] = await Promise.all([
+      const [loggerResp, settingsResp, controlResp] = await Promise.all([
         fetch(browser.runtime.getURL('js/utils/logger.js')),
-        fetch(browser.runtime.getURL('js/utils/settings-defaults.js')),
-        fetch(browser.runtime.getURL('js/utils/settings-store.js')),
+        fetch(browser.runtime.getURL('js/utils/settings.js')),
         fetch(browser.runtime.getURL('js/control.js')),
       ]);
-      const [loggerCode, defaultsCode, storeCode, controlCode] = await Promise.all([
+      const [loggerCode, settingsCode, controlCode] = await Promise.all([
         loggerResp.text(),
-        defaultsResp.text(),
-        storeResp.text(),
+        settingsResp.text(),
         controlResp.text(),
       ]);
-      const blob = new Blob([loggerCode + '\n' + defaultsCode + '\n' + storeCode + '\n' + controlCode], { type: 'application/javascript' });
+      const blob = new Blob([loggerCode + '\n' + settingsCode + '\n' + controlCode], { type: 'application/javascript' });
       _controlWorker = new Worker(URL.createObjectURL(blob));
     } catch (e) {
       __webhid.logger.error('[bridge] control worker spawn failed:', e);
@@ -513,19 +511,17 @@
     if (_workers.has(deviceId)) return;
     let worker;
     try {
-      const [loggerResp, defaultsResp, storeResp, workerResp] = await Promise.all([
+      const [loggerResp, settingsResp, workerResp] = await Promise.all([
         fetch(browser.runtime.getURL('js/utils/logger.js')),
-        fetch(browser.runtime.getURL('js/utils/settings-defaults.js')),
-        fetch(browser.runtime.getURL('js/utils/settings-store.js')),
+        fetch(browser.runtime.getURL('js/utils/settings.js')),
         fetch(browser.runtime.getURL('js/worker.js')),
       ]);
-      const [loggerCode, defaultsCode, storeCode, workerCode] = await Promise.all([
+      const [loggerCode, settingsCode, workerCode] = await Promise.all([
         loggerResp.text(),
-        defaultsResp.text(),
-        storeResp.text(),
+        settingsResp.text(),
         workerResp.text(),
       ]);
-      const blob = new Blob([loggerCode + '\n' + defaultsCode + '\n' + storeCode + '\n' + workerCode], { type: 'application/javascript' });
+      const blob = new Blob([loggerCode + '\n' + settingsCode + '\n' + workerCode], { type: 'application/javascript' });
       worker = new Worker(URL.createObjectURL(blob));
     } catch (e) {
       __webhid.logger.error('[bridge] worker fetch/spawn failed:', e);
