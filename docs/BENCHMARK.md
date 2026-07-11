@@ -4,7 +4,7 @@
 
 **Test scenario**: Open sayodevice.com → open device → switch to Image tab → wait for full gallery load (8 images).
 
-**Profile analysis**: Firefox Profiler and Chromium DevTools recordings, analyzed via Python scripts (see `AGENT_PERF_ANALYSIS_GUIDE.md`).
+**Profile analysis**: Firefox Profiler and Chromium DevTools recordings, analyzed via Python scripts (methodology: `skills/agent-perf-analysis`).
 
 **Benchmark window** (all modes): `pointerdown` (user clicks Image tab) → last `Paint` event (last image render complete). AnimationFrame::Presentation events after last Paint are skipped. they are the compositor presenting an already-rendered frame, not part of the image-loading pipeline.
 
@@ -49,7 +49,7 @@
 
 ## Chromium Profile Analysis
 
-**Profiles**: `Trace-20260710T105413.json.gz` (run 1, 43MB, 120706 events) and `chromium 2.gz` (run 2, 47MB, 127425 events).
+**Profiles**: 2 cold-start runs — #1 (43MB, 120706 events) and #2 (47MB, 127425 events).
 
 ### Activity Timeline (run 2)
 
@@ -117,7 +117,7 @@ The `real` function is the minified HID callback handler, called for each input 
 
 ## Firefox NM Data Profile Analysis
 
-**Profiles**: 5 cold-start runs. `nm cold start.gz` (run 1, 13.5MB), `nm cold start 2.gz` (run 2, 13.3MB), `nm-cold-start-3.gz` (run 3, 12.4MB), `nm-cold-start-4.gz` (run 4, 12.8MB), `nm-cold-start-5.gz` (run 5, 15.9MB).
+**Profiles**: 5 cold-start runs — #1 (13.5MB), #2 (13.3MB), #3 (12.4MB), #4 (12.8MB), #5 (15.9MB).
 
 **Configuration**: WS Control plane + NM Data plane. Control operations (enumerate/close) route via WS text frames after NM handshake. Data (sendReport, input reports, feature reports) flows through the NM host: page → bridge → background → NM host → daemon → HID. The bridge forwards data actions as `sendreport` / `sendfeaturereport` / `receivefeaturereport` via `browser.runtime.sendMessage`.
 
@@ -190,7 +190,7 @@ Data plane JS is below sampling resolution on the content thread. The NM subproc
 
 ## Firefox Worker WS Data Profile Analysis
 
-**Profiles**: 5 cold-start runs with zero-copy input report delivery. `fix-tier1-ws-worker-1.json` (run 1, 11.4MB), `fix-tier1-ws-worker-2.json` (run 2, 11.2MB), `fix-tier1-ws-worker-3.json` (run 3, 11.6MB), `fix-tier1-ws-worker-4.json` (run 4, 10.6MB), `ws-cold-start-5.json` (run 5, 11.1MB).
+**Profiles**: 5 cold-start runs with zero-copy input report delivery — #1 (11.4MB), #2 (11.2MB), #3 (11.6MB), #4 (10.6MB), #5 (11.1MB).
 
 **Configuration**: WS Control plane + WS Data plane via Web Worker (postMessage transfer, no SAB). A Web Worker owns the WebSocket. Input reports arrive via `ws.onmessage` in the worker (off main thread) → worker parses batch → `self.postMessage({type:'inputReport', reportId, data: buf}, [buf])` (zero-copy transfer) → bridge re-forwards to page via `window.postMessage({...}, '*', [buf])` (second zero-copy transfer) → polyfill creates `DataView` directly on the transferred ArrayBuffer (no intermediate copy). 2 context hops, true zero-copy end-to-end, no SAB, no COOP/COEP.
 
