@@ -1,103 +1,53 @@
 (function () {
-  if (navigator.hid) return;
+  if (globalThis.navigator?.hid) return;
   __webhid.logger.initLogger('polyfill');
 
   let _reqId = 0;
   const _pending = {};
 
-  // ── Device persistence helpers ────────────────────────────────────────────
-  // Device permissions stored per site origin. Hash from vid/pid/serial/path.
-
   let _savedDevices = null;
   let _deviceInfoCache = null;
 
   async function getSavedDevices() {
-    // Return cached hashes if available
-    if (_savedDevices !== null) {
-      return _savedDevices;
-    }
-
+    if (_savedDevices !== null) return _savedDevices;
     try {
-      const result = await sendRequest(
-        "getSavedDevices",
-        { origin: window.location.origin },
-      );
+      const result = await sendRequest("getSavedDevices", { origin: globalThis.location?.origin || '' });
       _savedDevices = result.hashes || [];
-      // Clear device cache so next getDevices() refreshes
       _deviceInfoCache = null;
       return _savedDevices;
-    } catch (error) {
-      return [];
-    }
+    } catch { return []; }
   }
 
   async function getDeviceCache() {
-    if (_deviceInfoCache !== null) {
-      return _deviceInfoCache;
-    }
-
+    if (_deviceInfoCache !== null) return _deviceInfoCache;
     try {
       const response = await sendRequest("enumerate");
       const devices = __webhid.http.isOk(response.s) && Array.isArray(response.D) ? response.D : [];
       _deviceInfoCache = new Map();
-      for (const device of devices) {
-        _deviceInfoCache.set(device.deviceId, device);
-      }
+      for (const d of devices) _deviceInfoCache.set(d.deviceId, d);
       return _deviceInfoCache;
-    } catch (error) {
-      _deviceInfoCache = new Map();
-      return _deviceInfoCache;
-    }
+    } catch { _deviceInfoCache = new Map(); return _deviceInfoCache; }
   }
-
 
   async function saveDevice(deviceInfo) {
     try {
-      // Clear cache to force refresh
       _savedDevices = null;
-
-      const result = await sendRequest(
-        "saveDevice",
-        {
-          origin: window.location.origin,
-          device: {
-            deviceId: deviceInfo.deviceId,
-          },
-        }
-      );
-
+      const result = await sendRequest("saveDevice", {
+        origin: globalThis.location?.origin || '',
+        device: { deviceId: deviceInfo.deviceId },
+      });
       if (result.success) {
-        // Update cache with just the hashes array
         _savedDevices = result.hashes || [];
-        // Clear device cache so next getDevices() refreshes
         _deviceInfoCache = null;
       }
-    } catch (error) {
-
-    }
+    } catch {}
   }
-
-  // ── Transport ────────────────────────────────────────────────────────────
-  //
-  // Two data-plane modes (both go through the content-script bridge -
-  // Firefox does not support `externally_connectable`, so the page cannot
-  // connect to the background directly):
-  //   ws: page → bridge → WebSocket → daemon (input reports via postMessage transfer)
-  //   nm : page → bridge → background → NM host → daemon
-  //
-  // In `nm` mode the polyfill sends data actions as `sendreport` /
-  // `sendfeaturereport` / `receivefeaturereport` (instead of `worker-*`),
-  // which the bridge forwards to the background via runtime.sendMessage.
-  //
-  // The page (MAIN world) has no `browser.*` APIs, so settings are fetched
-  // via a bridge request and updated via bridge-pushed `settings` events.
 
   const _defs = globalThis.__webhid.GLOBAL_DEFAULTS;
   const settings = __webhid.createSettingsStore(_defs);
 
-  // Listen for responses, events, and settings pushes from the bridge.
-  window.addEventListener("message", (event) => {
-    if (event.source !== window) return;
+  globalThis.addEventListener("message", (event) => {
+    if (event.source !== globalThis) return;
     if (!event.data) return;
     if (event.data.__webhid_bridge === "res") {
       const handler = _pending[event.data.id];
@@ -122,7 +72,7 @@
         msg.__transfer = true;
         xfers.push(payload.data.buffer);
       }
-      window.postMessage(msg, "*", xfers.length ? xfers : undefined);
+      globalThis.postMessage(msg, "*", xfers.length ? xfers : undefined);
     });
   }
 
@@ -133,414 +83,303 @@
       msg.__transfer = true;
       xfers.push(payload.data.buffer);
     }
-    window.postMessage(msg, "*", xfers.length ? xfers : undefined);
+    globalThis.postMessage(msg, "*", xfers.length ? xfers : undefined);
   }
 
-  // Subscribe to settings changes for logging + logLevel.
   settings.on('dataPlane', (v) => __webhid.logger.info('data plane changed: ' + v));
   settings.on('fireAndForget', (v) => __webhid.logger.info('fire-and-forget: ' + v));
   settings.on('logLevel', (v) => { if (__webhid.logger.applyLevel) __webhid.logger.applyLevel(v); });
 
-  // Fetch initial settings from the bridge (which has browser.storage access).
   sendRequest("getSettings", {}).then((s) => {
     if (!s) return;
     settings.set(s);
     __webhid.logger.info('data plane: ' + settings.dataPlane + ' (fire-and-forget: ' + settings.fireAndForget + ')');
   });
 
-  // ── Event classes ────────────────────────────────────────────────────────
+  const _devState = new WeakMap();
+  const _hidState = new WeakMap();
+  const _evtState = new WeakMap();
+  const _deviceRegistry = new Map();
 
-  class HIDInputReportEvent extends Event {
-    #device;
-    #reportId;
-    #data;
-    constructor(type, init) {
-      super(type, init);
-      this.#device = init.device;
-      this.#reportId = init.reportId;
-      this.#data = init.data;
-    }
-    get device() { return this.#device; }
-    get reportId() { return this.#reportId; }
-    get data() { return this.#data; }
-  }
+  function HIDDevice() { throw new TypeError('Illegal constructor'); }
+  HIDDevice.prototype = Object.create(EventTarget.prototype);
+  HIDDevice.prototype.constructor = HIDDevice;
+  Object.defineProperty(HIDDevice.prototype, Symbol.toStringTag, { value: 'HIDDevice', configurable: true });
 
-  class HIDConnectionEvent extends Event {
-    #device;
-    constructor(type, device) {
-      super(type);
-      this.#device = device;
-    }
-    get device() { return this.#device; }
-  }
-
-  // ── Global device registry ────────────────────────────────────────────────
-  // Tracks all HIDDevice instances so getDevices()/requestDevice() return
-  // the SAME objects. Open state is shared across tabs (matches Chromium).
-  const _deviceRegistry = new Map(); // internalId -> HIDDevice
-
-  function getOrCreateDevice(deviceInfo) {
-    const id = deviceInfo.deviceId;
-    if (id && _deviceRegistry.has(id)) {
-      return _deviceRegistry.get(id);
-    }
-    const dev = new HIDDevice(deviceInfo);
-    if (id) _deviceRegistry.set(id, dev);
-    return dev;
-  }
-
-  // ── HIDDevice ─────────────────────────────────────────────────────────────
-
-  class HIDDevice extends EventTarget {
-    #listenerToWrapper = new WeakMap();
-    #activeWrappers = new Set();
-    #oninputreportListener = null;
-    #parsedCollections = null;
-    #opened = false;
-    #deviceId = null;
-    #maxInputReportSize = 0;
-    #port = null;
-
-    constructor(deviceInfo) {
-      super();
-      this.vendorId = deviceInfo.vendorId;
-      this.productId = deviceInfo.productId;
-      this.productName = deviceInfo.productName;
-      this.#deviceId = deviceInfo.deviceId || null;
-
-      this.#parsedCollections = deviceInfo.collections || [];
-
-      this.#maxInputReportSize = deviceInfo.maxInputReportSize || 64;
-    }
-
-    get opened() { return this.#opened; }
-
-    get collections() {
-      return this.#parsedCollections;
-    }
-
-    async open() {
-      if (this.opened) {
-        throw new DOMException("Device is already open", "InvalidStateError");
-      }
-      if (!this.#deviceId) {
-        throw new DOMException("No device ID", "InvalidStateError");
-      }
+  Object.defineProperties(HIDDevice.prototype, {
+    opened: { get() { return _devState.get(this)?.opened ?? false; }, enumerable: true, configurable: true },
+    vendorId: { get() { return _devState.get(this)?.vendorId; }, enumerable: true, configurable: true },
+    productId: { get() { return _devState.get(this)?.productId; }, enumerable: true, configurable: true },
+    productName: { get() { return _devState.get(this)?.productName; }, enumerable: true, configurable: true },
+    collections: { get() { return _devState.get(this)?.collections; }, enumerable: true, configurable: true },
+    oninputreport: {
+      get() { return _devState.get(this)?.oninputreport ?? null; },
+      set(v) {
+        const s = _devState.get(this);
+        if (!s) return;
+        if (s.oninputreport) this.removeEventListener('inputreport', s.oninputreport);
+        s.oninputreport = v;
+        if (v) this.addEventListener('inputreport', v);
+      },
+      enumerable: true, configurable: true,
+    },
+    open: { value: async function() {
+      const s = _devState.get(this); if (!s) throw new DOMException("Invalid state", "InvalidStateError");
+      if (s.opened) throw new DOMException("Device is already open", "InvalidStateError");
       try {
-        const response = await sendRequest("open", {
-          deviceId: this.#deviceId,
-          reportSize: this.#maxInputReportSize + 3,
-        });
+        const response = await sendRequest("open", { deviceId: s.deviceId, reportSize: s.maxInputReportSize + 3 });
         if (__webhid.http.isOk(response.s)) {
-          this.#opened = true;
-          __webhid.logger.info('open deviceId=' + this.#deviceId + ' dataPlane=' + settings.dataPlane);
+          s.opened = true;
+          __webhid.logger.info('open deviceId=' + s.deviceId + ' dataPlane=' + settings.dataPlane);
           this.dispatchEvent(new Event("open"));
           return true;
         }
         throw new Error("Open failed: " + __webhid.http.name(response.s || 0));
-      } catch (error) {
-        throw new DOMException(error.message, "InvalidStateError");
-      }
-    }
-
-    async close() {
-      if (!this.opened) return;
-      __webhid.logger.debug('close deviceId=' + this.#deviceId);
+      } catch (error) { throw new DOMException(error.message, "InvalidStateError"); }
+    }, enumerable: true, configurable: true, writable: true },
+    close: { value: async function() {
+      const s = _devState.get(this); if (!s) return;
+      if (!s.opened) return;
+      __webhid.logger.debug('close deviceId=' + s.deviceId);
       try {
-        const response = await sendRequest("close", {
-          deviceId: this.#deviceId,
-        });
+        const response = await sendRequest("close", { deviceId: s.deviceId });
         if (__webhid.http.isOk(response.s)) {
-          this.#opened = false;
-          if (this.#port) {
-            this.#port.onmessage = null;
-            this.#port.close();
-            this.#port = null;
-          }
+          s.opened = false;
+          if (s.port) { s.port.onmessage = null; s.port.close(); s.port = null; }
           this.dispatchEvent(new Event("close"));
-        } else {
-          throw new Error("Failed to close device");
-        }
-      } catch (error) {
-        throw new DOMException(error.message, "InvalidStateError");
-      }
-    }
-
-    async sendReport(reportId, data) {
-      if (!this.opened)
-        throw new DOMException("Device is not open", "InvalidStateError");
-      const view = data instanceof ArrayBuffer
-        ? new Uint8Array(data)
-        : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+        } else { throw new Error("Failed to close device"); }
+      } catch (error) { throw new DOMException(error.message, "InvalidStateError"); }
+    }, enumerable: true, configurable: true, writable: true },
+    sendReport: { value: async function(reportId, data) {
+      const s = _devState.get(this); if (!s) throw new DOMException("Invalid state", "InvalidStateError");
+      if (!s.opened) throw new DOMException("Device is not open", "InvalidStateError");
+      const view = data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
       const buffer = view.slice();
       try {
         const action = settings.dataPlane === 'nm' ? "sendreport" : "worker-send";
         __webhid.logger.debug('sendReport reportId=' + reportId + ' len=' + buffer.length);
-        if (settings.fireAndForget) {
-          sendFireAndForget(action, {
-            deviceId: this.#deviceId,
-            reportId: reportId,
-            data: buffer,
-          });
-          return;
-        }
-        const response = await sendRequest(action, {
-          deviceId: this.#deviceId,
-          reportId: reportId,
-          data: buffer,
-        });
-        if (__webhid.http.isOk(response.s)) {
-          return;
-        }
+        if (settings.fireAndForget) { sendFireAndForget(action, { deviceId: s.deviceId, reportId, data: buffer }); return; }
+        const response = await sendRequest(action, { deviceId: s.deviceId, reportId, data: buffer });
+        if (__webhid.http.isOk(response.s)) return;
         throw new Error("sendReport failed");
-      } catch (error) {
-        throw new DOMException(error.message, "NetworkError");
-      }
-    }
-
-    async receiveFeatureReport(reportId) {
-      if (!this.opened)
-        throw new DOMException("Device is not open", "InvalidStateError");
+      } catch (error) { throw new DOMException(error.message, "NetworkError"); }
+    }, enumerable: true, configurable: true, writable: true },
+    receiveFeatureReport: { value: async function(reportId) {
+      const s = _devState.get(this); if (!s) throw new DOMException("Invalid state", "InvalidStateError");
+      if (!s.opened) throw new DOMException("Device is not open", "InvalidStateError");
       try {
         const action = settings.dataPlane === 'nm' ? "receivefeaturereport" : "worker-receiveFeature";
-        const response = await sendRequest(action, {
-          deviceId: this.#deviceId,
-          reportId: reportId,
-        });
+        const response = await sendRequest(action, { deviceId: s.deviceId, reportId });
         if (__webhid.http.isOk(response.s) && response.d) {
-          __webhid.logger.debug('receiveFeatureReport done len=' + (typeof response.d === 'string' ? 'base64' : response.d.length));
           const buf = typeof response.d === 'string' ? Uint8Array.fromBase64(response.d) : response.d;
           return new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
         }
         throw new Error("receiveFeatureReport failed");
-      } catch (error) {
-        throw new DOMException(error.message, "NetworkError");
-      }
-    }
-
-    async sendFeatureReport(reportId, data) {
-      if (!this.opened)
-        throw new DOMException("Device is not open", "InvalidStateError");
-      const view = data instanceof ArrayBuffer
-        ? new Uint8Array(data)
-        : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+      } catch (error) { throw new DOMException(error.message, "NetworkError"); }
+    }, enumerable: true, configurable: true, writable: true },
+    sendFeatureReport: { value: async function(reportId, data) {
+      const s = _devState.get(this); if (!s) throw new DOMException("Invalid state", "InvalidStateError");
+      if (!s.opened) throw new DOMException("Device is not open", "InvalidStateError");
+      const view = data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
       const buffer = view.slice();
       __webhid.logger.debug('sendFeatureReport reportId=' + reportId + ' len=' + buffer.length);
       try {
         const action = settings.dataPlane === 'nm' ? "sendfeaturereport" : "worker-sendFeature";
-        if (settings.fireAndForget) {
-          sendFireAndForget(action, {
-            deviceId: this.#deviceId,
-            reportId: reportId,
-            data: buffer,
-          });
-          return undefined;
-        }
-        const response = await sendRequest(action, {
-          deviceId: this.#deviceId,
-          reportId: reportId,
-          data: buffer,
-        });
-        if (__webhid.http.isOk(response.s)) {
-          return undefined;
-        }
+        if (settings.fireAndForget) { sendFireAndForget(action, { deviceId: s.deviceId, reportId, data: buffer }); return undefined; }
+        const response = await sendRequest(action, { deviceId: s.deviceId, reportId, data: buffer });
+        if (__webhid.http.isOk(response.s)) return undefined;
         throw new Error("sendFeatureReport failed");
-      } catch (error) {
-        throw new DOMException(error.message, "NetworkError");
-      }
-    }
-
-    async forget() {
-      if (this.opened) await this.close();
-      await sendRequest("forgetDevice", { deviceId: this.#deviceId });
-    }
-
-    addEventListener(type, listener) {
-      super.addEventListener(type, listener);
-      if (type === "inputreport") {
-        const wrapper = (event) => {
-          if (event.source !== window) return;
-          if (!event.data || event.data.__webhid_bridge !== "evt") return;
-          const detail = event.data.event;
-
-          if (!detail) {
-            __webhid.logger.debug("wrapper: no detail, skipping");
-            return;
-          }
-
-          const eventType = detail.eventType;
-
-          const evDeviceId = detail.deviceId;
-
-          if (eventType === "webhid-data-ready") {
-            if (detail.port && !this.#port) {
-              this.#port = detail.port;
-              this.#port.onmessage = (portEvent) => {
-                const d = portEvent.data;
-                if (d.type === 'inputReport') {
-                  if (this.#deviceId && d.deviceId && d.deviceId !== this.#deviceId) return;
-                  let dataView;
-                  if (d.data) {
-                    dataView = new DataView(d.data);
-                  } else {
-                    dataView = new DataView(new ArrayBuffer(0));
-                  }
-                  if (dataView.byteLength > 0 && d.reportId !== 33) {
-                    let hex = '';
-                    for (let i = 0; i < Math.min(8, dataView.byteLength); i++) hex += dataView.getUint8(i).toString(16).padStart(2, '0') + ' ';
-                    __webhid.logger.debug('port inputReport device=' + this.#deviceId + ' reportId=' + d.reportId + ' len=' + dataView.byteLength + ' first8=' + hex);
-                  }
-                  this.dispatchEvent(new HIDInputReportEvent('inputreport', {
-                    device: this,
-                    reportId: d.reportId,
-                    data: dataView,
-                  }));
-                }
-              };
-              __webhid.logger.info('MessagePort connected for device=' + this.#deviceId + ': direct worker→page input reports');
-            }
-            return;
-          }
-
-          if (eventType === "input_report") {
-            if (evDeviceId && this.#deviceId && evDeviceId !== this.#deviceId) return;
-            let dataView;
-            if (typeof detail.data === 'string') {
-              const buf = Uint8Array.fromBase64(detail.data);
-              dataView = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
-            } else if (detail.data) {
-              dataView = new DataView(detail.data.buffer, detail.data.byteOffset, detail.data.byteLength);
-            } else {
-              dataView = new DataView(new ArrayBuffer(0));
-            }
-            if (dataView.byteLength > 0 && detail.reportId !== 33) {
-              let hex = '';
-              for (let i = 0; i < Math.min(8, dataView.byteLength); i++) hex += dataView.getUint8(i).toString(16).padStart(2, '0') + ' ';
-              __webhid.logger.debug('page inputReport device=' + (this.#deviceId || evDeviceId) + ' reportId=' + detail.reportId + ' len=' + dataView.byteLength + ' first8=' + hex);
-            }
-            this.dispatchEvent(new HIDInputReportEvent('inputreport', {
-              device: this,
-              reportId: detail.reportId,
-              data: dataView,
-            }));
-            return;
-          }
-
-          // Handle disconnection events
-          if (eventType === "disconnect") {
-            this.dispatchEvent(new HIDConnectionEvent("disconnect", this));
-            return;
-          }
-
-          __webhid.logger.debug("wrapper: unknown eventType:", eventType);
-        };
-
-        const existing = this.#listenerToWrapper.get(listener);
-        if (existing) return;
-        this.#listenerToWrapper.set(listener, wrapper);
-        this.#activeWrappers.add(wrapper);
-        window.addEventListener("message", wrapper);
-      }
-    }
-
-    removeEventListener(type, listener) {
-      super.removeEventListener(type, listener);
+      } catch (error) { throw new DOMException(error.message, "NetworkError"); }
+    }, enumerable: true, configurable: true, writable: true },
+    forget: { value: async function() {
+      const s = _devState.get(this); if (!s) return;
+      if (s.opened) await this.close();
+      await sendRequest("forgetDevice", { deviceId: s.deviceId });
+    }, enumerable: true, configurable: true, writable: true },
+    addEventListener: { value: function(type, listener) {
+      EventTarget.prototype.addEventListener.call(this, type, listener);
       if (type !== "inputreport") return;
-      const wrapper = this.#listenerToWrapper.get(listener);
+      const s = _devState.get(this); if (!s) return;
+      if (s.wrappers.has(listener)) return;
+      const wrapper = (event) => {
+        if (event.source !== globalThis) return;
+        if (!event.data || event.data.__webhid_bridge !== "evt") return;
+        const detail = event.data.event;
+        if (!detail) return;
+        const eventType = detail.eventType;
+        const evDeviceId = detail.deviceId;
+        if (eventType === "webhid-data-ready") {
+          if (detail.port && !s.port) {
+            s.port = detail.port;
+            s.port.onmessage = (portEvent) => {
+              const d = portEvent.data;
+              if (d.type !== 'inputReport') return;
+              if (s.deviceId && d.deviceId && d.deviceId !== s.deviceId) return;
+              const dataView = d.data ? new DataView(d.data) : new DataView(new ArrayBuffer(0));
+              this.dispatchEvent(new HIDInputReportEvent('inputreport', { device: this, reportId: d.reportId, data: dataView }));
+            };
+            __webhid.logger.info('MessagePort connected for device=' + s.deviceId);
+          }
+          return;
+        }
+        if (eventType === "input_report") {
+          if (evDeviceId && s.deviceId && evDeviceId !== s.deviceId) return;
+          let dataView;
+          if (typeof detail.data === 'string') {
+            const buf = Uint8Array.fromBase64(detail.data);
+            dataView = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+          } else if (detail.data) {
+            dataView = new DataView(detail.data.buffer, detail.data.byteOffset, detail.data.byteLength);
+          } else { dataView = new DataView(new ArrayBuffer(0)); }
+          this.dispatchEvent(new HIDInputReportEvent('inputreport', { device: this, reportId: detail.reportId, data: dataView }));
+          return;
+        }
+        if (eventType === "disconnect") {
+          this.dispatchEvent(new HIDConnectionEvent("disconnect", this));
+          return;
+        }
+      };
+      s.wrappers.set(listener, wrapper);
+      globalThis.addEventListener("message", wrapper);
+    }, enumerable: true, configurable: true, writable: true },
+    removeEventListener: { value: function(type, listener) {
+      EventTarget.prototype.removeEventListener.call(this, type, listener);
+      if (type !== "inputreport") return;
+      const s = _devState.get(this); if (!s) return;
+      const wrapper = s.wrappers.get(listener);
       if (!wrapper) return;
-      this.#listenerToWrapper.delete(listener);
-      this.#activeWrappers.delete(wrapper);
-      window.removeEventListener("message", wrapper);
-    }
+      s.wrappers.delete(listener);
+      globalThis.removeEventListener("message", wrapper);
+    }, enumerable: true, configurable: true, writable: true },
+  });
 
-    get oninputreport() {
-      return this.#oninputreportListener;
-    }
-
-    set oninputreport(listener) {
-      // Always pass the current listener to removeEventListener
-      const currentListener = this.#oninputreportListener;
-      this.removeEventListener("inputreport", currentListener);
-
-      // Set the new listener
-      if (listener !== null) {
-        this.#oninputreportListener = listener;
-        this.addEventListener("inputreport", listener);
-      } else {
-        this.#oninputreportListener = null;
-      }
-    }
+  function _createHIDDevice(deviceInfo) {
+    const obj = Object.create(HIDDevice.prototype);
+    EventTarget.call(obj);
+    _devState.set(obj, {
+      deviceId: deviceInfo.deviceId,
+      vendorId: deviceInfo.vendorId,
+      productId: deviceInfo.productId,
+      productName: deviceInfo.productName,
+      collections: deviceInfo.collections || [],
+      opened: false,
+      port: null,
+      maxInputReportSize: deviceInfo.maxInputReportSize || 64,
+      oninputreport: null,
+      wrappers: new Map(),
+    });
+    return obj;
   }
 
-  // ── HID (navigator.hid) ───────────────────────────────────────────────────
+  function getOrCreateDevice(deviceInfo) {
+    const id = deviceInfo.deviceId;
+    if (id && _deviceRegistry.has(id)) return _deviceRegistry.get(id);
+    const dev = _createHIDDevice(deviceInfo);
+    if (id) _deviceRegistry.set(id, dev);
+    return dev;
+  }
 
-  class HID extends EventTarget {
-    async getDevices() {
+  function HIDInputReportEvent() { throw new TypeError('Illegal constructor'); }
+  HIDInputReportEvent.prototype = Object.create(Event.prototype);
+  HIDInputReportEvent.prototype.constructor = HIDInputReportEvent;
+  Object.defineProperty(HIDInputReportEvent.prototype, Symbol.toStringTag, { value: 'HIDInputReportEvent', configurable: true });
+  Object.defineProperties(HIDInputReportEvent.prototype, {
+    device: { get() { return _evtState.get(this)?.device; }, enumerable: true, configurable: true },
+    reportId: { get() { return _evtState.get(this)?.reportId; }, enumerable: true, configurable: true },
+    data: { get() { return _evtState.get(this)?.data; }, enumerable: true, configurable: true },
+  });
+
+  function _createHIDInputReportEvent(type, init) {
+    const obj = Object.create(HIDInputReportEvent.prototype);
+    Event.call(obj, type, init);
+    _evtState.set(obj, { device: init.device, reportId: init.reportId, data: init.data });
+    return obj;
+  }
+
+  function HIDConnectionEvent() { throw new TypeError('Illegal constructor'); }
+  HIDConnectionEvent.prototype = Object.create(Event.prototype);
+  HIDConnectionEvent.prototype.constructor = HIDConnectionEvent;
+  Object.defineProperty(HIDConnectionEvent.prototype, Symbol.toStringTag, { value: 'HIDConnectionEvent', configurable: true });
+  Object.defineProperty(HIDConnectionEvent.prototype, 'device', {
+    get() { return _evtState.get(this)?.device; }, enumerable: true, configurable: true,
+  });
+
+  function _createHIDConnectionEvent(type, device) {
+    const obj = Object.create(HIDConnectionEvent.prototype);
+    Event.call(obj, type);
+    _evtState.set(obj, { device });
+    return obj;
+  }
+
+  function HID() { throw new TypeError('Illegal constructor'); }
+  HID.prototype = Object.create(EventTarget.prototype);
+  HID.prototype.constructor = HID;
+  Object.defineProperty(HID.prototype, Symbol.toStringTag, { value: 'HID', configurable: true });
+
+  Object.defineProperties(HID.prototype, {
+    getDevices: { value: async function() {
       __webhid.logger.debug('getDevices');
       try {
         const savedHashes = await getSavedDevices();
         const deviceCache = await getDeviceCache();
-        const grantedDevices = [];
+        const granted = [];
         for (const hash of savedHashes) {
           const device = deviceCache.get(hash);
-          if (device) {
-            grantedDevices.push(getOrCreateDevice(device));
-          }
+          if (device) granted.push(getOrCreateDevice(device));
         }
-        __webhid.logger.debug('getDevices returned ' + grantedDevices.length + ' device(s)');
-        return grantedDevices;
-      } catch (error) {
-        __webhid.logger.warn('getDevices error:', error);
-        return [];
-      }
-    }
-
-    // Per the WebHID spec the argument is an options object: { filters: [] }
-    async requestDevice(options = {}) {
+        __webhid.logger.debug('getDevices returned ' + granted.length + ' device(s)');
+        return granted;
+      } catch (error) { __webhid.logger.warn('getDevices error:', error); return []; }
+    }, enumerable: true, configurable: true, writable: true },
+    requestDevice: { value: async function(options = {}) {
       const filters = Array.isArray(options.filters) ? options.filters : [];
       __webhid.logger.debug('requestDevice filters=' + JSON.stringify(filters));
       return new Promise((resolve, reject) => {
         const id = ++_reqId;
         _pending[id] = (result) => {
-          if (result.cancelled) {
-            reject(new DOMException("No device selected", "NotFoundError"));
-          } else {
-            const devices = result.devices;
-            if (!devices || devices.length === 0) {
-              reject(new DOMException("No device selected", "NotFoundError"));
-              return;
-            }
-
-            for (const d of devices) {
-              saveDevice(d);
-            }
-
-            // Resolve with an array of HIDDevice instances per spec
-            resolve(devices.map((d) => getOrCreateDevice(d)));
-          }
+          if (result.cancelled) { reject(new DOMException("No device selected", "NotFoundError")); return; }
+          const devices = result.devices;
+          if (!devices || devices.length === 0) { reject(new DOMException("No device selected", "NotFoundError")); return; }
+          for (const d of devices) saveDevice(d);
+          resolve(devices.map((d) => getOrCreateDevice(d)));
         };
-        window.postMessage(
-          {
-            __webhid_bridge: "req",
-            id,
-            action: "requestDevice",
-            payload: { filters }, // always an array
-          },
-          "*",
-        );
+        globalThis.postMessage({ __webhid_bridge: "req", id, action: "requestDevice", payload: { filters } }, "*");
       });
-    }
+    }, enumerable: true, configurable: true, writable: true },
+    onconnect: {
+      get() { return _hidState.get(this)?.onconnect ?? null; },
+      set(v) {
+        const s = _hidState.get(this); if (!s) return;
+        if (s.onconnect) this.removeEventListener('connect', s.onconnect);
+        s.onconnect = v;
+        if (v) this.addEventListener('connect', v);
+      },
+      enumerable: true, configurable: true,
+    },
+    ondisconnect: {
+      get() { return _hidState.get(this)?.ondisconnect ?? null; },
+      set(v) {
+        const s = _hidState.get(this); if (!s) return;
+        if (s.ondisconnect) this.removeEventListener('disconnect', s.ondisconnect);
+        s.ondisconnect = v;
+        if (v) this.addEventListener('disconnect', v);
+      },
+      enumerable: true, configurable: true,
+    },
+  });
+
+  function _createHID() {
+    const obj = Object.create(HID.prototype);
+    EventTarget.call(obj);
+    _hidState.set(obj, { onconnect: null, ondisconnect: null });
+    return obj;
   }
 
-  // ── Expose ────────────────────────────────────────────────────────────────
-
-  Object.defineProperty(navigator, 'hid', {
-    value: new HID(),
-    writable: false,
-    configurable: true,
-    enumerable: true,
+  Object.defineProperty(globalThis, 'HID', { value: HID, writable: false, configurable: true, enumerable: false });
+  Object.defineProperty(globalThis, 'HIDDevice', { value: HIDDevice, writable: false, configurable: true, enumerable: false });
+  Object.defineProperty(globalThis, 'HIDInputReportEvent', { value: HIDInputReportEvent, writable: false, configurable: true, enumerable: false });
+  Object.defineProperty(globalThis, 'HIDConnectionEvent', { value: HIDConnectionEvent, writable: false, configurable: true, enumerable: false });
+  Object.defineProperty(globalThis.navigator, 'hid', {
+    value: _createHID(), writable: false, configurable: true, enumerable: true,
   });
-  window.HIDDevice = HIDDevice;
-  window.HIDInputReportEvent = HIDInputReportEvent;
-  window.HIDConnectionEvent = HIDConnectionEvent;
 })();
