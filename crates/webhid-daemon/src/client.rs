@@ -1,56 +1,28 @@
-//! Handles a single native-messaging process connection.
-//!
-//! Two concurrent subtasks share the write half of the socket via an mpsc
-//! channel:
-//!
-//!   1. **Request loop** – reads [`NmRequest`]s from the client, dispatches
-//!      them to the [`DeviceManager`], and enqueues the [`NmResponse`].
-//!   2. **Event forwarder** – subscribes to the broadcast bus and enqueues
-//!      every hot-plug / input-report event (converted to [`NmResponse`]).
-//!
-//! A dedicated **writer task** drains the mpsc channel and serialises each
-//! message to the socket, ensuring frames are never interleaved.
-
 use std::sync::Arc;
 
-use tokio::io::{AsyncRead, AsyncWrite, BufReader};
+use tokio::io::{AsyncRead, BufReader};
 use tokio::sync::{broadcast, mpsc};
-use webhid::{protocol, IpcResponse, NmRequest, NmResponse};
+use webhid::{protocol, IpcResponse, NmMessage, NmRequest, NmResponse, parse_packed_send_report, EVT_HANDSHAKE};
 
 use crate::{device_mgr::DeviceManager, hid};
 
-/// Drive a single NM client connection.
-///
-/// `reader` and `writer` are accepted as separate parameters because the two
-/// supported transports split the read/write halves at the call site:
-///   - IPC mode (Unix socket / Windows named pipe) – a single bidirectional
-///     stream that the caller splits via `tokio::io::split`.
-///   - `--nm-host` mode – `tokio::io::stdin()` (AsyncRead only) and
-///     `tokio::io::stdout()` (AsyncWrite only) are distinct handles and
-///     cannot be unified into a single `AsyncRead + AsyncWrite` type.
 pub async fn handle(
     reader: impl AsyncRead + Unpin + Send + 'static,
-    writer: impl AsyncWrite + Unpin + Send + 'static,
+    writer: impl tokio::io::AsyncWrite + Unpin + Send + 'static,
     client_id: u64,
     device_mgr: Arc<DeviceManager>,
     mut event_rx: broadcast::Receiver<IpcResponse>,
     ws_port: u16,
 ) -> anyhow::Result<()> {
     let mut reader = BufReader::new(reader);
+    let (tx, mut rx) = mpsc::channel::<NmMessage>(1024);
 
-    let (tx, mut rx) = mpsc::channel::<NmResponse>(1024);
+    let _ = tx.send(NmMessage::Control(NmResponse {
+        event_type: Some(EVT_HANDSHAKE),
+        ws_port: Some(ws_port),
+        ..Default::default()
+    })).await;
 
-    // Announce capabilities (WS port) to the client immediately so the
-    // addon can connect its data-plane Worker before opening any device.
-    let _ = tx
-        .send(NmResponse {
-            event_type: Some("handshake".into()),
-            ws_port: Some(ws_port),
-            ..Default::default()
-        })
-        .await;
-
-    // --- Writer task ---
     let writer_task = tokio::spawn(async move {
         let mut writer = tokio::io::BufWriter::new(writer);
         while let Some(msg) = rx.recv().await {
@@ -61,7 +33,6 @@ pub async fn handle(
         }
     });
 
-    // --- Event-forwarder task ---
     let tx_events = tx.clone();
     let device_mgr_for_events = Arc::clone(&device_mgr);
     let event_task = tokio::spawn(async move {
@@ -69,8 +40,6 @@ pub async fn handle(
             match event_rx.recv().await {
                 Ok(ev) => {
                     if let webhid::IpcResponse::InputReport { ref device_id, .. } = ev {
-                        // Skip input reports when the device is in WS mode —
-                        // they go through the WebSocket data plane instead.
                         if device_mgr_for_events.dataplane_mode(device_id) == "ws" {
                             continue;
                         }
@@ -90,7 +59,7 @@ pub async fn handle(
     });
 
     loop {
-        let request: NmRequest = match protocol::read_message(&mut reader).await {
+        let request: NmRequest = match protocol::read_nm_request(&mut reader).await {
             Ok(r) => r,
             Err(e) => {
                 if e.kind() != std::io::ErrorKind::UnexpectedEof {
@@ -108,22 +77,17 @@ pub async fn handle(
     event_task.abort();
     writer_task.abort();
     device_mgr.close_client_devices(client_id);
-
     Ok(())
 }
-
-// ---------------------------------------------------------------------------
-// Request dispatch
-// ---------------------------------------------------------------------------
 
 async fn dispatch(
     device_mgr: &DeviceManager,
     client_id: u64,
     req: NmRequest,
     ws_port: u16,
-) -> NmResponse {
+) -> NmMessage {
     let id = req.id();
-    let mut resp = match req {
+    let resp: NmResponse = match req {
         NmRequest::Enumerate { .. } => match device_mgr.enumerate() {
             Ok(devices) => NmResponse::ok_with_devices(devices),
             Err(e) => NmResponse::err(e.to_string()),
@@ -141,67 +105,62 @@ async fn dispatch(
             Err(e) => NmResponse::err(e.to_string()),
         },
 
-        NmRequest::SendReport {
-            device_id,
-            report_id,
-            data,
-            ..
-        } => match device_mgr.get_file(&device_id, client_id) {
-            Err(e) => NmResponse::err(e.to_string()),
-            Ok(dev_arc) => {
-                let result = tokio::task::spawn_blocking(move || {
-                    let dev = dev_arc.lock().unwrap();
-                    hid::write_report(&dev, report_id, &data)
-                })
-                .await;
-                match result {
-                    Ok(Ok(())) => NmResponse::ok(),
-                    Ok(Err(e)) => NmResponse::err(e.to_string()),
-                    Err(e) => NmResponse::err(e.to_string()),
+        NmRequest::SendReport { packed, .. } => {
+            match parse_packed_send_report(&packed) {
+                Ok((device_id, report_id, data)) => {
+                    match device_mgr.get_file(device_id, client_id) {
+                        Err(e) => NmResponse::err(e.to_string()),
+                        Ok(dev_arc) => {
+                            let data_owned = data.to_vec();
+                            let result = tokio::task::spawn_blocking(move || {
+                                let dev = dev_arc.lock().unwrap();
+                                hid::write_report(&dev, report_id, &data_owned)
+                            }).await;
+                            match result {
+                                Ok(Ok(())) => NmResponse::ok(),
+                                Ok(Err(e)) => NmResponse::err(e.to_string()),
+                                Err(e) => NmResponse::err(e.to_string()),
+                            }
+                        }
+                    }
                 }
+                Err(e) => NmResponse::err(e.to_string()),
             }
-        },
+        }
 
-        NmRequest::ReceiveFeatureReport {
-            device_id,
-            report_id,
-            ..
-        } => match device_mgr.get_file(&device_id, client_id) {
-            Err(e) => NmResponse::err(e.to_string()),
-            Ok(dev_arc) => {
-                let result = tokio::task::spawn_blocking(move || {
-                    let dev = dev_arc.lock().unwrap();
-                    hid::read_feature_report(&dev, report_id)
-                })
-                .await;
-                match result {
-                    Ok(Ok(data)) => NmResponse::ok_with_data(data),
-                    Ok(Err(e)) => NmResponse::err(e.to_string()),
-                    Err(e) => NmResponse::err(e.to_string()),
+        NmRequest::ReceiveFeatureReport { device_id, report_id, .. } => {
+            match device_mgr.get_file(&device_id, client_id) {
+                Err(e) => NmResponse::err(e.to_string()),
+                Ok(dev_arc) => {
+                    let result = tokio::task::spawn_blocking(move || {
+                        let dev = dev_arc.lock().unwrap();
+                        hid::read_feature_report(&dev, report_id)
+                    }).await;
+                    match result {
+                        Ok(Ok(data)) => NmResponse::ok_with_data(data),
+                        Ok(Err(e)) => NmResponse::err(e.to_string()),
+                        Err(e) => NmResponse::err(e.to_string()),
+                    }
                 }
             }
-        },
+        }
 
-        NmRequest::SendFeatureReport {
-            device_id,
-            report_id,
-            data,
-            ..
-        } => match device_mgr.get_file(&device_id, client_id) {
-            Err(e) => NmResponse::err(e.to_string()),
-            Ok(dev_arc) => {
-                let result = tokio::task::spawn_blocking(move || {
-                    let dev = dev_arc.lock().unwrap();
-                    hid::write_feature_report(&dev, report_id, &data)
-                })
-                .await;
-                match result {
-                    Ok(Ok(())) => NmResponse::ok(),
-                    Ok(Err(e)) => NmResponse::err(e.to_string()),
-                    Err(e) => NmResponse::err(e.to_string()),
+        NmRequest::SendFeatureReport { device_id, report_id, data, .. } => {
+            match device_mgr.get_file(&device_id, client_id) {
+                Err(e) => NmResponse::err(e.to_string()),
+                Ok(dev_arc) => {
+                    let result = tokio::task::spawn_blocking(move || {
+                        let dev = dev_arc.lock().unwrap();
+                        hid::write_feature_report(&dev, report_id, &data)
+                    }).await;
+                    match result {
+                        Ok(Ok(())) => NmResponse::ok(),
+                        Ok(Err(e)) => NmResponse::err(e.to_string()),
+                        Err(e) => NmResponse::err(e.to_string()),
+                    }
                 }
             }
-        },
+        }
 
         NmRequest::SetDataPlane { device_id, mode, .. } => {
             device_mgr.set_dataplane_mode(&device_id, &mode);
@@ -218,33 +177,25 @@ async fn dispatch(
             }
         }
     };
+    let mut resp = resp;
     resp.id = id;
-    resp
+    NmMessage::Control(resp)
 }
 
-// ---------------------------------------------------------------------------
-// Event conversion  (internal broadcast  →  NmResponse for the socket)
-// ---------------------------------------------------------------------------
-
-fn ipc_event_to_nm(ev: IpcResponse) -> Option<NmResponse> {
+fn ipc_event_to_nm(ev: IpcResponse) -> Option<NmMessage> {
     match ev {
-        IpcResponse::DeviceConnected { device, .. } => Some(NmResponse::event_connect(device)),
-
-        IpcResponse::DeviceDisconnected { device, .. } => Some(NmResponse::event_disconnect(device)),
-
-        IpcResponse::InputReport {
-            device_id,
-            report_id,
-            data,
-            ..
-        } => Some(NmResponse::event_input_report(device_id, report_id, data.to_vec())),
-
-        IpcResponse::Handshake { ws_port, .. } => Some(NmResponse {
-            event_type: Some("handshake".into()),
-            ws_port: Some(ws_port),
-            ..Default::default()
-        }),
-
+        IpcResponse::DeviceConnected { device, .. } =>
+            Some(NmMessage::Control(NmResponse::event_connect(device))),
+        IpcResponse::DeviceDisconnected { device, .. } =>
+            Some(NmMessage::Control(NmResponse::event_disconnect(device))),
+        IpcResponse::InputReport { device_id, report_id, data, .. } =>
+            Some(NmMessage::packed_input_report(&device_id, [(report_id, &data[..])])),
+        IpcResponse::Handshake { ws_port, .. } =>
+            Some(NmMessage::Control(NmResponse {
+                event_type: Some(EVT_HANDSHAKE),
+                ws_port: Some(ws_port),
+                ..Default::default()
+            })),
         _ => {
             log::warn!("unexpected event: {ev:?}");
             None

@@ -1,6 +1,5 @@
 let _deviceCache = [];
 
-/** deviceId → Set<tabId> */
 const _deviceTabMap = new Map();
 
 function registerDeviceTab(deviceId, tabId) {
@@ -8,7 +7,7 @@ function registerDeviceTab(deviceId, tabId) {
   let tabs = _deviceTabMap.get(deviceId);
   if (!tabs) { tabs = new Set(); _deviceTabMap.set(deviceId, tabs); }
   tabs.add(tabId);
-  __webhid.logger.debug(`[bg] register device ${deviceId} → tab ${tabId} (owners: ${tabs.size})`);
+  __webhid.logger.debug('[bg] register device ' + deviceId + ' tab ' + tabId);
 }
 
 function unregisterDeviceTab(deviceId, tabId) {
@@ -17,11 +16,8 @@ function unregisterDeviceTab(deviceId, tabId) {
   if (!tabs) return;
   tabs.delete(tabId);
   if (tabs.size === 0) _deviceTabMap.delete(deviceId);
-  else _deviceTabMap.set(deviceId, tabs);
-  __webhid.logger.debug(`[bg] unregister device ${deviceId} ← tab ${tabId} (remaining: ${tabs.size})`);
 }
 
-/** Drop every device→tab entry that points at `tabId` (called on tab close). */
 function purgeTab(tabId) {
   if (tabId == null) return;
   for (const [deviceId, tabs] of _deviceTabMap) {
@@ -29,32 +25,51 @@ function purgeTab(tabId) {
   }
 }
 
-/** Resolve the set of tabIds that should receive an event for `deviceId`. */
+// NM event codes (must match Rust constants)
+const EVT_HANDSHAKE = 1;
+const EVT_CONNECT = 2;
+const EVT_DISCONNECT = 3;
+
+// NM action codes (must match Rust constants)
+const ACT = { enum: '1', open: '2', close: '3', sr: '4', rfr: '5', sfr: '6', sdp: '7', hs: '8' };
+
+// Packed binary message type
+const PKG_INPUT_REPORT = 0x01;
+const PKG_SEND_REPORT = 0x02;
+
 function tabsForEvent(message) {
-  // Handshake and other non-device-scoped events go to every tab.
-  const eventType = message.eventType;
-  if (eventType === 'handshake' || !message.deviceId) return null; // null = broadcast
-  const tabs = _deviceTabMap.get(message.deviceId);
+  const eventType = message.e;
+  if (eventType === EVT_HANDSHAKE || !message.i) return null;
+  const tabs = _deviceTabMap.get(message.i);
   return tabs && tabs.size > 0 ? [...tabs] : null;
 }
 
-// NM host names registered by the installer:
-// - webhid.forwarder_nm_host: thin forwarder → daemon Unix socket / pipe
-// - webhid.daemon_nm_host:     daemon speaks NM directly on stdin/stdout
 const NM_HOST_FORWARDER = "webhid.forwarder_nm_host";
-const NM_HOST_DAEMON    = "webhid.daemon_nm_host";
+const NM_HOST_DAEMON = "webhid.daemon_nm_host";
 
 let _daemonAsNmHost = globalThis.__webhid.GLOBAL_DEFAULTS.daemonAsNmHost;
 let _nmHostName = NM_HOST_FORWARDER;
 
-// Load the daemon-as-NM-host setting before connecting. The first connect
-// must use the correct name or the user has to manually reload the addon
-// after toggling the setting.
 async function loadNmHostSetting() {
   const global = await browser.storage.local.get({ daemonAsNmHost: globalThis.__webhid.GLOBAL_DEFAULTS.daemonAsNmHost });
   _daemonAsNmHost = global.daemonAsNmHost;
   _nmHostName = _daemonAsNmHost ? NM_HOST_DAEMON : NM_HOST_FORWARDER;
   __webhid.logger.info('[bg] NM host:', _nmHostName);
+}
+
+function buildPackedSendReport(deviceId, reportId, data) {
+  const devBytes = new TextEncoder().encode(deviceId);
+  if (devBytes.length > 255) throw new Error('deviceId too long');
+  const buf = new Uint8Array(5 + devBytes.length + data.length);
+  let o = 0;
+  buf[o++] = PKG_SEND_REPORT;
+  buf[o++] = devBytes.length;
+  buf.set(devBytes, o); o += devBytes.length;
+  buf[o++] = reportId;
+  buf[o++] = data.length & 0xFF;
+  buf[o++] = (data.length >> 8) & 0xFF;
+  buf.set(data, o);
+  return buf;
 }
 
 const NativeMessaging = {
@@ -66,51 +81,50 @@ const NativeMessaging = {
 
   connect() {
     if (this.port) return Promise.resolve();
-    __webhid.logger.debug(`[nm] connecting to ${_nmHostName}...`);
+    __webhid.logger.debug('[nm] connecting to ' + _nmHostName + '...');
     try {
       this.port = browser.runtime.connectNative(_nmHostName);
       this._reconnectDelay = 1000;
       __webhid.logger.debug('[nm] connected');
 
       this.port.onMessage.addListener((message) => {
-        // `data` arrives as a base64 string and is forwarded as-is;
-        // decoding happens at the final consumer (polyfill) to avoid
-        // structured-clone copies of typed arrays.
-        if (message.eventType) { this.onMessage(message); return; }
-        if (message.id) {
+        // Packed data message: {"d":"<b64>"} with no id/e
+        if (message.d !== undefined && message.id === undefined && message.e === undefined) {
+          this.onPackedData(message.d);
+          return;
+        }
+        // Control event (has "e" field)
+        if (message.e !== undefined) {
+          this.onControlEvent(message);
+          return;
+        }
+        // Control response (has "id" field)
+        if (message.id !== undefined) {
           const p = this._pending.get(message.id);
           if (p) { this._pending.delete(message.id); p.resolve(message); return; }
         }
-        __webhid.logger.warn("webhid: NM response no matching pending:", message);
+        __webhid.logger.warn('[nm] unmatched:', message);
       });
 
       this.port.onDisconnect.addListener(() => {
-        __webhid.logger.warn("[nm] disconnected; will retry in", this._reconnectDelay, "ms");
+        __webhid.logger.warn('[nm] disconnected; will retry in', this._reconnectDelay, 'ms');
         this.port = null;
-        for (const [id, p] of this._pending) p.resolve({ success: false, error: "NM disconnected" });
+        for (const [id, p] of this._pending) p.resolve({ ok: false, err: 'NM disconnected' });
         this._pending.clear();
         this._scheduleReconnect();
       });
 
       return Promise.resolve();
     } catch (error) {
-      __webhid.logger.error("[nm] connect failed:", error);
+      __webhid.logger.error('[nm] connect failed:', error);
       this._scheduleReconnect();
       return Promise.reject(error);
     }
   },
 
-  // Tear down the current port so the next connect() picks up the new
-  // NM host name. Called when the `daemonAsNmHost` setting changes.
   reconnectWithNewHost() {
-    if (this.port) {
-      try { this.port.disconnect(); } catch {}
-      this.port = null;
-    }
-    if (this._reconnectTimer) {
-      clearTimeout(this._reconnectTimer);
-      this._reconnectTimer = null;
-    }
+    if (this.port) { try { this.port.disconnect(); } catch {} this.port = null; }
+    if (this._reconnectTimer) { clearTimeout(this._reconnectTimer); this._reconnectTimer = null; }
     this._reconnectDelay = 1000;
     this.connect().catch(() => {});
   },
@@ -119,7 +133,7 @@ const NativeMessaging = {
     if (this._reconnectTimer) return;
     this._reconnectTimer = setTimeout(() => {
       this._reconnectTimer = null;
-      __webhid.logger.debug("[nm] reconnecting...");
+      __webhid.logger.debug('[nm] reconnecting...');
       this.connect().catch(() => {});
     }, this._reconnectDelay);
     this._reconnectDelay = Math.min(this._reconnectDelay * 2, 10000);
@@ -129,14 +143,11 @@ const NativeMessaging = {
     return new Promise((resolve, reject) => {
       if (!this.port) {
         this.connect().catch(() => {});
-        reject(new Error("NM disconnected, reconnecting; please retry"));
+        reject(new Error('NM disconnected, reconnecting; please retry'));
         return;
       }
-
       const id = this._nextId++;
-      __webhid.logger.debug('[nm] sendRequest action=' + request.action + ' id=' + id);
       this._pending.set(id, { resolve, reject });
-
       try {
         this.port.postMessage({ ...request, id });
       } catch (e) {
@@ -147,59 +158,54 @@ const NativeMessaging = {
   },
 
   async enumerateDevices() {
-    return await this.sendRequest({ action: "enumerate" });
+    return await this.sendRequest({ a: ACT.enum });
   },
-
   async openDevice(deviceId) {
-    return await this.sendRequest({
-      action: "open",
-      deviceId: deviceId,
-    });
+    return await this.sendRequest({ a: ACT.open, i: deviceId });
   },
-
   async closeDevice(deviceId) {
-    return await this.sendRequest({
-      action: "close",
-      deviceId: deviceId,
-    });
+    return await this.sendRequest({ a: ACT.close, i: deviceId });
   },
-
   async handshake() {
-    return await this.sendRequest({ action: "handshake" });
+    return await this.sendRequest({ a: ACT.hs });
   },
-
   async sendReport(deviceId, reportId, data) {
-    return await this.sendRequest({
-      action: "sendreport",
-      deviceId: deviceId,
-      reportId: reportId,
-      data: data.toBase64(),
-    });
+    const packed = buildPackedSendReport(deviceId, reportId, data);
+    return await this.sendRequest({ a: ACT.sr, d: packed.toBase64() });
   },
-
   async receiveFeatureReport(deviceId, reportId) {
-    return await this.sendRequest({
-      action: "receivefeaturereport",
-      deviceId: deviceId,
-      reportId: reportId,
-    });
+    return await this.sendRequest({ a: ACT.rfr, i: deviceId, r: reportId });
   },
-
   async sendFeatureReport(deviceId, reportId, data) {
-    return await this.sendRequest({
-      action: "sendfeaturereport",
-      deviceId: deviceId,
-      reportId: reportId,
-      data: data.toBase64(),
-    });
+    return await this.sendRequest({ a: ACT.sfr, i: deviceId, r: reportId, d: data.toBase64() });
   },
 
-  onMessage(message) {
-    if (!message.eventType) return;
+  onPackedData(b64) {
+    // Decode just enough to read deviceId for routing
+    const bin = Uint8Array.fromBase64(b64);
+    if (bin.length < 2 || bin[0] !== PKG_INPUT_REPORT) return;
+    const devIdLen = bin[1];
+    if (2 + devIdLen > bin.length) return;
+    const deviceId = new TextDecoder().decode(bin.subarray(2, 2 + devIdLen));
 
+    const targets = tabsForEvent({ i: deviceId });
+    const send = (tabId) => browser.tabs
+      .sendMessage(tabId, { action: 'webhid-device-event', d: b64 })
+      .catch(() => {});
+    if (targets) {
+      for (const tabId of targets) send(tabId);
+    } else {
+      browser.tabs.query({}).then((tabs) => {
+        for (const tab of tabs) send(tab.id);
+      });
+    }
+  },
+
+  onControlEvent(message) {
+    if (message.e === undefined) return;
     const targets = tabsForEvent(message);
     const send = (tabId) => browser.tabs
-      .sendMessage(tabId, { action: "webhid-device-event", event: message })
+      .sendMessage(tabId, { action: 'webhid-device-event', event: message })
       .catch(() => {});
     if (targets) {
       for (const tabId of targets) send(tabId);
@@ -211,26 +217,13 @@ const NativeMessaging = {
   },
 };
 
-// ---------------------------------------------------------------------------
-// Lifecycle
-// ---------------------------------------------------------------------------
-
 browser.runtime.onStartup.addListener(() => {
   loadNmHostSetting().then(() => NativeMessaging.connect());
 });
-
 browser.runtime.onInstalled.addListener(() => {
   loadNmHostSetting().then(() => NativeMessaging.connect());
 });
-
-// On first load of the background page (which fires neither onStartup nor
-// onInstalled in some Firefox versions during temporary load), pull the
-// setting and connect.
 loadNmHostSetting().then(() => NativeMessaging.connect());
-
-// Clean up device→tab mappings when a tab closes so we don't leak entries
-// (and so a re-opened tab doesn't keep receiving events for a device it no
-// longer owns).
 browser.tabs.onRemoved.addListener((tabId) => purgeTab(tabId));
 
 browser.storage.onChanged.addListener((changes, area) => {
@@ -240,128 +233,96 @@ browser.storage.onChanged.addListener((changes, area) => {
       if (newName !== _nmHostName) {
         _daemonAsNmHost = changes.daemonAsNmHost.newValue;
         _nmHostName = newName;
-        __webhid.logger.info('[bg] NM host changed →', _nmHostName, '(reconnecting)');
+        __webhid.logger.info('[bg] NM host changed:', _nmHostName);
         NativeMessaging.reconnectWithNewHost();
       }
     }
   }
 });
 
-// ---------------------------------------------------------------------------
-// Message handler for content-script requests
-// ---------------------------------------------------------------------------
-
 browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
   switch (request.action) {
-    case "enumerate":
+    case 'enumerate':
       NativeMessaging.enumerateDevices()
         .then((response) => {
-          if (response.success && response.devices) {
-            _deviceCache = response.devices;
-          }
+          if (response.ok && response.devs) _deviceCache = response.devs;
           sendResponse(response);
         })
-        .catch((e) => {
-          sendResponse({ success: false, error: e.message });
-        });
-      return true; // keep channel open for async response
-
-    case "handshake":
-      NativeMessaging.handshake()
-        .then(sendResponse)
-        .catch((e) => sendResponse({ success: false, error: e.message }));
+        .catch((e) => sendResponse({ ok: false, err: e.message }));
       return true;
 
-    case "open": {
+    case 'handshake':
+      NativeMessaging.handshake()
+        .then(sendResponse)
+        .catch((e) => sendResponse({ ok: false, err: e.message }));
+      return true;
+
+    case 'open': {
       const tabId = sender.tab?.id;
       NativeMessaging.openDevice(request.deviceId)
         .then((response) => {
-          if (response.success && response.deviceId) {
-            registerDeviceTab(response.deviceId, tabId);
-          }
+          if (response.ok && response.i) registerDeviceTab(response.i, tabId);
           sendResponse(response);
         })
-        .catch((e) => sendResponse({ success: false, error: e.message }));
+        .catch((e) => sendResponse({ ok: false, err: e.message }));
       return true;
     }
 
-    case "close": {
+    case 'close': {
       const tabId = sender.tab?.id;
       NativeMessaging.closeDevice(request.deviceId)
         .then((response) => {
-          if (response.success) unregisterDeviceTab(request.deviceId, tabId);
+          if (response.ok) unregisterDeviceTab(request.deviceId, tabId);
           sendResponse(response);
         })
-        .catch((e) => sendResponse({ success: false, error: e.message }));
+        .catch((e) => sendResponse({ ok: false, err: e.message }));
       return true;
     }
 
-    case "setdataplane":
-      NativeMessaging.sendRequest({
-        action: "setdataplane",
-        deviceId: request.deviceId,
-        mode: request.mode,
-      })
+    case 'setdataplane':
+      NativeMessaging.sendRequest({ a: ACT.sdp, i: request.deviceId, m: request.mode })
         .then(sendResponse)
-        .catch((e) => sendResponse({ success: false, error: e.message }));
+        .catch((e) => sendResponse({ ok: false, err: e.message }));
       return true;
 
-    case "sendreport":
-      NativeMessaging.sendReport(
-        request.deviceId,
-        request.reportId || 0,
-        request.data,
-      )
+    case 'sendreport':
+      NativeMessaging.sendReport(request.deviceId, request.reportId || 0, request.data)
         .then(sendResponse)
-        .catch((e) => sendResponse({ success: false, error: e.message }));
+        .catch((e) => sendResponse({ ok: false, err: e.message }));
       return true;
 
-    case "receivefeaturereport":
-      NativeMessaging.receiveFeatureReport(
-        request.deviceId,
-        request.reportId,
-      )
+    case 'receivefeaturereport':
+      NativeMessaging.receiveFeatureReport(request.deviceId, request.reportId)
         .then(sendResponse)
-        .catch((e) => sendResponse({ success: false, error: e.message }));
+        .catch((e) => sendResponse({ ok: false, err: e.message }));
       return true;
 
-    case "sendfeaturereport":
-      NativeMessaging.sendFeatureReport(
-        request.deviceId,
-        request.reportId || 0,
-        request.data,
-      )
+    case 'sendfeaturereport':
+      NativeMessaging.sendFeatureReport(request.deviceId, request.reportId || 0, request.data)
         .then(sendResponse)
-        .catch((e) => sendResponse({ success: false, error: e.message }));
+        .catch((e) => sendResponse({ ok: false, err: e.message }));
       return true;
 
-    case "show-device-picker":
-      // The device picker is rendered directly by the content script;
-      // background just acknowledges the notification.
-      return false;
-
-    case "getSavedDevices":
+    case 'getSavedDevices':
       (async () => {
         try {
           const key = encodeURIComponent(request.origin);
           const result = await browser.storage.local.get(key);
-          const hashes = result[key] || [];
-          sendResponse({ success: true, hashes });
+          sendResponse({ success: true, hashes: result[key] || [] });
         } catch (e) {
           sendResponse({ success: false, error: e.message, hashes: [] });
         }
       })();
       return true;
 
-    case "saveDevice":
+    case 'saveDevice':
       (async () => {
         try {
           const key = encodeURIComponent(request.origin);
           const result = await browser.storage.local.get(key);
           const hashes = result[key] || [];
-          const deviceId = request.device.deviceId;
-          if (!hashes.includes(deviceId)) {
-            hashes.push(deviceId);
+          if (!hashes.includes(request.device.deviceId)) {
+            hashes.push(request.device.deviceId);
             await browser.storage.local.set({ [key]: hashes });
           }
           sendResponse({ success: true, hashes });
@@ -371,10 +332,10 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
       })();
       return true;
 
-    case "forgetDevice":
+    case 'forgetDevice':
       (async () => {
         try {
-          const origin = new URL(sender.tab?.url || "http://localhost").origin;
+          const origin = new URL(sender.tab?.url || 'http://localhost').origin;
           const storageKey = encodeURIComponent(origin);
           const result = await browser.storage.local.get(storageKey);
           let hashes = result[storageKey] || [];
@@ -389,14 +350,14 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
       })();
       return true;
 
-    case "device-count-changed":
+    case 'device-count-changed':
       browser.action.setBadgeText({
-        text: request.count > 0 ? String(request.count) : "",
+        text: request.count > 0 ? String(request.count) : '',
         tabId: sender.tab?.id,
       });
       return false;
 
-    case "getDeviceCache":
+    case 'getDeviceCache':
       sendResponse({ devices: _deviceCache });
       return false;
 

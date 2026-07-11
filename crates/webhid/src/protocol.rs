@@ -1,42 +1,53 @@
-// Updated protocol.rs – switched to BytesMut for efficient JSON framing.
+// Protocol framing: length-prefixed JSON messages.
 
 use std::io;
 
+use base64::Engine;
 use bytes::BytesMut;
 use serde::{Serialize, de::DeserializeOwned};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-/// Maximum accepted message size (1 MiB). Anything larger is rejected to
-/// prevent runaway allocations if the framing gets out of sync.
+use crate::NmRequest;
+
 const MAX_MSG: usize = 1024 * 1024;
 
-/// Read one length‑prefixed JSON message from `reader`.
 pub async fn read_message<R, T>(reader: &mut R) -> io::Result<T>
 where
     R: AsyncRead + Unpin,
     T: DeserializeOwned,
 {
-    // Read the 4‑byte little‑endian length prefix.
     let len = reader.read_u32_le().await? as usize;
-
     if len > MAX_MSG {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!("incoming message is too large ({len} bytes)"),
         ));
     }
-
-    // Allocate a buffer large enough for the payload.
     let mut buf = BytesMut::with_capacity(len);
-    // The buffer is empty at this point; set its length so that `read_exact`
-    // knows how many bytes to read.
     buf.resize(len, 0);
-    // Read the exact number of bytes into the buffer.
     reader.read_exact(&mut buf).await?;
-
     serde_json::from_slice(&buf).map_err(|e| {
         io::Error::new(io::ErrorKind::InvalidData, format!("JSON decode: {e}"))
     })
+}
+
+pub async fn read_nm_request<R: AsyncRead + Unpin>(
+    reader: &mut R,
+) -> io::Result<NmRequest> {
+    let value: serde_json::Value = read_message(reader).await?;
+    let action = value.get("a").and_then(|v| v.as_str()).unwrap_or("");
+    if action == "4" {
+        let b64 = value.get("d").and_then(|v| v.as_str())
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "sr missing d"))?;
+        let packed = base64::engine::general_purpose::STANDARD
+            .decode(b64)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        let id = value.get("id").and_then(|v| v.as_u64()).map(|n| n as u32);
+        Ok(NmRequest::SendReport { id, packed })
+    } else {
+        serde_json::from_value(value).map_err(|e|
+            io::Error::new(io::ErrorKind::InvalidData, format!("NM decode: {e}")))
+    }
 }
 
 /// Serialise `value` as JSON, prefix with its length, and write to `writer`.

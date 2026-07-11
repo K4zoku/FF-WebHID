@@ -175,8 +175,8 @@
     async #loadDevices() {
       try {
         const response = await browser.runtime.sendMessage({ action: "enumerate" });
-        if (response && response.success) {
-          this.devices = response.devices || [];
+        if (response && response.ok) {
+          this.devices = response.devs || [];
           await this.#renderDevices();
         } else {
           this.devices = [];
@@ -579,8 +579,8 @@
   (async () => {
     try {
       const resp = await browser.runtime.sendMessage({ action: 'handshake' });
-      if (resp.success && resp.wsPort) {
-        _wsPort = resp.wsPort;
+      if (resp.ok && resp.wp) {
+        _wsPort = resp.wp;
         const global = await browser.storage.local.get(__webhid.GLOBAL_DEFAULTS);
         let cp = global.controlPlane;
         const origin = window.location.origin;
@@ -591,8 +591,8 @@
           if (ss.controlPlane !== undefined) cp = ss.controlPlane;
         }
         _controlPlane = cp;
-        if (cp === 'ws' && resp.controlToken) {
-          _spawnControlWorker(resp.controlToken, resp.wsPort);
+        if (cp === 'ws' && resp.ct) {
+          _spawnControlWorker(resp.ct, resp.wp);
         }
       }
     } catch (e) {
@@ -764,12 +764,12 @@
       const msg = Object.assign({ action }, payload || {});
       const response = await browser.runtime.sendMessage(msg);
 
-      if (action === "open" && response.success && response.sessionToken) {
-        const deviceId = response.deviceId;
+      if (action === "open" && response.ok && response.st) {
+        const deviceId = response.i;
         _openDevices.add(deviceId);
-        _sessionTokens.set(deviceId, response.sessionToken);
+        _sessionTokens.set(deviceId, response.st);
         browser.runtime.sendMessage({ action: "device-count-changed", count: _openDevices.size }).catch(() => {});
-        __webhid.logger.debug('[bridge] open ok deviceId=' + deviceId + ' wsPort=' + response.wsPort);
+        __webhid.logger.debug('[bridge] open ok deviceId=' + deviceId + ' wsPort=' + response.wp);
         const origin = window.location.origin;
         const siteKey = origin ? `site:${origin}` : null;
 
@@ -788,7 +788,7 @@
         }).catch(() => {});
 
         if (dataPlane === 'ws') {
-          _spawnDataPlane(deviceId, response.sessionToken, response.wsPort || _wsPort);
+          _spawnDataPlane(deviceId, response.st, response.wp || _wsPort);
         }
       }
 
@@ -820,8 +820,8 @@
   browser.runtime.onMessage.addListener((message) => {
     if (message.action === "webhid-device-event" && message.event) {
       const evt = message.event;
-      if (evt.eventType === "handshake") {
-        _wsPort = evt.wsPort;
+      if (evt.e === 1) {
+        _wsPort = evt.wp;
         __webhid.logger.info('[bridge] handshake: wsPort=' + _wsPort);
         return;
       }
@@ -897,9 +897,9 @@
       __webhid.logger.info('[bridge] control plane changed:', cp);
       if (cp === 'ws' && _wsPort && !_controlWorker) {
         const resp = await browser.runtime.sendMessage({ action: 'handshake' });
-        if (resp.success && resp.controlToken && resp.wsPort) {
-          _wsPort = resp.wsPort;
-          _spawnControlWorker(resp.controlToken, resp.wsPort);
+        if (resp.ok && resp.ct && resp.wp) {
+          _wsPort = resp.wp;
+          _spawnControlWorker(resp.ct, resp.wp);
         }
       } else if (cp === 'nm' && _controlWorker) {
         _terminateControlWorker();
