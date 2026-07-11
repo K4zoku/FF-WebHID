@@ -120,6 +120,14 @@ const NativeMessaging = {
       __webhid.logger.debug('[nm] connected');
 
       this.port.onMessage.addListener((message) => {
+        // Error frame from NM host (daemon connect failure, etc.)
+        // Format: {"s":503,"E":"<reason>"} — no n/d/e fields
+        if (message.E !== undefined && message.s !== undefined && message.n === undefined) {
+          __webhid.logger.error('[nm] host error: ' + message.E);
+          for (const [, p] of this._pending) p.resolve(message);
+          this._pending.clear();
+          return;
+        }
         // Packed data message: {"d":"<b64>"} with no n/e
         if (message.d !== undefined && message.n === undefined && message.e === undefined) {
           this.onPackedData(message.d);
@@ -139,7 +147,13 @@ const NativeMessaging = {
       });
 
       this.port.onDisconnect.addListener(() => {
-        __webhid.logger.warn('[nm] disconnected; will retry in', this._reconnectDelay, 'ms');
+        // If no error frame was received before disconnect, it's likely:
+        // (1) NM host crashed/exited unexpectedly
+        // (2) NM host couldn't spawn (manifest issue)
+        // (3) NM host couldn't connect to daemon (permission/socket issue)
+        __webhid.logger.warn('[nm] disconnected; will retry in ' + this._reconnectDelay + 'ms. ' +
+          'If persistent: check daemon status (systemctl status webhid-daemon), ' +
+          'group membership (groups), and NM host manifest.');
         this.port = null;
         for (const [id, p] of this._pending) p.resolve({ s: 503 });
         this._pending.clear();

@@ -13,9 +13,22 @@
 //! The only logic here is retrying the daemon socket connection with
 //! exponential backoff.
 
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader, BufWriter};
 
 const MAX_FRAME_SIZE: usize = 16 * 1024 * 1024;
+const CONNECT_TIMEOUT_MS: u64 = 5000;
+
+/// Write a JSON error frame to the NM host's stdout (→ addon).
+/// Format: `{"s":503,"E":"<msg>"}` — addon's `port.onMessage` receives it,
+/// logs the error, and the pending request (if any) gets rejected.
+async fn write_error_frame<W: AsyncWrite + Unpin>(w: &mut W, msg: &str) {
+    let frame = serde_json::json!({"s": 503, "E": msg});
+    let json = serde_json::to_vec(&frame).unwrap_or_default();
+    let len = (json.len() as u32).to_le_bytes();
+    let _ = w.write_all(&len).await;
+    let _ = w.write_all(&json).await;
+    let _ = w.flush().await;
+}
 
 #[cfg(target_os = "linux")]
 const DEFAULT_SOCKET: &str = "/run/webhid/webhid.sock";
@@ -66,6 +79,7 @@ async fn main() -> anyhow::Result<()> {
         use tokio::net::UnixStream;
         let candidates = candidate_sockets();
         let mut delay = 100u64;
+        let mut total_waited = 0u64;
         let (stream, connected_path) = loop {
             let mut last_err = None;
             let matched = 'candidates: {
@@ -81,14 +95,21 @@ async fn main() -> anyhow::Result<()> {
                 break (s, p);
             }
             let last_err = last_err.unwrap();
-            if delay > 30000 {
-                return Err(anyhow::anyhow!(
-                    "cannot connect to webhid-daemon (tried {}) after retries: {last_err}",
+            if total_waited >= CONNECT_TIMEOUT_MS {
+                let msg = format!(
+                    "cannot connect to webhid-daemon (tried {}): {last_err}\n\
+                     Check: (1) daemon running? systemctl status webhid-daemon\n\
+                     (2) socket path correct? (3) user in webhid group? sudo usermod -aG webhid $USER",
                     candidates.join(", "),
-                ));
+                );
+                log::error!("{msg}");
+                let mut stdout = tokio::io::stdout();
+                write_error_frame(&mut stdout, &msg).await;
+                return Err(anyhow::anyhow!(msg));
             }
             log::warn!("daemon connect failed ({last_err}), retry in {delay}ms");
             tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
+            total_waited += delay;
             delay = (delay * 2).min(2000);
         };
         log::info!("connected to daemon at {connected_path}");
@@ -101,21 +122,25 @@ async fn main() -> anyhow::Result<()> {
         let pipe_name =
             std::env::var("WEBHID_PIPE").unwrap_or_else(|_| DEFAULT_PIPE.to_string());
         let mut delay = 100u64;
+        let mut total_waited = 0u64;
         let stream = loop {
             match ClientOptions::new().open(&pipe_name) {
                 Ok(s) => break s,
                 Err(e) => {
-                    if delay > 30000 {
-                        return Err(anyhow::anyhow!(
-                            "cannot connect to daemon pipe '{pipe_name}' after retries: {e}"
-                        ));
+                    if total_waited >= CONNECT_TIMEOUT_MS {
+                        let msg = format!(
+                            "cannot connect to daemon pipe '{pipe_name}' after retries: {e}\n\
+                             Check: (1) daemon running? (2) pipe name correct?",
+                        );
+                        log::error!("{msg}");
+                        let mut stdout = tokio::io::stdout();
+                        write_error_frame(&mut stdout, &msg).await;
+                        return Err(anyhow::anyhow!(msg));
                     }
                     log::warn!("daemon connect failed ({e}), retry in {delay}ms");
                     tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
-                    delay *= 2;
-                    if delay > 2000 {
-                        delay = 2000;
-                    }
+                    total_waited += delay;
+                    delay = (delay * 2).min(2000);
                 }
             }
         };
