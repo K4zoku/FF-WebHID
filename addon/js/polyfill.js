@@ -1,6 +1,6 @@
 (function () {
   if (navigator.hid) return;
-  __webhid.logger.initLogger('webhid');
+  __webhid.logger.initLogger('polyfill');
 
   let _reqId = 0;
   const _pending = {};
