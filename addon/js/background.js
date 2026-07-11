@@ -374,14 +374,12 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
     case "forgetDevice":
       (async () => {
         try {
-          const key = encodeURIComponent(request.origin || sender.tab?.url || "");
           const origin = new URL(sender.tab?.url || "http://localhost").origin;
           const storageKey = encodeURIComponent(origin);
           const result = await browser.storage.local.get(storageKey);
           let hashes = result[storageKey] || [];
-          // Remove matching hash
-          if (request.deviceId) {
-            hashes = hashes.filter(h => h !== request.deviceId);
+          if (request.hash) {
+            hashes = hashes.filter(h => h !== request.hash);
             await browser.storage.local.set({ [storageKey]: hashes });
           }
           sendResponse({ success: true, hashes });

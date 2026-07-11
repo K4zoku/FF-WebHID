@@ -131,26 +131,6 @@
   text-overflow: ellipsis;
 }
 
-.webhid-device-name.webhid-name-overflow {
-  cursor: default;
-}
-
-.webhid-device-item:hover .webhid-device-name.webhid-name-overflow {
-  text-overflow: clip;
-  animation: webhid-marquee 3s 0.4s ease-in-out infinite alternate;
-}
-
-@keyframes webhid-marquee {
-  from { transform: translateX(0); }
-  to   { transform: translateX(calc(-1px * var(--webhid-overflow))); }
-}
-
-.webhid-device-info {
-  font-size: 14px;
-  color: var(--text-muted);
-  margin-bottom: 2px;
-}
-
 .webhid-device-vendor {
   font-size: 12px;
   color: var(--text-muted);

@@ -106,23 +106,6 @@
 
     #setupEventListeners() {
       browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
-        if (request.action === "show-device-picker") {
-          this.show(request.filters || []);
-          sendResponse({ success: true });
-          return true;
-        }
-        if (request.action === "device-selected") {
-          this.hide();
-          this.#onDeviceSelected(request.device);
-          sendResponse({ success: true });
-          return true;
-        }
-        if (request.action === "device-cancelled") {
-          this.hide();
-          this.#onDeviceCancelled();
-          sendResponse({ success: true });
-          return true;
-        }
         if (request.action === "getOpenDeviceIds") {
           sendResponse({ ids: Array.from(_openDevices) });
           return true;
@@ -187,12 +170,6 @@
       }
 
       await this.#loadDevices();
-    }
-
-    hide() {
-      if (this.dialog?.open) {
-        this.dialog.close();
-      }
     }
 
     async #loadDevices() {

@@ -8,7 +8,6 @@
   },
   "permissions": [
     "nativeMessaging",
-    "scripting",
     "storage"
   ],
   "host_permissions": [
@@ -61,13 +60,9 @@
         "css/theme.css",
         "css/device-picker.css",
         "js/utils/logger.js",
-        "js/utils/device-utils.js",
         "js/utils/settings-defaults.js",
         "js/worker.js",
-        "js/control.js",
-        "html/popup.html",
-        "js/popup.js",
-        "css/popup.css"
+        "js/control.js"
       ],
       "matches": [
         "<all_urls>"

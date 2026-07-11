@@ -372,9 +372,13 @@
 
     async forget() {
       if (this.opened) await this.close();
-      await sendRequest("forgetDevice", {
+      const hash = __webhid.createDeviceHash({
+        vendorId: this.vendorId,
+        productId: this.productId,
+        serialNumber: '',
         deviceId: this.#deviceId,
       });
+      await sendRequest("forgetDevice", { hash });
     }
 
     addEventListener(type, listener) {
@@ -447,14 +451,8 @@
             return;
           }
 
-          // Handle connection events
-          if (eventType === "connect" || eventType === "connected") {
-            this.dispatchEvent(new HIDConnectionEvent("connect", this));
-            return;
-          }
-
           // Handle disconnection events
-          if (eventType === "disconnect" || eventType === "disconnected") {
+          if (eventType === "disconnect") {
             this.dispatchEvent(new HIDConnectionEvent("disconnect", this));
             return;
           }

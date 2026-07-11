@@ -30,7 +30,6 @@ const logger = {
   _level: LEVEL_WARN,
   _loaded: false,
   applyLevel: _applyLevel,
-  applyPerf: _applyPerf,
 };
 
 function _applyLevel(level) {
