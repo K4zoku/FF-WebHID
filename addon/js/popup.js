@@ -1,4 +1,5 @@
 (async () => {
+  __webhid.logger.initLogger('popup');
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
   let origin = '';
   if (tab && tab.url) {

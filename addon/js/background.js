@@ -1,3 +1,5 @@
+__webhid.logger.initLogger('bg');
+
 let _deviceCache = [];
 
 const _deviceTabMap = new Map();
@@ -7,7 +9,7 @@ function registerDeviceTab(deviceId, tabId) {
   let tabs = _deviceTabMap.get(deviceId);
   if (!tabs) { tabs = new Set(); _deviceTabMap.set(deviceId, tabs); }
   tabs.add(tabId);
-  __webhid.logger.debug('[bg] register device ' + deviceId + ' tab ' + tabId);
+  __webhid.logger.debug('register device ' + deviceId + ' tab ' + tabId);
 }
 
 function unregisterDeviceTab(deviceId, tabId) {
@@ -54,11 +56,11 @@ function _nmHostName() { return settings.daemonAsNmHost ? NM_HOST_DAEMON : NM_HO
 async function loadNmHostSetting() {
   const global = await browser.storage.local.get(__webhid.GLOBAL_DEFAULTS);
   settings.set(global);
-  __webhid.logger.info('[bg] NM host:', _nmHostName());
+  __webhid.logger.info('NM host:', _nmHostName());
 }
 
 settings.on('daemonAsNmHost', () => {
-  __webhid.logger.info('[bg] NM host changed:', _nmHostName());
+  __webhid.logger.info('NM host changed:', _nmHostName());
   NativeMessaging.reconnectWithNewHost();
 });
 
@@ -83,15 +85,15 @@ const NativeMessaging = {
 
   connect() {
     if (this.port) return Promise.resolve();
-    __webhid.logger.debug('[nm] connecting to ' + _nmHostName() + '...');
+    __webhid.logger.debug('connecting to ' + _nmHostName() + '...');
     try {
       this.port = browser.runtime.connectNative(_nmHostName());
       this._reconnectDelay = 1000;
-      __webhid.logger.debug('[nm] connected');
+      __webhid.logger.debug('connected');
 
       this.port.onMessage.addListener((message) => {
         if (message.E !== undefined && message.s !== undefined && message.n === undefined) {
-          __webhid.logger.error('[nm] host error: ' + message.E);
+          __webhid.logger.error('host error: ' + message.E);
           for (const [, p] of this._pending) p.resolve(message);
           this._pending.clear();
           return;
@@ -108,11 +110,11 @@ const NativeMessaging = {
           const p = this._pending.get(message.n);
           if (p) { this._pending.delete(message.n); p.resolve(message); return; }
         }
-        __webhid.logger.warn('[nm] unmatched:', message);
+        __webhid.logger.warn('unmatched:', message);
       });
 
       this.port.onDisconnect.addListener(() => {
-        __webhid.logger.warn('[nm] disconnected; will retry in ' + this._reconnectDelay + 'ms. ' +
+        __webhid.logger.warn('disconnected; will retry in ' + this._reconnectDelay + 'ms. ' +
           'If persistent: check daemon status (systemctl status webhid-daemon), ' +
           'group membership (groups), and NM host manifest.');
         this.port = null;
@@ -123,7 +125,7 @@ const NativeMessaging = {
 
       return Promise.resolve();
     } catch (error) {
-      __webhid.logger.error('[nm] connect failed:', error);
+      __webhid.logger.error('connect failed:', error);
       this._scheduleReconnect();
       return Promise.reject(error);
     }
@@ -140,7 +142,7 @@ const NativeMessaging = {
     if (this._reconnectTimer) return;
     this._reconnectTimer = setTimeout(() => {
       this._reconnectTimer = null;
-      __webhid.logger.debug('[nm] reconnecting...');
+      __webhid.logger.debug('reconnecting...');
       this.connect().catch(() => {});
     }, this._reconnectDelay);
     this._reconnectDelay = Math.min(this._reconnectDelay * 2, 10000);
@@ -155,7 +157,7 @@ const NativeMessaging = {
       }
       const id = this._nextId++;
       this._pending.set(id, { resolve, reject });
-      __webhid.logger.debug('[nm] sendRequest a=' + (request.a || 'packed') + ' n=' + id);
+      __webhid.logger.debug('sendRequest a=' + (request.a || 'packed') + ' n=' + id);
       try {
         this.port.postMessage({ ...request, n: id });
       } catch (e) {
@@ -175,7 +177,7 @@ const NativeMessaging = {
       const id = this._nextId++;
       this._pending.set(id, { resolve, reject });
       const packedBuf = buildPackedFn(id);
-      __webhid.logger.debug('[nm] sendPacked msgType=0x' + packedBuf[0].toString(16) + ' n=' + id);
+      __webhid.logger.debug('sendPacked msgType=0x' + packedBuf[0].toString(16) + ' n=' + id);
       try {
         this.port.postMessage({ d: packedBuf.toBase64() });
       } catch (e) {

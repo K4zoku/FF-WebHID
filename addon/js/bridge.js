@@ -2,6 +2,7 @@
 
 (function () {
   "use strict";
+  __webhid.logger.initLogger('bridge');
 
   // Device Picker Modal Class
   class WebHIDDevicePicker {
@@ -60,7 +61,7 @@
         style.textContent = theme + "\n" + css;
         this.shadowRoot.appendChild(style);
       } catch (e) {
-        __webhid.logger.warn("[WebHID] Failed to load shadow styles", e);
+        __webhid.logger.warn("Failed to load shadow styles", e);
       }
     }
 
@@ -126,7 +127,7 @@
         tries++;
       }
       if (!this.shadowRoot) {
-        __webhid.logger.error('[WebHID] shadowRoot not initialized; cannot show device picker');
+        __webhid.logger.error('shadowRoot not initialized; cannot show device picker');
         this.#onDeviceCancelled();
         return;
       }
@@ -183,14 +184,14 @@
           const code = response?.s || 0;
           const errMsg = __webhid.http.name(code);
           const userMsg = this.#classifyError(errMsg);
-          __webhid.logger.error('[WebHID] enumerate failed:', errMsg);
+          __webhid.logger.error('enumerate failed:', errMsg);
           this.#showMessage(userMsg, true);
         }
       } catch (error) {
         this.devices = [];
         const errMsg = error?.message || String(error);
         const userMsg = this.#classifyError(errMsg);
-        __webhid.logger.error('[WebHID] enumerate exception:', errMsg);
+        __webhid.logger.error('enumerate exception:', errMsg);
         this.#showMessage(userMsg, true);
       }
     }
@@ -417,7 +418,7 @@
       const url = await _getWorkerBlobUrl('control');
       _controlWorker = new Worker(url);
     } catch (e) {
-      __webhid.logger.error('[bridge] control worker spawn failed:', e);
+      __webhid.logger.error('control worker spawn failed:', e);
       _controlWorker = null;
       return;
     }
@@ -427,15 +428,15 @@
 
     _controlPort.onmessage = ({ data }) => {
       if (data.type === 'ready') {
-        __webhid.logger.info('[bridge] control worker ready');
+        __webhid.logger.info('control worker ready');
       } else if (data.type === 'closed') {
-        __webhid.logger.warn('[bridge] control worker WS closed; will auto-reconnect');
+        __webhid.logger.warn('control worker WS closed; will auto-reconnect');
         for (const [, { resolve }] of _controlPending) resolve({ s: 503 });
         _controlPending.clear();
       } else if (data.type === 'auth-failed') {
         // Daemon rejected control token (restart / invalidation). Re-handshake
         // to get a fresh control token and respawn the control worker.
-        __webhid.logger.warn('[bridge] control worker auth-failed code=' + data.code + '; re-handshaking');
+        __webhid.logger.warn('control worker auth-failed code=' + data.code + '; re-handshaking');
         for (const [, { resolve }] of _controlPending) resolve({ s: 503 });
         _controlPending.clear();
         _terminateControlWorker();
@@ -448,7 +449,7 @@
     };
 
     _controlWorker.postMessage({ type: 'connect', token, wsPort, logLevel: __webhid.logger._level }, [port2]);
-    __webhid.logger.info('[bridge] control worker spawned');
+    __webhid.logger.info('control worker spawned');
   }
 
   function _terminateControlWorker() {
@@ -468,10 +469,10 @@
         _wsPort = resp.w;
         _spawnControlWorker(resp.c, resp.w);
       } else {
-        __webhid.logger.error('[bridge] token refresh failed: s=' + (resp?.s || 0));
+        __webhid.logger.error('token refresh failed: s=' + (resp?.s || 0));
       }
     } catch (e) {
-      __webhid.logger.error('[bridge] token refresh error:', e.message);
+      __webhid.logger.error('token refresh error:', e.message);
     }
   }
 
@@ -510,10 +511,10 @@
         _sessionTokens.set(deviceId, resp.t);
         _spawnDataPlane(deviceId, resp.t, resp.w || _wsPort);
       } else {
-        __webhid.logger.error('[bridge] data plane token refresh failed for', deviceId, 's=' + (resp?.s || 0));
+        __webhid.logger.error('data plane token refresh failed for', deviceId, 's=' + (resp?.s || 0));
       }
     } catch (e) {
-      __webhid.logger.error('[bridge] data plane token refresh error:', e.message);
+      __webhid.logger.error('data plane token refresh error:', e.message);
     }
   }
 
@@ -524,13 +525,13 @@
       const url = await _getWorkerBlobUrl('worker');
       worker = new Worker(url);
     } catch (e) {
-      __webhid.logger.error('[bridge] worker fetch/spawn failed:', e);
+      __webhid.logger.error('worker fetch/spawn failed:', e);
       return;
     }
 
     // Stale check: a newer spawn or despawn happened while we were fetching.
     if (_spawnGen.get(deviceId) !== gen) {
-      __webhid.logger.info('[bridge] worker spawn stale, discarding for', deviceId);
+      __webhid.logger.info('worker spawn stale, discarding for', deviceId);
       worker.terminate();
       _workers.delete(deviceId);
       return;
@@ -539,7 +540,7 @@
 
     worker.onmessage = ({ data }) => {
       if (data.type === 'ready') {
-        __webhid.logger.info('[bridge] worker ready for', deviceId);
+        __webhid.logger.info('worker ready for', deviceId);
         _workerReady.add(deviceId);
         const queue = _workerQueues.get(deviceId);
         if (queue) {
@@ -553,7 +554,7 @@
         const { port1, port2 } = new MessageChannel();
         worker.postMessage({ type: 'setPort' }, [port1]);
         _workerPorts.set(deviceId, true);
-        __webhid.logger.info('[bridge] MessageChannel created for', deviceId, '- input reports bypass bridge');
+        __webhid.logger.info('MessageChannel created for', deviceId, '- input reports bypass bridge');
         window.postMessage({
           __webhid_bridge: 'evt',
           event: { eventType: 'webhid-data-ready', deviceId: deviceId, port: port2 }
@@ -561,13 +562,13 @@
       } else if (data.type === 'auth-failed') {
         // Daemon rejected session token (restart / invalidation). Re-open
         // the device via NM to get a fresh session token, then respawn worker.
-        __webhid.logger.warn('[bridge] worker auth-failed for', deviceId, 'code=' + data.code + '; re-opening');
+        __webhid.logger.warn('worker auth-failed for', deviceId, 'code=' + data.code + '; re-opening');
         _workers.delete(deviceId);
         _workerReady.delete(deviceId);
         _workerPorts.delete(deviceId);
         _refreshDataPlaneToken(deviceId);
       } else if (data.type === 'closed') {
-        __webhid.logger.warn('[bridge] worker closed for', deviceId);
+        __webhid.logger.warn('worker closed for', deviceId);
         _workers.delete(deviceId);
         _workerReady.delete(deviceId);
         _workerPorts.delete(deviceId);
@@ -582,7 +583,7 @@
         if (view && __webhid.logger._level >= 3 && data.reportId !== 33) {
           let hex = '';
           for (let i = 0; i < Math.min(8, view.length); i++) hex += view[i].toString(16).padStart(2, '0') + ' ';
-          __webhid.logger.debug('[bridge] worker→page inputReport device=' + deviceId + ' reportId=' + data.reportId + ' len=' + view.length + ' first8=' + hex);
+          __webhid.logger.debug('worker→page inputReport device=' + deviceId + ' reportId=' + data.reportId + ' len=' + view.length + ' first8=' + hex);
         }
         window.postMessage({
           __webhid_bridge: 'evt',
@@ -617,7 +618,7 @@
     await _spawnWorker(deviceId, sessionToken, wsPort, opts, gen);
     // If worker spawn failed (worker not in map), fall back to NM.
     if (!_workers.has(deviceId) && _spawnGen.get(deviceId) === gen) {
-      __webhid.logger.warn('[bridge] worker spawn failed for', deviceId, '; falling back to NM');
+      __webhid.logger.warn('worker spawn failed for', deviceId, '; falling back to NM');
       browser.runtime.sendMessage({
         action: 'setdataplane', deviceId: deviceId, mode: 'nm'
       }).catch(() => {});
@@ -648,7 +649,7 @@
         }
       }
     } catch (e) {
-      __webhid.logger.warn('[bridge] handshake failed:', e.message);
+      __webhid.logger.warn('handshake failed:', e.message);
     }
   })();
 
@@ -659,7 +660,7 @@
     const { id, action: reqAction, payload } = event.data;
     let action = reqAction;
     const isFireAndForget = event.data.fireAndForget === true;
-    __webhid.logger.debug('[bridge] req action=' + action + ' id=' + id + (isFireAndForget ? ' (faf)' : ''));
+    __webhid.logger.debug('req action=' + action + ' id=' + id + (isFireAndForget ? ' (faf)' : ''));
 
     // Settings fetch: page (MAIN world) has no browser.* APIs.
     // Merge per-site overrides on top of global defaults.
@@ -748,7 +749,7 @@
         return;
       }
 
-      __webhid.logger.warn('[bridge] no worker for', deviceId, '; falling back to NM');
+      __webhid.logger.warn('no worker for', deviceId, '; falling back to NM');
       const fallbackAction =
         action === "worker-send" ? "sendreport" :
         action === "worker-sendFeature" ? "sendfeaturereport" :
@@ -824,7 +825,7 @@
         _openDevices.add(deviceId);
         _sessionTokens.set(deviceId, response.t);
         browser.runtime.sendMessage({ action: "device-count-changed", count: _openDevices.size }).catch(() => {});
-        __webhid.logger.debug('[bridge] open ok deviceId=' + deviceId + ' wsPort=' + response.w);
+        __webhid.logger.debug('open ok deviceId=' + deviceId + ' wsPort=' + response.w);
 
         const dataPlane = settings.dataPlane;
         browser.runtime.sendMessage({
@@ -840,7 +841,7 @@
 
       if (action === "close") {
         const deviceId = payload.deviceId;
-        __webhid.logger.debug('[bridge] close deviceId=' + deviceId);
+        __webhid.logger.debug('close deviceId=' + deviceId);
         _openDevices.delete(deviceId);
         _sessionTokens.delete(deviceId);
         browser.runtime.sendMessage({ action: "device-count-changed", count: _openDevices.size }).catch(() => {});
@@ -869,7 +870,7 @@
       const evt = message.event;
       if (evt.e === 1) {
         _wsPort = evt.w;
-        __webhid.logger.info('[bridge] handshake: wsPort=' + _wsPort);
+        __webhid.logger.info('handshake: wsPort=' + _wsPort);
         return;
       }
       window.postMessage({ __webhid_bridge: "evt", event: evt }, "*");
@@ -884,7 +885,7 @@
   // made before === after for all changed keys.
 
   function _applyControlPlane(cp) {
-    __webhid.logger.info('[bridge] control plane changed:', cp);
+    __webhid.logger.info('control plane changed:', cp);
     if (cp === 'ws' && _wsPort && !_controlWorker) {
       browser.runtime.sendMessage({ action: 'handshake' }).then((resp) => {
         if (__webhid.http.isOk(resp.s) && resp.c && resp.w) {
@@ -912,7 +913,7 @@
         mode: dp,
       }).catch(() => {});
     }
-    __webhid.logger.info('[bridge] data plane changed:', dp, 'open devices:', _openDevices.size);
+    __webhid.logger.info('data plane changed:', dp, 'open devices:', _openDevices.size);
   }
 
   // Subscribe local effects: fire only when SettingsStore detects a real change.

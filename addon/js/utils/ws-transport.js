@@ -22,7 +22,7 @@
 
   function createWsTransport(opts) {
     const tag = opts.tag || 'ws';
-    const log = (level, msg) => __webhid.logger[level]('[' + tag + '] ' + msg);
+    const log = (level, msg) => __webhid.logger[level](msg);
     let ws = null;
     let connectMsg = null;
     let reconnectTimer = null;

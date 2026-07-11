@@ -1,5 +1,6 @@
 'use strict';
 const { logger } = self.__webhid;
+__webhid.logger.initLogger('worker');
 const MSG_SEND_REPORT = 0x01;
 const MSG_SEND_FEATURE_REPORT = 0x02;
 const MSG_RECEIVE_FEATURE_REPORT = 0x03;
@@ -28,7 +29,7 @@ self.onmessage = ({ data: msg, ports }) => {
   }
   if (msg.type === 'setPort') {
     _port = ports[0];
-    logger.debug('[worker] received MessagePort for direct input reports');
+    logger.debug('received MessagePort for direct input reports');
     return;
   }
   if (msg.type === 'settings') {
@@ -55,7 +56,7 @@ function pushInputBatch(batch) {
       if (logger._level >= 3) {
         let hex = '';
         for (let i = 0; i < Math.min(8, view.length); i++) hex += view[i].toString(16).padStart(2, '0') + ' ';
-        logger.debug('[worker] inputReport reportId=' + reportId + ' len=' + payloadLen + ' first8=' + hex);
+        logger.debug('inputReport reportId=' + reportId + ' len=' + payloadLen + ' first8=' + hex);
       }
       if (_port) {
         _port.postMessage({ type: 'inputReport', reportId, data: buf }, [buf]);
@@ -72,12 +73,12 @@ function pushInputBatch(batch) {
     offset += len;
     count++;
   }
-  if (count > 0) logger.debug('[worker] forwarded ' + count + ' reports via ' + (_port ? 'MessagePort' : 'postMessage'));
+  if (count > 0) logger.debug('forwarded ' + count + ' reports via ' + (_port ? 'MessagePort' : 'postMessage'));
 }
 
 function handleSend(msg, msgType) {
   if (!_transport || !_transport.isOpen()) {
-    logger.warn('[worker] send: WS not open');
+    logger.warn('send: WS not open');
     self.postMessage({ type: 'sendResult', reqId: msg.reqId, error: 'ws not open' });
     return;
   }

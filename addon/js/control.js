@@ -1,5 +1,6 @@
 'use strict';
 const { logger } = self.__webhid;
+__webhid.logger.initLogger('control');
 const settings = __webhid.createSettingsStore(self.__webhid.GLOBAL_DEFAULTS);
 settings.on('logLevel', (v) => logger.applyLevel(v));
 let _port = null;

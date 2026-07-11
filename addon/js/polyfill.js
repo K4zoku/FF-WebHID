@@ -1,5 +1,6 @@
 (function () {
-  if (navigator.hid) return; // already installed
+  if (navigator.hid) return;
+  __webhid.logger.initLogger('webhid');
 
   let _reqId = 0;
   const _pending = {};
@@ -136,15 +137,15 @@
   }
 
   // Subscribe to settings changes for logging + logLevel.
-  settings.on('dataPlane', (v) => __webhid.logger.info('[webhid] data plane changed: ' + v));
-  settings.on('fireAndForget', (v) => __webhid.logger.info('[webhid] fire-and-forget: ' + v));
+  settings.on('dataPlane', (v) => __webhid.logger.info('data plane changed: ' + v));
+  settings.on('fireAndForget', (v) => __webhid.logger.info('fire-and-forget: ' + v));
   settings.on('logLevel', (v) => { if (__webhid.logger.applyLevel) __webhid.logger.applyLevel(v); });
 
   // Fetch initial settings from the bridge (which has browser.storage access).
   sendRequest("getSettings", {}).then((s) => {
     if (!s) return;
     settings.set(s);
-    __webhid.logger.info('[webhid] data plane: ' + settings.dataPlane + ' (fire-and-forget: ' + settings.fireAndForget + ')');
+    __webhid.logger.info('data plane: ' + settings.dataPlane + ' (fire-and-forget: ' + settings.fireAndForget + ')');
   });
 
   // ── Event classes ────────────────────────────────────────────────────────
@@ -232,7 +233,7 @@
         });
         if (__webhid.http.isOk(response.s)) {
           this.#opened = true;
-          __webhid.logger.info('[webhid] open deviceId=' + this.#deviceId + ' dataPlane=' + settings.dataPlane);
+          __webhid.logger.info('open deviceId=' + this.#deviceId + ' dataPlane=' + settings.dataPlane);
           this.dispatchEvent(new Event("open"));
           return true;
         }
@@ -244,7 +245,7 @@
 
     async close() {
       if (!this.opened) return;
-      __webhid.logger.debug('[webhid] close deviceId=' + this.#deviceId);
+      __webhid.logger.debug('close deviceId=' + this.#deviceId);
       try {
         const response = await sendRequest("close", {
           deviceId: this.#deviceId,
@@ -274,7 +275,7 @@
       const buffer = view.slice();
       try {
         const action = settings.dataPlane === 'nm' ? "sendreport" : "worker-send";
-        __webhid.logger.debug('[webhid] sendReport reportId=' + reportId + ' len=' + buffer.length);
+        __webhid.logger.debug('sendReport reportId=' + reportId + ' len=' + buffer.length);
         if (settings.fireAndForget) {
           sendFireAndForget(action, {
             deviceId: this.#deviceId,
@@ -307,7 +308,7 @@
           reportId: reportId,
         });
         if (__webhid.http.isOk(response.s) && response.d) {
-          __webhid.logger.debug('[webhid] receiveFeatureReport done len=' + (typeof response.d === 'string' ? 'base64' : response.d.length));
+          __webhid.logger.debug('receiveFeatureReport done len=' + (typeof response.d === 'string' ? 'base64' : response.d.length));
           const buf = typeof response.d === 'string' ? Uint8Array.fromBase64(response.d) : response.d;
           return new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
         }
@@ -324,7 +325,7 @@
         ? new Uint8Array(data)
         : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
       const buffer = view.slice();
-      __webhid.logger.debug('[webhid] sendFeatureReport reportId=' + reportId + ' len=' + buffer.length);
+      __webhid.logger.debug('sendFeatureReport reportId=' + reportId + ' len=' + buffer.length);
       try {
         const action = settings.dataPlane === 'nm' ? "sendfeaturereport" : "worker-sendFeature";
         if (settings.fireAndForget) {
@@ -363,7 +364,7 @@
           const detail = event.data.event;
 
           if (!detail) {
-            __webhid.logger.debug("[WebHID] wrapper: no detail, skipping");
+            __webhid.logger.debug("wrapper: no detail, skipping");
             return;
           }
 
@@ -387,7 +388,7 @@
                   if (dataView.byteLength > 0 && d.reportId !== 33) {
                     let hex = '';
                     for (let i = 0; i < Math.min(8, dataView.byteLength); i++) hex += dataView.getUint8(i).toString(16).padStart(2, '0') + ' ';
-                    __webhid.logger.debug('[webhid] port inputReport device=' + this.#deviceId + ' reportId=' + d.reportId + ' len=' + dataView.byteLength + ' first8=' + hex);
+                    __webhid.logger.debug('port inputReport device=' + this.#deviceId + ' reportId=' + d.reportId + ' len=' + dataView.byteLength + ' first8=' + hex);
                   }
                   this.dispatchEvent(new HIDInputReportEvent('inputreport', {
                     device: this,
@@ -396,7 +397,7 @@
                   }));
                 }
               };
-              __webhid.logger.info('[webhid] MessagePort connected for device=' + this.#deviceId + ': direct worker→page input reports');
+              __webhid.logger.info('MessagePort connected for device=' + this.#deviceId + ': direct worker→page input reports');
             }
             return;
           }
@@ -415,7 +416,7 @@
             if (dataView.byteLength > 0 && detail.reportId !== 33) {
               let hex = '';
               for (let i = 0; i < Math.min(8, dataView.byteLength); i++) hex += dataView.getUint8(i).toString(16).padStart(2, '0') + ' ';
-              __webhid.logger.debug('[webhid] page inputReport device=' + (this.#deviceId || evDeviceId) + ' reportId=' + detail.reportId + ' len=' + dataView.byteLength + ' first8=' + hex);
+              __webhid.logger.debug('page inputReport device=' + (this.#deviceId || evDeviceId) + ' reportId=' + detail.reportId + ' len=' + dataView.byteLength + ' first8=' + hex);
             }
             this.dispatchEvent(new HIDInputReportEvent('inputreport', {
               device: this,
@@ -431,7 +432,7 @@
             return;
           }
 
-          __webhid.logger.debug("[WebHID] wrapper: unknown eventType:", eventType);
+          __webhid.logger.debug("wrapper: unknown eventType:", eventType);
         };
 
         const existing = this.#listenerToWrapper.get(listener);
@@ -475,7 +476,7 @@
 
   class HID extends EventTarget {
     async getDevices() {
-      __webhid.logger.debug('[webhid] getDevices');
+      __webhid.logger.debug('getDevices');
       try {
         const savedHashes = await getSavedDevices();
         const deviceCache = await getDeviceCache();
@@ -486,10 +487,10 @@
             grantedDevices.push(getOrCreateDevice(device));
           }
         }
-        __webhid.logger.debug('[webhid] getDevices returned ' + grantedDevices.length + ' device(s)');
+        __webhid.logger.debug('getDevices returned ' + grantedDevices.length + ' device(s)');
         return grantedDevices;
       } catch (error) {
-        __webhid.logger.warn('[webhid] getDevices error:', error);
+        __webhid.logger.warn('getDevices error:', error);
         return [];
       }
     }
@@ -497,7 +498,7 @@
     // Per the WebHID spec the argument is an options object: { filters: [] }
     async requestDevice(options = {}) {
       const filters = Array.isArray(options.filters) ? options.filters : [];
-      __webhid.logger.debug('[webhid] requestDevice filters=' + JSON.stringify(filters));
+      __webhid.logger.debug('requestDevice filters=' + JSON.stringify(filters));
       return new Promise((resolve, reject) => {
         const id = ++_reqId;
         _pending[id] = (result) => {
@@ -533,7 +534,12 @@
 
   // ── Expose ────────────────────────────────────────────────────────────────
 
-  navigator.hid = new HID();
+  Object.defineProperty(navigator, 'hid', {
+    value: new HID(),
+    writable: false,
+    configurable: true,
+    enumerable: true,
+  });
   window.HIDDevice = HIDDevice;
   window.HIDInputReportEvent = HIDInputReportEvent;
   window.HIDConnectionEvent = HIDConnectionEvent;

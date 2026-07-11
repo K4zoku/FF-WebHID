@@ -1,4 +1,5 @@
 (async () => {
+  __webhid.logger.initLogger('settings');
   const current = await browser.storage.local.get(__webhid.GLOBAL_DEFAULTS);
 
   for (const key of ['fireAndForget', 'daemonAsNmHost']) {
