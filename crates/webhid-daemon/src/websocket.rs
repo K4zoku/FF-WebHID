@@ -596,7 +596,8 @@ async fn handle_client_text(
             }
         }
         "close" => {
-            match device_mgr.close(device_id) {
+            let req_dev_id = req.get("deviceId").and_then(|v| v.as_u64()).unwrap_or(device_id as u64) as u32;
+            match device_mgr.close(req_dev_id) {
                 Ok(()) => serde_json::json!({ "n": id, "s": 204 }),
                 Err(_) => serde_json::json!({ "n": id, "s": 404 }),
             }
