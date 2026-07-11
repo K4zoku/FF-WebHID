@@ -9,9 +9,11 @@ use webhid::DeviceInfo;
 // These are used by write_report, write_feature_report, and read_feature_report
 // which are always called from spawn_blocking threads.
 thread_local! {
-    static WRITE_BUF: RefCell<Vec<u8>> = RefCell::new(Vec::with_capacity(4096));
-    static READ_BUF: RefCell<Vec<u8>> = RefCell::new(Vec::with_capacity(4096));
+    static WRITE_BUF: RefCell<Vec<u8>> = RefCell::new(Vec::with_capacity(256));
+    static READ_BUF: RefCell<Vec<u8>> = RefCell::new(Vec::with_capacity(256));
 }
+
+const DEFAULT_READ_SIZE: usize = 4096;
 
 // ---------------------------------------------------------------------------
 // device_id: stable, platform-independent identifier
@@ -192,10 +194,11 @@ pub fn uses_numbered_reports(buf: &[u8]) -> bool {
 
 /// Block until a HID input report is available (or `timeout_ms` expires).
 /// hidapi's `read_timeout` handles polling internally.
-pub fn read_with_timeout(dev: &HidDevice, timeout_ms: i32) -> std::io::Result<Vec<u8>> {
+pub fn read_with_timeout(dev: &HidDevice, timeout_ms: i32, buf_size: usize) -> std::io::Result<Vec<u8>> {
     READ_BUF.with(|buf| {
         let mut buf = buf.borrow_mut();
-        buf.resize(4096, 0);
+        let size = buf_size.max(DEFAULT_READ_SIZE);
+        buf.resize(size, 0);
         let n = dev.read_timeout(&mut buf, timeout_ms)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
         if n == 0 {
@@ -229,7 +232,7 @@ pub fn write_report(dev: &HidDevice, report_id: u8, payload: &[u8]) -> std::io::
 pub fn read_feature_report(dev: &HidDevice, report_id: u8) -> std::io::Result<Vec<u8>> {
     READ_BUF.with(|buf| {
         let mut buf = buf.borrow_mut();
-        buf.resize(4096, 0);
+        buf.resize(DEFAULT_READ_SIZE, 0);
         buf[0] = report_id;
         let n = dev.get_feature_report(&mut buf)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;

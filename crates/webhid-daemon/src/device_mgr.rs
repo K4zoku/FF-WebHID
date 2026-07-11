@@ -124,8 +124,9 @@ impl DeviceManager {
         let dev_for_task = Arc::clone(&reader_arc);
         let stop_for_task = Arc::clone(&stop_flag);
         let tx = self.event_tx.clone();
+        let read_buf_size = info.max_input_report_size as usize + 1;
 
-        log::info!("[reader] starting for {dev_id:#x} (numbered_reports={uses_numbered_reports})");
+        log::info!("[reader] starting for {dev_id:#x} (numbered_reports={uses_numbered_reports}, buf_size={read_buf_size})");
         let handle = tokio::spawn(async move {
             loop {
                 if stop_for_task.load(Ordering::SeqCst) { break; }
@@ -134,7 +135,7 @@ impl DeviceManager {
                     let dev = Arc::clone(&dev_for_task);
                     move || {
                         let d = dev.lock().unwrap();
-                        hid::read_with_timeout(&d, 500)
+                        hid::read_with_timeout(&d, 500, read_buf_size)
                     }
                 })
                 .await;
