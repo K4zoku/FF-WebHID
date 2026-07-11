@@ -181,7 +181,14 @@ const NativeMessaging = {
     return await this.sendRequest({ a: ACT.sr, d: packed.toBase64() });
   },
   async receiveFeatureReport(deviceId, reportId) {
-    return await this.sendRequest({ a: ACT.rfr, i: deviceId, r: reportId });
+    const resp = await this.sendRequest({ a: ACT.rfr, i: deviceId, r: reportId });
+    // Decode base64 payload to Uint8Array so the content script / polyfill
+    // gets a typed array directly (no re-decode needed). Same tradeoff as
+    // input reports: saves 1 decode + shrinks IPC message ~7x.
+    if (resp && typeof resp.d === 'string') {
+      resp.d = Uint8Array.fromBase64(resp.d);
+    }
+    return resp;
   },
   async sendFeatureReport(deviceId, reportId, data) {
     return await this.sendRequest({ a: ACT.sfr, i: deviceId, r: reportId, d: data.toBase64() });
@@ -197,9 +204,14 @@ const NativeMessaging = {
     const payloadLen = bin[7] | (bin[8] << 8);
     const payloadEnd = 9 + payloadLen;
     if (payloadEnd > bin.length) return;
-    const payloadB64 = bin.subarray(9, payloadEnd).toBase64();
+    // Copy payload into a fresh Uint8Array so the receiving tab gets a clean
+    // buffer (the original `bin` may be large; subarray would keep it alive).
+    // Sending Uint8Array instead of base64 string saves 1 encode + 1 decode
+    // per input report and shrinks the bg→tab IPC message ~7x.
+    const payload = new Uint8Array(payloadLen);
+    payload.set(bin.subarray(9, payloadEnd));
 
-    const event = { eventType: 'input_report', deviceId, reportId, data: payloadB64 };
+    const event = { eventType: 'input_report', deviceId, reportId, data: payload };
     const targets = tabsForEvent({ i: deviceId });
     const send = (tabId) => browser.tabs
       .sendMessage(tabId, { action: 'webhid-device-event', event })
