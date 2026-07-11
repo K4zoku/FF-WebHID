@@ -188,7 +188,7 @@ const NativeMessaging = {
     const bin = Uint8Array.fromBase64(b64);
     if (bin.length < 9 || bin[0] !== PKG_INPUT_REPORT) return;
     if (bin[1] !== 4) return;  // devIdLen must be 4
-    const deviceId = bin[2] | (bin[3] << 8) | (bin[4] << 16) | (bin[5] << 24) >>> 0;
+    const deviceId = (bin[2] | (bin[3] << 8) | (bin[4] << 16) | (bin[5] << 24)) >>> 0;
     const reportId = bin[6];
     const payloadLen = bin[7] | (bin[8] << 8);
     const payloadEnd = 9 + payloadLen;
