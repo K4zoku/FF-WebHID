@@ -40,6 +40,9 @@
 
   document.getElementById('fireAndForget').checked = settings.fireAndForget;
 
+  const logLevelSelect = document.getElementById('logLevel');
+  logLevelSelect.value = String(settings.logLevel);
+
   dataPlaneSelect.addEventListener('change', (e) => {
     saveSetting('dataPlane', e.target.value);
   });
@@ -48,6 +51,9 @@
   });
   document.getElementById('fireAndForget').addEventListener('change', (e) => {
     saveSetting('fireAndForget', e.target.checked);
+  });
+  logLevelSelect.addEventListener('change', (e) => {
+    saveSetting('logLevel', parseInt(e.target.value, 10));
   });
 
   async function loadDevices() {
