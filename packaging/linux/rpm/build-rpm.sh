@@ -34,6 +34,7 @@ Summary:        WebHID implementation for Firefox via native-messaging bridge an
 License:        MIT
 URL:            https://github.com/K4zoku/FF-WebHID
 Requires:       systemd-libs
+Requires(pre):  shadow-utils
 Requires(post): systemd
 Requires(preun): systemd
 
@@ -66,6 +67,10 @@ done
 
 install -Dm644 "$REPO_ROOT/LICENSE" \\
   %{buildroot}/usr/share/licenses/webhid/LICENSE
+
+%pre
+getent group webhid >/dev/null || groupadd -r webhid
+exit 0
 
 %post
 %systemd_post webhid-daemon.service

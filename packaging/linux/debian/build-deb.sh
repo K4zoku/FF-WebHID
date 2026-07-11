@@ -71,6 +71,7 @@ EOF
 
 cat > "$DEBROOT/DEBIAN/postinst" << 'EOF'
 #!/bin/sh
+getent group webhid >/dev/null || groupadd --system webhid
 systemctl daemon-reload 2>/dev/null || true
 systemctl enable --now webhid-daemon.service 2>/dev/null || true
 EOF

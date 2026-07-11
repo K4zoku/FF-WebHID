@@ -13,6 +13,7 @@ NM_BIN      := $(RELEASE_DIR)/webhid-native-messaging
 PREFIX      ?= /usr/local
 USER_PREFIX ?= $(HOME)/.local
 CARGO_ARGS  ?=
+WEBHID_GROUP?= webhid
 
 NM_MANIFEST       := $(MANIFEST_DIR)/webhid.forwarder_nm_host.json
 NM_NAME           := webhid.forwarder_nm_host.json
@@ -28,6 +29,7 @@ USER_SYSTEMD_DIR  ?= $(HOME)/.config/systemd/user
 
 .PHONY: all build build-addon package \
 		install install-system install-user install-udev-rule \
+		install-webhid-group \
 		install-daemon-nm-host-system install-daemon-nm-host-user \
 		uninstall uninstall-system uninstall-user \
 		windows-msi \
@@ -72,7 +74,7 @@ windows-msi:
 
 install: install-system
 
-install-system: build
+install-system: build install-webhid-group
 	@echo "==> Installing binaries to $(PREFIX)/bin/"
 	install -Dm755 "$(DAEMON_BIN)" "$(DESTDIR)$(PREFIX)/bin/webhid-daemon"
 	install -Dm755 "$(NM_BIN)"       "$(DESTDIR)$(PREFIX)/bin/webhid-native-messaging"
@@ -84,6 +86,17 @@ install-system: build
 	  "$(MANIFEST_DIR)/webhid-daemon.service" | install -Dm644 /dev/stdin "$(DESTDIR)$(SYSTEMD_DIR)/webhid-daemon.service"
 	@echo "Run: systemctl daemon-reload && systemctl enable --now webhid-daemon.service"
 	@echo "Done. Load the addon in Firefox (about:debugging → Load Temporary Add-on)."
+
+install-webhid-group:
+	@echo "==> Ensuring '$(WEBHID_GROUP)' group exists"
+	@getent group $(WEBHID_GROUP) >/dev/null || groupadd --system $(WEBHID_GROUP)
+	@if [ -n "$$SUDO_USER" ]; then \
+		echo "==> Adding $$SUDO_USER to '$(WEBHID_GROUP)' group"; \
+		usermod -aG $(WEBHID_GROUP) "$$SUDO_USER"; \
+		echo "    (log out/in, or 'newgrp $(WEBHID_GROUP)', for this to take effect)"; \
+	else \
+		echo "==> Run 'sudo usermod -aG $(WEBHID_GROUP) \$$USER' to grant your user access"; \
+	fi
 
 install-user: build
 	@echo "==> Installing binaries to $(USER_PREFIX)/bin/"
@@ -165,6 +178,7 @@ help:
 	@echo "  package                        - build + build-addon"
 	@echo "  windows-msi            - build Windows MSI installer (run on Windows)"
 	@echo "  install-system  - install binaries + NM manifest + systemd service (needs root)"
+	@echo "  install-webhid-group - create 'webhid' group + add current user (needs root)"
 	@echo "  install-user      - install binaries + NM manifest + systemd user service (no root)"
 	@echo "  install-udev-rule  - install udev rule for hidraw access (needs root)"
 	@echo "  install-daemon-nm-host-system - install daemon + daemon-as-NM-host manifest (needs root)"

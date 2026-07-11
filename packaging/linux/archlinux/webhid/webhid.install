@@ -1,4 +1,5 @@
 post_install() {
+    getent group webhid >/dev/null || groupadd --system webhid
     echo ""
     echo "  ╔══════════════════════════════════════════════════════════════╗"
     echo "  ║                     webhid installed                        ║"
@@ -11,7 +12,12 @@ post_install() {
     echo ""
     echo "       systemctl enable --now webhid-daemon.service"
     echo ""
-    echo "  2) Install the Firefox browser addon:"
+    echo "  2) Add your user to the 'webhid' group to access the daemon socket:"
+    echo ""
+    echo "       sudo usermod -aG webhid \$USER"
+    echo "       (log out/in for the group change to take effect)"
+    echo ""
+    echo "  3) Install the Firefox browser addon:"
     echo "       • temporary:    about:debugging → Load Temporary Add-on"
     echo "       • system-wide:  install the webhid-addon package"
     echo ""

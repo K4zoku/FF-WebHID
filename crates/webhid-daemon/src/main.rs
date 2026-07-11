@@ -45,7 +45,7 @@ fn socket_mode(path: &str) -> u32 {
     if path.starts_with("/run/user/") || path.contains("/run/user/") {
         0o600
     } else {
-        0o666
+        0o660
     }
 }
 
