@@ -117,7 +117,7 @@
       set(v) {
         const s = _devState.get(this);
         if (!s) return;
-        if (s.oninputreport) this.removeEventListener('inputreport', s.oninputreport);
+        if (s.oninputreport) s.et.removeEventListener('inputreport', s.oninputreport);
         s.oninputreport = v;
         if (v) this.addEventListener('inputreport', v);
       },
@@ -197,9 +197,10 @@
       await sendRequest("forgetDevice", { deviceId: s.deviceId });
     }, enumerable: true, configurable: true, writable: true },
     addEventListener: { value: function(type, listener) {
-      EventTarget.prototype.addEventListener.call(this, type, listener);
+      const s = _devState.get(this);
+      if (s) s.et.addEventListener(type, listener);
       if (type !== "inputreport") return;
-      const s = _devState.get(this); if (!s) return;
+      if (!s) return;
       if (s.wrappers.has(listener)) return;
       const wrapper = (event) => {
         if (event.source !== globalThis) return;
@@ -243,9 +244,10 @@
       globalThis.addEventListener("message", wrapper);
     }, enumerable: true, configurable: true, writable: true },
     removeEventListener: { value: function(type, listener) {
-      EventTarget.prototype.removeEventListener.call(this, type, listener);
+      const s = _devState.get(this);
+      if (s) s.et.removeEventListener(type, listener);
       if (type !== "inputreport") return;
-      const s = _devState.get(this); if (!s) return;
+      if (!s) return;
       const wrapper = s.wrappers.get(listener);
       if (!wrapper) return;
       s.wrappers.delete(listener);
@@ -254,8 +256,11 @@
   });
 
   function _createHIDDevice(deviceInfo) {
-    const obj = Reflect.construct(EventTarget, [], HIDDevice);
+    const obj = Object.create(HIDDevice.prototype);
+    const _et = new EventTarget();
+    obj.dispatchEvent = _et.dispatchEvent.bind(_et);
     _devState.set(obj, {
+      et: _et,
       deviceId: deviceInfo.deviceId,
       vendorId: deviceInfo.vendorId,
       productId: deviceInfo.productId,
@@ -343,9 +348,9 @@
       get() { return _hidState.get(this)?.onconnect ?? null; },
       set(v) {
         const s = _hidState.get(this); if (!s) return;
-        if (s.onconnect) this.removeEventListener('connect', s.onconnect);
+        if (s.onconnect) s.et.removeEventListener('connect', s.onconnect);
         s.onconnect = v;
-        if (v) this.addEventListener('connect', v);
+        if (v) s.et.addEventListener('connect', v);
       },
       enumerable: true, configurable: true,
     },
@@ -353,17 +358,19 @@
       get() { return _hidState.get(this)?.ondisconnect ?? null; },
       set(v) {
         const s = _hidState.get(this); if (!s) return;
-        if (s.ondisconnect) this.removeEventListener('disconnect', s.ondisconnect);
+        if (s.ondisconnect) s.et.removeEventListener('disconnect', s.ondisconnect);
         s.ondisconnect = v;
-        if (v) this.addEventListener('disconnect', v);
+        if (v) s.et.addEventListener('disconnect', v);
       },
       enumerable: true, configurable: true,
     },
   });
 
   function _createHID() {
-    const obj = Reflect.construct(EventTarget, [], HID);
-    _hidState.set(obj, { onconnect: null, ondisconnect: null });
+    const obj = Object.create(HID.prototype);
+    const _et = new EventTarget();
+    obj.dispatchEvent = _et.dispatchEvent.bind(_et);
+    _hidState.set(obj, { et: _et, onconnect: null, ondisconnect: null });
     return obj;
   }
 
