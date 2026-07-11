@@ -20,7 +20,7 @@ struct Entry {
     stop_flag: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
     session_token: Option<String>,
-    /// `"ws"` or `"nm"` — controls which channel receives input reports.
+    /// `"ws"` or `"nm"`: controls which channel receives input reports.
     dataplane_mode: Mutex<String>,
 }
 

@@ -22,9 +22,9 @@ WebHID brings Human Interface Device (HID) support to Firefox on Linux, macOS, a
 - **Hot-plug**: event-driven on all platforms
 - **Security**: FIDO/U2F blocklist, localhost-only WebSocket, token authentication, control token for WS control plane, group-based IPC socket permissions
 - **Per-device event routing**: daemon sends events only to the requested channel (NM or WS)
-- **SettingsStore observer**: Proxy-based settings propagation — changes take effect immediately, no reload needed. Per-site overrides for all settings including log level.
+- **SettingsStore observer**: Proxy-based settings propagation: changes take effect immediately, no reload needed. Per-site overrides for all settings including log level.
 - **NM error propagation**: NM host writes `{"s":503,"E":"..."}` error frame to stdout on connect failure, addon logs the reason instead of silent paralysis
-- **Packed TLV wire format**: hot-path NM messages (sendReport, sendFeatureReport, inputReport) use binary TLVs inside `{"d":"<b64>"}` with reqId inside the TLV — saves 7-14 bytes vs JSON fields
+- **Packed TLV wire format**: hot-path NM messages (sendReport, sendFeatureReport, inputReport) use binary TLVs inside `{"d":"<b64>"}` with reqId inside the TLV: saves 7-14 bytes vs JSON fields
 - **HTTP status codes**: responses use `s` field with HTTP semantics (200/201/204/4xx/5xx) instead of separate ok/err fields
 
 ## Install

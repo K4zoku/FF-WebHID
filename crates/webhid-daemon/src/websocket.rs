@@ -253,10 +253,10 @@ async fn handle_websocket(
     //   1. Block on recv() for the first report.
     //   2. Drain all immediately-available reports via try_recv() (natural
     //      coalescing from kernel poll).
-    //   3. If only 1 report was drained (sparse): flush immediately —
+    //   3. If only 1 report was drained (sparse): flush immediately -
     //      zero added latency.
     //   4. If >1 reports were drained (burst): wait up to ADAPTIVE_COALESCE_US
-    //      for more, drain again, then flush — amortizes syscall overhead.
+    //      for more, drain again, then flush: amortizes syscall overhead.
     //
     // Fixed-timer mode (batch_ms > 0): legacy behavior, flush every N ms.
     let tx_for_sender = tx.clone();

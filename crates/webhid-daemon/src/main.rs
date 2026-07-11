@@ -129,7 +129,7 @@ async fn main() -> anyhow::Result<()> {
 
         // In NM-host mode, stdin/stdout ARE the IPC channel.
         // The daemon reads NmRequest from stdin and writes NmResponse to stdout,
-        // exactly like the thin forwarder did — but without the extra hop.
+        // exactly like the thin forwarder did: but without the extra hop.
         // stdin only implements AsyncRead and stdout only implements AsyncWrite,
         // so we pass them directly as separate halves (no `tokio::io::split`).
         let stdin = tokio::io::stdin();

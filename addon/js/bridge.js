@@ -553,7 +553,7 @@
         const { port1, port2 } = new MessageChannel();
         worker.postMessage({ type: 'setPort' }, [port1]);
         _workerPorts.set(deviceId, true);
-        __webhid.logger.info('[bridge] MessageChannel created for', deviceId, '— input reports bypass bridge');
+        __webhid.logger.info('[bridge] MessageChannel created for', deviceId, '- input reports bypass bridge');
         window.postMessage({
           __webhid_bridge: 'evt',
           event: { eventType: 'webhid-data-ready', deviceId: deviceId, port: port2 }
@@ -609,7 +609,7 @@
 
   // Spawn the WS data plane for a device. Always uses a Web Worker (off
   // main thread). If worker spawn fails, falls back to NM by telling the
-  // daemon to use NM mode for this device — data then flows through the
+  // daemon to use NM mode for this device: data then flows through the
   // normal NM path (page → bridge → background → NM host → daemon).
   async function _spawnDataPlane(deviceId, sessionToken, wsPort, opts = {}) {
     const gen = (_spawnGen.get(deviceId) || 0) + 1;
@@ -661,7 +661,7 @@
     const isFireAndForget = event.data.fireAndForget === true;
     __webhid.logger.debug('[bridge] req action=' + action + ' id=' + id + (isFireAndForget ? ' (faf)' : ''));
 
-    // Settings fetch — page (MAIN world) has no browser.* APIs.
+    // Settings fetch: page (MAIN world) has no browser.* APIs.
     // Merge per-site overrides on top of global defaults.
     if (action === "getSettings") {
       try {
@@ -912,7 +912,7 @@
     __webhid.logger.info('[bridge] data plane changed:', dp, 'open devices:', _openDevices.size);
   }
 
-  // Subscribe local effects — fire only when SettingsStore detects a real change.
+  // Subscribe local effects: fire only when SettingsStore detects a real change.
   settings.on('controlPlane', (cp) => _applyControlPlane(cp));
   settings.on('dataPlane', (dp) => _applyDataPlane(dp));
 
@@ -943,7 +943,7 @@
     }
     if (Object.keys(patch).length === 0) return;
     // SettingsStore.set() returns only keys that actually changed vs current
-    // values — this is the correct diff, unlike the old get()-based approach.
+    // values: this is the correct diff, unlike the old get()-based approach.
     settings.set(patch);
   });
 })();

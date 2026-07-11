@@ -49,7 +49,7 @@
 
 ## Chromium Profile Analysis
 
-**Profiles**: 2 cold-start runs — #1 (43MB, 120706 events) and #2 (47MB, 127425 events).
+**Profiles**: 2 cold-start runs: #1 (43MB, 120706 events) and #2 (47MB, 127425 events).
 
 ### Activity Timeline (run 2)
 
@@ -117,7 +117,7 @@ The `real` function is the minified HID callback handler, called for each input 
 
 ## Firefox NM Data Profile Analysis
 
-**Profiles**: 5 cold-start runs — #1 (13.5MB), #2 (13.3MB), #3 (12.4MB), #4 (12.8MB), #5 (15.9MB).
+**Profiles**: 5 cold-start runs: #1 (13.5MB), #2 (13.3MB), #3 (12.4MB), #4 (12.8MB), #5 (15.9MB).
 
 **Configuration**: WS Control plane + NM Data plane. Control operations (enumerate/close) route via WS text frames after NM handshake. Data (sendReport, input reports, feature reports) flows through the NM host: page → bridge → background → NM host → daemon → HID. The bridge forwards data actions as `sendreport` / `sendfeaturereport` / `receivefeaturereport` via `browser.runtime.sendMessage`.
 
@@ -190,7 +190,7 @@ Data plane JS is below sampling resolution on the content thread. The NM subproc
 
 ## Firefox Worker WS Data Profile Analysis
 
-**Profiles**: 5 cold-start runs with zero-copy input report delivery — #1 (11.4MB), #2 (11.2MB), #3 (11.6MB), #4 (10.6MB), #5 (11.1MB).
+**Profiles**: 5 cold-start runs with zero-copy input report delivery: #1 (11.4MB), #2 (11.2MB), #3 (11.6MB), #4 (10.6MB), #5 (11.1MB).
 
 **Configuration**: WS Control plane + WS Data plane via Web Worker (postMessage transfer, no SAB). A Web Worker owns the WebSocket. Input reports arrive via `ws.onmessage` in the worker (off main thread) → worker parses batch → `self.postMessage({type:'inputReport', reportId, data: buf}, [buf])` (zero-copy transfer) → bridge re-forwards to page via `window.postMessage({...}, '*', [buf])` (second zero-copy transfer) → polyfill creates `DataView` directly on the transferred ArrayBuffer (no intermediate copy). 2 context hops, true zero-copy end-to-end, no SAB, no COOP/COEP.
 

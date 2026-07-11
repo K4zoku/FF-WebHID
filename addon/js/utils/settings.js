@@ -2,8 +2,8 @@
 //
 // Loaded by every context (background, content scripts, workers, popup,
 // settings page). Exports:
-//   __webhid.GLOBAL_DEFAULTS       — plain object with default values
-//   __webhid.createSettingsStore() — factory for a Proxy-backed store
+//   __webhid.GLOBAL_DEFAULTS      : plain object with default values
+//   __webhid.createSettingsStore(): factory for a Proxy-backed store
 //
 // Store usage:
 //   const settings = __webhid.createSettingsStore(__webhid.GLOBAL_DEFAULTS);

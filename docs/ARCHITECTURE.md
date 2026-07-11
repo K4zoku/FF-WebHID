@@ -120,9 +120,9 @@ All data routes via NM: `sendReport` → bridge → background → NM host → d
 
 For packed messages, `reqId` lives inside the TLV (not the JSON `n` field), so the JSON wrapper is just `{"d":"<b64>"}` with no `a`/`n`/`i`/`r` fields. Non-packed messages (enumerate, open, close, receiveFeatureReport, setDataPlane, handshake) use JSON with numeric action codes (`"a":1..8`) and single-char field names.
 
-**Responses** use HTTP status codes in the `s` field (200/201/204/4xx/5xx) instead of separate `ok`/`err` fields. Error responses contain only `{"n":N,"s":<code>}` — no error message string on the wire (the daemon logs it).
+**Responses** use HTTP status codes in the `s` field (200/201/204/4xx/5xx) instead of separate `ok`/`err` fields. Error responses contain only `{"n":N,"s":<code>}`: no error message string on the wire (the daemon logs it).
 
-**bg→tab IPC:** background.js decodes the base64 TLV and sends the payload as a `Uint8Array` to the tab via `tabs.sendMessage` (structured clone, not zero-copy — `tabs.sendMessage` has no transfer list). Polyfill receives `Uint8Array` directly, no re-decode needed.
+**bg→tab IPC:** background.js decodes the base64 TLV and sends the payload as a `Uint8Array` to the tab via `tabs.sendMessage` (structured clone, not zero-copy: `tabs.sendMessage` has no transfer list). Polyfill receives `Uint8Array` directly, no re-decode needed.
 
 Early fire-and-forget resolves after `window.postMessage` (<0.1ms). Input reports come via NM events → `tabs.sendMessage` → bridge → page.
 
@@ -137,8 +137,8 @@ Early fire-and-forget resolves after `window.postMessage` (<0.1ms). Input report
 | Per-device `dataplane_mode` | Events sent only to requested channel (NM or WS), no duplicate delivery |
 | Thread-local `WRITE_BUF` / `READ_BUF` | Avoids per-call allocation in hot path |
 | Control token (global, not per-device) | Control WS connects without device open |
-| NM packed TLVs (0x01/0x02/0x04) | Hot-path messages use `{"d":"<b64>"}` wrapper, reqId inside TLV — saves 7-14 bytes vs JSON fields |
-| NM bg→tab Uint8Array transfer | Background decodes base64 once, sends Uint8Array to tab (structured clone) — saves 1 encode + 1 decode per input report |
+| NM packed TLVs (0x01/0x02/0x04) | Hot-path messages use `{"d":"<b64>"}` wrapper, reqId inside TLV: saves 7-14 bytes vs JSON fields |
+| NM bg→tab Uint8Array transfer | Background decodes base64 once, sends Uint8Array to tab (structured clone): saves 1 encode + 1 decode per input report |
 | WS close code 4401/4402 | Auth-failure close codes let workers distinguish stale token from network error, trigger token refresh instead of blind retry |
 
 ## Security
@@ -167,7 +167,7 @@ sudo usermod -aG webhid $USER
 # log out + log back in for group change to take effect
 ```
 
-Alternatively, users with direct hidraw access (via udev `uaccess` rule) can skip the forwarder entirely by enabling **Daemon as NM host** in addon settings — the daemon speaks NM directly on stdin/stdout, no socket needed.
+Alternatively, users with direct hidraw access (via udev `uaccess` rule) can skip the forwarder entirely by enabling **Daemon as NM host** in addon settings: the daemon speaks NM directly on stdin/stdout, no socket needed.
 
 SO_PEERCRED is not checked because it would be redundant: group membership already enforces that only authorized users can connect. Adding a UID check on top would not increase security, only complexity.
 
@@ -195,9 +195,9 @@ All layers auto-reconnect with exponential backoff:
 
 Settings are stored in `browser.storage.local`. Global defaults + the `SettingsStore` factory live in `js/utils/settings.js`. Per-site overrides are stored under the key `site:<origin>`.
 
-Each consumer (background, bridge, polyfill, worker, control) creates its own `SettingsStore` instance — a Proxy-backed observer that fires listeners only when a value actually changes. Reads are direct property access (`settings.dataPlane`); writes are either assignment (`settings.fireAndForget = false`) or bulk (`settings.set({...})`). Subscriptions via `settings.on('key', cb)` or `settings.on(['k1','k2'], cb)`.
+Each consumer (background, bridge, polyfill, worker, control) creates its own `SettingsStore` instance: a Proxy-backed observer that fires listeners only when a value actually changes. Reads are direct property access (`settings.dataPlane`); writes are either assignment (`settings.fireAndForget = false`) or bulk (`settings.set({...})`). Subscriptions via `settings.on('key', cb)` or `settings.on(['k1','k2'], cb)`.
 
-The bridge's `storage.onChanged` listener extracts `changes[k].newValue` from Firefox storage events and calls `settings.set(patch)` — the store handles the diff internally. This replaced an earlier `get()`-based before/after diff that broke when the change was already committed to storage before the listener ran (making before === after for all keys).
+The bridge's `storage.onChanged` listener extracts `changes[k].newValue` from Firefox storage events and calls `settings.set(patch)`: the store handles the diff internally. This replaced an earlier `get()`-based before/after diff that broke when the change was already committed to storage before the listener ran (making before === after for all keys).
 
 ## Message flow examples
 

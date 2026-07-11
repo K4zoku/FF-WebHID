@@ -1,4 +1,4 @@
-// Control plane worker — owns WS control connection for enumerate/close.
+// Control plane worker: owns WS control connection for enumerate/close.
 // Communicates with bridge via MessageChannel port.
 'use strict';
 const { logger } = self.__webhid;

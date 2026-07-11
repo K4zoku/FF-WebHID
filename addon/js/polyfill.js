@@ -78,11 +78,11 @@
 
   // ── Transport ────────────────────────────────────────────────────────────
   //
-  // Two data-plane modes (both go through the content-script bridge —
+  // Two data-plane modes (both go through the content-script bridge -
   // Firefox does not support `externally_connectable`, so the page cannot
   // connect to the background directly):
-  //   ws — page → bridge → WebSocket → daemon (input reports via postMessage transfer)
-  //   nm  — page → bridge → background → NM host → daemon
+  //   ws: page → bridge → WebSocket → daemon (input reports via postMessage transfer)
+  //   nm : page → bridge → background → NM host → daemon
   //
   // In `nm` mode the polyfill sends data actions as `sendreport` /
   // `sendfeaturereport` / `receivefeaturereport` (instead of `worker-*`),
@@ -396,7 +396,7 @@
                   }));
                 }
               };
-              __webhid.logger.info('[webhid] MessagePort connected for device=' + this.#deviceId + ' — direct worker→page input reports');
+              __webhid.logger.info('[webhid] MessagePort connected for device=' + this.#deviceId + ': direct worker→page input reports');
             }
             return;
           }

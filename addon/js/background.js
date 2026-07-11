@@ -121,7 +121,7 @@ const NativeMessaging = {
 
       this.port.onMessage.addListener((message) => {
         // Error frame from NM host (daemon connect failure, etc.)
-        // Format: {"s":503,"E":"<reason>"} — no n/d/e fields
+        // Format: {"s":503,"E":"<reason>"}: no n/d/e fields
         if (message.E !== undefined && message.s !== undefined && message.n === undefined) {
           __webhid.logger.error('[nm] host error: ' + message.E);
           for (const [, p] of this._pending) p.resolve(message);
@@ -258,7 +258,7 @@ const NativeMessaging = {
 
   onPackedData(b64) {
     // TLV: [0x01][devId u32 LE][reportId u8][payloadLen u16 LE][payload]
-    // (no devIdLen byte — always 4 for u32)
+    // (no devIdLen byte: always 4 for u32)
     const bin = Uint8Array.fromBase64(b64);
     if (bin.length < 8 || bin[0] !== PKG_INPUT_REPORT) return;
     const deviceId = (bin[1] | (bin[2] << 8) | (bin[3] << 16) | (bin[4] << 24)) >>> 0;

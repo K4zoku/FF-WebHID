@@ -19,7 +19,7 @@ const MAX_FRAME_SIZE: usize = 16 * 1024 * 1024;
 const CONNECT_TIMEOUT_MS: u64 = 5000;
 
 /// Write a JSON error frame to the NM host's stdout (→ addon).
-/// Format: `{"s":503,"E":"<msg>"}` — addon's `port.onMessage` receives it,
+/// Format: `{"s":503,"E":"<msg>"}`: addon's `port.onMessage` receives it,
 /// logs the error, and the pending request (if any) gets rejected.
 async fn write_error_frame<W: AsyncWrite + Unpin>(w: &mut W, msg: &str) {
     let frame = serde_json::json!({"s": 503, "E": msg});
