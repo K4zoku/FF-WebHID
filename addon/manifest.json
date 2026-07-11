@@ -65,6 +65,7 @@
         "js/utils/logger.js",
         "js/utils/settings.js",
         "js/utils/http-status.js",
+        "js/utils/ws-transport.js",
         "js/worker.js",
         "js/control.js"
       ],

@@ -62,45 +62,15 @@ settings.on('daemonAsNmHost', () => {
   NativeMessaging.reconnectWithNewHost();
 });
 
-// Build packed sendReport TLV: [0x02][reqId u32 LE][devId u32 LE][reportId u8][payloadLen u16 LE][payload]
-// reqId is in the TLV so the JSON wrapper is just {"d":"<b64>"} (no a/n/i/r fields).
-function buildPackedSendReport(reqId, deviceId, reportId, data) {
+function buildPackedSend(msgType, reqId, deviceId, reportId, data) {
   const buf = new Uint8Array(12 + data.length);
-  let o = 0;
-  buf[o++] = PKG_SEND_REPORT;
-  buf[o++] = reqId & 0xFF;
-  buf[o++] = (reqId >> 8) & 0xFF;
-  buf[o++] = (reqId >> 16) & 0xFF;
-  buf[o++] = (reqId >> 24) & 0xFF;
-  buf[o++] = deviceId & 0xFF;
-  buf[o++] = (deviceId >> 8) & 0xFF;
-  buf[o++] = (deviceId >> 16) & 0xFF;
-  buf[o++] = (deviceId >> 24) & 0xFF;
-  buf[o++] = reportId;
-  buf[o++] = data.length & 0xFF;
-  buf[o++] = (data.length >> 8) & 0xFF;
-  buf.set(data, o);
-  return buf;
-}
-
-// Build packed sendFeatureReport TLV: [0x04][reqId u32 LE][devId u32 LE][reportId u8][payloadLen u16 LE][payload]
-// Same layout as sendReport but msgType=0x04.
-function buildPackedSendFeatureReport(reqId, deviceId, reportId, data) {
-  const buf = new Uint8Array(12 + data.length);
-  let o = 0;
-  buf[o++] = PKG_SEND_FEATURE_REPORT;
-  buf[o++] = reqId & 0xFF;
-  buf[o++] = (reqId >> 8) & 0xFF;
-  buf[o++] = (reqId >> 16) & 0xFF;
-  buf[o++] = (reqId >> 24) & 0xFF;
-  buf[o++] = deviceId & 0xFF;
-  buf[o++] = (deviceId >> 8) & 0xFF;
-  buf[o++] = (deviceId >> 16) & 0xFF;
-  buf[o++] = (deviceId >> 24) & 0xFF;
-  buf[o++] = reportId;
-  buf[o++] = data.length & 0xFF;
-  buf[o++] = (data.length >> 8) & 0xFF;
-  buf.set(data, o);
+  const dv = new DataView(buf.buffer);
+  buf[0] = msgType;
+  dv.setUint32(1, reqId, true);
+  dv.setUint32(5, deviceId, true);
+  buf[9] = reportId;
+  dv.setUint16(10, data.length, true);
+  buf.set(data, 12);
   return buf;
 }
 
@@ -120,25 +90,20 @@ const NativeMessaging = {
       __webhid.logger.debug('[nm] connected');
 
       this.port.onMessage.addListener((message) => {
-        // Error frame from NM host (daemon connect failure, etc.)
-        // Format: {"s":503,"E":"<reason>"}: no n/d/e fields
         if (message.E !== undefined && message.s !== undefined && message.n === undefined) {
           __webhid.logger.error('[nm] host error: ' + message.E);
           for (const [, p] of this._pending) p.resolve(message);
           this._pending.clear();
           return;
         }
-        // Packed data message: {"d":"<b64>"} with no n/e
         if (message.d !== undefined && message.n === undefined && message.e === undefined) {
           this.onPackedData(message.d);
           return;
         }
-        // Control event (has "e" field)
         if (message.e !== undefined) {
           this.onControlEvent(message);
           return;
         }
-        // Control response (has "n" field)
         if (message.n !== undefined) {
           const p = this._pending.get(message.n);
           if (p) { this._pending.delete(message.n); p.resolve(message); return; }
@@ -147,10 +112,6 @@ const NativeMessaging = {
       });
 
       this.port.onDisconnect.addListener(() => {
-        // If no error frame was received before disconnect, it's likely:
-        // (1) NM host crashed/exited unexpectedly
-        // (2) NM host couldn't spawn (manifest issue)
-        // (3) NM host couldn't connect to daemon (permission/socket issue)
         __webhid.logger.warn('[nm] disconnected; will retry in ' + this._reconnectDelay + 'ms. ' +
           'If persistent: check daemon status (systemctl status webhid-daemon), ' +
           'group membership (groups), and NM host manifest.');
@@ -204,9 +165,6 @@ const NativeMessaging = {
     });
   },
 
-  // Packed send: reqId goes inside TLV, JSON wrapper is just {"d":"<b64>"}.
-  // Response routing uses the reqId from daemon's response (which mirrors it
-  // back in the "n" field). _pending is keyed by reqId.
   sendPacked(buildPackedFn) {
     return new Promise((resolve, reject) => {
       if (!this.port) {
@@ -240,25 +198,20 @@ const NativeMessaging = {
     return await this.sendRequest({ a: ACT.hs });
   },
   async sendReport(deviceId, reportId, data) {
-    return await this.sendPacked((reqId) => buildPackedSendReport(reqId, deviceId, reportId, data));
+    return await this.sendPacked((reqId) => buildPackedSend(PKG_SEND_REPORT, reqId, deviceId, reportId, data));
   },
   async receiveFeatureReport(deviceId, reportId) {
     const resp = await this.sendRequest({ a: ACT.rfr, i: deviceId, r: reportId });
-    // Decode base64 payload to Uint8Array so the content script / polyfill
-    // gets a typed array directly (no re-decode needed). Same tradeoff as
-    // input reports: saves 1 decode + shrinks IPC message ~7x.
     if (resp && typeof resp.d === 'string') {
       resp.d = Uint8Array.fromBase64(resp.d);
     }
     return resp;
   },
   async sendFeatureReport(deviceId, reportId, data) {
-    return await this.sendPacked((reqId) => buildPackedSendFeatureReport(reqId, deviceId, reportId, data));
+    return await this.sendPacked((reqId) => buildPackedSend(PKG_SEND_FEATURE_REPORT, reqId, deviceId, reportId, data));
   },
 
   onPackedData(b64) {
-    // TLV: [0x01][devId u32 LE][reportId u8][payloadLen u16 LE][payload]
-    // (no devIdLen byte: always 4 for u32)
     const bin = Uint8Array.fromBase64(b64);
     if (bin.length < 8 || bin[0] !== PKG_INPUT_REPORT) return;
     const deviceId = (bin[1] | (bin[2] << 8) | (bin[3] << 16) | (bin[4] << 24)) >>> 0;
@@ -266,39 +219,23 @@ const NativeMessaging = {
     const payloadLen = bin[6] | (bin[7] << 8);
     const payloadEnd = 8 + payloadLen;
     if (payloadEnd > bin.length) return;
-    // Copy payload into a fresh Uint8Array so the receiving tab gets a clean
-    // buffer (the original `bin` may be large; subarray would keep it alive).
-    // Sending Uint8Array instead of base64 string saves 1 encode + 1 decode
-    // per input report and shrinks the bg→tab IPC message ~7x.
     const payload = new Uint8Array(payloadLen);
     payload.set(bin.subarray(8, payloadEnd));
 
     const event = { eventType: 'input_report', deviceId, reportId, data: payload };
     const targets = tabsForEvent({ i: deviceId });
-    const send = (tabId) => browser.tabs
-      .sendMessage(tabId, { action: 'webhid-device-event', event })
-      .catch(() => {});
-    if (targets) {
-      for (const tabId of targets) send(tabId);
-    } else {
-      browser.tabs.query({}).then((tabs) => {
-        for (const tab of tabs) send(tab.id);
-      });
+    if (!targets) return;
+    for (const tabId of targets) {
+      browser.tabs.sendMessage(tabId, { action: 'webhid-device-event', event }).catch(() => {});
     }
   },
 
   onControlEvent(message) {
     if (message.e === undefined) return;
     const targets = tabsForEvent(message);
-    const send = (tabId) => browser.tabs
-      .sendMessage(tabId, { action: 'webhid-device-event', event: message })
-      .catch(() => {});
-    if (targets) {
-      for (const tabId of targets) send(tabId);
-    } else {
-      browser.tabs.query({}).then((tabs) => {
-        for (const tab of tabs) send(tab.id);
-      });
+    if (!targets) return;
+    for (const tabId of targets) {
+      browser.tabs.sendMessage(tabId, { action: 'webhid-device-event', event: message }).catch(() => {});
     }
   },
 };
@@ -312,9 +249,6 @@ browser.runtime.onInstalled.addListener(() => {
 loadNmHostSetting().then(() => NativeMessaging.connect());
 browser.tabs.onRemoved.addListener((tabId) => purgeTab(tabId));
 
-// Push storage changes into the settings store; SettingsStore.set() handles
-// diffing and fires the daemonAsNmHost listener only when value actually
-// changes (avoids the old _nmHostName !== newName check).
 browser.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
   const patch = {};
@@ -393,15 +327,7 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
         try {
           const key = encodeURIComponent(request.origin);
           const result = await browser.storage.local.get(key);
-          // Migration: old format stored string device_ids; new format is u32 numbers.
-          // Drop any non-number entries and persist the cleaned list.
-          const raw = result[key] || [];
-          const hashes = raw.filter(h => typeof h === 'number');
-          if (raw.length !== hashes.length) {
-            await browser.storage.local.set({ [key]: hashes });
-            __webhid.logger.info('[bg] migrated saved devices: ' + raw.length + ' → ' + hashes.length + ' (dropped non-numeric)');
-          }
-          sendResponse({ success: true, hashes });
+          sendResponse({ success: true, hashes: result[key] || [] });
         } catch (e) {
           sendResponse({ success: false, error: e.message, hashes: [] });
         }

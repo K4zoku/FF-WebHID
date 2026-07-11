@@ -391,21 +391,31 @@
   let _controlReqId = 1;
   const _spawnGen = new Map();
 
+  const _workerBlobUrls = { worker: null, control: null };
+
+  async function _getWorkerBlobUrl(kind) {
+    if (_workerBlobUrls[kind]) return _workerBlobUrls[kind];
+    const baseUrls = [
+      'js/utils/logger.js',
+      'js/utils/settings.js',
+      'js/utils/ws-transport.js',
+    ];
+    const workerUrl = kind === 'control' ? 'js/control.js' : 'js/worker.js';
+    const fetches = await Promise.all(
+      [...baseUrls, workerUrl].map(u => fetch(browser.runtime.getURL(u)))
+    );
+    const texts = await Promise.all(fetches.map(r => r.text()));
+    const blob = new Blob([texts.join('\n')], { type: 'application/javascript' });
+    const url = URL.createObjectURL(blob);
+    _workerBlobUrls[kind] = url;
+    return url;
+  }
+
   async function _spawnControlWorker(token, wsPort) {
     if (_controlWorker) return;
     try {
-      const [loggerResp, settingsResp, controlResp] = await Promise.all([
-        fetch(browser.runtime.getURL('js/utils/logger.js')),
-        fetch(browser.runtime.getURL('js/utils/settings.js')),
-        fetch(browser.runtime.getURL('js/control.js')),
-      ]);
-      const [loggerCode, settingsCode, controlCode] = await Promise.all([
-        loggerResp.text(),
-        settingsResp.text(),
-        controlResp.text(),
-      ]);
-      const blob = new Blob([loggerCode + '\n' + settingsCode + '\n' + controlCode], { type: 'application/javascript' });
-      _controlWorker = new Worker(URL.createObjectURL(blob));
+      const url = await _getWorkerBlobUrl('control');
+      _controlWorker = new Worker(url);
     } catch (e) {
       __webhid.logger.error('[bridge] control worker spawn failed:', e);
       _controlWorker = null;
@@ -511,18 +521,8 @@
     if (_workers.has(deviceId)) return;
     let worker;
     try {
-      const [loggerResp, settingsResp, workerResp] = await Promise.all([
-        fetch(browser.runtime.getURL('js/utils/logger.js')),
-        fetch(browser.runtime.getURL('js/utils/settings.js')),
-        fetch(browser.runtime.getURL('js/worker.js')),
-      ]);
-      const [loggerCode, settingsCode, workerCode] = await Promise.all([
-        loggerResp.text(),
-        settingsResp.text(),
-        workerResp.text(),
-      ]);
-      const blob = new Blob([loggerCode + '\n' + settingsCode + '\n' + workerCode], { type: 'application/javascript' });
-      worker = new Worker(URL.createObjectURL(blob));
+      const url = await _getWorkerBlobUrl('worker');
+      worker = new Worker(url);
     } catch (e) {
       __webhid.logger.error('[bridge] worker fetch/spawn failed:', e);
       return;
@@ -760,7 +760,8 @@
           return;
         }
         const response = await browser.runtime.sendMessage(msg);
-        window.postMessage({ __webhid_bridge: "res", id, result: response }, "*");
+        const _xfers = (response && response.d instanceof Uint8Array) ? [response.d.buffer] : [];
+        window.postMessage({ __webhid_bridge: "res", id, result: response }, "*", _xfers.length ? _xfers : undefined);
       } catch (error) {
         window.postMessage({ __webhid_bridge: "res", id, result: { s: 500 } }, "*");
       }
@@ -810,7 +811,8 @@
       if (settings.controlPlane === 'ws' && _controlPort
           && (action === 'enumerate' || action === 'close')) {
         const response = await _sendControlCommand(action, payload || {});
-        window.postMessage({ __webhid_bridge: "res", id, result: response }, "*");
+        const _xfers = (response && response.d instanceof Uint8Array) ? [response.d.buffer] : [];
+        window.postMessage({ __webhid_bridge: "res", id, result: response }, "*", _xfers.length ? _xfers : undefined);
         return;
       }
 
@@ -845,7 +847,8 @@
         _despawnDataPlane(deviceId);
       }
 
-      window.postMessage({ __webhid_bridge: "res", id, result: response }, "*");
+      const _xfers = (response && response.d instanceof Uint8Array) ? [response.d.buffer] : [];
+      window.postMessage({ __webhid_bridge: "res", id, result: response }, "*", _xfers.length ? _xfers : undefined);
     } catch (error) {
       window.postMessage(
         {

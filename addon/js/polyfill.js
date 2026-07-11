@@ -191,14 +191,14 @@
   // ── HIDDevice ─────────────────────────────────────────────────────────────
 
   class HIDDevice extends EventTarget {
-    #inputReportListeners = new Map();
-    #inputReportWrappers = new Set();
+    #listenerToWrapper = new WeakMap();
+    #activeWrappers = new Set();
     #oninputreportListener = null;
     #parsedCollections = null;
     #opened = false;
     #deviceId = null;
-    #maxInputReportSize = 2048;
-    #port = null; // MessagePort for direct worker→page input reports
+    #maxInputReportSize = 0;
+    #port = null;
 
     constructor(deviceInfo) {
       super();
@@ -434,39 +434,22 @@
           __webhid.logger.debug("[WebHID] wrapper: unknown eventType:", eventType);
         };
 
-        // Register this wrapper for the original listener
-        // Use the listener's unique identity as key (listener.toString())
-        const listenerKey = listener.toString();
-        this.#inputReportListeners.set(listenerKey, listener);
-        this.#inputReportWrappers.add(wrapper);
-
+        const existing = this.#listenerToWrapper.get(listener);
+        if (existing) return;
+        this.#listenerToWrapper.set(listener, wrapper);
+        this.#activeWrappers.add(wrapper);
         window.addEventListener("message", wrapper);
-
       }
     }
 
     removeEventListener(type, listener) {
       super.removeEventListener(type, listener);
-      if (type === "inputreport") {
-        if (!listener || !listener.toString()) {
-          this.#inputReportListeners.clear();
-          this.#inputReportWrappers.forEach((wrapper) => {
-            window.removeEventListener("message", wrapper);
-          });
-          this.#inputReportWrappers.clear();
-        } else {
-          const listenerKey = listener.toString();
-          this.#inputReportListeners.delete(listenerKey);
-
-          if (this.#inputReportListeners.size === 0) {
-            this.#inputReportWrappers.forEach((wrapper) => {
-              window.removeEventListener("message", wrapper);
-            });
-            this.#inputReportWrappers.clear();
-            this.#inputReportListeners.clear();
-          }
-        }
-      }
+      if (type !== "inputreport") return;
+      const wrapper = this.#listenerToWrapper.get(listener);
+      if (!wrapper) return;
+      this.#listenerToWrapper.delete(listener);
+      this.#activeWrappers.delete(wrapper);
+      window.removeEventListener("message", wrapper);
     }
 
     get oninputreport() {
@@ -521,14 +504,12 @@
           if (result.cancelled) {
             reject(new DOMException("No device selected", "NotFoundError"));
           } else {
-            // result may contain 'devices' (array) or legacy 'device' (single)
-            const devices = result.devices || (result.device ? [result.device] : []);
-            if (devices.length === 0) {
+            const devices = result.devices;
+            if (!devices || devices.length === 0) {
               reject(new DOMException("No device selected", "NotFoundError"));
               return;
             }
 
-            // Save each selected device permission for future getDevices() calls
             for (const d of devices) {
               saveDevice(d);
             }

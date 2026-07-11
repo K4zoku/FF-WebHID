@@ -4,20 +4,28 @@ const MSG_SEND_REPORT = 0x01;
 const MSG_SEND_FEATURE_REPORT = 0x02;
 const MSG_RECEIVE_FEATURE_REPORT = 0x03;
 const RESP_RECEIVE_FEATURE_REPORT = 0x83;
-// WS close codes (4xxx = application-defined, must match daemon).
-const WS_CLOSE_UNKNOWN_TOKEN = 4401;
-const WS_CLOSE_BAD_TOKEN = 4402;
-let ws = null, _connectMsg = null;
-let _nextReqId = 1;
 const settings = __webhid.createSettingsStore(self.__webhid.GLOBAL_DEFAULTS);
 settings.on('logLevel', (v) => logger.applyLevel(v));
+let _nextReqId = 1;
 const _pending = new Map();
-let _reconnectTimer = null;
-let _reconnectDelay = 500;
 let _port = null;
+let _transport = null;
 
 self.onmessage = ({ data: msg, ports }) => {
-  if (msg.type === 'connect') return connect(msg);
+  if (msg.type === 'connect') {
+    _transport = __webhid.createWsTransport({
+      tag: 'worker',
+      onReady: () => self.postMessage({ type: 'ready' }),
+      onClosed: () => self.postMessage({ type: 'closed' }),
+      onAuthFailed: (code) => self.postMessage({ type: 'auth-failed', code }),
+      onBinary: (batch) => {
+        if (batch.length > 0 && batch[0] >= 0x80) return handleControlResponse(batch);
+        pushInputBatch(batch);
+      },
+    });
+    _transport.connect(msg);
+    return;
+  }
   if (msg.type === 'setPort') {
     _port = ports[0];
     logger.debug('[worker] received MessagePort for direct input reports');
@@ -31,63 +39,6 @@ self.onmessage = ({ data: msg, ports }) => {
   if (msg.type === 'sendFeature') return handleSend(msg, MSG_SEND_FEATURE_REPORT);
   if (msg.type === 'receiveFeature') return handleReceiveFeature(msg);
 };
-
-function connect(msg) {
-  _connectMsg = msg;
-  if (msg.logLevel !== undefined) settings.logLevel = msg.logLevel;
-  logger.debug('[worker] connect wsPort=' + msg.wsPort + ' reportSize=' + (msg.reportSize || 64));
-  _doConnect();
-}
-
-function _doConnect() {
-  const msg = _connectMsg;
-  if (!msg) return;
-  logger.debug('[worker] WS connecting to ws://127.0.0.1:' + msg.wsPort);
-  try {
-    ws = new WebSocket('ws://127.0.0.1:' + msg.wsPort, ['webhid.' + msg.token]);
-  } catch (e) {
-    logger.error('[worker] WS constructor threw:', e.message || e);
-    _scheduleReconnect();
-    return;
-  }
-  ws.binaryType = 'arraybuffer';
-  ws.onopen = () => {
-    _reconnectDelay = 500;
-    logger.debug('[worker] WS connected');
-    self.postMessage({ type: 'ready' });
-  };
-  ws.onerror = (e) => logger.error('[worker] WS ERROR:', e.message || e);
-  ws.onclose = (ev) => {
-    for (const [, p] of _pending) p.reject(new Error('ws closed'));
-    _pending.clear();
-    // Auth-failure close codes → ask bridge for a fresh token instead of
-    // blind-retrying with the stale one (daemon was restarted).
-    if (ev.code === WS_CLOSE_UNKNOWN_TOKEN || ev.code === WS_CLOSE_BAD_TOKEN) {
-      logger.warn('[worker] WS closed with auth-failure code ' + ev.code + '; requesting token refresh');
-      _connectMsg = null;  // halt auto-reconnect
-      self.postMessage({ type: 'auth-failed', code: ev.code });
-      return;
-    }
-    self.postMessage({ type: 'closed' });
-    _scheduleReconnect();
-  };
-  ws.onmessage = ({ data: frame }) => {
-    const batch = new Uint8Array(frame);
-    if (batch.length > 0 && batch[0] >= 0x80 && batch.length <= 10) return handleControlResponse(batch);
-    pushInputBatch(batch);
-  };
-}
-
-function _scheduleReconnect() {
-  if (_reconnectTimer) return;
-  logger.debug('[worker] scheduling reconnect in ' + _reconnectDelay + 'ms');
-  _reconnectTimer = setTimeout(() => {
-    _reconnectTimer = null;
-    if (!_connectMsg) return;
-    _doConnect();
-  }, _reconnectDelay);
-  _reconnectDelay = Math.min(_reconnectDelay * 2, 5000);
-}
 
 function pushInputBatch(batch) {
   let offset = 0, count = 0;
@@ -125,41 +76,41 @@ function pushInputBatch(batch) {
 }
 
 function handleSend(msg, msgType) {
-  if (!ws || ws.readyState !== WebSocket.OPEN) {
+  if (!_transport || !_transport.isOpen()) {
     logger.warn('[worker] send: WS not open');
     self.postMessage({ type: 'sendResult', reqId: msg.reqId, error: 'ws not open' });
     return;
   }
   const reqId = _nextReqId++;
-  const payload = msg.data || new Uint8Array(0);
+  const payload = msg.data;
   const frame = new Uint8Array(6 + payload.length);
+  const dv = new DataView(frame.buffer);
   frame[0] = msgType;
-  frame[1] = reqId & 0xFF; frame[2] = (reqId >> 8) & 0xFF; frame[3] = (reqId >> 16) & 0xFF; frame[4] = (reqId >> 24) & 0xFF;
+  dv.setUint32(1, reqId, true);
   frame[5] = msg.reportId;
   frame.set(payload, 6);
   if (settings.fireAndForget) {
-    ws.send(frame);
+    _transport.send(frame);
     self.postMessage({ type: 'sendResult', reqId: msg.reqId, success: true });
     return;
   }
   _pending.set(reqId, {
-    resolve: () => {
-      self.postMessage({ type: 'sendResult', reqId: msg.reqId, success: true });
-    },
+    resolve: () => self.postMessage({ type: 'sendResult', reqId: msg.reqId, success: true }),
     reject: (e) => self.postMessage({ type: 'sendResult', reqId: msg.reqId, error: String(e.message || e) }),
   });
-  ws.send(frame);
+  _transport.send(frame);
 }
 
 function handleReceiveFeature(msg) {
-  if (!ws || ws.readyState !== WebSocket.OPEN) {
+  if (!_transport || !_transport.isOpen()) {
     self.postMessage({ type: 'featureResult', reqId: msg.reqId, error: 'ws not open' });
     return;
   }
   const reqId = _nextReqId++;
   const frame = new Uint8Array(6);
+  const dv = new DataView(frame.buffer);
   frame[0] = MSG_RECEIVE_FEATURE_REPORT;
-  frame[1] = reqId & 0xFF; frame[2] = (reqId >> 8) & 0xFF; frame[3] = (reqId >> 16) & 0xFF; frame[4] = (reqId >> 24) & 0xFF;
+  dv.setUint32(1, reqId, true);
   frame[5] = msg.reportId;
   _pending.set(reqId, {
     resolve: (data) => {
@@ -168,13 +119,14 @@ function handleReceiveFeature(msg) {
     },
     reject: (e) => self.postMessage({ type: 'featureResult', reqId: msg.reqId, error: String(e.message || e) }),
   });
-  ws.send(frame);
+  _transport.send(frame);
 }
 
 function handleControlResponse(batch) {
   if (batch.length < 6) return;
   const respType = batch[0];
-  const reqId = batch[1] | (batch[2] << 8) | (batch[3] << 16) | (batch[4] << 24);
+  const dv = new DataView(batch.buffer, batch.byteOffset, batch.byteLength);
+  const reqId = dv.getUint32(1, true);
   const status = batch[5];
   const p = _pending.get(reqId);
   if (!p) return;
@@ -182,7 +134,7 @@ function handleControlResponse(batch) {
   if (respType === RESP_RECEIVE_FEATURE_REPORT) {
     if (status !== 0) return p.reject(new Error('feature read failed'));
     if (batch.length < 8) return p.reject(new Error('short feature resp'));
-    const len = batch[6] | (batch[7] << 8);
+    const len = dv.getUint16(6, true);
     const out = new Uint8Array(len);
     if (len > 0 && batch.length >= 8 + len) out.set(batch.subarray(8, 8 + len));
     return p.resolve(out);
