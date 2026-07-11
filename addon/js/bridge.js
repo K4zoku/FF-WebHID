@@ -382,7 +382,7 @@
   const _workerCallbacks = new Map();
   const _workerReady = new Set();
   const _workerQueues = new Map();
-  const _workerPorts = new Map(); // deviceId → true (port active, skip bridge re-forward)
+  const _workerPorts = new Map();
   let _wsPort = null;
   const settings = __webhid.createSettingsStore(__webhid.GLOBAL_DEFAULTS);
   let _controlWorker = null;
@@ -433,8 +433,6 @@
         for (const [, { resolve }] of _controlPending) resolve({ s: 503 });
         _controlPending.clear();
       } else if (data.type === 'auth-failed') {
-        // Daemon rejected control token (restart / invalidation). Re-handshake
-        // to get a fresh control token and respawn the control worker.
         __webhid.logger.warn('control worker auth-failed code=' + data.code + '; re-handshaking');
         for (const [, { resolve }] of _controlPending) resolve({ s: 503 });
         _controlPending.clear();
@@ -458,10 +456,8 @@
     _controlPending.clear();
   }
 
-  // Re-handshake via NM to get a fresh control token, then respawn
-  // the control worker. Called when daemon restarted (4401 close code).
   async function _refreshControlToken() {
-    if (_controlWorker) return;  // already respawning
+    if (_controlWorker) return;
     try {
       const resp = await browser.runtime.sendMessage({ action: 'handshake' });
       if (__webhid.http.isOk(resp.s) && resp.c && resp.w) {
@@ -487,8 +483,6 @@
     });
   }
 
-  // Tear down the data-plane worker for a device. Increments spawn generation
-  // so that any async _spawnWorker fetch in flight knows it's stale.
   function _despawnDataPlane(deviceId) {
     const gen = (_spawnGen.get(deviceId) || 0) + 1;
     _spawnGen.set(deviceId, gen);
@@ -500,10 +494,8 @@
     _workerPorts.delete(deviceId);
   }
 
-  // Re-open device via NM to get a fresh session token, then respawn
-  // the data-plane worker. Called when daemon restarted (4401 close code).
   async function _refreshDataPlaneToken(deviceId) {
-    if (_workers.has(deviceId)) return;  // already respawning
+    if (_workers.has(deviceId)) return;
     try {
       const resp = await browser.runtime.sendMessage({ action: 'open', deviceId });
       if (__webhid.http.isOk(resp.s) && resp.t) {
@@ -528,7 +520,6 @@
       return;
     }
 
-    // Stale check: a newer spawn or despawn happened while we were fetching.
     if (_spawnGen.get(deviceId) !== gen) {
       __webhid.logger.info('worker spawn stale, discarding for', deviceId);
       worker.terminate();
@@ -548,8 +539,6 @@
           }
           _workerQueues.delete(deviceId);
         }
-        // Create MessageChannel: port1 → worker (direct input reports),
-        // port2 → page (bypass bridge for input reports).
         const { port1, port2 } = new MessageChannel();
         worker.postMessage({ type: 'setPort' }, [port1]);
         _workerPorts.set(deviceId, true);
@@ -559,8 +548,6 @@
           event: { eventType: 'webhid-data-ready', deviceId: deviceId, port: port2 }
         }, '*', [port2]);
       } else if (data.type === 'auth-failed') {
-        // Daemon rejected session token (restart / invalidation). Re-open
-        // the device via NM to get a fresh session token, then respawn worker.
         __webhid.logger.warn('worker auth-failed for', deviceId, 'code=' + data.code + '; re-opening');
         _workers.delete(deviceId);
         _workerReady.delete(deviceId);
@@ -576,7 +563,6 @@
           event: { eventType: 'disconnect', deviceId: deviceId }
         }, '*');
       } else if (data.type === 'inputReport') {
-        // Only reaches here if port not active (fallback path).
         if (_workerPorts.has(deviceId)) return;
         const view = data.data ? new Uint8Array(data.data) : null;
         if (view && __webhid.logger._level >= 3 && data.reportId !== 33) {
@@ -607,15 +593,10 @@
     worker.postMessage({ type: 'connect', wsPort, token: sessionToken, reportSize: opts.reportSize || 64 });
   }
 
-  // Spawn the WS data plane for a device. Always uses a Web Worker (off
-  // main thread). If worker spawn fails, falls back to NM by telling the
-  // daemon to use NM mode for this device: data then flows through the
-  // normal NM path (page → bridge → background → NM host → daemon).
   async function _spawnDataPlane(deviceId, sessionToken, wsPort, opts = {}) {
     const gen = (_spawnGen.get(deviceId) || 0) + 1;
     _spawnGen.set(deviceId, gen);
     await _spawnWorker(deviceId, sessionToken, wsPort, opts, gen);
-    // If worker spawn failed (worker not in map), fall back to NM.
     if (!_workers.has(deviceId) && _spawnGen.get(deviceId) === gen) {
       __webhid.logger.warn('worker spawn failed for', deviceId, '; falling back to NM');
       browser.runtime.sendMessage({
@@ -624,9 +605,6 @@
     }
   }
 
-  // Init: send handshake to get wsPort. Only spawn control worker if
-  // control plane setting is 'ws'. If 'nm', just store wsPort for
-  // data plane use (open() sends WS data plane via _spawnDataPlane).
   (async () => {
     try {
       const resp = await browser.runtime.sendMessage({ action: 'handshake' });
@@ -661,8 +639,6 @@
     const isFireAndForget = event.data.fireAndForget === true;
     __webhid.logger.debug('req action=' + action + ' id=' + id + (isFireAndForget ? ' (faf)' : ''));
 
-    // Settings fetch: page (MAIN world) has no browser.* APIs.
-    // Merge per-site overrides on top of global defaults.
     if (action === "getSettings") {
       try {
         const global = await browser.storage.local.get(__webhid.GLOBAL_DEFAULTS);
@@ -683,8 +659,6 @@
       return;
     }
 
-    // Normalize NM actions → worker actions when device has a worker data
-    // plane (happens when polyfill hasn't received dataPlane push yet).
     if ((action === "sendreport" || action === "sendfeaturereport" || action === "receivefeaturereport")
         && payload && payload.deviceId
         && _workers.has(payload.deviceId)) {
@@ -722,7 +696,6 @@
         return;
       }
 
-      // Worker exists but not ready yet → queue for replay on ready.
       if (worker) {
         const wType =
           action === "worker-send" ? "send" :
@@ -768,9 +741,6 @@
       return;
     }
 
-    // requestDevice is special: we show the content-script-side picker modal
-    // and resolve via the webhid-device-selected / webhid-device-cancelled
-    // custom events it dispatches.
     if (action === "requestDevice") {
       let onSelected, onCancelled;
 
@@ -781,7 +751,6 @@
 
       onSelected = (e) => {
         cleanup();
-        // result contains an array of devices under `devices`
         window.postMessage(
           { __webhid_bridge: "res", id, result: { devices: e.detail.devices } },
           "*",
@@ -802,9 +771,6 @@
       return;
     }
 
-    // All other actions (enumerate / open / close / read / write) are forwarded
-    // to the background script via the native-messaging port, or via control
-    // worker if WS control plane is enabled and connected.
     try {
       let response;
       let viaControlWs = false;
@@ -882,11 +848,6 @@
   });
 
   // ── Settings observer ─────────────────────────────────────────────
-  // SettingsStore holds current effective values. storage.onChanged pushes
-  // new values in; SettingsStore.set() returns only keys that actually
-  // changed (comparing against current values), which avoids the old
-  // get()-based before/after diff bug where reading storage after commit
-  // made before === after for all changed keys.
 
   function _applyControlPlane(cp) {
     __webhid.logger.info('control plane changed:', cp);
@@ -920,7 +881,6 @@
     __webhid.logger.info('data plane changed:', dp, 'open devices:', _openDevices.size);
   }
 
-  // Subscribe local effects: fire only when SettingsStore detects a real change.
   settings.on('controlPlane', (cp) => _applyControlPlane(cp));
   settings.on('dataPlane', (dp) => _applyDataPlane(dp));
 
@@ -950,8 +910,6 @@
       for (const k of Object.keys(ss)) patch[k] = ss[k];
     }
     if (Object.keys(patch).length === 0) return;
-    // SettingsStore.set() returns only keys that actually changed vs current
-    // values: this is the correct diff, unlike the old get()-based approach.
     settings.set(patch);
   });
 })();

@@ -159,7 +159,6 @@ fn run_windows(event_tx: broadcast::Sender<IpcResponse>) {
         }
     }
 
-    // Raw Win32 FFI: avoids windows crate API version mismatches
     type HMODULE = isize;
     type HWND = isize;
     type HINSTANCE = isize;
@@ -342,7 +341,6 @@ fn run_macos(event_tx: broadcast::Sender<IpcResponse>) {
         return;
     }
 
-    // Global for C callbacks (can't capture closures)
     static GLOBAL_TX: std::sync::Mutex<Option<broadcast::Sender<IpcResponse>>> = std::sync::Mutex::new(None);
     *GLOBAL_TX.lock().unwrap() = Some(event_tx);
 

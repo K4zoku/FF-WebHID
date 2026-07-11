@@ -5,9 +5,6 @@ use hidapi::{HidApi, HidDevice, DeviceInfo as HidDeviceInfo};
 use std::cell::RefCell;
 use webhid::DeviceInfo;
 
-// Thread-local buffers to avoid per-call allocation in the hot path.
-// These are used by write_report, write_feature_report, and read_feature_report
-// which are always called from spawn_blocking threads.
 thread_local! {
     static WRITE_BUF: RefCell<Vec<u8>> = RefCell::new(Vec::with_capacity(256));
     static READ_BUF: RefCell<Vec<u8>> = RefCell::new(Vec::with_capacity(256));
@@ -47,7 +44,6 @@ pub fn make_device_id(info: &HidDeviceInfo) -> u32 {
 pub fn enumerate() -> anyhow::Result<Vec<DeviceInfo>> {
     let api = HidApi::new()?;
 
-    // Group by (vid, pid, serial); each group = 1 physical device
     let mut groups: std::collections::HashMap<(u16, u16, String), Vec<&HidDeviceInfo>> = std::collections::HashMap::new();
     for info in api.device_list() {
         if is_blocked_pub(info) { continue; }
@@ -57,14 +53,11 @@ pub fn enumerate() -> anyhow::Result<Vec<DeviceInfo>> {
 
     let mut devices = Vec::new();
     for ifaces in groups.values() {
-        // Deduplicate by report descriptor bytes; multiple hidraw nodes
-        // may expose the same descriptor (e.g. /dev/hidraw0 and /dev/hidraw1
-        // both being the same interface on some kernels).
         let mut seen_descriptors: std::collections::HashSet<Vec<u8>> = std::collections::HashSet::new();
         for info in ifaces {
             let desc = read_raw_report_descriptor_with_api(&api, info);
             if !seen_descriptors.insert(desc.clone()) {
-                continue; // duplicate interface; skip
+                continue;
             }
             if let Some(d) = info_from_hidapi_pub_with_desc(info, desc) {
                 devices.push(d);

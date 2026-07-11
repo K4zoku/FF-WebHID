@@ -53,8 +53,7 @@ const ADAPTIVE_COALESCE_US: u64 = 25;
 //         (data length = 0 on error)
 //
 // Frames from daemon → page that are NOT in this scheme are input-report
-// batches (existing format: `[len_u8][report_bytes]...`); preserved for
-// backward compat with the existing SAB ring buffer.
+// batches (existing format: `[len_u8][report_bytes]...`).
 
 const MSG_SEND_REPORT: u8 = 0x01;
 const MSG_SEND_FEATURE_REPORT: u8 = 0x02;
@@ -79,8 +78,6 @@ pub async fn start_server(
     let actual_port = listener.local_addr().unwrap().port();
     log::info!("WebSocket server listening on 127.0.0.1:{actual_port}");
 
-    // Send the actual bound port back to the caller (for --nm-host mode
-    // where port 0 = random).
     if let Some(tx) = port_callback {
         let _ = tx.send(actual_port);
     }
@@ -130,16 +127,12 @@ async fn handle_websocket(
             return Err(resp);
         }
         // Read token from Sec-WebSocket-Protocol header (subprotocol).
-        // Browser WebSocket API doesn't support custom headers, so we use
-        // the subprotocol mechanism: client sends `webhid.<token>` as
-        // the subprotocol. This avoids exposing the token in the URL.
         let token = req.headers().get("sec-websocket-protocol")
             .and_then(|v| v.to_str().ok())
             .and_then(|s| s.strip_prefix("webhid."))
             .map(String::from);
         let mut holder = token_ref.lock().unwrap();
         *holder = token;
-        // Echo back the subprotocol so the browser accepts the handshake
         let mut res = res;
         if let Some(proto) = req.headers().get("sec-websocket-protocol") {
             res.headers_mut().insert("sec-websocket-protocol", proto.clone());
@@ -206,11 +199,6 @@ async fn handle_websocket(
     });
 
     // --- Receiver task: handle incoming client frames (ping, close, hot-path writes) ---
-    //
-    // Page sends output/feature reports as binary frames so they bypass
-    // the JSON control plane entirely (5–10× lower latency for sendReport).
-    // Each frame is dispatched on a blocking thread to write to hidraw,
-    // and the response is enqueued back to the page via `tx`.
     let tx_for_receiver = tx.clone();
     let device_mgr_for_receiver = Arc::clone(&device_mgr);
     let device_id_for_receiver = device_id;
@@ -249,17 +237,6 @@ async fn handle_websocket(
     });
 
     // --- Sender task ---
-    //
-    // Adaptive flushing (default, batch_ms == 0):
-    //   1. Block on recv() for the first report.
-    //   2. Drain all immediately-available reports via try_recv() (natural
-    //      coalescing from kernel poll).
-    //   3. If only 1 report was drained (sparse): flush immediately -
-    //      zero added latency.
-    //   4. If >1 reports were drained (burst): wait up to ADAPTIVE_COALESCE_US
-    //      for more, drain again, then flush: amortizes syscall overhead.
-    //
-    // Fixed-timer mode (batch_ms > 0): legacy behavior, flush every N ms.
     let tx_for_sender = tx.clone();
     let device_id_for_sender = device_id;
     let batch_ms = std::env::var("WEBHID_WS_BATCH_MS")
@@ -498,8 +475,6 @@ async fn handle_client_binary(
     }
     let msg_type = frame[0];
 
-    // All hot-path messages carry a u32 LE request id right after the type
-    // byte so the page can match the response to its in-flight Promise.
     if frame.len() < 5 {
         log::warn!("[ws] short frame (len={}, need ≥5 for type+req_id)", frame.len());
         return;

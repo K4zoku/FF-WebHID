@@ -172,7 +172,6 @@ async fn main() -> anyhow::Result<()> {
                     break;
                 }
             }
-            // Vectored write: length prefix + payload in a single syscall
             let len = u32::try_from(buf.len()).unwrap_or(0).to_le_bytes();
             let len_io = std::io::IoSlice::new(&len);
             let buf_io = std::io::IoSlice::new(&buf);

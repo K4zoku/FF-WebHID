@@ -79,21 +79,10 @@ async fn main() -> anyhow::Result<()> {
 
     webhid::logging::init_logger();
 
-    // NM-host mode: daemon acts as the native messaging host directly,
-    // speaking the NM protocol on stdin/stdout (no separate NM host binary,
-    // no IPC socket). This eliminates 1 IPC hop + 2 copies per frame.
-    // Requires the daemon to run as the user (with udev rules for hidraw).
-    // WS port is random to avoid conflicts with a root daemon instance.
-    //
-    // Detection is based on the 2 positional args Firefox passes to every
-    // native-messaging host (manifest path + addon ID), per the Mozilla spec.
-    // See `detect_nm_host_mode` above.
     let nm_host_info = detect_nm_host_mode();
     let nm_host_mode = nm_host_info.is_some();
 
     let ws_port: u16 = if nm_host_mode {
-        // Bind to port 0 → OS assigns a random free port.
-        // We'll read it back after binding.
         0
     } else {
         std::env::var("WEBHID_WS_PORT")
@@ -108,7 +97,6 @@ async fn main() -> anyhow::Result<()> {
 
     let device_mgr = Arc::new(DeviceManager::new(event_tx.clone()));
 
-    // Start WS server and get the actual bound port.
     let actual_ws_port = {
         let event_tx_clone = event_tx.clone();
         let device_mgr_clone = Arc::clone(&device_mgr);
@@ -127,11 +115,6 @@ async fn main() -> anyhow::Result<()> {
         log::info!("started by add-on '{addon_id}' (manifest: {manifest_path})");
         log::info!("WebSocket server on port {actual_ws_port} (random)");
 
-        // In NM-host mode, stdin/stdout ARE the IPC channel.
-        // The daemon reads NmRequest from stdin and writes NmResponse to stdout,
-        // exactly like the thin forwarder did: but without the extra hop.
-        // stdin only implements AsyncRead and stdout only implements AsyncWrite,
-        // so we pass them directly as separate halves (no `tokio::io::split`).
         let stdin = tokio::io::stdin();
         let stdout = tokio::io::stdout();
         let rx = event_tx.subscribe();

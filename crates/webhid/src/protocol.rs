@@ -49,9 +49,6 @@ pub async fn read_nm_request<R: AsyncRead + Unpin>(
             }
             return Ok(match packed[0] {
                 PKG_SEND_REPORT => {
-                    // Pass raw packed buf to daemon dispatch, which calls
-                    // parse_packed_send again. Slight overhead (re-parse) but
-                    // keeps NmRequest::SendReport variant unchanged.
                     NmRequest::SendReport { id: None, packed }
                 }
                 PKG_SEND_FEATURE_REPORT => {
@@ -127,7 +124,6 @@ where
     W: AsyncWrite + Unpin,
     T: Serialize,
 {
-    // Serialize to a Vec<u8> and copy into the buffer.
     let json = serde_json::to_vec(value).map_err(|e| {
         io::Error::new(io::ErrorKind::InvalidData, format!("JSON encode: {e}"))
     })?;
@@ -183,7 +179,6 @@ mod tests {
         let mut buf = Vec::new();
         // length prefix = 2 MiB  ( > MAX_MSG = 1 MiB )
         buf.extend_from_slice(&(2_000_000u32).to_le_bytes());
-        // payload bytes (doesn't matter – size check happens first)
         buf.resize(buf.len() + 2_000_000, 0);
 
         let mut reader: &[u8] = &buf;
@@ -237,7 +232,7 @@ mod tests {
         let err = read_nm_request(&mut r).await.unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
 
-        // Missing 'a' → error (but {"d":"..."} without "a" would be packed path)
+        // Missing 'a' → error
         let mut buf = Vec::new();
         write_message(&mut buf, &serde_json::json!({"n": 1})).await.unwrap();
         let mut r: &[u8] = &buf;
