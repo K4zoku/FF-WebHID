@@ -345,6 +345,14 @@
         globalThis.postMessage({ __webhid_bridge: "req", id, action: "requestDevice", payload: { filters } }, "*");
       });
     }, enumerable: true, configurable: true, writable: true },
+    addEventListener: { value: function(type, listener) {
+      const s = _hidState.get(this);
+      if (s) s.et.addEventListener(type, listener);
+    }, enumerable: true, configurable: true, writable: true },
+    removeEventListener: { value: function(type, listener) {
+      const s = _hidState.get(this);
+      if (s) s.et.removeEventListener(type, listener);
+    }, enumerable: true, configurable: true, writable: true },
     onconnect: {
       get() { return _hidState.get(this)?.onconnect ?? null; },
       set(v) {
