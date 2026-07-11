@@ -603,7 +603,7 @@ async fn handle_client_text(
         }
         "open" => {
             let req_dev_id = req.get("deviceId").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-            match device_mgr.open(req_dev_id, 0) {
+            match device_mgr.open(req_dev_id) {
                 Ok((dev_id, session_token)) => serde_json::json!({
                     "n": id, "s": 201, "i": dev_id,
                     "t": session_token, "w": ws_port
