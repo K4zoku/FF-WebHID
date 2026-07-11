@@ -826,13 +826,18 @@
         __webhid.logger.debug('open ok deviceId=' + deviceId + ' wsPort=' + response.w);
 
         const dataPlane = settings.dataPlane;
-        if (!viaControlWs) {
+        if (viaControlWs) {
           browser.runtime.sendMessage({
-            action: "setdataplane",
+            action: "registerDevice",
             deviceId: deviceId,
-            mode: dataPlane,
           }).catch(() => {});
         }
+
+        browser.runtime.sendMessage({
+          action: "setdataplane",
+          deviceId: deviceId,
+          mode: dataPlane,
+        }).catch(() => {});
 
         if (dataPlane === 'ws') {
           _spawnDataPlane(deviceId, response.t, response.w || _wsPort);
@@ -845,6 +850,12 @@
         _openDevices.delete(deviceId);
         _sessionTokens.delete(deviceId);
         browser.runtime.sendMessage({ action: "device-count-changed", count: _openDevices.size }).catch(() => {});
+        if (viaControlWs) {
+          browser.runtime.sendMessage({
+            action: "unregisterDevice",
+            deviceId: deviceId,
+          }).catch(() => {});
+        }
         _despawnDataPlane(deviceId);
       }
 

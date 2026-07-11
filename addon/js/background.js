@@ -392,6 +392,20 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
       })();
       return true;
 
+    case 'registerDevice': {
+      const tabId = sender.tab?.id;
+      if (request.deviceId && tabId != null) registerDeviceTab(request.deviceId, tabId);
+      sendResponse({ s: 204 });
+      return false;
+    }
+
+    case 'unregisterDevice': {
+      const tabId = sender.tab?.id;
+      if (request.deviceId && tabId != null) unregisterDeviceTab(request.deviceId, tabId);
+      sendResponse({ s: 204 });
+      return false;
+    }
+
     case 'device-count-changed':
       browser.action.setBadgeText({
         text: request.count > 0 ? String(request.count) : '',
