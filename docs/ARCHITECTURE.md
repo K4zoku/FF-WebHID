@@ -80,8 +80,8 @@ Low-frequency operations: `enumerate`, `open`, `close`, `handshake`. Uses length
 After NM handshake, bridge spawns a control worker that connects a control-only WS (authenticated via controlToken). `enumerate` and `close` route via WS text frames (JSON) through the control worker:
 
 ```
-Bridge → control worker (MessageChannel) → WS text: {"id":1,"action":"enumerate"}
-Daemon → WS text: {"id":1,"success":true,"devices":[...]} → control worker → bridge (MessageChannel)
+Bridge -> control worker (MessageChannel) -> WS text: {"n":1,"action":"enumerate"}
+Daemon -> WS text: {"n":1,"s":200,"D":[...]} -> control worker -> bridge (MessageChannel)
 ```
 
 Control-only WS connections are accepted by the daemon when the token matches `controlToken` (separate from per-device session tokens). Binary frames are rejected on control connections.
@@ -160,7 +160,7 @@ FIDO/U2F security keys (YubiKey, Feitian, OnlyKey, Nitrokey, Google Titan, etc.)
 
 ### IPC socket permissions (Linux)
 
-When the daemon runs as root (systemd system service), the Unix socket is created at `/run/webhid/webhid.sock` with mode `0o660` and group `webhid`. Users must be in the `webhid` group to connect via the thin forwarder (`webhid.forwarder_nm_host`):
+When the daemon runs as root (systemd system service), the Unix socket is created at `/run/webhid/webhid.sock` with mode `0o660` (group `webhid`, set by systemd's `Group=webhid`). For user-service mode, the socket under `/run/user/<uid>/webhid/` uses mode `0o600`. Users must be in the `webhid` group to connect via the thin forwarder (`webhid.forwarder_nm_host`) when using root daemon:
 
 ```sh
 sudo usermod -aG webhid $USER

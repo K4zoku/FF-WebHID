@@ -93,9 +93,9 @@ Restart browser after writing these files. Paths must be absolute.
 | Variable | Default | Description |
 |---|---|---|
 | `WEBHID_SOCKET` | `/run/webhid/webhid.sock` (Linux) / `/tmp/webhid.sock` (macOS) | IPC socket path |
+| `WEBHID_PIPE` | `\\.\pipe\webhid` (Windows) | Named pipe path |
 | `WEBHID_WS_PORT` | `31337` | WebSocket server port |
-| `WEBHID_WS_BATCH_MS` | `0` | Input report flush policy. `0` = adaptive (drain + burst coalescing with 100μs window). `1`+ = fixed N ms timer. |
-| `WEBHID_IPC_PORT` | `31338` | TCP IPC port (Windows only, replaces Unix socket) |
+| `WEBHID_WS_BATCH_MS` | `0` | Input report flush policy. `0` = adaptive (drain + burst coalescing with 100us window). `1`+ = fixed N ms timer. |
 | `RUST_LOG` | `info` | Log level |
 
 ### Addon settings (development)
@@ -107,11 +107,10 @@ Restart browser after writing these files. Paths must be absolute.
 | `fireAndForget` | bool | `true` | Resolve sendReport after `window.postMessage` (<0.1ms) |
 | `daemonAsNmHost` | bool | `false` | Use daemon-as-NM-host (skip forwarder + socket) |
 | `logLevel` | 0 to 3 | `1` | 0=error, 1=warn, 2=info, 3=debug |
-| `perfLogging` | bool | `false` | Timing logs (only effective at debug level) |
 
 All settings can be overridden per-site via the popup (saved to `site:<origin>` key in `browser.storage.local`).
 
-The bridge's `storage.onChanged` listener computes effective settings (global merged with site override) before and after each change, and only acts when the effective value actually changes. This prevents unnecessary worker respawns when a global setting change does not affect the current site's effective value.
+The bridge uses a `SettingsStore` Proxy-based observer. `storage.onChanged` extracts `changes[k].newValue` and calls `settings.set(patch)`. The store handles diffing internally and fires listeners only when a value actually changes.
 
 ## Testing
 
@@ -199,7 +198,7 @@ CI builds on Linux, Windows, and macOS. Platform-specific code is gated with `#[
 | Platform | IPC | Hot-plug | hidapi feature | Daemon-as-NM-host |
 |---|---|---|---|---|
 | Linux | Unix socket | udev monitor | `linux-static-hidraw` | Yes (needs udev rule) |
-| macOS | Unix socket | hidapi poll (2s) | `macos-shared-device` | Yes |
-| Windows | Named pipe | hidapi poll (2s) | `windows-native` | Yes |
+| macOS | Unix socket | IOHIDManager callbacks | `macos-shared-device` | Yes |
+| Windows | Named pipe | RegisterDeviceNotification | `windows-native` | Yes |
 
 Daemon-as-NM-host works on all platforms. The daemon auto-detects NM mode via the 2 positional args Firefox passes (manifest path + addon ID).

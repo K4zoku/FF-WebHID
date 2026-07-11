@@ -15,7 +15,7 @@
 - **Firefox + NM Data** (WS Control + NM Data): data flows through Native Messaging host, 5 cold-start runs
 - **Firefox + Worker WS Data** (WS Control + WS Worker, postMessage transfer): Web Worker owns the WebSocket, forwards input reports via postMessage with ArrayBuffer transfer (2 context hops, zero-copy, no SAB), 5 cold-start runs
 
-**Codebase state**: Worker.js and SharedArrayBuffer code paths have been removed from the default architecture. The Worker WS mode is an opt-in `dataPlane: 'ws-worker'` option that re-introduces a worker (without SAB) for off-main-thread WS processing. No COOP/COEP injection in either Firefox mode. The polyfill uses **zero-copy input report delivery**. DataView is created directly on the transferred ArrayBuffer, no intermediate copy.
+**Codebase state**: Worker WS mode is the default `dataPlane: 'ws'` option: a Web Worker owns the WebSocket (without SAB) for off-main-thread WS processing. No COOP/COEP injection in either Firefox mode. The polyfill uses **zero-copy input report delivery**. DataView is created directly on the transferred ArrayBuffer, no intermediate copy.
 
 ---
 
