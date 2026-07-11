@@ -180,7 +180,7 @@
           await this.#renderDevices();
         } else {
           this.devices = [];
-          const errMsg = response?.error || "Unknown error";
+          const errMsg = response?.err || "Unknown error";
           const userMsg = this.#classifyError(errMsg);
           __webhid.logger.error('[WebHID] enumerate failed:', errMsg);
           this.#showMessage(userMsg, true);
@@ -419,7 +419,7 @@
         __webhid.logger.info('[bridge] control worker ready');
       } else if (data.type === 'closed') {
         __webhid.logger.warn('[bridge] control worker WS closed; will auto-reconnect');
-        for (const [, { resolve }] of _controlPending) resolve({ success: false, error: 'WS control closed' });
+        for (const [, { resolve }] of _controlPending) resolve({ ok: false, err: 'WS control closed' });
         _controlPending.clear();
       } else if (data.type === 'response' && data.id && _controlPending.has(data.id)) {
         const { resolve } = _controlPending.get(data.id);
@@ -435,14 +435,14 @@
   function _terminateControlWorker() {
     if (_controlPort) { _controlPort.onmessage = null; _controlPort.close(); _controlPort = null; }
     if (_controlWorker) { _controlWorker.postMessage({ type: 'disconnect' }); _controlWorker.terminate(); _controlWorker = null; }
-    for (const [, { resolve }] of _controlPending) resolve({ success: false, error: 'WS control closed' });
+    for (const [, { resolve }] of _controlPending) resolve({ ok: false, err: 'WS control closed' });
     _controlPending.clear();
   }
 
   function _sendControlCommand(action, payload) {
     return new Promise((resolve) => {
       if (!_controlPort) {
-        resolve({ success: false, error: 'WS control not connected' });
+        resolve({ ok: false, err: 'WS control not connected' });
         return;
       }
       const id = _controlReqId++;
@@ -547,9 +547,9 @@
         if (cbMap && cbMap.has(data.reqId)) {
           const cb = cbMap.get(data.reqId);
           cbMap.delete(data.reqId);
-          if (data.error) cb({ success: false, error: data.error });
-          else if (data.data) cb({ success: true, data: data.data });
-          else cb({ success: true });
+          if (data.error) cb({ ok: false, err: data.error });
+          else if (data.data) cb({ ok: true, d: data.data });
+          else cb({ ok: true });
         }
       }
     };
@@ -658,10 +658,10 @@
           let cbMap = _workerCallbacks.get(deviceId);
           if (!cbMap) { cbMap = new Map(); _workerCallbacks.set(deviceId, cbMap); }
           cbMap.set(id, (data) => {
-            const result = data.error ? { success: false, error: data.error }
-                        : data.data ? { success: true, data: data.data }
-                        : { success: data.success !== false };
-            const xfers = result.data instanceof Uint8Array ? [result.data.buffer] : [];
+            const result = data.error ? { ok: false, err: data.error }
+                        : data.data ? { ok: true, d: data.data }
+                        : { ok: data.ok !== false };
+            const xfers = result.d instanceof Uint8Array ? [result.d.buffer] : [];
             window.postMessage({ __webhid_bridge: "res", id, result }, "*", xfers.length ? xfers : undefined);
           });
         }
@@ -682,10 +682,10 @@
           let cbMap = _workerCallbacks.get(deviceId);
           if (!cbMap) { cbMap = new Map(); _workerCallbacks.set(deviceId, cbMap); }
           cbMap.set(id, (data) => {
-            const result = data.error ? { success: false, error: data.error }
-                        : data.data ? { success: true, data: data.data }
-                        : { success: data.success !== false };
-            const xfers = result.data instanceof Uint8Array ? [result.data.buffer] : [];
+            const result = data.error ? { ok: false, err: data.error }
+                        : data.data ? { ok: true, d: data.data }
+                        : { ok: data.ok !== false };
+            const xfers = result.d instanceof Uint8Array ? [result.d.buffer] : [];
             window.postMessage({ __webhid_bridge: "res", id, result }, "*", xfers.length ? xfers : undefined);
           });
         }
@@ -709,7 +709,7 @@
         const response = await browser.runtime.sendMessage(msg);
         window.postMessage({ __webhid_bridge: "res", id, result: response }, "*");
       } catch (error) {
-        window.postMessage({ __webhid_bridge: "res", id, result: { success: false, error: error.message } }, "*");
+        window.postMessage({ __webhid_bridge: "res", id, result: { ok: false, err: error.message } }, "*");
       }
       return;
     }
@@ -807,7 +807,7 @@
         {
           __webhid_bridge: "res",
           id,
-          result: { success: false, error: error.message },
+          result: { ok: false, err: error.message },
         },
         "*",
       );

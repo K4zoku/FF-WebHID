@@ -307,9 +307,9 @@
           deviceId: this.#deviceId,
           reportId: reportId,
         });
-        if (response.ok && response.data) {
-          __webhid.logger.debug('[webhid] receiveFeatureReport done len=' + (typeof response.data === 'string' ? 'base64' : response.data.length));
-          const buf = typeof response.data === 'string' ? Uint8Array.fromBase64(response.data) : response.data;
+        if (response.ok && response.d) {
+          __webhid.logger.debug('[webhid] receiveFeatureReport done len=' + (typeof response.d === 'string' ? 'base64' : response.d.length));
+          const buf = typeof response.d === 'string' ? Uint8Array.fromBase64(response.d) : response.d;
           return new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
         }
         throw new Error("receiveFeatureReport failed");

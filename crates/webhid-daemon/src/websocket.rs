@@ -566,7 +566,7 @@ async fn handle_client_text(
         Ok(v) => v,
         Err(e) => {
             let _ = tx.send(Message::Text(
-                serde_json::json!({ "error": format!("JSON parse: {e}") }).to_string().into(),
+                serde_json::json!({ "err": format!("JSON parse: {e}") }).to_string().into(),
             ));
             return;
         }
@@ -578,18 +578,18 @@ async fn handle_client_text(
     let result = match action {
         "enumerate" => {
             match device_mgr.enumerate() {
-                Ok(devices) => serde_json::json!({ "id": id, "success": true, "devices": devices }),
-                Err(e) => serde_json::json!({ "id": id, "success": false, "error": e.to_string() }),
+                Ok(devices) => serde_json::json!({ "id": id, "ok": true, "devs": devices }),
+                Err(e) => serde_json::json!({ "id": id, "ok": false, "err": e.to_string() }),
             }
         }
         "close" => {
             match device_mgr.close(device_id, 0) {
-                Ok(()) => serde_json::json!({ "id": id, "success": true }),
-                Err(e) => serde_json::json!({ "id": id, "success": false, "error": e.to_string() }),
+                Ok(()) => serde_json::json!({ "id": id, "ok": true }),
+                Err(e) => serde_json::json!({ "id": id, "ok": false, "err": e.to_string() }),
             }
         }
         _ => {
-            serde_json::json!({ "id": id, "success": false, "error": format!("unknown action: {action}") })
+            serde_json::json!({ "id": id, "ok": false, "err": format!("unknown action: {action}") })
         }
     };
 

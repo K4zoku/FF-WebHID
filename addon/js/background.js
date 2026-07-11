@@ -181,16 +181,24 @@ const NativeMessaging = {
   },
 
   onPackedData(b64) {
-    // Decode just enough to read deviceId for routing
+    // TLV: [msgType][devIdLen][devId][reportId][payloadLen u16 LE][payload]
     const bin = Uint8Array.fromBase64(b64);
     if (bin.length < 2 || bin[0] !== PKG_INPUT_REPORT) return;
     const devIdLen = bin[1];
     if (2 + devIdLen > bin.length) return;
     const deviceId = new TextDecoder().decode(bin.subarray(2, 2 + devIdLen));
+    const hdrEnd = 2 + devIdLen;
+    if (hdrEnd + 3 > bin.length) return;
+    const reportId = bin[hdrEnd];
+    const payloadLen = bin[hdrEnd + 1] | (bin[hdrEnd + 2] << 8);
+    const payloadEnd = hdrEnd + 3 + payloadLen;
+    if (payloadEnd > bin.length) return;
+    const payloadB64 = bin.subarray(hdrEnd + 3, payloadEnd).toBase64();
 
+    const event = { eventType: 'input_report', deviceId, reportId, data: payloadB64 };
     const targets = tabsForEvent({ i: deviceId });
     const send = (tabId) => browser.tabs
-      .sendMessage(tabId, { action: 'webhid-device-event', d: b64 })
+      .sendMessage(tabId, { action: 'webhid-device-event', event })
       .catch(() => {});
     if (targets) {
       for (const tabId of targets) send(tabId);

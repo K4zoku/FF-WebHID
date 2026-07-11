@@ -78,7 +78,7 @@ function _scheduleReconnect() {
 
 function _sendCommand(id, action, payload) {
   if (!ws || ws.readyState !== WebSocket.OPEN) {
-    if (_port) _port.postMessage({ type: 'response', id, result: { success: false, error: 'ws not open' } });
+    if (_port) _port.postMessage({ type: 'response', id, result: { ok: false, err: 'ws not open' } });
     return;
   }
   ws.send(JSON.stringify({ id, action, ...(payload || {}) }));
