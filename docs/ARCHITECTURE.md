@@ -56,15 +56,15 @@ The project has two independently switchable planes:
 | Component | What it does |
 |---|---|
 | `polyfill.js` | Polyfills `navigator.hid` in MAIN world; sends data via `window.postMessage` to bridge; receives input reports via MessageChannel (direct from worker) or bridge forwarding; early fire-and-forget resolves after `window.postMessage` (<0.1ms) |
-| `bridge.js` | Content script; routes control/data actions; spawns per-device data worker (WS mode); spawns control worker (control=WS); sends NM handshake on init to get controlToken + wsPort; tracks open devices via `_openDevices` Set; effective-settings-aware storage change handler |
-| `worker.js` | Web Worker (per-device, WS data plane); binary WS to daemon; input reports forwarded via MessageChannel (direct to page, zero-copy, no Xray); fire-and-forget `sendReport`; auto-reconnect with exponential backoff |
-| `control.js` | Web Worker (early spawn, control plane); WS text frames to daemon; enumerate/close commands; auto-reconnect with exponential backoff; communicates with bridge via MessageChannel port |
-| `background.js` | Extension background; owns NM port; handles `handshake` (returns controlToken + wsPort); tab-targeted event delivery; daemonAsNmHost switching |
-| `settings.html` / `popup.html` | Settings UI: control plane (NM/WS), data plane (WS/NM), fire-and-forget, log level, perf timing, daemon-as-NM-host |
+| `bridge.js` | Content script; routes control/data actions; spawns per-device data worker (WS mode); spawns control worker (control=WS); sends NM handshake on init to get controlToken + wsPort; tracks open devices via `_openDevices` Set; `SettingsStore` observer for live settings propagation |
+| `worker.js` | Web Worker (per-device, WS data plane); binary WS to daemon; input reports forwarded via MessageChannel (direct to page, zero-copy, no Xray); fire-and-forget `sendReport`; auto-reconnect with exponential backoff; detects WS auth-failure close code 4401 and triggers token refresh via bridge |
+| `control.js` | Web Worker (early spawn, control plane); WS text frames to daemon; enumerate/close commands; auto-reconnect with exponential backoff; communicates with bridge via MessageChannel port; same 4401 auth-failure handling as data worker |
+| `background.js` | Extension background; owns NM port; handles `handshake` (returns controlToken + wsPort); tab-targeted event delivery; daemonAsNmHost via `SettingsStore`; NM error frame logging; packed TLV encode/decode for sendReport/sendFeatureReport/inputReport |
+| `settings.html` / `popup.html` | Settings UI: control plane (NM/WS), data plane (WS/NM), fire-and-forget, log level (global + per-site), daemon-as-NM-host |
 | `webhid.forwarder_nm_host` | Thin byte-pipe NM host (forwarder mode): stdin ↔ Unix socket/named pipe |
 | `webhid.daemon_nm_host` | Daemon-as-NM-host mode: daemon speaks NM directly on stdin/stdout (auto-detected via Firefox's 2 positional args) |
 | `webhid-daemon` | Long-running service; hidapi device handles; WS server (data + control); adaptive batching; Arc<[u8]> broadcast; per-device dataplane mode; udev hot-plug |
-| `crates/webhid` | Shared Rust library: message types (NmRequest, NmResponse, IpcRequest, IpcResponse), protocol framing, base64 serde. All JSON field names use camelCase. |
+| `crates/webhid` | Shared Rust library: message types (NmRequest, NmResponse, IpcRequest, IpcResponse), protocol framing, base64 serde, FNV-1a device ID hash. NM wire uses single-char field names + HTTP status codes; packed binary TLVs for hot-path messages. |
 
 ## Control plane
 
@@ -108,7 +108,23 @@ High-frequency operations via binary WebSocket frames in a per-device Web Worker
 
 ### NM mode (optional)
 
-All data routes via NM: `sendReport` → bridge → background → NM host → daemon (JSON + base64). Early fire-and-forget resolves after `window.postMessage` (<0.1ms). Input reports come via NM events → `tabs.sendMessage` → bridge → page.
+All data routes via NM: `sendReport` → bridge → background → NM host → daemon. NM wire is JSON + base64 (Firefox spec requires UTF-8 JSON, binary framing is not allowed). Hot-path messages use packed binary TLVs encoded as base64 inside a single JSON field `{"d":"<b64>"}` to minimize wire overhead.
+
+**Packed TLV formats** (all multi-byte integers little-endian):
+
+| msgType | Direction | Layout | Used for |
+|---------|-----------|--------|----------|
+| 0x01 | daemon → addon | `[0x01][devId u32]([reportId u8][payloadLen u16][payload])*` | input_report (multi-report batch) |
+| 0x02 | addon → daemon | `[0x02][reqId u32][devId u32][reportId u8][payloadLen u16][payload]` | sendReport |
+| 0x04 | addon → daemon | `[0x04][reqId u32][devId u32][reportId u8][payloadLen u16][payload]` | sendFeatureReport |
+
+For packed messages, `reqId` lives inside the TLV (not the JSON `n` field), so the JSON wrapper is just `{"d":"<b64>"}` with no `a`/`n`/`i`/`r` fields. Non-packed messages (enumerate, open, close, receiveFeatureReport, setDataPlane, handshake) use JSON with numeric action codes (`"a":1..8`) and single-char field names.
+
+**Responses** use HTTP status codes in the `s` field (200/201/204/4xx/5xx) instead of separate `ok`/`err` fields. Error responses contain only `{"n":N,"s":<code>}` — no error message string on the wire (the daemon logs it).
+
+**bg→tab IPC:** background.js decodes the base64 TLV and sends the payload as a `Uint8Array` to the tab via `tabs.sendMessage` (structured clone, not zero-copy — `tabs.sendMessage` has no transfer list). Polyfill receives `Uint8Array` directly, no re-decode needed.
+
+Early fire-and-forget resolves after `window.postMessage` (<0.1ms). Input reports come via NM events → `tabs.sendMessage` → bridge → page.
 
 ## Daemon optimizations
 
@@ -121,6 +137,9 @@ All data routes via NM: `sendReport` → bridge → background → NM host → d
 | Per-device `dataplane_mode` | Events sent only to requested channel (NM or WS), no duplicate delivery |
 | Thread-local `WRITE_BUF` / `READ_BUF` | Avoids per-call allocation in hot path |
 | Control token (global, not per-device) | Control WS connects without device open |
+| NM packed TLVs (0x01/0x02/0x04) | Hot-path messages use `{"d":"<b64>"}` wrapper, reqId inside TLV — saves 7-14 bytes vs JSON fields |
+| NM bg→tab Uint8Array transfer | Background decodes base64 once, sends Uint8Array to tab (structured clone) — saves 1 encode + 1 decode per input report |
+| WS close code 4401/4402 | Auth-failure close codes let workers distinguish stale token from network error, trigger token refresh instead of blind retry |
 
 ## Security
 
@@ -139,29 +158,46 @@ FIDO/U2F security keys (YubiKey, Feitian, OnlyKey, Nitrokey, Google Titan, etc.)
 - **Device session token**: generated per `open()`, 128-bit hex. WS data connection must present it as subprotocol.
 - **Control token**: generated on first `handshake` request, 128-bit hex. WS control connection must present it as subprotocol. Allows enumerate/close without device open.
 
+### IPC socket permissions (Linux)
+
+When the daemon runs as root (systemd system service), the Unix socket is created at `/run/webhid/webhid.sock` with mode `0o660` and group `webhid`. Users must be in the `webhid` group to connect via the thin forwarder (`webhid.forwarder_nm_host`):
+
+```sh
+sudo usermod -aG webhid $USER
+# log out + log back in for group change to take effect
+```
+
+Alternatively, users with direct hidraw access (via udev `uaccess` rule) can skip the forwarder entirely by enabling **Daemon as NM host** in addon settings — the daemon speaks NM directly on stdin/stdout, no socket needed.
+
+SO_PEERCRED is not checked because it would be redundant: group membership already enforces that only authorized users can connect. Adding a UID check on top would not increase security, only complexity.
+
 ## Device IDs
 
-Stable, platform-independent hashes:
+Stable, platform-independent hashes (FNV-1a 32-bit):
 ```
-deviceId = djb2_hash("vid:pid:serial:interface:usagePage:usage:rawPath")
+deviceId = fnv1a_32(raw_path_bytes)
 ```
 
-Composite USB devices grouped by (vid, pid, serial); primary interface selected (vendor usagePage ≥ 0xFF00, or first non-boot).
+`raw_path` is the platform-specific device path (Linux: `/dev/hidraw0`, Windows: device interface path, macOS: IOService path). Same physical device in same USB port produces the same hash across reboots. Two devices with identical vid/pid/serial but different physical ports have different paths → different hashes.
+
+The hash is sent as a JSON number in wire fields (`i`, `n`-less packed TLVs) and as a 4-byte little-endian u32 in packed binary TLVs. On the JS side, the unsigned right shift `>>> 0` is mandatory when decoding to avoid signed int32 wraparound for hashes ≥ 0x80000000.
 
 ## Reconnect
 
 All layers auto-reconnect with exponential backoff:
-- **NM host → daemon:** retry socket connect (100ms → 2s, up to 30s)
+- **NM host → daemon:** retry socket connect (100ms → 2s, up to 5s). On timeout, writes `{"s":503,"E":"..."}` error frame to stdout before exiting so the addon logs the reason.
 - **background.js → NM host:** retry `connectNative` (1s → 10s)
-- **Data worker → daemon WS:** retry WebSocket (500ms → 5s)
-- **Control worker → daemon WS:** retry WebSocket (500ms → 5s)
+- **Data worker → daemon WS:** retry WebSocket (500ms → 5s). On auth-failure close code (4401 unknown token / 4402 bad token), halts auto-reconnect and asks bridge for a fresh token via `auth-failed` message.
+- **Control worker → daemon WS:** retry WebSocket (500ms → 5s). Same auth-failure handling as data worker.
 - **Daemon:** detects NM disconnect, closes devices; page receives `disconnect` event, re-opens on `connect` event
 
 ## Settings
 
-Settings are stored in `browser.storage.local`. Global defaults are in `settings-defaults.js`. Per-site overrides are stored under the key `site:<origin>`.
+Settings are stored in `browser.storage.local`. Global defaults + the `SettingsStore` factory live in `js/utils/settings.js`. Per-site overrides are stored under the key `site:<origin>`.
 
-The bridge's `storage.onChanged` listener computes effective settings (global merged with site override) before and after each change, and only acts when the effective value actually changes. This prevents unnecessary worker respawns when a global setting change does not affect the current site's effective value.
+Each consumer (background, bridge, polyfill, worker, control) creates its own `SettingsStore` instance — a Proxy-backed observer that fires listeners only when a value actually changes. Reads are direct property access (`settings.dataPlane`); writes are either assignment (`settings.fireAndForget = false`) or bulk (`settings.set({...})`). Subscriptions via `settings.on('key', cb)` or `settings.on(['k1','k2'], cb)`.
+
+The bridge's `storage.onChanged` listener extracts `changes[k].newValue` from Firefox storage events and calls `settings.set(patch)` — the store handles the diff internally. This replaced an earlier `get()`-based before/after diff that broke when the change was already committed to storage before the listener ran (making before === after for all keys).
 
 ## Message flow examples
 

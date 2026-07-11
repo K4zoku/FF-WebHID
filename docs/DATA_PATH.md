@@ -1,6 +1,6 @@
 # Data Path Analysis
 
-> Codebase: latest main (post-camelCase refactor, post-MessageChannel, post-control-worker)
+> Codebase: latest main (post-packed-TLV, post-SettingsStore, post-NM-error-propagation)
 
 ---
 

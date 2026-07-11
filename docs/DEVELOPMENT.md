@@ -152,17 +152,21 @@ FF-WebHID/
 │   │   ├── bridge.js        Isolated world: control/data routing, control worker, data worker spawn, effective-settings handler
 │   │   ├── worker.js        Data Web Worker: binary WS, MessageChannel input reports, fire-and-forget
 │   │   ├── control.js       Control Web Worker: WS text frames, enumerate/close, auto-reconnect
-│   │   ├── settings.js      Settings page logic
+│   │   ├── settings.js      Settings page logic (global settings UI)
 │   │   ├── popup.js         Popup logic (per-site settings, device list)
-│   │   └── utils/logger.js  Level-based logger + perf timing
+│   │   └── utils/
+│   │       ├── logger.js         Level-based logger (storage-driven)
+│   │       ├── settings.js       GLOBAL_DEFAULTS + SettingsStore Proxy factory
+│   │       ├── http-status.js    HTTP status code helper (isOk, name)
+│   │       └── device-utils.js   Device type guessing for popup icons
 │   ├── html/                Settings + popup HTML
 │   ├── css/                 Styles
 │   ├── icons/ res/          Icons + device type icons
 │
 ├── crates/                  Rust workspace
-│   ├── webhid/              Shared types (NmRequest, NmResponse, IpcRequest, IpcResponse) - all camelCase JSON
+│   ├── webhid/              Shared types (NmRequest, NmResponse, IpcRequest, IpcResponse) + FNV-1a hash + packed TLV parsers. NM wire: single-char fields + HTTP status + packed binary TLVs.
 │   ├── webhid-daemon/       System daemon (hidapi, WS server, adaptive batching, control WS)
-│   └── webhid-native-messaging/  Firefox ↔ daemon thin forwarder
+│   └── webhid-native-messaging/  Firefox ↔ daemon thin forwarder (writes error frame on connect failure)
 │
 ├── manifests/               NM manifests + systemd units + udev rule
 │   ├── webhid.forwarder_nm_host.json   Forwarder NM manifest ({{NM_BIN}})

@@ -298,10 +298,14 @@ Then install the [browser extension](https://addons.mozilla.org/en-US/firefox/ad
 ## Troubleshooting
 
 - **"Cannot connect to the WebHID daemon"**: daemon not running. Start it with the commands above.
-- **"Permission denied"** (Linux non-root): udev rule not installed. Run `sudo make install-udev-rule` or copy `99-webhid.rules` manually.
+- **"Permission denied (os error 13)"** (Linux root daemon, thin forwarder mode): your user is not in the `webhid` group. Fix with `sudo usermod -aG webhid $USER`, then log out and back in. The NM host now logs this with diagnostic hints before exiting.
+- **"Permission denied"** (Linux non-root daemon): udev rule not installed. Run `sudo make install-udev-rule` or copy `99-webhid.rules` manually.
+- **NM host silent failure** (addon paralyzed, no logs): fixed in current version — NM host now writes `{"s":503,"E":"..."}` error frame to stdout before exiting, addon logs `[nm] host error: <reason>`.
 - **Device picker shows "No HID devices found"**: daemon running but no HID devices detected. Check `hidapi` can enumerate: `ls /dev/hidraw*` (Linux).
 - **Badge counter not showing**: ensure the device is opened via `navigator.hid.requestDevice()`, the counter tracks open devices, not paired ones.
 - **NM data plane is slow**: enable Fire-and-forget in settings. If still slow, switch Data Plane to WebSocket.
+- **Daemon restart causes input report freeze**: fixed — workers detect WS close code 4401 (unknown token) and trigger token refresh via bridge (re-handshake for control, re-open for data).
+- **Settings change doesn't take effect**: fixed — `SettingsStore` Proxy observer fires listeners only on actual value change, replacing the old `get()`-based diff that broke after storage commit.
 
 ## Recommended Settings per Platform
 
@@ -309,12 +313,12 @@ Then install the [browser extension](https://addons.mozilla.org/en-US/firefox/ad
 
 | Setting | Recommended | Reason |
 |---------|------------|--------|
-| Daemon as NM host | ON (if running as user daemon) | Eliminates forwarder process + Unix socket |
+| Daemon as NM host | ON (if user has direct hidraw access) or OFF (if using root daemon + webhid group) | Eliminates forwarder process + Unix socket. Skips group membership requirement. |
 | Control Plane | WS | After NM handshake, control ops via WS text frames through control worker (5 to 15ms vs 15 to 40ms) |
 | Data Plane | WS (default) | Binary WS via worker with MessageChannel for max performance. Switch to NM if WS is blocked. |
 | Fire-and-forget | ON | Page latency <0.1ms for sendReport |
 
-**Setup**: Install udev rule + daemon. If using daemon-as-NM-host, install `webhid.daemon_nm_host` manifest via `make install-daemon-nm-host-user`.
+**Setup**: Install daemon (system package or `make install-system`). If using root daemon with thin forwarder, add your user to the `webhid` group: `sudo usermod -aG webhid $USER` (log out + back in). If using daemon-as-NM-host (recommended for users with direct hidraw access via udev `uaccess` rule), install `webhid.daemon_nm_host` manifest via `make install-daemon-nm-host-user` — no group membership needed.
 
 ### Windows
 
@@ -345,5 +349,4 @@ Then install the [browser extension](https://addons.mozilla.org/en-US/firefox/ad
 | Data Plane | NM | Isolates NM path performance (no worker/WS overhead) |
 | Control Plane | NM | Isolates NM control path |
 | Fire-and-forget | OFF | Measure actual NM roundtrip latency |
-| Log Level | Debug | See all message timings |
-| Performance timing | ON | Per-sendReport latency in console |
+| Log Level | Debug | See all message timings + settings change logs |
