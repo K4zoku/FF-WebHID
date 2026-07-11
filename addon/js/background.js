@@ -31,7 +31,7 @@ const EVT_CONNECT = 2;
 const EVT_DISCONNECT = 3;
 
 // NM action codes (must match Rust constants)
-const ACT = { enum: '1', open: '2', close: '3', sr: '4', rfr: '5', sfr: '6', sdp: '7', hs: '8' };
+const ACT = { enum: 1, open: 2, close: 3, sr: 4, rfr: 5, sfr: 6, sdp: 7, hs: 8 };
 
 // Packed binary message type
 const PKG_INPUT_REPORT = 0x01;

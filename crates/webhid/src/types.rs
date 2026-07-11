@@ -213,25 +213,18 @@ pub const PKG_SEND_REPORT: u8 = 0x02;
 
 /// A request received from Firefox via stdin.
 /// Uses numeric action codes and single-char field names for minimal wire size.
+/// Parsed manually in `protocol::read_nm_request` (numeric `a` not supported
+/// by serde's `tag` attribute).
 #[derive(Debug, Deserialize)]
-#[serde(tag = "a")]
 pub enum NmRequest {
-    #[serde(rename = "1")]
     Enumerate { #[serde(default)] id: Option<u32> },
-    #[serde(rename = "2")]
     Open { #[serde(default)] id: Option<u32>, #[serde(rename = "i")] device_id: String },
-    #[serde(rename = "3")]
     Close { #[serde(default)] id: Option<u32>, #[serde(rename = "i")] device_id: String },
     /// Packed sendReport. `d` is base64 of TLV binary.
-    #[serde(rename = "4")]
     SendReport { #[serde(default)] id: Option<u32>, #[serde(rename = "d")] packed: Vec<u8> },
-    #[serde(rename = "5")]
     ReceiveFeatureReport { #[serde(default)] id: Option<u32>, #[serde(rename = "i")] device_id: String, #[serde(rename = "r")] report_id: u8 },
-    #[serde(rename = "6")]
     SendFeatureReport { #[serde(default)] id: Option<u32>, #[serde(rename = "i")] device_id: String, #[serde(rename = "r")] report_id: u8, #[serde(with = "base64_serde", rename = "d")] data: Vec<u8> },
-    #[serde(rename = "7")]
     SetDataPlane { #[serde(default)] id: Option<u32>, #[serde(rename = "i")] device_id: String, #[serde(rename = "m")] mode: String },
-    #[serde(rename = "8")]
     Handshake { #[serde(default)] id: Option<u32> },
 }
 
@@ -502,24 +495,6 @@ mod tests {
 
         let json = serde_json::to_string(&NmResponse::ok_with_data(vec![0xDE])).unwrap();
         assert_eq!(json, r#"{"ok":true,"d":"3g=="}"#);
-    }
-
-    #[test]
-    fn test_nm_request_deserialize() {
-        let json = r#"{"a":"1"}"#;
-        let req: NmRequest = serde_json::from_str(json).unwrap();
-        assert!(matches!(req, NmRequest::Enumerate { id: None }));
-
-        let json = r#"{"a":"2","i":"test-dev"}"#;
-        let req: NmRequest = serde_json::from_str(json).unwrap();
-        assert!(matches!(req, NmRequest::Open { .. }));
-        if let NmRequest::Open { device_id, .. } = req {
-            assert_eq!(device_id, "test-dev");
-        }
-
-        let json = r#"{"a":"3","i":"abc123"}"#;
-        let req: NmRequest = serde_json::from_str(json).unwrap();
-        assert!(matches!(req, NmRequest::Close { .. }));
     }
 
     #[test]

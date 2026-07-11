@@ -34,20 +34,49 @@ where
 pub async fn read_nm_request<R: AsyncRead + Unpin>(
     reader: &mut R,
 ) -> io::Result<NmRequest> {
-    let value: serde_json::Value = read_message(reader).await?;
-    let action = value.get("a").and_then(|v| v.as_str()).unwrap_or("");
-    if action == "4" {
-        let b64 = value.get("d").and_then(|v| v.as_str())
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "sr missing d"))?;
-        let packed = base64::engine::general_purpose::STANDARD
-            .decode(b64)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-        let id = value.get("id").and_then(|v| v.as_u64()).map(|n| n as u32);
-        Ok(NmRequest::SendReport { id, packed })
-    } else {
-        serde_json::from_value(value).map_err(|e|
-            io::Error::new(io::ErrorKind::InvalidData, format!("NM decode: {e}")))
-    }
+    let v: serde_json::Value = read_message(reader).await?;
+    let action = v.get("a")
+        .and_then(|x| x.as_u64())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing 'a' (action)"))? as u8;
+    let id = v.get("id").and_then(|x| x.as_u64()).map(|n| n as u32);
+    Ok(match action {
+        1 => NmRequest::Enumerate { id },
+        2 => NmRequest::Open { id, device_id: get_str(&v, "i")? },
+        3 => NmRequest::Close { id, device_id: get_str(&v, "i")? },
+        4 => NmRequest::SendReport { id, packed: get_b64(&v, "d")? },
+        5 => NmRequest::ReceiveFeatureReport {
+            id, device_id: get_str(&v, "i")?, report_id: get_u8(&v, "r")?,
+        },
+        6 => NmRequest::SendFeatureReport {
+            id, device_id: get_str(&v, "i")?, report_id: get_u8(&v, "r")?,
+            data: get_b64(&v, "d")?,
+        },
+        7 => NmRequest::SetDataPlane {
+            id, device_id: get_str(&v, "i")?, mode: get_str(&v, "m")?,
+        },
+        8 => NmRequest::Handshake { id },
+        _ => return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("unknown action: {action}"),
+        )),
+    })
+}
+
+fn get_str(v: &serde_json::Value, key: &str) -> io::Result<String> {
+    v.get(key).and_then(|x| x.as_str()).map(String::from)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, format!("missing '{key}'")))
+}
+
+fn get_u8(v: &serde_json::Value, key: &str) -> io::Result<u8> {
+    v.get(key).and_then(|x| x.as_u64()).map(|n| n as u8)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, format!("missing '{key}'")))
+}
+
+fn get_b64(v: &serde_json::Value, key: &str) -> io::Result<Vec<u8>> {
+    let s = v.get(key).and_then(|x| x.as_str())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, format!("missing '{key}'")))?;
+    base64::engine::general_purpose::STANDARD.decode(s)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("bad b64 in '{key}': {e}")))
 }
 
 /// Serialise `value` as JSON, prefix with its length, and write to `writer`.
@@ -127,5 +156,50 @@ mod tests {
         let mut buf = Vec::new();
         write_message(&mut buf, &true).await.unwrap();
         assert!(!buf.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_read_nm_request_numeric_action() {
+        use crate::NmRequest;
+        // Enumerate: {"a":1}
+        let mut buf = Vec::new();
+        write_message(&mut buf, &serde_json::json!({"a": 1})).await.unwrap();
+        let mut r: &[u8] = &buf;
+        let req = read_nm_request(&mut r).await.unwrap();
+        assert!(matches!(req, NmRequest::Enumerate { id: None }));
+
+        // Open with id + deviceId
+        let mut buf = Vec::new();
+        write_message(&mut buf, &serde_json::json!({"a": 2, "id": 5, "i": "/dev/hidraw0"})).await.unwrap();
+        let mut r: &[u8] = &buf;
+        let req = read_nm_request(&mut r).await.unwrap();
+        match req {
+            NmRequest::Open { id, device_id } => {
+                assert_eq!(id, Some(5));
+                assert_eq!(device_id, "/dev/hidraw0");
+            }
+            _ => panic!("expected Open"),
+        }
+
+        // Handshake
+        let mut buf = Vec::new();
+        write_message(&mut buf, &serde_json::json!({"a": 8, "id": 7})).await.unwrap();
+        let mut r: &[u8] = &buf;
+        let req = read_nm_request(&mut r).await.unwrap();
+        assert!(matches!(req, NmRequest::Handshake { id: Some(7) }));
+
+        // Unknown action → error
+        let mut buf = Vec::new();
+        write_message(&mut buf, &serde_json::json!({"a": 99})).await.unwrap();
+        let mut r: &[u8] = &buf;
+        let err = read_nm_request(&mut r).await.unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+
+        // Missing 'a' → error
+        let mut buf = Vec::new();
+        write_message(&mut buf, &serde_json::json!({"id": 1})).await.unwrap();
+        let mut r: &[u8] = &buf;
+        let err = read_nm_request(&mut r).await.unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
     }
 }
