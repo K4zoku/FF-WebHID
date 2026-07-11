@@ -267,26 +267,26 @@ pub fn parse_packed_send_report(buf: &[u8]) -> std::io::Result<(&str, u8, &[u8])
 /// Uses single-char field names for minimal wire size.
 #[derive(Debug, Default, Serialize)]
 pub struct NmResponse {
-    #[serde(skip_serializing_if = "Option::is_none", rename = "id")]
+    #[serde(skip_serializing_if = "Option::is_none", rename = "n")]
     pub id: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none", rename = "ok")]
+    #[serde(skip_serializing_if = "Option::is_none", rename = "o")]
     pub success: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none", rename = "err")]
+    #[serde(skip_serializing_if = "Option::is_none", rename = "E")]
     pub error: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none", rename = "devs")]
+    #[serde(skip_serializing_if = "Option::is_none", rename = "D")]
     pub devices: Option<Vec<DeviceInfo>>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "d")]
     #[serde(with = "base64_opt_serde")]
     pub data: Option<Vec<u8>>,
-    #[serde(skip_serializing_if = "Option::is_none", rename = "st")]
+    #[serde(skip_serializing_if = "Option::is_none", rename = "t")]
     pub session_token: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none", rename = "ct")]
+    #[serde(skip_serializing_if = "Option::is_none", rename = "c")]
     pub control_token: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none", rename = "wp")]
+    #[serde(skip_serializing_if = "Option::is_none", rename = "w")]
     pub ws_port: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "e")]
     pub event_type: Option<u8>,
-    #[serde(skip_serializing_if = "Option::is_none", rename = "dev")]
+    #[serde(skip_serializing_if = "Option::is_none", rename = "v")]
     pub device: Option<DeviceInfo>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "i")]
     pub device_id: Option<String>,
@@ -488,13 +488,13 @@ mod tests {
     #[test]
     fn test_nm_response_json_serialize() {
         let json = serde_json::to_string(&NmResponse::ok()).unwrap();
-        assert_eq!(json, r#"{"ok":true}"#);
+        assert_eq!(json, r#"{"o":true}"#);
 
         let json = serde_json::to_string(&NmResponse::err("err")).unwrap();
-        assert_eq!(json, r#"{"ok":false,"err":"err"}"#);
+        assert_eq!(json, r#"{"o":false,"E":"err"}"#);
 
         let json = serde_json::to_string(&NmResponse::ok_with_data(vec![0xDE])).unwrap();
-        assert_eq!(json, r#"{"ok":true,"d":"3g=="}"#);
+        assert_eq!(json, r#"{"o":true,"d":"3g=="}"#);
     }
 
     #[test]

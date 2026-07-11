@@ -38,7 +38,7 @@ pub async fn read_nm_request<R: AsyncRead + Unpin>(
     let action = v.get("a")
         .and_then(|x| x.as_u64())
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing 'a' (action)"))? as u8;
-    let id = v.get("id").and_then(|x| x.as_u64()).map(|n| n as u32);
+    let id = v.get("n").and_then(|x| x.as_u64()).map(|n| n as u32);
     Ok(match action {
         1 => NmRequest::Enumerate { id },
         2 => NmRequest::Open { id, device_id: get_str(&v, "i")? },
@@ -170,7 +170,7 @@ mod tests {
 
         // Open with id + deviceId
         let mut buf = Vec::new();
-        write_message(&mut buf, &serde_json::json!({"a": 2, "id": 5, "i": "/dev/hidraw0"})).await.unwrap();
+        write_message(&mut buf, &serde_json::json!({"a": 2, "n": 5, "i": "/dev/hidraw0"})).await.unwrap();
         let mut r: &[u8] = &buf;
         let req = read_nm_request(&mut r).await.unwrap();
         match req {
@@ -183,7 +183,7 @@ mod tests {
 
         // Handshake
         let mut buf = Vec::new();
-        write_message(&mut buf, &serde_json::json!({"a": 8, "id": 7})).await.unwrap();
+        write_message(&mut buf, &serde_json::json!({"a": 8, "n": 7})).await.unwrap();
         let mut r: &[u8] = &buf;
         let req = read_nm_request(&mut r).await.unwrap();
         assert!(matches!(req, NmRequest::Handshake { id: Some(7) }));
@@ -197,7 +197,7 @@ mod tests {
 
         // Missing 'a' → error
         let mut buf = Vec::new();
-        write_message(&mut buf, &serde_json::json!({"id": 1})).await.unwrap();
+        write_message(&mut buf, &serde_json::json!({"n": 1})).await.unwrap();
         let mut r: &[u8] = &buf;
         let err = read_nm_request(&mut r).await.unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);

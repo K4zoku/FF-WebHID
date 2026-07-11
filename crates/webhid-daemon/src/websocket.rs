@@ -572,24 +572,24 @@ async fn handle_client_text(
         }
     };
 
-    let id = req.get("id").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+    let id = req.get("n").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
     let action = req.get("action").and_then(|v| v.as_str()).unwrap_or("");
 
     let result = match action {
         "enumerate" => {
             match device_mgr.enumerate() {
-                Ok(devices) => serde_json::json!({ "id": id, "ok": true, "devs": devices }),
-                Err(e) => serde_json::json!({ "id": id, "ok": false, "err": e.to_string() }),
+                Ok(devices) => serde_json::json!({ "n": id, "o": true, "D": devices }),
+                Err(e) => serde_json::json!({ "n": id, "o": false, "E": e.to_string() }),
             }
         }
         "close" => {
             match device_mgr.close(device_id, 0) {
-                Ok(()) => serde_json::json!({ "id": id, "ok": true }),
-                Err(e) => serde_json::json!({ "id": id, "ok": false, "err": e.to_string() }),
+                Ok(()) => serde_json::json!({ "n": id, "o": true }),
+                Err(e) => serde_json::json!({ "n": id, "o": false, "E": e.to_string() }),
             }
         }
         _ => {
-            serde_json::json!({ "id": id, "ok": false, "err": format!("unknown action: {action}") })
+            serde_json::json!({ "n": id, "o": false, "E": format!("unknown action: {action}") })
         }
     };
 

@@ -175,12 +175,12 @@
     async #loadDevices() {
       try {
         const response = await browser.runtime.sendMessage({ action: "enumerate" });
-        if (response && response.ok) {
-          this.devices = response.devs || [];
+        if (response && response.o) {
+          this.devices = response.D || [];
           await this.#renderDevices();
         } else {
           this.devices = [];
-          const errMsg = response?.err || "Unknown error";
+          const errMsg = response?.E || "Unknown error";
           const userMsg = this.#classifyError(errMsg);
           __webhid.logger.error('[WebHID] enumerate failed:', errMsg);
           this.#showMessage(userMsg, true);
@@ -419,7 +419,7 @@
         __webhid.logger.info('[bridge] control worker ready');
       } else if (data.type === 'closed') {
         __webhid.logger.warn('[bridge] control worker WS closed; will auto-reconnect');
-        for (const [, { resolve }] of _controlPending) resolve({ ok: false, err: 'WS control closed' });
+        for (const [, { resolve }] of _controlPending) resolve({ o: false, E: 'WS control closed' });
         _controlPending.clear();
       } else if (data.type === 'response' && data.id && _controlPending.has(data.id)) {
         const { resolve } = _controlPending.get(data.id);
@@ -435,14 +435,14 @@
   function _terminateControlWorker() {
     if (_controlPort) { _controlPort.onmessage = null; _controlPort.close(); _controlPort = null; }
     if (_controlWorker) { _controlWorker.postMessage({ type: 'disconnect' }); _controlWorker.terminate(); _controlWorker = null; }
-    for (const [, { resolve }] of _controlPending) resolve({ ok: false, err: 'WS control closed' });
+    for (const [, { resolve }] of _controlPending) resolve({ o: false, E: 'WS control closed' });
     _controlPending.clear();
   }
 
   function _sendControlCommand(action, payload) {
     return new Promise((resolve) => {
       if (!_controlPort) {
-        resolve({ ok: false, err: 'WS control not connected' });
+        resolve({ o: false, E: 'WS control not connected' });
         return;
       }
       const id = _controlReqId++;
@@ -547,9 +547,9 @@
         if (cbMap && cbMap.has(data.reqId)) {
           const cb = cbMap.get(data.reqId);
           cbMap.delete(data.reqId);
-          if (data.error) cb({ ok: false, err: data.error });
-          else if (data.data) cb({ ok: true, d: data.data });
-          else cb({ ok: true });
+          if (data.error) cb({ o: false, E: data.error });
+          else if (data.data) cb({ o: true, d: data.data });
+          else cb({ o: true });
         }
       }
     };
@@ -579,8 +579,8 @@
   (async () => {
     try {
       const resp = await browser.runtime.sendMessage({ action: 'handshake' });
-      if (resp.ok && resp.wp) {
-        _wsPort = resp.wp;
+      if (resp.o && resp.w) {
+        _wsPort = resp.w;
         const global = await browser.storage.local.get(__webhid.GLOBAL_DEFAULTS);
         let cp = global.controlPlane;
         const origin = window.location.origin;
@@ -591,8 +591,8 @@
           if (ss.controlPlane !== undefined) cp = ss.controlPlane;
         }
         _controlPlane = cp;
-        if (cp === 'ws' && resp.ct) {
-          _spawnControlWorker(resp.ct, resp.wp);
+        if (cp === 'ws' && resp.c) {
+          _spawnControlWorker(resp.c, resp.w);
         }
       }
     } catch (e) {
@@ -658,9 +658,9 @@
           let cbMap = _workerCallbacks.get(deviceId);
           if (!cbMap) { cbMap = new Map(); _workerCallbacks.set(deviceId, cbMap); }
           cbMap.set(id, (data) => {
-            const result = data.error ? { ok: false, err: data.error }
-                        : data.data ? { ok: true, d: data.data }
-                        : { ok: data.ok !== false };
+            const result = data.error ? { o: false, E: data.error }
+                        : data.data ? { o: true, d: data.data }
+                        : { o: true };
             const xfers = result.d instanceof Uint8Array ? [result.d.buffer] : [];
             window.postMessage({ __webhid_bridge: "res", id, result }, "*", xfers.length ? xfers : undefined);
           });
@@ -682,9 +682,9 @@
           let cbMap = _workerCallbacks.get(deviceId);
           if (!cbMap) { cbMap = new Map(); _workerCallbacks.set(deviceId, cbMap); }
           cbMap.set(id, (data) => {
-            const result = data.error ? { ok: false, err: data.error }
-                        : data.data ? { ok: true, d: data.data }
-                        : { ok: data.ok !== false };
+            const result = data.error ? { o: false, E: data.error }
+                        : data.data ? { o: true, d: data.data }
+                        : { o: true };
             const xfers = result.d instanceof Uint8Array ? [result.d.buffer] : [];
             window.postMessage({ __webhid_bridge: "res", id, result }, "*", xfers.length ? xfers : undefined);
           });
@@ -709,7 +709,7 @@
         const response = await browser.runtime.sendMessage(msg);
         window.postMessage({ __webhid_bridge: "res", id, result: response }, "*");
       } catch (error) {
-        window.postMessage({ __webhid_bridge: "res", id, result: { ok: false, err: error.message } }, "*");
+        window.postMessage({ __webhid_bridge: "res", id, result: { o: false, E: error.message } }, "*");
       }
       return;
     }
@@ -764,12 +764,12 @@
       const msg = Object.assign({ action }, payload || {});
       const response = await browser.runtime.sendMessage(msg);
 
-      if (action === "open" && response.ok && response.st) {
+      if (action === "open" && response.o && response.t) {
         const deviceId = response.i;
         _openDevices.add(deviceId);
-        _sessionTokens.set(deviceId, response.st);
+        _sessionTokens.set(deviceId, response.t);
         browser.runtime.sendMessage({ action: "device-count-changed", count: _openDevices.size }).catch(() => {});
-        __webhid.logger.debug('[bridge] open ok deviceId=' + deviceId + ' wsPort=' + response.wp);
+        __webhid.logger.debug('[bridge] open ok deviceId=' + deviceId + ' wsPort=' + response.w);
         const origin = window.location.origin;
         const siteKey = origin ? `site:${origin}` : null;
 
@@ -788,7 +788,7 @@
         }).catch(() => {});
 
         if (dataPlane === 'ws') {
-          _spawnDataPlane(deviceId, response.st, response.wp || _wsPort);
+          _spawnDataPlane(deviceId, response.t, response.w || _wsPort);
         }
       }
 
@@ -807,7 +807,7 @@
         {
           __webhid_bridge: "res",
           id,
-          result: { ok: false, err: error.message },
+          result: { o: false, E: error.message },
         },
         "*",
       );
@@ -821,7 +821,7 @@
     if (message.action === "webhid-device-event" && message.event) {
       const evt = message.event;
       if (evt.e === 1) {
-        _wsPort = evt.wp;
+        _wsPort = evt.w;
         __webhid.logger.info('[bridge] handshake: wsPort=' + _wsPort);
         return;
       }
@@ -897,9 +897,9 @@
       __webhid.logger.info('[bridge] control plane changed:', cp);
       if (cp === 'ws' && _wsPort && !_controlWorker) {
         const resp = await browser.runtime.sendMessage({ action: 'handshake' });
-        if (resp.ok && resp.ct && resp.wp) {
-          _wsPort = resp.wp;
-          _spawnControlWorker(resp.ct, resp.wp);
+        if (resp.o && resp.c && resp.w) {
+          _wsPort = resp.w;
+          _spawnControlWorker(resp.c, resp.w);
         }
       } else if (cp === 'nm' && _controlWorker) {
         _terminateControlWorker();

@@ -60,7 +60,7 @@ function _doConnect() {
     if (typeof data !== 'string') return;
     try {
       const msg = JSON.parse(data);
-      if (_port) _port.postMessage({ type: 'response', id: msg.id, result: msg });
+      if (_port) _port.postMessage({ type: 'response', id: msg.n, result: msg });
     } catch {}
   };
 }
@@ -78,8 +78,8 @@ function _scheduleReconnect() {
 
 function _sendCommand(id, action, payload) {
   if (!ws || ws.readyState !== WebSocket.OPEN) {
-    if (_port) _port.postMessage({ type: 'response', id, result: { ok: false, err: 'ws not open' } });
+    if (_port) _port.postMessage({ type: 'response', id, result: { o: false, E: 'ws not open' } });
     return;
   }
-  ws.send(JSON.stringify({ id, action, ...(payload || {}) }));
+  ws.send(JSON.stringify({ n: id, action, ...(payload || {}) }));
 }
