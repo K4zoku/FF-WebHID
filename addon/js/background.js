@@ -20,6 +20,11 @@ function unregisterDeviceTab(deviceId, tabId) {
   if (tabs.size === 0) _deviceTabMap.delete(deviceId);
 }
 
+function isTabAuthorizedForDevice(tabId, deviceId) {
+  const tabs = _deviceTabMap.get(deviceId);
+  return !!tabs && tabs.has(tabId);
+}
+
 function purgeTab(tabId) {
   if (tabId == null) return;
   for (const [deviceId, tabs] of _deviceTabMap) {
@@ -45,6 +50,13 @@ function tabsForEvent(message) {
   if (eventType === EVT_HANDSHAKE || !message.i) return null;
   const tabs = _deviceTabMap.get(message.i);
   return tabs && tabs.size > 0 ? [...tabs] : null;
+}
+
+async function isDeviceAllowedForOrigin(origin, deviceId) {
+  if (!origin || !deviceId) return false;
+  const key = encodeURIComponent(origin);
+  const result = await browser.storage.local.get(key);
+  return (result[key] || []).includes(deviceId);
 }
 
 const NM_HOST_FORWARDER = "webhid.forwarder_nm_host";
@@ -280,12 +292,16 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     case 'open': {
       const tabId = sender.tab?.id;
-      NativeMessaging.openDevice(request.deviceId)
-        .then((response) => {
-          if (__webhid.http.isOk(response.s) && response.i) registerDeviceTab(response.i, tabId);
-          sendResponse(response);
-        })
-        .catch((e) => sendResponse({ s: 500 }));
+      const origin = sender.tab?.url ? new URL(sender.tab.url).origin : null;
+      isDeviceAllowedForOrigin(origin, request.deviceId).then((allowed) => {
+        if (!allowed) { sendResponse({ s: 403 }); return; }
+        NativeMessaging.openDevice(request.deviceId)
+          .then((response) => {
+            if (__webhid.http.isOk(response.s) && response.i) registerDeviceTab(response.i, tabId);
+            sendResponse(response);
+          })
+          .catch((e) => sendResponse({ s: 500 }));
+      });
       return true;
     }
 
@@ -301,12 +317,14 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     case 'setdataplane':
+      if (!isTabAuthorizedForDevice(sender.tab?.id, request.deviceId)) { sendResponse({ s: 403 }); return true; }
       NativeMessaging.sendRequest({ a: ACT.sdp, i: request.deviceId, m: request.mode })
         .then(sendResponse)
         .catch((e) => sendResponse({ s: 500 }));
       return true;
 
     case 'sendreport':
+      if (!isTabAuthorizedForDevice(sender.tab?.id, request.deviceId)) { sendResponse({ s: 403 }); return true; }
       __webhid.logger.debug('sendreport: deviceId=' + request.deviceId + ' reportId=' + (request.reportId || 0) + ' dataLen=' + (request.data?.length ?? 'undefined') + ' dataCtor=' + (request.data?.constructor?.name ?? 'undefined'));
       NativeMessaging.sendReport(request.deviceId, request.reportId || 0, request.data)
         .then((resp) => { __webhid.logger.debug('sendreport resp:', resp); sendResponse(resp); })
@@ -314,12 +332,14 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true;
 
     case 'receivefeaturereport':
+      if (!isTabAuthorizedForDevice(sender.tab?.id, request.deviceId)) { sendResponse({ s: 403 }); return true; }
       NativeMessaging.receiveFeatureReport(request.deviceId, request.reportId)
         .then(sendResponse)
         .catch((e) => sendResponse({ s: 500 }));
       return true;
 
     case 'sendfeaturereport':
+      if (!isTabAuthorizedForDevice(sender.tab?.id, request.deviceId)) { sendResponse({ s: 403 }); return true; }
       NativeMessaging.sendFeatureReport(request.deviceId, request.reportId || 0, request.data)
         .then(sendResponse)
         .catch((e) => sendResponse({ s: 500 }));
