@@ -92,9 +92,7 @@
   // via a bridge request and updated via bridge-pushed `settings` events.
 
   const _defs = globalThis.__webhid.GLOBAL_DEFAULTS;
-  let _dataPlane = _defs.dataPlane;
-  let _fireAndForget = _defs.fireAndForget;
-
+  const settings = __webhid.createSettingsStore(_defs);
 
   // Listen for responses, events, and settings pushes from the bridge.
   window.addEventListener("message", (event) => {
@@ -109,10 +107,7 @@
       return;
     }
     if (event.data.__webhid_bridge === "settings") {
-      const s = event.data.settings;
-      if (s.dataPlane !== undefined) { _dataPlane = s.dataPlane; __webhid.logger.info('[webhid] data plane changed: ' + _dataPlane); }
-      if (s.fireAndForget !== undefined) { _fireAndForget = s.fireAndForget; __webhid.logger.info('[webhid] fire-and-forget: ' + _fireAndForget); }
-      if (s.logLevel !== undefined && __webhid.logger.applyLevel) __webhid.logger.applyLevel(s.logLevel);
+      settings.set(event.data.settings || {});
     }
   });
 
@@ -140,13 +135,16 @@
     window.postMessage(msg, "*", xfers.length ? xfers : undefined);
   }
 
+  // Subscribe to settings changes for logging + logLevel.
+  settings.on('dataPlane', (v) => __webhid.logger.info('[webhid] data plane changed: ' + v));
+  settings.on('fireAndForget', (v) => __webhid.logger.info('[webhid] fire-and-forget: ' + v));
+  settings.on('logLevel', (v) => { if (__webhid.logger.applyLevel) __webhid.logger.applyLevel(v); });
+
   // Fetch initial settings from the bridge (which has browser.storage access).
   sendRequest("getSettings", {}).then((s) => {
     if (!s) return;
-    if (s.dataPlane !== undefined) _dataPlane = s.dataPlane;
-    if (s.fireAndForget !== undefined) _fireAndForget = s.fireAndForget;
-    if (s.logLevel !== undefined && __webhid.logger.applyLevel) __webhid.logger.applyLevel(s.logLevel);
-    __webhid.logger.info('[webhid] data plane: ' + _dataPlane + ' (fire-and-forget: ' + _fireAndForget + ')');
+    settings.set(s);
+    __webhid.logger.info('[webhid] data plane: ' + settings.dataPlane + ' (fire-and-forget: ' + settings.fireAndForget + ')');
   });
 
   // ── Event classes ────────────────────────────────────────────────────────
@@ -234,7 +232,7 @@
         });
         if (__webhid.http.isOk(response.s)) {
           this.#opened = true;
-          __webhid.logger.info('[webhid] open deviceId=' + this.#deviceId + ' dataPlane=' + _dataPlane);
+          __webhid.logger.info('[webhid] open deviceId=' + this.#deviceId + ' dataPlane=' + settings.dataPlane);
           this.dispatchEvent(new Event("open"));
           return true;
         }
@@ -275,9 +273,9 @@
         : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
       const buffer = view.slice();
       try {
-        const action = _dataPlane === 'nm' ? "sendreport" : "worker-send";
+        const action = settings.dataPlane === 'nm' ? "sendreport" : "worker-send";
         __webhid.logger.debug('[webhid] sendReport reportId=' + reportId + ' len=' + buffer.length);
-        if (_fireAndForget) {
+        if (settings.fireAndForget) {
           sendFireAndForget(action, {
             deviceId: this.#deviceId,
             reportId: reportId,
@@ -303,7 +301,7 @@
       if (!this.opened)
         throw new DOMException("Device is not open", "InvalidStateError");
       try {
-        const action = _dataPlane === 'nm' ? "receivefeaturereport" : "worker-receiveFeature";
+        const action = settings.dataPlane === 'nm' ? "receivefeaturereport" : "worker-receiveFeature";
         const response = await sendRequest(action, {
           deviceId: this.#deviceId,
           reportId: reportId,
@@ -328,8 +326,8 @@
       const buffer = view.slice();
       __webhid.logger.debug('[webhid] sendFeatureReport reportId=' + reportId + ' len=' + buffer.length);
       try {
-        const action = _dataPlane === 'nm' ? "sendfeaturereport" : "worker-sendFeature";
-        if (_fireAndForget) {
+        const action = settings.dataPlane === 'nm' ? "sendfeaturereport" : "worker-sendFeature";
+        if (settings.fireAndForget) {
           sendFireAndForget(action, {
             deviceId: this.#deviceId,
             reportId: reportId,

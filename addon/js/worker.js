@@ -9,7 +9,8 @@ const WS_CLOSE_UNKNOWN_TOKEN = 4401;
 const WS_CLOSE_BAD_TOKEN = 4402;
 let ws = null, _connectMsg = null;
 let _nextReqId = 1;
-let _fireAndForget = self.__webhid.GLOBAL_DEFAULTS.fireAndForget;
+const settings = __webhid.createSettingsStore(self.__webhid.GLOBAL_DEFAULTS);
+settings.on('logLevel', (v) => logger.applyLevel(v));
 const _pending = new Map();
 let _reconnectTimer = null;
 let _reconnectDelay = 500;
@@ -23,8 +24,7 @@ self.onmessage = ({ data: msg, ports }) => {
     return;
   }
   if (msg.type === 'settings') {
-    if (msg.fireAndForget !== undefined) _fireAndForget = msg.fireAndForget !== false;
-    if (msg.logLevel !== undefined) { logger.applyLevel(msg.logLevel); }
+    settings.set(msg);
     return;
   }
   if (msg.type === 'send') return handleSend(msg, MSG_SEND_REPORT);
@@ -34,7 +34,7 @@ self.onmessage = ({ data: msg, ports }) => {
 
 function connect(msg) {
   _connectMsg = msg;
-  if (msg.logLevel !== undefined) { logger.applyLevel(msg.logLevel); }
+  if (msg.logLevel !== undefined) settings.logLevel = msg.logLevel;
   logger.debug('[worker] connect wsPort=' + msg.wsPort + ' reportSize=' + (msg.reportSize || 64));
   _doConnect();
 }
@@ -137,7 +137,7 @@ function handleSend(msg, msgType) {
   frame[1] = reqId & 0xFF; frame[2] = (reqId >> 8) & 0xFF; frame[3] = (reqId >> 16) & 0xFF; frame[4] = (reqId >> 24) & 0xFF;
   frame[5] = msg.reportId;
   frame.set(payload, 6);
-  if (_fireAndForget) {
+  if (settings.fireAndForget) {
     ws.send(frame);
     self.postMessage({ type: 'sendResult', reqId: msg.reqId, success: true });
     return;

@@ -5,20 +5,22 @@ const { logger } = self.__webhid;
 // WS close codes (4xxx = application-defined, must match daemon).
 const WS_CLOSE_UNKNOWN_TOKEN = 4401;
 const WS_CLOSE_BAD_TOKEN = 4402;
+const settings = __webhid.createSettingsStore(self.__webhid.GLOBAL_DEFAULTS);
+settings.on('logLevel', (v) => logger.applyLevel(v));
 let ws = null, _port = null, _connectMsg = null;
 let _reconnectTimer = null, _reconnectDelay = 500;
 
 self.onmessage = ({ data: msg, ports }) => {
   if (msg.type === 'connect') {
     _connectMsg = msg;
-    if (msg.logLevel !== undefined) logger.applyLevel(msg.logLevel);
+    if (msg.logLevel !== undefined) settings.logLevel = msg.logLevel;
     if (ports && ports[0]) {
       _port = ports[0];
       _port.onmessage = ({ data: pmsg }) => {
         if (pmsg.type === 'command') {
           _sendCommand(pmsg.id, pmsg.action, pmsg.payload);
         } else if (pmsg.type === 'settings') {
-          if (pmsg.logLevel !== undefined) logger.applyLevel(pmsg.logLevel);
+          settings.set(pmsg);
         } else if (pmsg.type === 'disconnect') {
           if (ws) { ws.onclose = null; ws.close(); ws = null; }
           _connectMsg = null;
@@ -32,7 +34,7 @@ self.onmessage = ({ data: msg, ports }) => {
   }
   // Fallback for messages sent via worker.postMessage (not port)
   if (msg.type === 'settings') {
-    if (msg.logLevel !== undefined) logger.applyLevel(msg.logLevel);
+    settings.set(msg);
     return;
   }
 };

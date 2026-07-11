@@ -384,7 +384,7 @@
   const _workerQueues = new Map();
   const _workerPorts = new Map(); // deviceId → true (port active, skip bridge re-forward)
   let _wsPort = null;
-  let _controlPlane = 'nm';
+  const settings = __webhid.createSettingsStore(__webhid.GLOBAL_DEFAULTS);
   let _controlWorker = null;
   let _controlPort = null;
   const _controlPending = new Map();
@@ -394,17 +394,19 @@
   async function _spawnControlWorker(token, wsPort) {
     if (_controlWorker) return;
     try {
-      const [loggerResp, defaultsResp, controlResp] = await Promise.all([
+      const [loggerResp, defaultsResp, storeResp, controlResp] = await Promise.all([
         fetch(browser.runtime.getURL('js/utils/logger.js')),
         fetch(browser.runtime.getURL('js/utils/settings-defaults.js')),
+        fetch(browser.runtime.getURL('js/utils/settings-store.js')),
         fetch(browser.runtime.getURL('js/control.js')),
       ]);
-      const [loggerCode, defaultsCode, controlCode] = await Promise.all([
+      const [loggerCode, defaultsCode, storeCode, controlCode] = await Promise.all([
         loggerResp.text(),
         defaultsResp.text(),
+        storeResp.text(),
         controlResp.text(),
       ]);
-      const blob = new Blob([loggerCode + '\n' + defaultsCode + '\n' + controlCode], { type: 'application/javascript' });
+      const blob = new Blob([loggerCode + '\n' + defaultsCode + '\n' + storeCode + '\n' + controlCode], { type: 'application/javascript' });
       _controlWorker = new Worker(URL.createObjectURL(blob));
     } catch (e) {
       __webhid.logger.error('[bridge] control worker spawn failed:', e);
@@ -511,17 +513,19 @@
     if (_workers.has(deviceId)) return;
     let worker;
     try {
-      const [loggerResp, defaultsResp, workerResp] = await Promise.all([
+      const [loggerResp, defaultsResp, storeResp, workerResp] = await Promise.all([
         fetch(browser.runtime.getURL('js/utils/logger.js')),
         fetch(browser.runtime.getURL('js/utils/settings-defaults.js')),
+        fetch(browser.runtime.getURL('js/utils/settings-store.js')),
         fetch(browser.runtime.getURL('js/worker.js')),
       ]);
-      const [loggerCode, defaultsCode, workerCode] = await Promise.all([
+      const [loggerCode, defaultsCode, storeCode, workerCode] = await Promise.all([
         loggerResp.text(),
         defaultsResp.text(),
+        storeResp.text(),
         workerResp.text(),
       ]);
-      const blob = new Blob([loggerCode + '\n' + defaultsCode + '\n' + workerCode], { type: 'application/javascript' });
+      const blob = new Blob([loggerCode + '\n' + defaultsCode + '\n' + storeCode + '\n' + workerCode], { type: 'application/javascript' });
       worker = new Worker(URL.createObjectURL(blob));
     } catch (e) {
       __webhid.logger.error('[bridge] worker fetch/spawn failed:', e);
@@ -633,16 +637,17 @@
       if (__webhid.http.isOk(resp.s) && resp.w) {
         _wsPort = resp.w;
         const global = await browser.storage.local.get(__webhid.GLOBAL_DEFAULTS);
-        let cp = global.controlPlane;
         const origin = window.location.origin;
         const siteKey = origin ? `site:${origin}` : null;
         if (siteKey) {
           const siteResult = await browser.storage.local.get(siteKey);
           const ss = siteResult[siteKey] || {};
-          if (ss.controlPlane !== undefined) cp = ss.controlPlane;
+          for (const k of Object.keys(__webhid.GLOBAL_DEFAULTS)) {
+            if (ss[k] !== undefined) global[k] = ss[k];
+          }
         }
-        _controlPlane = cp;
-        if (cp === 'ws' && resp.c) {
+        settings.set(global);
+        if (settings.controlPlane === 'ws' && resp.c) {
           _spawnControlWorker(resp.c, resp.w);
         }
       }
@@ -674,7 +679,7 @@
             if (ss[k] !== undefined) global[k] = ss[k];
           }
         }
-        _controlPlane = global.controlPlane;
+        settings.set(global);
         window.postMessage({ __webhid_bridge: "res", id, result: global }, "*");
       } catch (e) {
         window.postMessage({ __webhid_bridge: "res", id, result: {} }, "*");
@@ -806,7 +811,7 @@
     try {
       // WS control plane: route enumerate/close via control worker.
       // open always goes via NM (needs sessionToken per device).
-      if (_controlPlane === 'ws' && _controlPort
+      if (settings.controlPlane === 'ws' && _controlPort
           && (action === 'enumerate' || action === 'close')) {
         const response = await _sendControlCommand(action, payload || {});
         window.postMessage({ __webhid_bridge: "res", id, result: response }, "*");
@@ -822,17 +827,8 @@
         _sessionTokens.set(deviceId, response.t);
         browser.runtime.sendMessage({ action: "device-count-changed", count: _openDevices.size }).catch(() => {});
         __webhid.logger.debug('[bridge] open ok deviceId=' + deviceId + ' wsPort=' + response.w);
-        const origin = window.location.origin;
-        const siteKey = origin ? `site:${origin}` : null;
 
-        const globalDefaults = await browser.storage.local.get(__webhid.GLOBAL_DEFAULTS);
-        let dataPlane = globalDefaults.dataPlane;
-        if (siteKey) {
-          const siteResult = await browser.storage.local.get(siteKey);
-          const ss = siteResult[siteKey] || {};
-          if (ss.dataPlane !== undefined) dataPlane = ss.dataPlane;
-        }
-
+        const dataPlane = settings.dataPlane;
         browser.runtime.sendMessage({
           action: "setdataplane",
           deviceId: deviceId,
@@ -881,102 +877,77 @@
     }
   });
 
-  browser.storage.onChanged.addListener(async (changes, area) => {
-    if (area !== 'local') return;
+  // ── Settings observer ─────────────────────────────────────────────
+  // SettingsStore holds current effective values. storage.onChanged pushes
+  // new values in; SettingsStore.set() returns only keys that actually
+  // changed (comparing against current values), which avoids the old
+  // get()-based before/after diff bug where reading storage after commit
+  // made before === after for all changed keys.
 
-    const origin = window.location.origin;
-    const siteKey = origin ? `site:${origin}` : null;
-
-    // Compute effective settings BEFORE the change (what we currently have).
-    const before = await browser.storage.local.get(__webhid.GLOBAL_DEFAULTS);
-    if (siteKey) {
-      const siteResult = await browser.storage.local.get(siteKey);
-      const ss = siteResult[siteKey] || {};
-      for (const k of Object.keys(__webhid.GLOBAL_DEFAULTS)) {
-        if (ss[k] !== undefined) before[k] = ss[k];
-      }
-    }
-
-    // Determine which keys changed (global or site-level).
-    const changed = {};
-    for (const k of ['dataPlane', 'controlPlane', 'fireAndForget', 'logLevel']) {
-      if (changes[k]) changed[k] = changes[k].newValue;
-      if (siteKey && changes[siteKey]) {
-        const ss = changes[siteKey].newValue || {};
-        if (ss[k] !== undefined) changed[k] = ss[k];
-      }
-    }
-
-    // Compute effective settings AFTER the change.
-    const after = { ...before };
-    for (const [k, v] of Object.entries(changed)) {
-      after[k] = v;
-    }
-
-    // Only act on settings whose EFFECTIVE value actually changed.
-    const effective = {};
-    for (const k of Object.keys(changed)) {
-      if (before[k] !== after[k]) {
-        effective[k] = after[k];
-      }
-    }
-
-    if (Object.keys(effective).length === 0) return;
-
-    // Push changed settings to the page.
-    {
-      const settings = {};
-      for (const k of Object.keys(effective)) {
-        settings[k] = effective[k];
-      }
-      window.postMessage({ __webhid_bridge: "settings", settings }, "*");
-    }
-
-    // Forward fire-and-forget / logLevel to workers (only if changed).
-    const workerMsg = { type: 'settings' };
-    let hasWorkerSettings = false;
-    if (effective.fireAndForget !== undefined) { workerMsg.fireAndForget = effective.fireAndForget; hasWorkerSettings = true; }
-    if (effective.logLevel !== undefined) { workerMsg.logLevel = effective.logLevel; hasWorkerSettings = true; }
-    if (hasWorkerSettings) {
-      for (const worker of _workers.values()) worker.postMessage(workerMsg);
-      if (_controlWorker) _controlWorker.postMessage(workerMsg);
-    }
-
-    // Control plane change: only act if effective value changed.
-    if (effective.controlPlane !== undefined) {
-      const cp = effective.controlPlane;
-      _controlPlane = cp;
-      __webhid.logger.info('[bridge] control plane changed:', cp);
-      if (cp === 'ws' && _wsPort && !_controlWorker) {
-        const resp = await browser.runtime.sendMessage({ action: 'handshake' });
+  function _applyControlPlane(cp) {
+    __webhid.logger.info('[bridge] control plane changed:', cp);
+    if (cp === 'ws' && _wsPort && !_controlWorker) {
+      browser.runtime.sendMessage({ action: 'handshake' }).then((resp) => {
         if (__webhid.http.isOk(resp.s) && resp.c && resp.w) {
           _wsPort = resp.w;
           _spawnControlWorker(resp.c, resp.w);
         }
-      } else if (cp === 'nm' && _controlWorker) {
-        _terminateControlWorker();
-      }
+      }).catch(() => {});
+    } else if (cp === 'nm' && _controlWorker) {
+      _terminateControlWorker();
     }
+  }
 
-    // Data plane change: only act if effective value changed.
-    if (effective.dataPlane !== undefined) {
-      const dp = effective.dataPlane;
-      for (const id of _openDevices) { _despawnDataPlane(id); }
-
-      if (dp === 'ws') {
-        for (const id of _openDevices) {
-          const token = _sessionTokens.get(id);
-          if (token) _spawnDataPlane(id, token, _wsPort);
-        }
-      }
+  function _applyDataPlane(dp) {
+    for (const id of _openDevices) { _despawnDataPlane(id); }
+    if (dp === 'ws') {
       for (const id of _openDevices) {
-        browser.runtime.sendMessage({
-          action: "setdataplane",
-          deviceId: id,
-          mode: dp,
-        }).catch(() => {});
+        const token = _sessionTokens.get(id);
+        if (token) _spawnDataPlane(id, token, _wsPort);
       }
-      __webhid.logger.info('[bridge] data plane changed:', dp, 'open devices:', _openDevices.size);
     }
+    for (const id of _openDevices) {
+      browser.runtime.sendMessage({
+        action: "setdataplane",
+        deviceId: id,
+        mode: dp,
+      }).catch(() => {});
+    }
+    __webhid.logger.info('[bridge] data plane changed:', dp, 'open devices:', _openDevices.size);
+  }
+
+  // Subscribe local effects — fire only when SettingsStore detects a real change.
+  settings.on('controlPlane', (cp) => _applyControlPlane(cp));
+  settings.on('dataPlane', (dp) => _applyDataPlane(dp));
+
+  // Push any settings change to page + workers.
+  settings.on(['dataPlane', 'controlPlane', 'fireAndForget', 'logLevel'], () => {
+    const all = settings.getAll();
+    const patch = {};
+    for (const k of ['dataPlane', 'controlPlane', 'fireAndForget', 'logLevel']) {
+      patch[k] = all[k];
+    }
+    window.postMessage({ __webhid_bridge: "settings", settings: patch }, "*");
+    const workerMsg = { type: 'settings', ...patch };
+    for (const worker of _workers.values()) worker.postMessage(workerMsg);
+    if (_controlWorker) _controlWorker.postMessage(workerMsg);
+  });
+
+  browser.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return;
+    const origin = window.location.origin;
+    const siteKey = origin ? `site:${origin}` : null;
+    const patch = {};
+    for (const k of Object.keys(__webhid.GLOBAL_DEFAULTS)) {
+      if (changes[k]) patch[k] = changes[k].newValue;
+    }
+    if (siteKey && changes[siteKey]) {
+      const ss = changes[siteKey].newValue || {};
+      for (const k of Object.keys(ss)) patch[k] = ss[k];
+    }
+    if (Object.keys(patch).length === 0) return;
+    // SettingsStore.set() returns only keys that actually changed vs current
+    // values — this is the correct diff, unlike the old get()-based approach.
+    settings.set(patch);
   });
 })();
