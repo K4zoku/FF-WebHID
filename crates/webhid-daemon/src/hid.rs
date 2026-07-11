@@ -17,37 +17,15 @@ thread_local! {
 // device_id: stable, platform-independent identifier
 // ---------------------------------------------------------------------------
 
-/// Generate a stable device identifier from HID metadata.
+/// Generate a stable `u32` device identifier from the device path.
 ///
-/// Format: hash of (vid, pid, serial, interface_number, usage_page, usage,
-/// physical_location).  This is stable across reboots (as long as the device
-/// stays plugged into the same USB port) and distinguishes composite USB
-/// devices with multiple HID interfaces.
-pub fn make_device_id(info: &HidDeviceInfo) -> String {
-    let serial = info.serial_number().unwrap_or("");
-    let interface = info.interface_number();
-    let usage_page = info.usage_page();
-    let usage = info.usage();
-    // Physical location: on Linux, hidapi path encodes it. On Windows,
-    // the instance ID contains bus/port info. We use the raw path here
-    // for disambiguation; two devices with identical vid/pid/serial but
-    // different physical ports will have different paths.
-    let path = info.path().to_string_lossy();
-    let ident = format!(
-        "{:04x}:{:04x}:{}:{}:{:04x}:{:04x}:{}",
-        info.vendor_id(),
-        info.product_id(),
-        serial,
-        interface,
-        usage_page,
-        usage,
-        path,
-    );
-    let mut hash: u64 = 5381;
-    for b in ident.bytes() {
-        hash = hash.wrapping_mul(33).wrapping_add(b as u64);
-    }
-    format!("{:016x}", hash)
+/// Uses FNV-1a 32-bit hash of the platform-specific device path
+/// (Linux: `/dev/hidraw0` / syspath; Windows: device interface path;
+/// macOS: IOService path). Same device in same port → same hash across
+/// reboots. Two devices with identical vid/pid/serial but different
+/// physical ports have different paths → different hashes.
+pub fn make_device_id(info: &HidDeviceInfo) -> u32 {
+    webhid::hash_device_id(&info.path().to_string_lossy())
 }
 
 // ---------------------------------------------------------------------------
@@ -169,9 +147,9 @@ pub fn is_blocked_pub(info: &HidDeviceInfo) -> bool {
 // Open
 // ---------------------------------------------------------------------------
 
-/// Open a device by its stable `device_id`.
+/// Open a device by its stable `device_id` (u32 FNV-1a hash of path).
 /// Returns (DeviceInfo, uses_numbered_reports, HidDevice) for I/O.
-pub fn open_by_device_id(device_id: &str) -> anyhow::Result<(DeviceInfo, bool, HidDevice)> {
+pub fn open_by_device_id(device_id: u32) -> anyhow::Result<(DeviceInfo, bool, HidDevice)> {
     let api = HidApi::new()?;
     for info in api.device_list() {
         if is_blocked_pub(info) { continue; }

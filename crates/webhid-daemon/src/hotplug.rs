@@ -6,12 +6,12 @@ use tokio::sync::broadcast;
 use webhid::IpcResponse;
 
 #[cfg(any(target_os = "windows", target_os = "macos"))]
-static DEVICE_CACHE: Mutex<Option<HashMap<String, webhid::DeviceInfo>>> = Mutex::new(None);
+static DEVICE_CACHE: Mutex<Option<HashMap<u32, webhid::DeviceInfo>>> = Mutex::new(None);
 
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 fn refresh_and_diff(event_tx: &broadcast::Sender<IpcResponse>) {
-    let current: HashMap<String, webhid::DeviceInfo> = match crate::hid::enumerate() {
-        Ok(devs) => devs.into_iter().map(|d| (d.device_id.clone(), d)).collect(),
+    let current: HashMap<u32, webhid::DeviceInfo> = match crate::hid::enumerate() {
+        Ok(devs) => devs.into_iter().map(|d| (d.device_id, d)).collect(),
         Err(_) => return,
     };
     let mut cache = DEVICE_CACHE.lock().unwrap();
@@ -74,7 +74,7 @@ fn start_udev(event_tx: broadcast::Sender<IpcResponse>) -> anyhow::Result<()> {
     use std::os::unix::io::AsRawFd;
     use std::sync::Mutex;
 
-    static DEVICE_CACHE: Mutex<Option<HashMap<String, webhid::DeviceInfo>>> = Mutex::new(None);
+    static DEVICE_CACHE: Mutex<Option<HashMap<u32, webhid::DeviceInfo>>> = Mutex::new(None);
 
     std::thread::Builder::new()
         .name("udev-monitor".into())
@@ -95,9 +95,8 @@ fn start_udev(event_tx: broadcast::Sender<IpcResponse>) -> anyhow::Result<()> {
                 let cache = cache.get_or_insert_with(HashMap::new);
                 for info in api.device_list() {
                     if crate::hid::is_blocked_pub(info) { continue; }
-                    let devnode = info.path().to_string_lossy().to_string();
                     if let Some(d) = crate::hid::info_from_hidapi_pub(info) {
-                        cache.insert(devnode, d);
+                        cache.insert(d.device_id, d);
                     }
                 }
             }
@@ -119,12 +118,12 @@ fn start_udev(event_tx: broadcast::Sender<IpcResponse>) -> anyhow::Result<()> {
                             log::info!("device connected: {:04x}:{:04x} ({})", info.vendor_id, info.product_id, info.device_id);
                             let mut cache = DEVICE_CACHE.lock().unwrap();
                             let cache = cache.get_or_insert_with(HashMap::new);
-                            cache.insert(devnode, info.clone());
+                            cache.insert(info.device_id, info.clone());
                             IpcResponse::DeviceConnected { id: 0, device: info }
                         }
                         udev::EventType::Remove => {
                             let mut cache = DEVICE_CACHE.lock().unwrap();
-                            let info = cache.as_mut().and_then(|c| c.remove(&devnode));
+                            let info = cache.as_mut().and_then(|c| c.remove(&webhid::hash_device_id(&devnode)));
                             match info {
                                 Some(i) => {
                                     log::info!("device disconnected: {:04x}:{:04x} ({})", i.vendor_id, i.product_id, i.device_id);
@@ -156,7 +155,7 @@ fn run_windows(event_tx: broadcast::Sender<IpcResponse>) {
         let mut cache = DEVICE_CACHE.lock().unwrap();
         let cache = cache.get_or_insert_with(HashMap::new);
         for d in devices {
-            cache.insert(d.device_id.clone(), d);
+            cache.insert(d.device_id, d);
         }
     }
 
@@ -305,7 +304,7 @@ fn run_macos(event_tx: broadcast::Sender<IpcResponse>) {
 
     type CFDictionaryRef = *const std::ffi::c_void;
 
-    static DEVICE_CACHE: Mutex<Option<HashMap<String, webhid::DeviceInfo>>> = Mutex::new(None);
+    static DEVICE_CACHE: Mutex<Option<HashMap<u32, webhid::DeviceInfo>>> = Mutex::new(None);
 
     unsafe extern "C" {
         fn IOHIDManagerCreate(allocator: CFAllocatorRef, options: IOOptionBits) -> *mut std::ffi::c_void;
@@ -333,7 +332,7 @@ fn run_macos(event_tx: broadcast::Sender<IpcResponse>) {
         let mut cache = DEVICE_CACHE.lock().unwrap();
         let cache = cache.get_or_insert_with(HashMap::new);
         for d in devices {
-            cache.insert(d.device_id.clone(), d);
+            cache.insert(d.device_id, d);
         }
     }
 

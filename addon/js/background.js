@@ -58,13 +58,15 @@ async function loadNmHostSetting() {
 }
 
 function buildPackedSendReport(deviceId, reportId, data) {
-  const devBytes = new TextEncoder().encode(deviceId);
-  if (devBytes.length > 255) throw new Error('deviceId too long');
-  const buf = new Uint8Array(5 + devBytes.length + data.length);
+  // deviceId: u32 number, 4 bytes LE
+  const buf = new Uint8Array(9 + data.length);
   let o = 0;
   buf[o++] = PKG_SEND_REPORT;
-  buf[o++] = devBytes.length;
-  buf.set(devBytes, o); o += devBytes.length;
+  buf[o++] = 4;  // devIdLen = 4 (u32)
+  buf[o++] = deviceId & 0xFF;
+  buf[o++] = (deviceId >> 8) & 0xFF;
+  buf[o++] = (deviceId >> 16) & 0xFF;
+  buf[o++] = (deviceId >> 24) & 0xFF;
   buf[o++] = reportId;
   buf[o++] = data.length & 0xFF;
   buf[o++] = (data.length >> 8) & 0xFF;
@@ -182,19 +184,16 @@ const NativeMessaging = {
   },
 
   onPackedData(b64) {
-    // TLV: [msgType][devIdLen][devId][reportId][payloadLen u16 LE][payload]
+    // TLV: [msgType=0x01][devIdLen=4][devId u32 LE][reportId][payloadLen u16 LE][payload]
     const bin = Uint8Array.fromBase64(b64);
-    if (bin.length < 2 || bin[0] !== PKG_INPUT_REPORT) return;
-    const devIdLen = bin[1];
-    if (2 + devIdLen > bin.length) return;
-    const deviceId = new TextDecoder().decode(bin.subarray(2, 2 + devIdLen));
-    const hdrEnd = 2 + devIdLen;
-    if (hdrEnd + 3 > bin.length) return;
-    const reportId = bin[hdrEnd];
-    const payloadLen = bin[hdrEnd + 1] | (bin[hdrEnd + 2] << 8);
-    const payloadEnd = hdrEnd + 3 + payloadLen;
+    if (bin.length < 9 || bin[0] !== PKG_INPUT_REPORT) return;
+    if (bin[1] !== 4) return;  // devIdLen must be 4
+    const deviceId = bin[2] | (bin[3] << 8) | (bin[4] << 16) | (bin[5] << 24) >>> 0;
+    const reportId = bin[6];
+    const payloadLen = bin[7] | (bin[8] << 8);
+    const payloadEnd = 9 + payloadLen;
     if (payloadEnd > bin.length) return;
-    const payloadB64 = bin.subarray(hdrEnd + 3, payloadEnd).toBase64();
+    const payloadB64 = bin.subarray(9, payloadEnd).toBase64();
 
     const event = { eventType: 'input_report', deviceId, reportId, data: payloadB64 };
     const targets = tabsForEvent({ i: deviceId });
@@ -317,7 +316,15 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
         try {
           const key = encodeURIComponent(request.origin);
           const result = await browser.storage.local.get(key);
-          sendResponse({ success: true, hashes: result[key] || [] });
+          // Migration: old format stored string device_ids; new format is u32 numbers.
+          // Drop any non-number entries and persist the cleaned list.
+          const raw = result[key] || [];
+          const hashes = raw.filter(h => typeof h === 'number');
+          if (raw.length !== hashes.length) {
+            await browser.storage.local.set({ [key]: hashes });
+            __webhid.logger.info('[bg] migrated saved devices: ' + raw.length + ' → ' + hashes.length + ' (dropped non-numeric)');
+          }
+          sendResponse({ success: true, hashes });
         } catch (e) {
           sendResponse({ success: false, error: e.message, hashes: [] });
         }

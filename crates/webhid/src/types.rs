@@ -22,7 +22,7 @@ pub struct DeviceInfo {
     pub usage_page: Option<u16>,
     #[serde(default)]
     pub usage: Option<u16>,
-    pub device_id: String,
+    pub device_id: u32,
     #[serde(default)]
     pub collections: Vec<Collection>,
     #[serde(default)]
@@ -126,12 +126,12 @@ pub struct Field {
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum IpcRequest {
     Enumerate { id: u32 },
-    Open { id: u32, device_id: String },
-    Close { id: u32, device_id: String },
-    SendReport { id: u32, device_id: String, report_id: u8, data: Vec<u8> },
-    ReceiveFeatureReport { id: u32, device_id: String, report_id: u8 },
-    SendFeatureReport { id: u32, device_id: String, report_id: u8, data: Vec<u8> },
-    SetDataPlane { id: u32, device_id: String, mode: String },
+    Open { id: u32, device_id: u32 },
+    Close { id: u32, device_id: u32 },
+    SendReport { id: u32, device_id: u32, report_id: u8, data: Vec<u8> },
+    ReceiveFeatureReport { id: u32, device_id: u32, report_id: u8 },
+    SendFeatureReport { id: u32, device_id: u32, report_id: u8, data: Vec<u8> },
+    SetDataPlane { id: u32, device_id: u32, mode: String },
 }
 
 impl IpcRequest {
@@ -152,7 +152,7 @@ impl IpcRequest {
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum IpcResponse {
     Devices { id: u32, devices: Vec<DeviceInfo> },
-    Opened { id: u32, device_id: String, session_token: Option<String>, ws_port: Option<u16> },
+    Opened { id: u32, device_id: u32, session_token: Option<String>, ws_port: Option<u16> },
     Ok { id: u32 },
     Data { id: u32, data: Vec<u8> },
     Error { id: u32, message: String },
@@ -160,7 +160,7 @@ pub enum IpcResponse {
     DeviceDisconnected { id: u32, device: DeviceInfo },
     InputReport {
         id: u32,
-        device_id: String,
+        device_id: u32,
         report_id: u8,
         #[serde(with = "arc_bytes")]
         data: Arc<[u8]>,
@@ -218,13 +218,13 @@ pub const PKG_SEND_REPORT: u8 = 0x02;
 #[derive(Debug, Deserialize)]
 pub enum NmRequest {
     Enumerate { #[serde(default)] id: Option<u32> },
-    Open { #[serde(default)] id: Option<u32>, #[serde(rename = "i")] device_id: String },
-    Close { #[serde(default)] id: Option<u32>, #[serde(rename = "i")] device_id: String },
+    Open { #[serde(default)] id: Option<u32>, #[serde(rename = "i")] device_id: u32 },
+    Close { #[serde(default)] id: Option<u32>, #[serde(rename = "i")] device_id: u32 },
     /// Packed sendReport. `d` is base64 of TLV binary.
     SendReport { #[serde(default)] id: Option<u32>, #[serde(rename = "d")] packed: Vec<u8> },
-    ReceiveFeatureReport { #[serde(default)] id: Option<u32>, #[serde(rename = "i")] device_id: String, #[serde(rename = "r")] report_id: u8 },
-    SendFeatureReport { #[serde(default)] id: Option<u32>, #[serde(rename = "i")] device_id: String, #[serde(rename = "r")] report_id: u8, #[serde(with = "base64_serde", rename = "d")] data: Vec<u8> },
-    SetDataPlane { #[serde(default)] id: Option<u32>, #[serde(rename = "i")] device_id: String, #[serde(rename = "m")] mode: String },
+    ReceiveFeatureReport { #[serde(default)] id: Option<u32>, #[serde(rename = "i")] device_id: u32, #[serde(rename = "r")] report_id: u8 },
+    SendFeatureReport { #[serde(default)] id: Option<u32>, #[serde(rename = "i")] device_id: u32, #[serde(rename = "r")] report_id: u8, #[serde(with = "base64_serde", rename = "d")] data: Vec<u8> },
+    SetDataPlane { #[serde(default)] id: Option<u32>, #[serde(rename = "i")] device_id: u32, #[serde(rename = "m")] mode: String },
     Handshake { #[serde(default)] id: Option<u32> },
 }
 
@@ -244,19 +244,17 @@ impl NmRequest {
 }
 
 /// Parse a packed sendReport TLV buffer.
-/// Layout: [msgType][devIdLen][devId][reportId][payloadLen u16 LE][payload]
-pub fn parse_packed_send_report(buf: &[u8]) -> std::io::Result<(&str, u8, &[u8])> {
+/// Layout: [msgType=0x02][devIdLen=4][devId u32 LE][reportId][payloadLen u16 LE][payload]
+pub fn parse_packed_send_report(buf: &[u8]) -> std::io::Result<(u32, u8, &[u8])> {
     let invalid = |msg: &str| std::io::Error::new(std::io::ErrorKind::InvalidData, msg);
-    if buf.len() < 5 { return Err(invalid("short packed sendReport")); }
+    if buf.len() < 9 { return Err(invalid("short packed sendReport")); }
     if buf[0] != PKG_SEND_REPORT { return Err(invalid("bad msgType")); }
-    let n = buf[1] as usize;
-    if buf.len() < 2 + n + 3 { return Err(invalid("truncated header")); }
-    let device_id = std::str::from_utf8(&buf[2..2+n])
-        .map_err(|_| invalid("non-utf8 deviceId"))?;
-    let report_id = buf[2+n];
-    let payload_len = u16::from_le_bytes([buf[3+n], buf[4+n]]) as usize;
-    if buf.len() < 5+n + payload_len { return Err(invalid("truncated payload")); }
-    Ok((device_id, report_id, &buf[5+n..5+n+payload_len]))
+    if buf[1] != 4 { return Err(invalid("bad devIdLen (expected 4)")); }
+    let device_id = u32::from_le_bytes([buf[2], buf[3], buf[4], buf[5]]);
+    let report_id = buf[6];
+    let payload_len = u16::from_le_bytes([buf[7], buf[8]]) as usize;
+    if buf.len() < 9 + payload_len { return Err(invalid("truncated payload")); }
+    Ok((device_id, report_id, &buf[9..9+payload_len]))
 }
 
 // ---------------------------------------------------------------------------
@@ -288,7 +286,7 @@ pub struct NmResponse {
     #[serde(skip_serializing_if = "Option::is_none", rename = "v")]
     pub device: Option<DeviceInfo>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "i")]
-    pub device_id: Option<String>,
+    pub device_id: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "r")]
     pub report_id: Option<u8>,
 }
@@ -303,7 +301,7 @@ impl NmResponse {
     pub fn ok_with_devices(devices: Vec<DeviceInfo>) -> Self {
         Self { status: Some(200), devices: Some(devices), ..Default::default() }
     }
-    pub fn ok_opened(device_id: String, session_token: Option<String>, ws_port: Option<u16>) -> Self {
+    pub fn ok_opened(device_id: u32, session_token: Option<String>, ws_port: Option<u16>) -> Self {
         Self { status: Some(201), device_id: Some(device_id), session_token, ws_port, ..Default::default() }
     }
     pub fn err(code: u16) -> Self {
@@ -350,15 +348,13 @@ impl NmMessage {
     /// `reports` is a slice of (report_id, payload) pairs; multiple entries
     /// produce a multi-report batch (JS decoder loops).
     pub fn packed_input_report<'a>(
-        device_id: &str,
+        device_id: u32,
         reports: impl IntoIterator<Item = (u8, &'a [u8])>,
     ) -> Self {
-        let dev_bytes = device_id.as_bytes();
-        debug_assert!(dev_bytes.len() <= 255, "deviceId too long");
-        let mut buf = Vec::with_capacity(2 + dev_bytes.len() + 16);
+        let mut buf = Vec::with_capacity(9 + 16);
         buf.push(PKG_INPUT_REPORT);
-        buf.push(dev_bytes.len() as u8);
-        buf.extend_from_slice(dev_bytes);
+        buf.push(4);  // devIdLen = 4 (u32)
+        buf.extend_from_slice(&device_id.to_le_bytes());
         for (report_id, payload) in reports {
             buf.push(report_id);
             let len = payload.len() as u16;
@@ -466,7 +462,7 @@ mod tests {
         let dev = DeviceInfo {
             vendor_id: 0x1234, product_id: 0x5678, product_name: Some("Test".into()),
             manufacturer: None, serial_number: None, usage_page: None,
-            usage: None, device_id: "abc".into(), collections: vec![],
+            usage: None, device_id: 0xabc, collections: vec![],
             max_input_report_size: 0,
         };
         let r = NmResponse::ok_with_devices(vec![dev]);
@@ -476,9 +472,9 @@ mod tests {
 
     #[test]
     fn test_nm_response_ok_opened() {
-        let r = NmResponse::ok_opened("devpath".into(), Some("tok".into()), Some(31337));
+        let r = NmResponse::ok_opened(0x1234, Some("tok".into()), Some(31337));
         assert_eq!(r.status, Some(201));
-        assert_eq!(r.device_id, Some("devpath".into()));
+        assert_eq!(r.device_id, Some(0x1234));
         assert_eq!(r.session_token, Some("tok".into()));
         assert_eq!(r.ws_port, Some(31337));
     }
@@ -497,17 +493,18 @@ mod tests {
 
     #[test]
     fn test_packed_input_report() {
-        let device_id = "abc123";
+        let device_id: u32 = 0x12345678;
         let payload = [0xAA, 0xBB, 0xCC];
         let msg = NmMessage::packed_input_report(device_id, [(33u8, &payload[..])]);
         match msg {
             NmMessage::PackedData(buf) => {
                 assert_eq!(buf[0], PKG_INPUT_REPORT);
-                assert_eq!(buf[1], device_id.len() as u8);
-                assert_eq!(&buf[2..2+device_id.len()], device_id.as_bytes());
-                assert_eq!(buf[2+device_id.len()], 33);
-                let payload_start = 5 + device_id.len();
-                assert_eq!(&buf[payload_start..], &payload);
+                assert_eq!(buf[1], 4);  // devIdLen = 4
+                assert_eq!(&buf[2..6], &device_id.to_le_bytes());
+                assert_eq!(buf[6], 33);  // reportId
+                let payload_len = u16::from_le_bytes([buf[7], buf[8]]) as usize;
+                assert_eq!(payload_len, 3);
+                assert_eq!(&buf[9..9+payload_len], &payload);
             }
             _ => panic!("expected PackedData"),
         }
@@ -515,10 +512,10 @@ mod tests {
 
     #[test]
     fn test_parse_packed_send_report() {
-        let device_id = "testdev";
+        let device_id: u32 = 0xDEADBEEF;
         let payload = [0x01, 0x02, 0x03];
-        let mut buf = vec![PKG_SEND_REPORT, device_id.len() as u8];
-        buf.extend_from_slice(device_id.as_bytes());
+        let mut buf = vec![PKG_SEND_REPORT, 4];
+        buf.extend_from_slice(&device_id.to_le_bytes());
         buf.push(42); // reportId
         buf.extend_from_slice(&(payload.len() as u16).to_le_bytes());
         buf.extend_from_slice(&payload);
@@ -533,11 +530,11 @@ mod tests {
     fn test_ipc_request_json_roundtrip() {
         let cases: Vec<IpcRequest> = vec![
             IpcRequest::Enumerate { id: 1 },
-            IpcRequest::Open { id: 2, device_id: "test-device".into() },
-            IpcRequest::Close { id: 3, device_id: "test-device".into() },
-            IpcRequest::SendReport { id: 5, device_id: "test-device".into(), report_id: 1, data: vec![0x00, 0xFF] },
-            IpcRequest::ReceiveFeatureReport { id: 6, device_id: "test-device".into(), report_id: 0 },
-            IpcRequest::SendFeatureReport { id: 7, device_id: "test-device".into(), report_id: 0, data: vec![0xAA] },
+            IpcRequest::Open { id: 2, device_id: 0xfeedface },
+            IpcRequest::Close { id: 3, device_id: 0xfeedface },
+            IpcRequest::SendReport { id: 5, device_id: 0xfeedface, report_id: 1, data: vec![0x00, 0xFF] },
+            IpcRequest::ReceiveFeatureReport { id: 6, device_id: 0xfeedface, report_id: 0 },
+            IpcRequest::SendFeatureReport { id: 7, device_id: 0xfeedface, report_id: 0, data: vec![0xAA] },
         ];
         for req in cases {
             let json = serde_json::to_string(&req).unwrap();
@@ -551,12 +548,12 @@ mod tests {
         let dev = DeviceInfo {
             vendor_id: 0x1234, product_id: 0x5678, product_name: None,
             manufacturer: None, serial_number: None, usage_page: None,
-            usage: None, device_id: "dev".into(), collections: vec![],
+            usage: None, device_id: 0xd, collections: vec![],
             max_input_report_size: 0,
         };
         let cases: Vec<IpcResponse> = vec![
             IpcResponse::Devices { id: 1, devices: vec![dev.clone()] },
-            IpcResponse::Opened { id: 2, device_id: "dev".into(), session_token: Some("tok".into()), ws_port: Some(31337) },
+            IpcResponse::Opened { id: 2, device_id: 0xd, session_token: Some("tok".into()), ws_port: Some(31337) },
             IpcResponse::Ok { id: 3 },
             IpcResponse::Data { id: 4, data: vec![0x01, 0x02] },
             IpcResponse::Error { id: 5, message: "fail".into() },

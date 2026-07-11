@@ -41,18 +41,18 @@ pub async fn read_nm_request<R: AsyncRead + Unpin>(
     let id = v.get("n").and_then(|x| x.as_u64()).map(|n| n as u32);
     Ok(match action {
         1 => NmRequest::Enumerate { id },
-        2 => NmRequest::Open { id, device_id: get_str(&v, "i")? },
-        3 => NmRequest::Close { id, device_id: get_str(&v, "i")? },
+        2 => NmRequest::Open { id, device_id: get_u32(&v, "i")? },
+        3 => NmRequest::Close { id, device_id: get_u32(&v, "i")? },
         4 => NmRequest::SendReport { id, packed: get_b64(&v, "d")? },
         5 => NmRequest::ReceiveFeatureReport {
-            id, device_id: get_str(&v, "i")?, report_id: get_u8(&v, "r")?,
+            id, device_id: get_u32(&v, "i")?, report_id: get_u8(&v, "r")?,
         },
         6 => NmRequest::SendFeatureReport {
-            id, device_id: get_str(&v, "i")?, report_id: get_u8(&v, "r")?,
+            id, device_id: get_u32(&v, "i")?, report_id: get_u8(&v, "r")?,
             data: get_b64(&v, "d")?,
         },
         7 => NmRequest::SetDataPlane {
-            id, device_id: get_str(&v, "i")?, mode: get_str(&v, "m")?,
+            id, device_id: get_u32(&v, "i")?, mode: get_str(&v, "m")?,
         },
         8 => NmRequest::Handshake { id },
         _ => return Err(io::Error::new(
@@ -69,6 +69,11 @@ fn get_str(v: &serde_json::Value, key: &str) -> io::Result<String> {
 
 fn get_u8(v: &serde_json::Value, key: &str) -> io::Result<u8> {
     v.get(key).and_then(|x| x.as_u64()).map(|n| n as u8)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, format!("missing '{key}'")))
+}
+
+fn get_u32(v: &serde_json::Value, key: &str) -> io::Result<u32> {
+    v.get(key).and_then(|x| x.as_u64()).map(|n| n as u32)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, format!("missing '{key}'")))
 }
 
@@ -170,13 +175,13 @@ mod tests {
 
         // Open with id + deviceId
         let mut buf = Vec::new();
-        write_message(&mut buf, &serde_json::json!({"a": 2, "n": 5, "i": "/dev/hidraw0"})).await.unwrap();
+        write_message(&mut buf, &serde_json::json!({"a": 2, "n": 5, "i": 305419896})).await.unwrap();
         let mut r: &[u8] = &buf;
         let req = read_nm_request(&mut r).await.unwrap();
         match req {
             NmRequest::Open { id, device_id } => {
                 assert_eq!(id, Some(5));
-                assert_eq!(device_id, "/dev/hidraw0");
+                assert_eq!(device_id, 305419896);
             }
             _ => panic!("expected Open"),
         }

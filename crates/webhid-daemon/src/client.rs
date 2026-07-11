@@ -40,7 +40,7 @@ pub async fn handle(
             match event_rx.recv().await {
                 Ok(ev) => {
                     if let webhid::IpcResponse::InputReport { ref device_id, .. } = ev {
-                        if device_mgr_for_events.dataplane_mode(device_id) == "ws" {
+                        if device_mgr_for_events.dataplane_mode(*device_id) == "ws" {
                             continue;
                         }
                     }
@@ -93,7 +93,7 @@ async fn dispatch(
             Err(_) => NmResponse::err(500),
         },
 
-        NmRequest::Open { device_id, .. } => match device_mgr.open(&device_id, client_id) {
+        NmRequest::Open { device_id, .. } => match device_mgr.open(device_id, client_id) {
             Ok((dev_id, session_token)) => {
                 NmResponse::ok_opened(dev_id, session_token, Some(ws_port))
             }
@@ -106,7 +106,7 @@ async fn dispatch(
             }
         },
 
-        NmRequest::Close { device_id, .. } => match device_mgr.close(&device_id, client_id) {
+        NmRequest::Close { device_id, .. } => match device_mgr.close(device_id, client_id) {
             Ok(()) => NmResponse::ok(),
             Err(e) => {
                 let code = if e.to_string().contains("not found") { 404 } else { 500 };
@@ -138,7 +138,7 @@ async fn dispatch(
         }
 
         NmRequest::ReceiveFeatureReport { device_id, report_id, .. } => {
-            match device_mgr.get_file(&device_id, client_id) {
+            match device_mgr.get_file(device_id, client_id) {
                 Err(_) => NmResponse::err(404),
                 Ok(dev_arc) => {
                     let result = tokio::task::spawn_blocking(move || {
@@ -155,7 +155,7 @@ async fn dispatch(
         }
 
         NmRequest::SendFeatureReport { device_id, report_id, data, .. } => {
-            match device_mgr.get_file(&device_id, client_id) {
+            match device_mgr.get_file(device_id, client_id) {
                 Err(_) => NmResponse::err(404),
                 Ok(dev_arc) => {
                     let result = tokio::task::spawn_blocking(move || {
@@ -172,7 +172,7 @@ async fn dispatch(
         }
 
         NmRequest::SetDataPlane { device_id, mode, .. } => {
-            device_mgr.set_dataplane_mode(&device_id, &mode);
+            device_mgr.set_dataplane_mode(device_id, &mode);
             NmResponse::ok()
         }
 
@@ -198,7 +198,7 @@ fn ipc_event_to_nm(ev: IpcResponse) -> Option<NmMessage> {
         IpcResponse::DeviceDisconnected { device, .. } =>
             Some(NmMessage::Control(NmResponse::event_disconnect(device))),
         IpcResponse::InputReport { device_id, report_id, data, .. } =>
-            Some(NmMessage::packed_input_report(&device_id, [(report_id, &data[..])])),
+            Some(NmMessage::packed_input_report(device_id, [(report_id, &data[..])])),
         IpcResponse::Handshake { ws_port, .. } =>
             Some(NmMessage::Control(NmResponse {
                 event_type: Some(EVT_HANDSHAKE),

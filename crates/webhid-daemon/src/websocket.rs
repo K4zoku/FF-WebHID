@@ -186,11 +186,11 @@ async fn handle_websocket(
         }
     };
 
-    log::info!("[ws] authenticated token for device_id={device_id}");
+    log::info!("[ws] authenticated token for device_id={device_id:#x}");
 
     let mut event_rx = event_tx.subscribe();
 
-    device_mgr.set_dataplane_mode(&device_id, "ws");
+    device_mgr.set_dataplane_mode(device_id, "ws");
 
     let (mut ws_sender, mut ws_receiver) = ws_stream.split();
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
@@ -212,7 +212,7 @@ async fn handle_websocket(
     // and the response is enqueued back to the page via `tx`.
     let tx_for_receiver = tx.clone();
     let device_mgr_for_receiver = Arc::clone(&device_mgr);
-    let device_id_for_receiver = device_id.clone();
+    let device_id_for_receiver = device_id;
     let mut receiver_task = tokio::spawn(async move {
         while let Some(msg) = ws_receiver.next().await {
             match msg {
@@ -225,17 +225,17 @@ async fn handle_websocket(
                 Ok(Message::Binary(frame)) => {
                     let tx_clone = tx_for_receiver.clone();
                     let mgr = Arc::clone(&device_mgr_for_receiver);
-                    let dev_id = device_id_for_receiver.clone();
+                    let dev_id = device_id_for_receiver;
                     tokio::spawn(async move {
-                        handle_client_binary(&frame, &mgr, &dev_id, tx_clone).await;
+                        handle_client_binary(&frame, &mgr, dev_id, tx_clone).await;
                     });
                 }
                 Ok(Message::Text(text)) => {
                     let tx_clone = tx_for_receiver.clone();
                     let mgr = Arc::clone(&device_mgr_for_receiver);
-                    let dev_id = device_id_for_receiver.clone();
+                    let dev_id = device_id_for_receiver;
                     tokio::spawn(async move {
-                        handle_client_text(&text, &mgr, &dev_id, tx_clone).await;
+                        handle_client_text(&text, &mgr, dev_id, tx_clone).await;
                     });
                 }
                 Err(e) => {
@@ -260,7 +260,7 @@ async fn handle_websocket(
     //
     // Fixed-timer mode (batch_ms > 0): legacy behavior, flush every N ms.
     let tx_for_sender = tx.clone();
-    let device_id_for_sender = device_id.clone();
+    let device_id_for_sender = device_id;
     let batch_ms = std::env::var("WEBHID_WS_BATCH_MS")
         .ok()
         .and_then(|s| s.parse().ok())
@@ -284,7 +284,7 @@ async fn handle_websocket(
                         }
                     }
                     event_result = event_rx.recv() => {
-                        if !handle_event(event_result, &device_id_for_sender, &mut batch, &tx_for_sender) {
+                        if !handle_event(event_result, device_id_for_sender, &mut batch, &tx_for_sender) {
                             break;
                         }
                     }
@@ -298,12 +298,12 @@ async fn handle_websocket(
         loop {
             // 1. Block for first event.
             let event_result = event_rx.recv().await;
-            if !handle_event(event_result, &device_id_for_sender, &mut batch, &tx_for_sender) {
+            if !handle_event(event_result, device_id_for_sender, &mut batch, &tx_for_sender) {
                 break;
             }
 
             // 2. Drain immediately-available events.
-            drain_available(&mut event_rx, &device_id_for_sender, &mut batch, &tx_for_sender);
+            drain_available(&mut event_rx, device_id_for_sender, &mut batch, &tx_for_sender);
 
             // 3. Burst coalescing: if multiple reports accumulated, wait
             //    briefly for more before flushing.
@@ -311,10 +311,10 @@ async fn handle_websocket(
                 tokio::select! {
                     _ = tokio::time::sleep(coalesce) => {}
                     event_result = event_rx.recv() => {
-                        if !handle_event(event_result, &device_id_for_sender, &mut batch, &tx_for_sender) {
+                        if !handle_event(event_result, device_id_for_sender, &mut batch, &tx_for_sender) {
                             break;
                         }
-                        drain_available(&mut event_rx, &device_id_for_sender, &mut batch, &tx_for_sender);
+                        drain_available(&mut event_rx, device_id_for_sender, &mut batch, &tx_for_sender);
                     }
                 }
             }
@@ -340,8 +340,8 @@ async fn handle_websocket(
     receiver_task.abort();
     sender_task.abort();
 
-    log::info!("[ws] connection for {device_id} closed");
-    device_mgr.set_dataplane_mode(&device_id, "nm");
+    log::info!("[ws] connection for {device_id:#x} closed");
+    device_mgr.set_dataplane_mode(device_id, "nm");
     Ok(())
 }
 
@@ -368,7 +368,7 @@ async fn handle_control_ws(
                 let tx_clone = tx.clone();
                 let mgr = Arc::clone(&device_mgr);
                 tokio::spawn(async move {
-                    handle_client_text(&text, &mgr, "", tx_clone).await;
+                    handle_client_text(&text, &mgr, 0, tx_clone).await;
                 });
             }
             Ok(Message::Ping(data)) => { let _ = tx.send(Message::Pong(data)); }
@@ -390,7 +390,7 @@ async fn handle_control_ws(
 /// Returns `false` when the channel is closed.
 fn handle_event(
     event_result: Result<webhid::IpcResponse, broadcast::error::RecvError>,
-    device_id: &str,
+    device_id: u32,
     batch: &mut Vec<(u8, Arc<[u8]>)>,
     tx: &mpsc::UnboundedSender<Message>,
 ) -> bool {
@@ -426,7 +426,7 @@ fn handle_event(
 /// during the same poll iteration.
 fn drain_available(
     rx: &mut broadcast::Receiver<webhid::IpcResponse>,
-    device_id: &str,
+    device_id: u32,
     batch: &mut Vec<(u8, Arc<[u8]>)>,
     tx: &mpsc::UnboundedSender<Message>,
 ) {
@@ -472,7 +472,7 @@ fn create_batch_frame(reports: &[(u8, Arc<[u8]>)]) -> Vec<u8> {
 async fn handle_client_binary(
     frame: &[u8],
     device_mgr: &Arc<DeviceManager>,
-    device_id: &str,
+    device_id: u32,
     tx: mpsc::UnboundedSender<Message>,
 ) {
     if frame.is_empty() {
@@ -569,7 +569,7 @@ async fn handle_client_binary(
 async fn handle_client_text(
     text: &str,
     device_mgr: &Arc<DeviceManager>,
-    device_id: &str,
+    device_id: u32,
     tx: mpsc::UnboundedSender<Message>,
 ) {
     let req: serde_json::Value = match serde_json::from_str(text) {
