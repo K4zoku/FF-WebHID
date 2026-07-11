@@ -15,7 +15,7 @@
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader, BufWriter};
 
-const MAX_FRAME_SIZE: usize = 16 * 1024 * 1024;
+const MAX_FRAME_SIZE: usize = 1024 * 1024;
 const CONNECT_TIMEOUT_MS: u64 = 5000;
 
 /// Write a JSON error frame to the NM host's stdout (→ addon).

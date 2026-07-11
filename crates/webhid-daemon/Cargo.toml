@@ -12,6 +12,7 @@ log = { version = "0.4", features = ["std"] }
 tokio-tungstenite = "0.26"
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
 getrandom = "0.4"
+subtle = "2"
 hidapi = { version = "2.6", default-features = false }
 hidreport = { version = "0.6", default-features = false }
 

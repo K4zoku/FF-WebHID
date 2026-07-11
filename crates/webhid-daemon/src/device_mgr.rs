@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use hidapi::HidDevice;
 
@@ -18,6 +18,7 @@ struct Entry {
     handle: Option<JoinHandle<()>>,
     refcount: u32,
     dataplane_mode: Mutex<String>,
+    ws_generation: AtomicU64,
 }
 
 const HEX_CHARS: &[u8; 16] = b"0123456789abcdef";
@@ -62,7 +63,12 @@ impl DeviceManager {
     }
 
     pub fn validate_control_token(&self, token: &str) -> bool {
-        self.control_token.lock().unwrap().as_deref() == Some(token)
+        use subtle::ConstantTimeEq;
+        let guard = self.control_token.lock().unwrap();
+        match guard.as_deref() {
+            Some(stored) => stored.as_bytes().ct_eq(token.as_bytes()).into(),
+            None => false,
+        }
     }
 
     pub fn enumerate(&self) -> anyhow::Result<Vec<DeviceInfo>> {
@@ -87,6 +93,11 @@ impl DeviceManager {
         let (info, uses_numbered_reports, device) = hid::open_by_device_id(device_id)?;
         let id = info.device_id;
 
+        let stop_flag = Arc::new(AtomicBool::new(false));
+        let reader_device = hid::open_by_device_id(id)?.2;
+        let reader_arc = Arc::new(Mutex::new(reader_device));
+        let writer_arc = Arc::new(Mutex::new(device));
+
         let mut map = self.devices.lock().unwrap();
         if let Some(entry) = map.get_mut(&id) {
             entry.refcount += 1;
@@ -97,15 +108,12 @@ impl DeviceManager {
             return Ok((id, Some(session_token)));
         }
 
-        let stop_flag = Arc::new(AtomicBool::new(false));
-        let reader_device = hid::open_by_device_id(id)?.2;
-        let reader_arc = Arc::new(Mutex::new(reader_device));
-        let writer_arc = Arc::new(Mutex::new(device));
         let entry = Entry {
             device: Arc::clone(&writer_arc),
             stop_flag: Arc::clone(&stop_flag),
             handle: None,
             refcount: 1,
+            ws_generation: AtomicU64::new(0),
             dataplane_mode: Mutex::new("nm".to_string()),
         };
 
@@ -126,7 +134,7 @@ impl DeviceManager {
                     let dev = Arc::clone(&dev_for_task);
                     move || {
                         let d = dev.lock().unwrap();
-                        hid::read_with_timeout(&d, 5000)
+                        hid::read_with_timeout(&d, 500)
                     }
                 })
                 .await;
@@ -194,6 +202,29 @@ impl DeviceManager {
         }
     }
 
+    pub fn ws_connect(&self, device_id: u32) -> u64 {
+        let map = self.devices.lock().unwrap();
+        if let Some(entry) = map.get(&device_id) {
+            let g = entry.ws_generation.fetch_add(1, Ordering::SeqCst) + 1;
+            *entry.dataplane_mode.lock().unwrap() = "ws".to_string();
+            log::info!("[device_mgr] {device_id:#x} WS connect gen={g}");
+            g
+        } else { 0 }
+    }
+
+    pub fn ws_disconnect(&self, device_id: u32, generation: u64) {
+        let map = self.devices.lock().unwrap();
+        if let Some(entry) = map.get(&device_id) {
+            let current = entry.ws_generation.load(Ordering::SeqCst);
+            if current == generation {
+                *entry.dataplane_mode.lock().unwrap() = "nm".to_string();
+                log::info!("[device_mgr] {device_id:#x} WS disconnect gen={generation} → nm");
+            } else {
+                log::info!("[device_mgr] {device_id:#x} WS disconnect gen={generation} stale (current={current}), keeping ws");
+            }
+        }
+    }
+
     pub fn dataplane_mode(&self, device_id: u32) -> String {
         let map = self.devices.lock().unwrap();
         map.get(&device_id)
@@ -215,7 +246,14 @@ impl DeviceManager {
     }
 
     pub fn get_device_by_token(&self, token: &str) -> Option<u32> {
-        self.tokens.lock().unwrap().get(token).copied()
+        use subtle::ConstantTimeEq;
+        let tokens = self.tokens.lock().unwrap();
+        for (stored, device_id) in tokens.iter() {
+            if stored.as_bytes().ct_eq(token.as_bytes()).into() {
+                return Some(*device_id);
+            }
+        }
+        None
     }
 }
 

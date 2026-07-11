@@ -28,7 +28,10 @@ function isTabAuthorizedForDevice(tabId, deviceId) {
 function purgeTab(tabId) {
   if (tabId == null) return;
   for (const [deviceId, tabs] of _deviceTabMap) {
-    if (tabs.delete(tabId) && tabs.size === 0) _deviceTabMap.delete(deviceId);
+    if (tabs.delete(tabId) && tabs.size === 0) {
+      _deviceTabMap.delete(deviceId);
+      NativeMessaging.closeDevice(deviceId).catch(() => {});
+    }
   }
 }
 
@@ -247,9 +250,22 @@ const NativeMessaging = {
   onControlEvent(message) {
     if (message.e === undefined) return;
     const targets = tabsForEvent(message);
-    if (!targets) return;
-    for (const tabId of targets) {
-      browser.tabs.sendMessage(tabId, { action: 'webhid-device-event', event: message }).catch(() => {});
+    if (targets) {
+      for (const tabId of targets) {
+        browser.tabs.sendMessage(tabId, { action: 'webhid-device-event', event: message }).catch(() => {});
+      }
+    } else if (message.i && (message.e === EVT_CONNECT || message.e === EVT_DISCONNECT)) {
+      browser.tabs.query({}).then((tabs) => {
+        for (const tab of tabs) {
+          if (!tab.url) continue;
+          try {
+            const origin = new URL(tab.url).origin;
+            isDeviceAllowedForOrigin(origin, message.i).then((allowed) => {
+              if (allowed) browser.tabs.sendMessage(tab.id, { action: 'webhid-device-event', event: message }).catch(() => {});
+            });
+          } catch {}
+        }
+      }).catch(() => {});
     }
   },
 };

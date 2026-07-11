@@ -82,8 +82,12 @@ function handleSend(msg, msgType) {
     self.postMessage({ type: 'sendResult', reqId: msg.reqId, error: 'ws not open' });
     return;
   }
-  const reqId = _nextReqId++;
   const payload = msg.data;
+  if (!(payload instanceof Uint8Array)) {
+    self.postMessage({ type: 'sendResult', reqId: msg.reqId, error: 'bad payload' });
+    return;
+  }
+  const reqId = _nextReqId++;
   const frame = new Uint8Array(6 + payload.length);
   const dv = new DataView(frame.buffer);
   frame[0] = msgType;

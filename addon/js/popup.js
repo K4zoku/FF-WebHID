@@ -69,6 +69,7 @@
     let hashes = result[siteDevicesKey] || [];
     hashes = hashes.filter(h => h !== hash);
     await browser.storage.local.set({ [siteDevicesKey]: hashes });
+    browser.runtime.sendMessage({ action: 'close', deviceId: hash }).catch(() => {});
     renderDevices();
   }
 

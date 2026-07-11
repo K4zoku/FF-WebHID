@@ -29,7 +29,10 @@ self.onmessage = ({ data: msg, ports }) => {
         try {
           const m = JSON.parse(text);
           if (_port) _port.postMessage({ type: 'response', id: m.n, result: m });
-        } catch {}
+        } catch (e) {
+          logger.error('failed to parse WS text frame: ' + e.message);
+          if (_port) _port.postMessage({ type: 'response', id: 0, result: { s: 500 } });
+        }
       },
     });
     _transport.connect(msg);

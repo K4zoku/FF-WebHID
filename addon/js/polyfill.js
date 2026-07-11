@@ -236,6 +236,7 @@
           return;
         }
         if (eventType === "disconnect") {
+          _deviceInfoCache = null;
           this.dispatchEvent(new HIDConnectionEvent("disconnect", { device: this }));
           return;
         }

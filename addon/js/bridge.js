@@ -878,13 +878,7 @@
   // Forward events pushed by background.js into the page world.
   browser.runtime.onMessage.addListener((message) => {
     if (message.action === "webhid-device-event" && message.event) {
-      const evt = message.event;
-      if (evt.e === 1) {
-        _wsPort = evt.w;
-        __webhid.logger.info('handshake: wsPort=' + _wsPort);
-        return;
-      }
-      window.postMessage({ __webhid_bridge: "evt", event: evt }, "*");
+      window.postMessage({ __webhid_bridge: "evt", event: message.event }, "*");
     }
   });
 

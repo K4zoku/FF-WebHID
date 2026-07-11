@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use tokio::io::{AsyncRead, BufReader};
 use tokio::sync::{broadcast, mpsc};
-use webhid::{protocol, IpcResponse, NmMessage, NmRequest, NmResponse, parse_packed_send, EVT_HANDSHAKE};
+use webhid::{protocol, IpcResponse, NmMessage, NmRequest, NmResponse, parse_packed_send};
 
 use crate::{device_mgr::DeviceManager, hid};
 
@@ -15,12 +15,6 @@ pub async fn handle(
 ) -> anyhow::Result<()> {
     let mut reader = BufReader::new(reader);
     let (tx, mut rx) = mpsc::channel::<NmMessage>(1024);
-
-    let _ = tx.send(NmMessage::Control(NmResponse {
-        event_type: Some(EVT_HANDSHAKE),
-        ws_port: Some(ws_port),
-        ..Default::default()
-    })).await;
 
     let writer_task = tokio::spawn(async move {
         let mut writer = tokio::io::BufWriter::new(writer);
@@ -84,13 +78,7 @@ async fn dispatch(
     req: NmRequest,
     ws_port: u16,
 ) -> NmMessage {
-    let id = if let NmRequest::SendReport { packed, .. } = &req {
-        if packed.len() >= 5 {
-            Some(u32::from_le_bytes([packed[1], packed[2], packed[3], packed[4]]))
-        } else { None }
-    } else {
-        req.id()
-    };
+    let req_id = req.id();
     let resp: NmResponse = match req {
         NmRequest::Enumerate { .. } => match device_mgr.enumerate() {
             Ok(devices) => NmResponse::ok_with_devices(devices),
@@ -119,8 +107,8 @@ async fn dispatch(
 
         NmRequest::SendReport { packed, .. } => {
             match parse_packed_send(&packed) {
-                Ok((_req_id, device_id, report_id, data)) => {
-                    match device_mgr.get_file(device_id) {
+                Ok((req_id, device_id, report_id, data)) => {
+                    let result_resp = match device_mgr.get_file(device_id) {
                         Err(_) => NmResponse::err(404),
                         Ok(dev_arc) => {
                             let data_owned = data.to_vec();
@@ -134,7 +122,10 @@ async fn dispatch(
                                 Err(_) => NmResponse::err(500),
                             }
                         }
-                    }
+                    };
+                    let mut r = result_resp;
+                    r.id = Some(req_id);
+                    r
                 }
                 Err(_) => NmResponse::err(422),
             }
@@ -192,7 +183,9 @@ async fn dispatch(
         }
     };
     let mut resp = resp;
-    resp.id = id;
+    if resp.id.is_none() {
+        resp.id = req_id;
+    }
     NmMessage::Control(resp)
 }
 
@@ -204,12 +197,6 @@ fn ipc_event_to_nm(ev: IpcResponse) -> Option<NmMessage> {
             Some(NmMessage::Control(NmResponse::event_disconnect(device))),
         IpcResponse::InputReport { device_id, report_id, data, .. } =>
             Some(NmMessage::packed_input_report(device_id, [(report_id, &data[..])])),
-        IpcResponse::Handshake { ws_port, .. } =>
-            Some(NmMessage::Control(NmResponse {
-                event_type: Some(EVT_HANDSHAKE),
-                ws_port: Some(ws_port),
-                ..Default::default()
-            })),
         _ => {
             log::warn!("unexpected event: {ev:?}");
             None

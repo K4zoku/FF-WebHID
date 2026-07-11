@@ -318,10 +318,10 @@ impl NmResponse {
         Self { status: Some(code), ..Default::default() }
     }
     pub fn event_connect(device: DeviceInfo) -> Self {
-        Self { event_type: Some(EVT_CONNECT), device: Some(device), ..Default::default() }
+        Self { event_type: Some(EVT_CONNECT), device: Some(device.clone()), device_id: Some(device.device_id), ..Default::default() }
     }
     pub fn event_disconnect(device: DeviceInfo) -> Self {
-        Self { event_type: Some(EVT_DISCONNECT), device: Some(device), ..Default::default() }
+        Self { event_type: Some(EVT_DISCONNECT), device: Some(device.clone()), device_id: Some(device.device_id), ..Default::default() }
     }
 }
 

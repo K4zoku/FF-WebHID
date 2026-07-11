@@ -118,7 +118,8 @@ async fn handle_websocket(
 
     let ws_stream = tokio_tungstenite::accept_hdr_async(stream, move |req: &Request, res: Response| {
         let host = req.uri().host().unwrap_or("");
-        if !host.is_empty() && host != "127.0.0.1" && host != "localhost" {
+        let is_loopback = host.is_empty() || host == "127.0.0.1" || host == "localhost" || host == "::1";
+        if !is_loopback {
             log::warn!("[ws] rejected connection from host: {host}");
             let resp = Response::builder()
                 .status(StatusCode::FORBIDDEN)
@@ -188,7 +189,7 @@ async fn handle_websocket(
 
     let mut event_rx = event_tx.subscribe();
 
-    device_mgr.set_dataplane_mode(device_id, "ws");
+    let ws_gen = device_mgr.ws_connect(device_id);
 
     let (mut ws_sender, mut ws_receiver) = ws_stream.split();
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
@@ -339,7 +340,7 @@ async fn handle_websocket(
     sender_task.abort();
 
     log::info!("[ws] connection for {device_id:#x} closed");
-    device_mgr.set_dataplane_mode(device_id, "nm");
+    device_mgr.ws_disconnect(device_id, ws_gen);
     Ok(())
 }
 
