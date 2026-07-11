@@ -11,6 +11,7 @@ BuildRequires:  rust-packaging >= 1.70
 BuildRequires:  pkgconfig(libudev)
 BuildRequires:  make
 Requires:       systemd-libs
+Requires(pre):  shadow-utils
 Requires(post): systemd
 Requires(preun): systemd
 
@@ -42,6 +43,10 @@ for browser in librewolf waterfox; do
 done
 
 install -Dm644 LICENSE %{buildroot}%{_datadir}/licenses/%{name}/LICENSE
+
+%pre
+getent group webhid >/dev/null || groupadd -r webhid
+exit 0
 
 %post
 %systemd_post webhid-daemon.service

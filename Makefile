@@ -74,7 +74,7 @@ windows-msi:
 
 install: install-system
 
-install-system: build install-webhid-group
+install-system: build
 	@echo "==> Installing binaries to $(PREFIX)/bin/"
 	install -Dm755 "$(DAEMON_BIN)" "$(DESTDIR)$(PREFIX)/bin/webhid-daemon"
 	install -Dm755 "$(NM_BIN)"       "$(DESTDIR)$(PREFIX)/bin/webhid-native-messaging"
@@ -84,6 +84,9 @@ install-system: build install-webhid-group
 	@echo "==> Installing systemd service"
 	sed 's|{{DAEMON_BIN}}|$(PREFIX)/bin/webhid-daemon|g' \
 	  "$(MANIFEST_DIR)/webhid-daemon.service" | install -Dm644 /dev/stdin "$(DESTDIR)$(SYSTEMD_DIR)/webhid-daemon.service"
+	@if [ -z "$(DESTDIR)" ]; then $(MAKE) install-webhid-group; else \
+		echo "==> DESTDIR set (packaging build) — skipping group creation;" \
+		     "package should create '$(WEBHID_GROUP)' via post-install scriptlet"; fi
 	@echo "Run: systemctl daemon-reload && systemctl enable --now webhid-daemon.service"
 	@echo "Done. Load the addon in Firefox (about:debugging → Load Temporary Add-on)."
 
