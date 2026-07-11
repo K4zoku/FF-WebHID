@@ -426,7 +426,9 @@ pub fn max_input_report_size(collections: &[Collection]) -> u32 {
         let mut max = 0u32;
         for c in collections {
             for r in &c.input_reports {
-                let bits: u32 = r.items.iter().map(|f| f.report_size * f.report_count).sum();
+                let bits: u32 = r.items.iter()
+                    .map(|f| f.report_size.saturating_mul(f.report_count))
+                    .fold(0u32, |a, b| a.saturating_add(b));
                 let bytes = bits.div_ceil(8);
                 if bytes > max {
                     max = bytes;

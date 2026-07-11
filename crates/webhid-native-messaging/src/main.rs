@@ -15,6 +15,8 @@
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
 
+const MAX_FRAME_SIZE: usize = 16 * 1024 * 1024;
+
 #[cfg(target_os = "linux")]
 const DEFAULT_SOCKET: &str = "/run/webhid/webhid.sock";
 #[cfg(target_os = "macos")]
@@ -218,6 +220,9 @@ async fn read_frame<R: AsyncRead + Unpin>(
     }
 
     let len = u32::from_le_bytes(len_bytes) as usize;
+    if len > MAX_FRAME_SIZE {
+        return Err(anyhow::anyhow!("frame too large: {len} bytes"));
+    }
     buf.resize(len, 0);
     reader.read_exact(buf).await?;
     Ok(true)

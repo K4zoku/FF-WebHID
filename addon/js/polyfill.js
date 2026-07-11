@@ -98,6 +98,7 @@
 
   // Listen for responses, events, and settings pushes from the bridge.
   window.addEventListener("message", (event) => {
+    if (event.source !== window) return;
     if (!event.data) return;
     if (event.data.__webhid_bridge === "res") {
       const handler = _pending[event.data.id];
@@ -359,6 +360,7 @@
       super.addEventListener(type, listener);
       if (type === "inputreport") {
         const wrapper = (event) => {
+          if (event.source !== window) return;
           if (!event.data || event.data.__webhid_bridge !== "evt") return;
           const detail = event.data.event;
 

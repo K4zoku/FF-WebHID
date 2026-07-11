@@ -652,6 +652,7 @@
   })();
 
   window.addEventListener("message", async (event) => {
+    if (event.source !== window) return;
     if (!event.data || event.data.__webhid_bridge !== "req") return;
 
     const { id, action: reqAction, payload } = event.data;
