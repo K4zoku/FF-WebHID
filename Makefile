@@ -81,6 +81,9 @@ install-system: build
 	@echo "==> Installing native-messaging manifest to $(SYSTEM_NM_DIR)"
 	sed 's|{{NM_BIN}}|$(PREFIX)/bin/webhid-native-messaging|g' \
 	  "$(NM_MANIFEST)" | install -Dm644 /dev/stdin "$(DESTDIR)$(SYSTEM_NM_DIR)/$(NM_NAME)"
+	@echo "==> Installing daemon-as-NM-host manifest to $(SYSTEM_NM_DIR)"
+	sed 's|{{DAEMON_BIN}}|$(PREFIX)/bin/webhid-daemon|g' \
+	  "$(DAEMON_NM_MANIFEST)" | install -Dm644 /dev/stdin "$(DESTDIR)$(SYSTEM_NM_DIR)/$(DAEMON_NM_NAME)"
 	@echo "==> Installing systemd service"
 	sed 's|{{DAEMON_BIN}}|$(PREFIX)/bin/webhid-daemon|g' \
 	  "$(MANIFEST_DIR)/webhid-daemon.service" | install -Dm644 /dev/stdin "$(DESTDIR)$(SYSTEMD_DIR)/webhid-daemon.service"
@@ -110,6 +113,10 @@ install-user: build
 	sed 's|{{NM_BIN}}|$(USER_PREFIX)/bin/webhid-native-messaging|g' \
 	  "$(NM_MANIFEST)" > "$(USER_NM_DIR)/$(NM_NAME)"
 	chmod 644 "$(USER_NM_DIR)/$(NM_NAME)"
+	@echo "==> Installing daemon-as-NM-host manifest to $(USER_NM_DIR)"
+	sed 's|{{DAEMON_BIN}}|$(USER_PREFIX)/bin/webhid-daemon|g' \
+	  "$(DAEMON_NM_MANIFEST)" > "$(USER_NM_DIR)/$(DAEMON_NM_NAME)"
+	chmod 644 "$(USER_NM_DIR)/$(DAEMON_NM_NAME)"
 	@echo "==> Installing systemd user service to $(USER_SYSTEMD_DIR)"
 	@mkdir -p "$(USER_SYSTEMD_DIR)"
 	sed 's|{{DAEMON_BIN}}|$(USER_PREFIX)/bin/webhid-daemon|g' \
