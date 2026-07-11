@@ -4,6 +4,9 @@ const MSG_SEND_REPORT = 0x01;
 const MSG_SEND_FEATURE_REPORT = 0x02;
 const MSG_RECEIVE_FEATURE_REPORT = 0x03;
 const RESP_RECEIVE_FEATURE_REPORT = 0x83;
+// WS close codes (4xxx = application-defined, must match daemon).
+const WS_CLOSE_UNKNOWN_TOKEN = 4401;
+const WS_CLOSE_BAD_TOKEN = 4402;
 let ws = null, _connectMsg = null;
 let _nextReqId = 1;
 let _fireAndForget = self.__webhid.GLOBAL_DEFAULTS.fireAndForget;
@@ -54,9 +57,17 @@ function _doConnect() {
     self.postMessage({ type: 'ready' });
   };
   ws.onerror = (e) => logger.error('[worker] WS ERROR:', e.message || e);
-  ws.onclose = () => {
+  ws.onclose = (ev) => {
     for (const [, p] of _pending) p.reject(new Error('ws closed'));
     _pending.clear();
+    // Auth-failure close codes → ask bridge for a fresh token instead of
+    // blind-retrying with the stale one (daemon was restarted).
+    if (ev.code === WS_CLOSE_UNKNOWN_TOKEN || ev.code === WS_CLOSE_BAD_TOKEN) {
+      logger.warn('[worker] WS closed with auth-failure code ' + ev.code + '; requesting token refresh');
+      _connectMsg = null;  // halt auto-reconnect
+      self.postMessage({ type: 'auth-failed', code: ev.code });
+      return;
+    }
     self.postMessage({ type: 'closed' });
     _scheduleReconnect();
   };

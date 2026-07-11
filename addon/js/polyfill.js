@@ -37,7 +37,7 @@
 
     try {
       const response = await sendRequest("enumerate");
-      const devices = response.o && Array.isArray(response.D) ? response.D : [];
+      const devices = __webhid.http.isOk(response.s) && Array.isArray(response.D) ? response.D : [];
       _deviceInfoCache = new Map();
       for (const device of devices) {
         _deviceInfoCache.set(device.deviceId, device);
@@ -231,13 +231,13 @@
           deviceId: this.#deviceId,
           reportSize: this.#maxInputReportSize + 3,
         });
-        if (response.o) {
+        if (__webhid.http.isOk(response.s)) {
           this.#opened = true;
           __webhid.logger.info('[webhid] open deviceId=' + this.#deviceId + ' dataPlane=' + _dataPlane);
           this.dispatchEvent(new Event("open"));
           return true;
         }
-        throw new Error(response.E || "Failed to open device");
+        throw new Error("Open failed: " + __webhid.http.name(response.s || 0));
       } catch (error) {
         throw new DOMException(error.message, "InvalidStateError");
       }
@@ -250,7 +250,7 @@
         const response = await sendRequest("close", {
           deviceId: this.#deviceId,
         });
-        if (response.o) {
+        if (__webhid.http.isOk(response.s)) {
           this.#opened = false;
           if (this.#port) {
             this.#port.onmessage = null;
@@ -289,7 +289,7 @@
           reportId: reportId,
           data: buffer,
         });
-        if (response.o) {
+        if (__webhid.http.isOk(response.s)) {
           return;
         }
         throw new Error("sendReport failed");
@@ -307,7 +307,7 @@
           deviceId: this.#deviceId,
           reportId: reportId,
         });
-        if (response.o && response.d) {
+        if (__webhid.http.isOk(response.s) && response.d) {
           __webhid.logger.debug('[webhid] receiveFeatureReport done len=' + (typeof response.d === 'string' ? 'base64' : response.d.length));
           const buf = typeof response.d === 'string' ? Uint8Array.fromBase64(response.d) : response.d;
           return new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
@@ -341,7 +341,7 @@
           reportId: reportId,
           data: buffer,
         });
-        if (response.o) {
+        if (__webhid.http.isOk(response.s)) {
           return undefined;
         }
         throw new Error("sendFeatureReport failed");

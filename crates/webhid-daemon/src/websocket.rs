@@ -7,7 +7,14 @@ use tokio::net::TcpListener;
 use tokio::sync::{broadcast, mpsc};
 use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
 use tokio_tungstenite::tungstenite::http::StatusCode;
+use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::Message;
+
+// Custom WebSocket close codes (4xxx range = application-defined).
+// 4401: token unknown (daemon restarted / session invalidated)
+// 4402: token missing or malformed
+const WS_CLOSE_UNKNOWN_TOKEN: u16 = 4401;
+const WS_CLOSE_BAD_TOKEN: u16 = 4402;
 
 use crate::device_mgr::DeviceManager;
 use crate::hid;
@@ -149,14 +156,16 @@ async fn handle_websocket(
     };
 
     let token = token_holder.lock().unwrap().take();
-    let token = match token {
-        Some(t) if t.len() == 32 && t.chars().all(|c| c.is_ascii_hexdigit()) => t,
+    let (token, ws_stream) = match token {
+        Some(t) if t.len() == 32 && t.chars().all(|c| c.is_ascii_hexdigit()) => (t, ws_stream),
         Some(_) => {
             log::warn!("[ws] invalid token format; closing");
+            let _ = send_close(ws_stream, WS_CLOSE_BAD_TOKEN, "bad token").await;
             return Ok(());
         }
         None => {
             log::warn!("[ws] no token provided; closing");
+            let _ = send_close(ws_stream, WS_CLOSE_BAD_TOKEN, "no token").await;
             return Ok(());
         }
     };
@@ -172,6 +181,7 @@ async fn handle_websocket(
         Some(id) => id,
         None => {
             log::warn!("[ws] unknown token; closing");
+            let _ = send_close(ws_stream, WS_CLOSE_UNKNOWN_TOKEN, "unknown token").await;
             return Ok(());
         }
     };
@@ -578,18 +588,18 @@ async fn handle_client_text(
     let result = match action {
         "enumerate" => {
             match device_mgr.enumerate() {
-                Ok(devices) => serde_json::json!({ "n": id, "o": true, "D": devices }),
-                Err(e) => serde_json::json!({ "n": id, "o": false, "E": e.to_string() }),
+                Ok(devices) => serde_json::json!({ "n": id, "s": 200, "D": devices }),
+                Err(_) => serde_json::json!({ "n": id, "s": 500 }),
             }
         }
         "close" => {
             match device_mgr.close(device_id, 0) {
-                Ok(()) => serde_json::json!({ "n": id, "o": true }),
-                Err(e) => serde_json::json!({ "n": id, "o": false, "E": e.to_string() }),
+                Ok(()) => serde_json::json!({ "n": id, "s": 204 }),
+                Err(_) => serde_json::json!({ "n": id, "s": 404 }),
             }
         }
         _ => {
-            serde_json::json!({ "n": id, "o": false, "E": format!("unknown action: {action}") })
+            serde_json::json!({ "n": id, "s": 400 })
         }
     };
 
@@ -616,6 +626,25 @@ fn make_feature_read_resp(req_id: u32, status: u8, data: &[u8]) -> Message {
     buf.extend_from_slice(&len.to_le_bytes());
     buf.extend_from_slice(&data[..len as usize]);
     Message::Binary(buf.into())
+}
+
+/// Send a close frame with a custom code + reason, then close the stream.
+/// Used to signal token-auth failures so the client can distinguish them
+/// from network errors and trigger a token refresh instead of blind retry.
+async fn send_close(
+    ws_stream: tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
+    code: u16,
+    reason: &'static str,
+) -> Result<(), tokio_tungstenite::tungstenite::Error> {
+    use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode as Cc;
+    let (mut sender, mut receiver) = ws_stream.split();
+    let _ = sender.send(Message::Close(Some(CloseFrame {
+        code: Cc::from(code),
+        reason: reason.into(),
+    }))).await;
+    // Drain any incoming frames until the client acknowledges the close.
+    while receiver.next().await.is_some() {}
+    Ok(())
 }
 
 #[cfg(test)]

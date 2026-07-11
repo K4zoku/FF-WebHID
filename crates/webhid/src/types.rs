@@ -265,14 +265,13 @@ pub fn parse_packed_send_report(buf: &[u8]) -> std::io::Result<(&str, u8, &[u8])
 
 /// A response or event sent back to Firefox via stdout.
 /// Uses single-char field names for minimal wire size.
+/// Status uses HTTP semantics (200/201/204/4xx/5xx).
 #[derive(Debug, Default, Serialize)]
 pub struct NmResponse {
     #[serde(skip_serializing_if = "Option::is_none", rename = "n")]
     pub id: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none", rename = "o")]
-    pub success: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none", rename = "E")]
-    pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "s")]
+    pub status: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "D")]
     pub devices: Option<Vec<DeviceInfo>>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "d")]
@@ -296,19 +295,19 @@ pub struct NmResponse {
 
 impl NmResponse {
     pub fn ok() -> Self {
-        Self { success: Some(true), ..Default::default() }
+        Self { status: Some(204), ..Default::default() }
     }
     pub fn ok_with_data(data: Vec<u8>) -> Self {
-        Self { success: Some(true), data: Some(data), ..Default::default() }
+        Self { status: Some(200), data: Some(data), ..Default::default() }
     }
     pub fn ok_with_devices(devices: Vec<DeviceInfo>) -> Self {
-        Self { success: Some(true), devices: Some(devices), ..Default::default() }
+        Self { status: Some(200), devices: Some(devices), ..Default::default() }
     }
     pub fn ok_opened(device_id: String, session_token: Option<String>, ws_port: Option<u16>) -> Self {
-        Self { success: Some(true), device_id: Some(device_id), session_token, ws_port, ..Default::default() }
+        Self { status: Some(201), device_id: Some(device_id), session_token, ws_port, ..Default::default() }
     }
-    pub fn err(message: impl Into<String>) -> Self {
-        Self { success: Some(false), error: Some(message.into()), ..Default::default() }
+    pub fn err(code: u16) -> Self {
+        Self { status: Some(code), ..Default::default() }
     }
     pub fn event_connect(device: DeviceInfo) -> Self {
         Self { event_type: Some(EVT_CONNECT), device: Some(device), ..Default::default() }
@@ -446,20 +445,19 @@ mod tests {
     #[test]
     fn test_nm_response_ok() {
         let r = NmResponse::ok();
-        assert_eq!(r.success, Some(true));
+        assert_eq!(r.status, Some(204));
     }
 
     #[test]
     fn test_nm_response_err() {
-        let r = NmResponse::err("something went wrong");
-        assert_eq!(r.success, Some(false));
-        assert_eq!(r.error, Some("something went wrong".into()));
+        let r = NmResponse::err(404);
+        assert_eq!(r.status, Some(404));
     }
 
     #[test]
     fn test_nm_response_ok_with_data() {
         let r = NmResponse::ok_with_data(vec![1, 2, 3]);
-        assert_eq!(r.success, Some(true));
+        assert_eq!(r.status, Some(200));
         assert_eq!(r.data, Some(vec![1, 2, 3]));
     }
 
@@ -472,14 +470,14 @@ mod tests {
             max_input_report_size: 0,
         };
         let r = NmResponse::ok_with_devices(vec![dev]);
-        assert_eq!(r.success, Some(true));
+        assert_eq!(r.status, Some(200));
         assert!(r.devices.is_some());
     }
 
     #[test]
     fn test_nm_response_ok_opened() {
         let r = NmResponse::ok_opened("devpath".into(), Some("tok".into()), Some(31337));
-        assert_eq!(r.success, Some(true));
+        assert_eq!(r.status, Some(201));
         assert_eq!(r.device_id, Some("devpath".into()));
         assert_eq!(r.session_token, Some("tok".into()));
         assert_eq!(r.ws_port, Some(31337));
@@ -488,13 +486,13 @@ mod tests {
     #[test]
     fn test_nm_response_json_serialize() {
         let json = serde_json::to_string(&NmResponse::ok()).unwrap();
-        assert_eq!(json, r#"{"o":true}"#);
+        assert_eq!(json, r#"{"s":204}"#);
 
-        let json = serde_json::to_string(&NmResponse::err("err")).unwrap();
-        assert_eq!(json, r#"{"o":false,"E":"err"}"#);
+        let json = serde_json::to_string(&NmResponse::err(404)).unwrap();
+        assert_eq!(json, r#"{"s":404}"#);
 
         let json = serde_json::to_string(&NmResponse::ok_with_data(vec![0xDE])).unwrap();
-        assert_eq!(json, r#"{"o":true,"d":"3g=="}"#);
+        assert_eq!(json, r#"{"s":200,"d":"3g=="}"#);
     }
 
     #[test]

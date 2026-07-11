@@ -17,6 +17,7 @@
     "scripts": [
       "js/utils/logger.js",
       "js/utils/settings-defaults.js",
+      "js/utils/http-status.js",
       "js/background.js"
     ]
   },
@@ -37,6 +38,7 @@
         "js/utils/logger.js",
         "js/utils/device-utils.js",
         "js/utils/settings-defaults.js",
+        "js/utils/http-status.js",
         "js/polyfill.js"
       ],
       "world": "MAIN"
@@ -49,6 +51,7 @@
         "js/utils/logger.js",
         "js/utils/device-utils.js",
         "js/utils/settings-defaults.js",
+        "js/utils/http-status.js",
         "js/bridge.js"
       ]
     }
@@ -61,6 +64,7 @@
         "css/device-picker.css",
         "js/utils/logger.js",
         "js/utils/settings-defaults.js",
+        "js/utils/http-status.js",
         "js/worker.js",
         "js/control.js"
       ],

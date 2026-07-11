@@ -175,12 +175,13 @@
     async #loadDevices() {
       try {
         const response = await browser.runtime.sendMessage({ action: "enumerate" });
-        if (response && response.o) {
+        if (response && __webhid.http.isOk(response.s)) {
           this.devices = response.D || [];
           await this.#renderDevices();
         } else {
           this.devices = [];
-          const errMsg = response?.E || "Unknown error";
+          const code = response?.s || 0;
+          const errMsg = __webhid.http.name(code);
           const userMsg = this.#classifyError(errMsg);
           __webhid.logger.error('[WebHID] enumerate failed:', errMsg);
           this.#showMessage(userMsg, true);
@@ -419,8 +420,16 @@
         __webhid.logger.info('[bridge] control worker ready');
       } else if (data.type === 'closed') {
         __webhid.logger.warn('[bridge] control worker WS closed; will auto-reconnect');
-        for (const [, { resolve }] of _controlPending) resolve({ o: false, E: 'WS control closed' });
+        for (const [, { resolve }] of _controlPending) resolve({ s: 503 });
         _controlPending.clear();
+      } else if (data.type === 'auth-failed') {
+        // Daemon rejected control token (restart / invalidation). Re-handshake
+        // to get a fresh control token and respawn the control worker.
+        __webhid.logger.warn('[bridge] control worker auth-failed code=' + data.code + '; re-handshaking');
+        for (const [, { resolve }] of _controlPending) resolve({ s: 503 });
+        _controlPending.clear();
+        _terminateControlWorker();
+        _refreshControlToken();
       } else if (data.type === 'response' && data.id && _controlPending.has(data.id)) {
         const { resolve } = _controlPending.get(data.id);
         _controlPending.delete(data.id);
@@ -435,14 +444,31 @@
   function _terminateControlWorker() {
     if (_controlPort) { _controlPort.onmessage = null; _controlPort.close(); _controlPort = null; }
     if (_controlWorker) { _controlWorker.postMessage({ type: 'disconnect' }); _controlWorker.terminate(); _controlWorker = null; }
-    for (const [, { resolve }] of _controlPending) resolve({ o: false, E: 'WS control closed' });
+    for (const [, { resolve }] of _controlPending) resolve({ s: 503 });
     _controlPending.clear();
+  }
+
+  // Re-handshake via NM to get a fresh control token, then respawn
+  // the control worker. Called when daemon restarted (4401 close code).
+  async function _refreshControlToken() {
+    if (_controlWorker) return;  // already respawning
+    try {
+      const resp = await browser.runtime.sendMessage({ action: 'handshake' });
+      if (__webhid.http.isOk(resp.s) && resp.c && resp.w) {
+        _wsPort = resp.w;
+        _spawnControlWorker(resp.c, resp.w);
+      } else {
+        __webhid.logger.error('[bridge] token refresh failed: s=' + (resp?.s || 0));
+      }
+    } catch (e) {
+      __webhid.logger.error('[bridge] token refresh error:', e.message);
+    }
   }
 
   function _sendControlCommand(action, payload) {
     return new Promise((resolve) => {
       if (!_controlPort) {
-        resolve({ o: false, E: 'WS control not connected' });
+        resolve({ s: 503 });
         return;
       }
       const id = _controlReqId++;
@@ -462,6 +488,23 @@
     _workerReady.delete(deviceId);
     _workerQueues.delete(deviceId);
     _workerPorts.delete(deviceId);
+  }
+
+  // Re-open device via NM to get a fresh session token, then respawn
+  // the data-plane worker. Called when daemon restarted (4401 close code).
+  async function _refreshDataPlaneToken(deviceId) {
+    if (_workers.has(deviceId)) return;  // already respawning
+    try {
+      const resp = await browser.runtime.sendMessage({ action: 'open', deviceId });
+      if (__webhid.http.isOk(resp.s) && resp.t) {
+        _sessionTokens.set(deviceId, resp.t);
+        _spawnDataPlane(deviceId, resp.t, resp.w || _wsPort);
+      } else {
+        __webhid.logger.error('[bridge] data plane token refresh failed for', deviceId, 's=' + (resp?.s || 0));
+      }
+    } catch (e) {
+      __webhid.logger.error('[bridge] data plane token refresh error:', e.message);
+    }
   }
 
   async function _spawnWorker(deviceId, sessionToken, wsPort, opts = {}, gen) {
@@ -515,6 +558,14 @@
           __webhid_bridge: 'evt',
           event: { eventType: 'webhid-data-ready', deviceId: deviceId, port: port2 }
         }, '*', [port2]);
+      } else if (data.type === 'auth-failed') {
+        // Daemon rejected session token (restart / invalidation). Re-open
+        // the device via NM to get a fresh session token, then respawn worker.
+        __webhid.logger.warn('[bridge] worker auth-failed for', deviceId, 'code=' + data.code + '; re-opening');
+        _workers.delete(deviceId);
+        _workerReady.delete(deviceId);
+        _workerPorts.delete(deviceId);
+        _refreshDataPlaneToken(deviceId);
       } else if (data.type === 'closed') {
         __webhid.logger.warn('[bridge] worker closed for', deviceId);
         _workers.delete(deviceId);
@@ -547,9 +598,9 @@
         if (cbMap && cbMap.has(data.reqId)) {
           const cb = cbMap.get(data.reqId);
           cbMap.delete(data.reqId);
-          if (data.error) cb({ o: false, E: data.error });
-          else if (data.data) cb({ o: true, d: data.data });
-          else cb({ o: true });
+          if (data.error) cb({ s: 500 });
+          else if (data.data) cb({ s: 200, d: data.data });
+          else cb({ s: 204 });
         }
       }
     };
@@ -579,7 +630,7 @@
   (async () => {
     try {
       const resp = await browser.runtime.sendMessage({ action: 'handshake' });
-      if (resp.o && resp.w) {
+      if (__webhid.http.isOk(resp.s) && resp.w) {
         _wsPort = resp.w;
         const global = await browser.storage.local.get(__webhid.GLOBAL_DEFAULTS);
         let cp = global.controlPlane;
@@ -658,9 +709,9 @@
           let cbMap = _workerCallbacks.get(deviceId);
           if (!cbMap) { cbMap = new Map(); _workerCallbacks.set(deviceId, cbMap); }
           cbMap.set(id, (data) => {
-            const result = data.error ? { o: false, E: data.error }
-                        : data.data ? { o: true, d: data.data }
-                        : { o: true };
+            const result = data.error ? { s: 500 }
+                        : data.data ? { s: 200, d: data.data }
+                        : { s: 204 };
             const xfers = result.d instanceof Uint8Array ? [result.d.buffer] : [];
             window.postMessage({ __webhid_bridge: "res", id, result }, "*", xfers.length ? xfers : undefined);
           });
@@ -682,9 +733,9 @@
           let cbMap = _workerCallbacks.get(deviceId);
           if (!cbMap) { cbMap = new Map(); _workerCallbacks.set(deviceId, cbMap); }
           cbMap.set(id, (data) => {
-            const result = data.error ? { o: false, E: data.error }
-                        : data.data ? { o: true, d: data.data }
-                        : { o: true };
+            const result = data.error ? { s: 500 }
+                        : data.data ? { s: 200, d: data.data }
+                        : { s: 204 };
             const xfers = result.d instanceof Uint8Array ? [result.d.buffer] : [];
             window.postMessage({ __webhid_bridge: "res", id, result }, "*", xfers.length ? xfers : undefined);
           });
@@ -709,7 +760,7 @@
         const response = await browser.runtime.sendMessage(msg);
         window.postMessage({ __webhid_bridge: "res", id, result: response }, "*");
       } catch (error) {
-        window.postMessage({ __webhid_bridge: "res", id, result: { o: false, E: error.message } }, "*");
+        window.postMessage({ __webhid_bridge: "res", id, result: { s: 500 } }, "*");
       }
       return;
     }
@@ -764,7 +815,7 @@
       const msg = Object.assign({ action }, payload || {});
       const response = await browser.runtime.sendMessage(msg);
 
-      if (action === "open" && response.o && response.t) {
+      if (action === "open" && __webhid.http.isOk(response.s) && response.t) {
         const deviceId = response.i;
         _openDevices.add(deviceId);
         _sessionTokens.set(deviceId, response.t);
@@ -807,7 +858,7 @@
         {
           __webhid_bridge: "res",
           id,
-          result: { o: false, E: error.message },
+          result: { s: 500 },
         },
         "*",
       );
@@ -897,7 +948,7 @@
       __webhid.logger.info('[bridge] control plane changed:', cp);
       if (cp === 'ws' && _wsPort && !_controlWorker) {
         const resp = await browser.runtime.sendMessage({ action: 'handshake' });
-        if (resp.o && resp.c && resp.w) {
+        if (__webhid.http.isOk(resp.s) && resp.c && resp.w) {
           _wsPort = resp.w;
           _spawnControlWorker(resp.c, resp.w);
         }

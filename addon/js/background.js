@@ -109,7 +109,7 @@ const NativeMessaging = {
       this.port.onDisconnect.addListener(() => {
         __webhid.logger.warn('[nm] disconnected; will retry in', this._reconnectDelay, 'ms');
         this.port = null;
-        for (const [id, p] of this._pending) p.resolve({ o: false, E: 'NM disconnected' });
+        for (const [id, p] of this._pending) p.resolve({ s: 503 });
         this._pending.clear();
         this._scheduleReconnect();
       });
@@ -254,26 +254,26 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
     case 'enumerate':
       NativeMessaging.enumerateDevices()
         .then((response) => {
-          if (response.o && response.D) _deviceCache = response.D;
+          if (__webhid.http.isOk(response.s) && response.D) _deviceCache = response.D;
           sendResponse(response);
         })
-        .catch((e) => sendResponse({ o: false, E: e.message }));
+        .catch((e) => sendResponse({ s: 500 }));
       return true;
 
     case 'handshake':
       NativeMessaging.handshake()
         .then(sendResponse)
-        .catch((e) => sendResponse({ o: false, E: e.message }));
+        .catch((e) => sendResponse({ s: 500 }));
       return true;
 
     case 'open': {
       const tabId = sender.tab?.id;
       NativeMessaging.openDevice(request.deviceId)
         .then((response) => {
-          if (response.o && response.i) registerDeviceTab(response.i, tabId);
+          if (__webhid.http.isOk(response.s) && response.i) registerDeviceTab(response.i, tabId);
           sendResponse(response);
         })
-        .catch((e) => sendResponse({ o: false, E: e.message }));
+        .catch((e) => sendResponse({ s: 500 }));
       return true;
     }
 
@@ -281,35 +281,35 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
       const tabId = sender.tab?.id;
       NativeMessaging.closeDevice(request.deviceId)
         .then((response) => {
-          if (response.o) unregisterDeviceTab(request.deviceId, tabId);
+          if (__webhid.http.isOk(response.s)) unregisterDeviceTab(request.deviceId, tabId);
           sendResponse(response);
         })
-        .catch((e) => sendResponse({ o: false, E: e.message }));
+        .catch((e) => sendResponse({ s: 500 }));
       return true;
     }
 
     case 'setdataplane':
       NativeMessaging.sendRequest({ a: ACT.sdp, i: request.deviceId, m: request.mode })
         .then(sendResponse)
-        .catch((e) => sendResponse({ o: false, E: e.message }));
+        .catch((e) => sendResponse({ s: 500 }));
       return true;
 
     case 'sendreport':
       NativeMessaging.sendReport(request.deviceId, request.reportId || 0, request.data)
         .then(sendResponse)
-        .catch((e) => sendResponse({ o: false, E: e.message }));
+        .catch((e) => sendResponse({ s: 500 }));
       return true;
 
     case 'receivefeaturereport':
       NativeMessaging.receiveFeatureReport(request.deviceId, request.reportId)
         .then(sendResponse)
-        .catch((e) => sendResponse({ o: false, E: e.message }));
+        .catch((e) => sendResponse({ s: 500 }));
       return true;
 
     case 'sendfeaturereport':
       NativeMessaging.sendFeatureReport(request.deviceId, request.reportId || 0, request.data)
         .then(sendResponse)
-        .catch((e) => sendResponse({ o: false, E: e.message }));
+        .catch((e) => sendResponse({ s: 500 }));
       return true;
 
     case 'getSavedDevices':

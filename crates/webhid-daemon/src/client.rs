@@ -90,26 +90,35 @@ async fn dispatch(
     let resp: NmResponse = match req {
         NmRequest::Enumerate { .. } => match device_mgr.enumerate() {
             Ok(devices) => NmResponse::ok_with_devices(devices),
-            Err(e) => NmResponse::err(e.to_string()),
+            Err(_) => NmResponse::err(500),
         },
 
         NmRequest::Open { device_id, .. } => match device_mgr.open(&device_id, client_id) {
             Ok((dev_id, session_token)) => {
                 NmResponse::ok_opened(dev_id, session_token, Some(ws_port))
             }
-            Err(e) => NmResponse::err(e.to_string()),
+            Err(e) => {
+                let msg = e.to_string();
+                let code = if msg.contains("open by") { 403 }
+                           else if msg.contains("not found") || msg.contains("No such") { 404 }
+                           else { 500 };
+                NmResponse::err(code)
+            }
         },
 
         NmRequest::Close { device_id, .. } => match device_mgr.close(&device_id, client_id) {
             Ok(()) => NmResponse::ok(),
-            Err(e) => NmResponse::err(e.to_string()),
+            Err(e) => {
+                let code = if e.to_string().contains("not found") { 404 } else { 500 };
+                NmResponse::err(code)
+            }
         },
 
         NmRequest::SendReport { packed, .. } => {
             match parse_packed_send_report(&packed) {
                 Ok((device_id, report_id, data)) => {
                     match device_mgr.get_file(device_id, client_id) {
-                        Err(e) => NmResponse::err(e.to_string()),
+                        Err(_) => NmResponse::err(404),
                         Ok(dev_arc) => {
                             let data_owned = data.to_vec();
                             let result = tokio::task::spawn_blocking(move || {
@@ -118,19 +127,19 @@ async fn dispatch(
                             }).await;
                             match result {
                                 Ok(Ok(())) => NmResponse::ok(),
-                                Ok(Err(e)) => NmResponse::err(e.to_string()),
-                                Err(e) => NmResponse::err(e.to_string()),
+                                Ok(Err(_)) => NmResponse::err(500),
+                                Err(_) => NmResponse::err(500),
                             }
                         }
                     }
                 }
-                Err(e) => NmResponse::err(e.to_string()),
+                Err(_) => NmResponse::err(422),
             }
         }
 
         NmRequest::ReceiveFeatureReport { device_id, report_id, .. } => {
             match device_mgr.get_file(&device_id, client_id) {
-                Err(e) => NmResponse::err(e.to_string()),
+                Err(_) => NmResponse::err(404),
                 Ok(dev_arc) => {
                     let result = tokio::task::spawn_blocking(move || {
                         let dev = dev_arc.lock().unwrap();
@@ -138,8 +147,8 @@ async fn dispatch(
                     }).await;
                     match result {
                         Ok(Ok(data)) => NmResponse::ok_with_data(data),
-                        Ok(Err(e)) => NmResponse::err(e.to_string()),
-                        Err(e) => NmResponse::err(e.to_string()),
+                        Ok(Err(_)) => NmResponse::err(500),
+                        Err(_) => NmResponse::err(500),
                     }
                 }
             }
@@ -147,7 +156,7 @@ async fn dispatch(
 
         NmRequest::SendFeatureReport { device_id, report_id, data, .. } => {
             match device_mgr.get_file(&device_id, client_id) {
-                Err(e) => NmResponse::err(e.to_string()),
+                Err(_) => NmResponse::err(404),
                 Ok(dev_arc) => {
                     let result = tokio::task::spawn_blocking(move || {
                         let dev = dev_arc.lock().unwrap();
@@ -155,8 +164,8 @@ async fn dispatch(
                     }).await;
                     match result {
                         Ok(Ok(())) => NmResponse::ok(),
-                        Ok(Err(e)) => NmResponse::err(e.to_string()),
-                        Err(e) => NmResponse::err(e.to_string()),
+                        Ok(Err(_)) => NmResponse::err(500),
+                        Err(_) => NmResponse::err(500),
                     }
                 }
             }
@@ -170,7 +179,7 @@ async fn dispatch(
         NmRequest::Handshake { .. } => {
             let control_token = device_mgr.get_or_create_control_token();
             NmResponse {
-                success: Some(true),
+                status: Some(200),
                 control_token: Some(control_token),
                 ws_port: Some(ws_port),
                 ..Default::default()
