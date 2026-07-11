@@ -807,18 +807,16 @@
     // to the background script via the native-messaging port, or via control
     // worker if WS control plane is enabled and connected.
     try {
-      // WS control plane: route enumerate/close via control worker.
-      // open always goes via NM (needs sessionToken per device).
+      let response;
+      let viaControlWs = false;
       if (settings.controlPlane === 'ws' && _controlPort
-          && (action === 'enumerate' || action === 'close')) {
-        const response = await _sendControlCommand(action, payload || {});
-        const _xfers = (response && response.d instanceof Uint8Array) ? [response.d.buffer] : [];
-        window.postMessage({ __webhid_bridge: "res", id, result: response }, "*", _xfers.length ? _xfers : undefined);
-        return;
+          && (action === 'enumerate' || action === 'close' || action === 'open')) {
+        response = await _sendControlCommand(action, payload || {});
+        viaControlWs = true;
+      } else {
+        const msg = Object.assign({ action }, payload || {});
+        response = await browser.runtime.sendMessage(msg);
       }
-
-      const msg = Object.assign({ action }, payload || {});
-      const response = await browser.runtime.sendMessage(msg);
 
       if (action === "open" && __webhid.http.isOk(response.s) && response.t) {
         const deviceId = response.i;
@@ -828,11 +826,13 @@
         __webhid.logger.debug('open ok deviceId=' + deviceId + ' wsPort=' + response.w);
 
         const dataPlane = settings.dataPlane;
-        browser.runtime.sendMessage({
-          action: "setdataplane",
-          deviceId: deviceId,
-          mode: dataPlane,
-        }).catch(() => {});
+        if (!viaControlWs) {
+          browser.runtime.sendMessage({
+            action: "setdataplane",
+            deviceId: deviceId,
+            mode: dataPlane,
+          }).catch(() => {});
+        }
 
         if (dataPlane === 'ws') {
           _spawnDataPlane(deviceId, response.t, response.w || _wsPort);

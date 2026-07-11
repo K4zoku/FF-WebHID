@@ -307,9 +307,10 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true;
 
     case 'sendreport':
+      __webhid.logger.debug('sendreport: deviceId=' + request.deviceId + ' reportId=' + (request.reportId || 0) + ' dataLen=' + (request.data?.length ?? 'undefined') + ' dataCtor=' + (request.data?.constructor?.name ?? 'undefined'));
       NativeMessaging.sendReport(request.deviceId, request.reportId || 0, request.data)
-        .then(sendResponse)
-        .catch((e) => sendResponse({ s: 500 }));
+        .then((resp) => { __webhid.logger.debug('sendreport resp:', resp); sendResponse(resp); })
+        .catch((e) => { __webhid.logger.error('sendreport error:', e.message); sendResponse({ s: 500 }); });
       return true;
 
     case 'receivefeaturereport':

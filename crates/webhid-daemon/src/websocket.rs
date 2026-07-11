@@ -97,7 +97,7 @@ pub async fn start_server(
                 let event_tx_clone = event_tx.clone();
                 let device_mgr_clone = Arc::clone(&device_mgr);
                 tokio::spawn(async move {
-                    if let Err(e) = handle_websocket(stream, event_tx_clone, device_mgr_clone).await {
+                    if let Err(e) = handle_websocket(stream, event_tx_clone, device_mgr_clone, port).await {
                         log::warn!("[ws] {addr} error: {e:#}");
                     }
                 });
@@ -112,6 +112,7 @@ async fn handle_websocket(
     stream: tokio::net::TcpStream,
     event_tx: broadcast::Sender<webhid::IpcResponse>,
     device_mgr: Arc<DeviceManager>,
+    ws_port: u16,
 ) -> anyhow::Result<()> {
     // Capture the session token from the HTTP upgrade request.
     let token_holder: Arc<std::sync::Mutex<Option<String>>> =
@@ -173,7 +174,7 @@ async fn handle_websocket(
     // Check if this is a control-only token first.
     if device_mgr.validate_control_token(&token) {
         log::info!("[ws] control-only connection accepted");
-        return handle_control_ws(ws_stream, device_mgr).await;
+        return handle_control_ws(ws_stream, device_mgr, ws_port).await;
     }
 
     // Otherwise: device session token.
@@ -235,7 +236,7 @@ async fn handle_websocket(
                     let mgr = Arc::clone(&device_mgr_for_receiver);
                     let dev_id = device_id_for_receiver;
                     tokio::spawn(async move {
-                        handle_client_text(&text, &mgr, dev_id, tx_clone).await;
+                        handle_client_text(&text, &mgr, dev_id, tx_clone, ws_port).await;
                     });
                 }
                 Err(e) => {
@@ -350,6 +351,7 @@ async fn handle_websocket(
 async fn handle_control_ws(
     ws_stream: tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
     device_mgr: Arc<DeviceManager>,
+    ws_port: u16,
 ) -> anyhow::Result<()> {
     use futures_util::StreamExt;
     let (mut ws_sender, mut ws_receiver) = ws_stream.split();
@@ -368,7 +370,7 @@ async fn handle_control_ws(
                 let tx_clone = tx.clone();
                 let mgr = Arc::clone(&device_mgr);
                 tokio::spawn(async move {
-                    handle_client_text(&text, &mgr, 0, tx_clone).await;
+                    handle_client_text(&text, &mgr, 0, tx_clone, ws_port).await;
                 });
             }
             Ok(Message::Ping(data)) => { let _ = tx.send(Message::Pong(data)); }
@@ -571,6 +573,7 @@ async fn handle_client_text(
     device_mgr: &Arc<DeviceManager>,
     device_id: u32,
     tx: mpsc::UnboundedSender<Message>,
+    ws_port: u16,
 ) {
     let req: serde_json::Value = match serde_json::from_str(text) {
         Ok(v) => v,
@@ -596,6 +599,22 @@ async fn handle_client_text(
             match device_mgr.close(device_id, 0) {
                 Ok(()) => serde_json::json!({ "n": id, "s": 204 }),
                 Err(_) => serde_json::json!({ "n": id, "s": 404 }),
+            }
+        }
+        "open" => {
+            let req_dev_id = req.get("deviceId").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+            match device_mgr.open(req_dev_id, 0) {
+                Ok((dev_id, session_token)) => serde_json::json!({
+                    "n": id, "s": 201, "i": dev_id,
+                    "t": session_token, "w": ws_port
+                }),
+                Err(e) => {
+                    let msg = e.to_string();
+                    let code = if msg.contains("open by") { 403 }
+                               else if msg.contains("not found") || msg.contains("No such") { 404 }
+                               else { 500 };
+                    serde_json::json!({ "n": id, "s": code })
+                }
             }
         }
         _ => {
