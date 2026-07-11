@@ -169,9 +169,9 @@ Download the `.msi` from [GitHub Releases](https://github.com/K4zoku/FF-WebHID/r
 The installer:
 - Installs binaries to `C:\Program Files\WebHID\`
 - Registers the native messaging host in the Windows registry (Firefox auto-detects)
-- Creates a Scheduled Task ("WebHID Daemon") that auto-starts the daemon at logon
 
-No manual setup needed; install and restart Firefox.
+
+Install and restart Firefox. Start the daemon manually: run webhid-daemon.exe from the install directory.
 
 ### Portable/Manual
 

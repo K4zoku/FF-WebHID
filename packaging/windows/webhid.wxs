@@ -14,8 +14,6 @@
     HKLM\SOFTWARE\Mozilla\NativeMessagingHosts\webhid.forwarder_nm_host  = [INSTALLDIR]webhid.forwarder_nm_host.json
     HKLM\SOFTWARE\Mozilla\NativeMessagingHosts\webhid.daemon_nm_host        = [INSTALLDIR]webhid.daemon_nm_host.json
 
-  Scheduled Task:
-    "WebHID Daemon": runs at logon, webhid-daemon.exe
 -->
 <Wix xmlns='http://wixtoolset.org/schemas/v4/wxs'>
   <Package Name='WebHID'
@@ -38,19 +36,6 @@
 
     <Launch Condition='Privileged' Message='This installer requires administrator privileges.'/>
 
-    <CustomAction Id='CreateTask'
-                  Directory='INSTALLDIR'
-                  ExeCommand='powershell.exe -NoProfile -NonInteractive -Command &quot;Register-ScheduledTask -TaskName \&quot;WebHID Daemon\&quot; -Action (New-ScheduledTaskAction -Execute \&quot;[INSTALLDIR]webhid-daemon.exe\&quot;) -Trigger (New-ScheduledTaskTrigger -AtLogOn) -Settings (New-ScheduledTaskSettingsSet -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)) -Force&quot;'
-                  Return='check'/>
-    <CustomAction Id='DeleteTask'
-                  Directory='INSTALLDIR'
-                  ExeCommand='powershell.exe -NoProfile -NonInteractive -Command &quot;Unregister-ScheduledTask -TaskName \&quot;WebHID Daemon\&quot; -Confirm:$false&quot;'
-                  Return='ignore'/>
-
-    <InstallExecuteSequence>
-      <Custom Action='CreateTask' After='InstallFiles' Condition='NOT Installed'/>
-      <Custom Action='DeleteTask' Before='RemoveFiles' Condition='Installed'/>
-    </InstallExecuteSequence>
   </Package>
 
   <Fragment>
