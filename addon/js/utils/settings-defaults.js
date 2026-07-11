@@ -1,6 +1,5 @@
 (function () {
 const GLOBAL_DEFAULTS = {
-  perfLogging: false,
   fireAndForget: true,
   dataPlane: 'nm',
   controlPlane: 'nm',

@@ -8,7 +8,6 @@
 // Usage:
 //   <script src="logger.js"></script>      // popup/settings/content scripts
 //   __webhid.logger.info("hello")
-//   const t = __webhid.perf.begin(); ... __webhid.perf.end(t, "label")
 //
 // IIFE-scoped: re-injection (MAIN world page reload) creates a new scope,
 // so `const` declarations never conflict with a previous injection.
@@ -51,24 +50,6 @@ function _parseLevel(v) {
   return LEVEL_WARN;
 }
 
-// Performance timing helper. perf.begin() returns a timestamp token;
-// perf.end(token, label) logs `label <elapsed>ms` at debug level.
-// When logLevel < debug, both are no-ops; zero overhead.
-const perf = {
-  begin: _nop,
-  end: _nop,
-};
-
-function _applyPerf() {
-  if (logger._level >= LEVEL_DEBUG) {
-    perf.begin = () => performance.now();
-    perf.end = (t0, label) => logger.debug(label + ' ' + (performance.now() - t0).toFixed(2) + 'ms');
-  } else {
-    perf.begin = _nop;
-    perf.end = _nop;
-  }
-}
-
 async function _load() {
   if (logger._loaded) return;
   logger._loaded = true;
@@ -77,12 +58,10 @@ async function _load() {
     if (!ext || !ext.storage || !ext.storage.local) return;
     const result = await ext.storage.local.get({ logLevel: LEVEL_WARN });
     _applyLevel(_parseLevel(result.logLevel));
-    _applyPerf();
     if (ext.storage.onChanged) {
       ext.storage.onChanged.addListener((changes, area) => {
         if (area === 'local' && changes.logLevel) {
           _applyLevel(_parseLevel(changes.logLevel.newValue));
-          _applyPerf();
         }
       });
     }
@@ -92,13 +71,11 @@ async function _load() {
 }
 
 _applyLevel(LEVEL_WARN);
-_applyPerf();
 _load();
 
 // Exports
 globalThis.__webhid = globalThis.__webhid || {};
 globalThis.__webhid.logger = logger;
-globalThis.__webhid.perf = perf;
 globalThis.__webhid._nop = _nop;
 
 })();

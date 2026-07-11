@@ -93,19 +93,8 @@
 
   const _defs = globalThis.__webhid.GLOBAL_DEFAULTS;
   let _dataPlane = _defs.dataPlane;
-  let _perfLogging = _defs.perfLogging;
   let _fireAndForget = _defs.fireAndForget;
 
-  function _applyPerf() {
-    const active = _perfLogging && __webhid.logger._level >= 3;
-    if (active) {
-      __webhid.perf.begin = () => performance.now();
-      __webhid.perf.end = (t0, label) => __webhid.logger.debug(label + ' ' + (performance.now() - t0).toFixed(2) + 'ms');
-    } else {
-      __webhid.perf.begin = () => {};
-      __webhid.perf.end = () => {};
-    }
-  }
 
   // Listen for responses, events, and settings pushes from the bridge.
   window.addEventListener("message", (event) => {
@@ -123,8 +112,6 @@
       if (s.dataPlane !== undefined) { _dataPlane = s.dataPlane; __webhid.logger.info('[webhid] data plane changed: ' + _dataPlane); }
       if (s.fireAndForget !== undefined) { _fireAndForget = s.fireAndForget; __webhid.logger.info('[webhid] fire-and-forget: ' + _fireAndForget); }
       if (s.logLevel !== undefined && __webhid.logger.applyLevel) __webhid.logger.applyLevel(s.logLevel);
-      if (s.perfLogging !== undefined) _perfLogging = s.perfLogging;
-      _applyPerf();
     }
   });
 
@@ -158,8 +145,6 @@
     if (s.dataPlane !== undefined) _dataPlane = s.dataPlane;
     if (s.fireAndForget !== undefined) _fireAndForget = s.fireAndForget;
     if (s.logLevel !== undefined && __webhid.logger.applyLevel) __webhid.logger.applyLevel(s.logLevel);
-    if (s.perfLogging !== undefined) _perfLogging = s.perfLogging;
-    _applyPerf();
     __webhid.logger.info('[webhid] data plane: ' + _dataPlane + ' (fire-and-forget: ' + _fireAndForget + ')');
   });
 
@@ -288,7 +273,6 @@
         ? new Uint8Array(data)
         : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
       const buffer = view.slice();
-      const t0 = __webhid.perf.begin();
       try {
         const action = _dataPlane === 'nm' ? "sendreport" : "worker-send";
         __webhid.logger.debug('[webhid] sendReport reportId=' + reportId + ' len=' + buffer.length);
@@ -298,7 +282,6 @@
             reportId: reportId,
             data: buffer,
           });
-          __webhid.perf.end(t0, '[webhid] sendReport reportId=' + reportId);
           return;
         }
         const response = await sendRequest(action, {
@@ -307,7 +290,6 @@
           data: buffer,
         });
         if (response.success) {
-          __webhid.perf.end(t0, '[webhid] sendReport reportId=' + reportId);
           return;
         }
         throw new Error("sendReport failed");

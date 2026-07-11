@@ -1,5 +1,5 @@
 'use strict';
-const { logger, perf, _nop } = self.__webhid;
+const { logger } = self.__webhid;
 const MSG_SEND_REPORT = 0x01;
 const MSG_SEND_FEATURE_REPORT = 0x02;
 const MSG_RECEIVE_FEATURE_REPORT = 0x03;
@@ -10,7 +10,7 @@ let _fireAndForget = self.__webhid.GLOBAL_DEFAULTS.fireAndForget;
 const _pending = new Map();
 let _reconnectTimer = null;
 let _reconnectDelay = 500;
-let _port = null; // MessagePort for direct worker→page input reports
+let _port = null;
 
 self.onmessage = ({ data: msg, ports }) => {
   if (msg.type === 'connect') return connect(msg);
@@ -21,8 +21,7 @@ self.onmessage = ({ data: msg, ports }) => {
   }
   if (msg.type === 'settings') {
     if (msg.fireAndForget !== undefined) _fireAndForget = msg.fireAndForget !== false;
-    if (msg.logLevel !== undefined) { logger.applyLevel(msg.logLevel); _applyPerf(); }
-    if (msg.perfLogging !== undefined) { _perfLogging = msg.perfLogging === true; _applyPerf(); }
+    if (msg.logLevel !== undefined) { logger.applyLevel(msg.logLevel); }
     return;
   }
   if (msg.type === 'send') return handleSend(msg, MSG_SEND_REPORT);
@@ -30,20 +29,9 @@ self.onmessage = ({ data: msg, ports }) => {
   if (msg.type === 'receiveFeature') return handleReceiveFeature(msg);
 };
 
-var _perfLogging = self.__webhid.GLOBAL_DEFAULTS.perfLogging;
-function _applyPerf() {
-  if (_perfLogging && logger._level >= 3) {
-    perf.begin = () => performance.now();
-    perf.end = (t0, label) => logger.debug(label + ' ' + (performance.now() - t0).toFixed(2) + 'ms');
-  } else {
-    perf.begin = _nop;
-    perf.end = _nop;
-  }
-}
-
 function connect(msg) {
   _connectMsg = msg;
-  if (msg.logLevel !== undefined) { logger.applyLevel(msg.logLevel); _applyPerf(); }
+  if (msg.logLevel !== undefined) { logger.applyLevel(msg.logLevel); }
   logger.debug('[worker] connect wsPort=' + msg.wsPort + ' reportSize=' + (msg.reportSize || 64));
   _doConnect();
 }
@@ -126,7 +114,6 @@ function pushInputBatch(batch) {
 }
 
 function handleSend(msg, msgType) {
-  const t0 = perf.begin();
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     logger.warn('[worker] send: WS not open');
     self.postMessage({ type: 'sendResult', reqId: msg.reqId, error: 'ws not open' });
@@ -141,13 +128,11 @@ function handleSend(msg, msgType) {
   frame.set(payload, 6);
   if (_fireAndForget) {
     ws.send(frame);
-    perf.end(t0, '[worker] send reportId=' + msg.reportId + ' fire-and-forget');
     self.postMessage({ type: 'sendResult', reqId: msg.reqId, success: true });
     return;
   }
   _pending.set(reqId, {
     resolve: () => {
-      perf.end(t0, '[worker] send reportId=' + msg.reportId + ' acked');
       self.postMessage({ type: 'sendResult', reqId: msg.reqId, success: true });
     },
     reject: (e) => self.postMessage({ type: 'sendResult', reqId: msg.reqId, error: String(e.message || e) }),
@@ -167,7 +152,8 @@ function handleReceiveFeature(msg) {
   frame[5] = msg.reportId;
   _pending.set(reqId, {
     resolve: (data) => {
-      self.postMessage({ type: 'featureResult', reqId: msg.reqId, data });
+      const transfer = (data instanceof Uint8Array) ? [data.buffer] : [];
+      self.postMessage({ type: 'featureResult', reqId: msg.reqId, data }, transfer);
     },
     reject: (e) => self.postMessage({ type: 'featureResult', reqId: msg.reqId, error: String(e.message || e) }),
   });

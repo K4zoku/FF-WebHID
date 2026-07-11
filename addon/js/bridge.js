@@ -847,7 +847,7 @@
 
     // Determine which keys changed (global or site-level).
     const changed = {};
-    for (const k of ['dataPlane', 'controlPlane', 'fireAndForget', 'logLevel', 'perfLogging']) {
+    for (const k of ['dataPlane', 'controlPlane', 'fireAndForget', 'logLevel']) {
       if (changes[k]) changed[k] = changes[k].newValue;
       if (siteKey && changes[siteKey]) {
         const ss = changes[siteKey].newValue || {};
@@ -880,12 +880,11 @@
       window.postMessage({ __webhid_bridge: "settings", settings }, "*");
     }
 
-    // Forward fire-and-forget / logLevel / perfLogging to workers (only if changed).
+    // Forward fire-and-forget / logLevel to workers (only if changed).
     const workerMsg = { type: 'settings' };
     let hasWorkerSettings = false;
     if (effective.fireAndForget !== undefined) { workerMsg.fireAndForget = effective.fireAndForget; hasWorkerSettings = true; }
     if (effective.logLevel !== undefined) { workerMsg.logLevel = effective.logLevel; hasWorkerSettings = true; }
-    if (effective.perfLogging !== undefined) { workerMsg.perfLogging = effective.perfLogging; hasWorkerSettings = true; }
     if (hasWorkerSettings) {
       for (const worker of _workers.values()) worker.postMessage(workerMsg);
       if (_controlWorker) _controlWorker.postMessage(workerMsg);
