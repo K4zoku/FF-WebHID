@@ -235,9 +235,8 @@
     }
 
     async #deviceMatchesSaved(device) {
-      const savedHashes = await this.#getSavedDevices();
-      const deviceHash = __webhid.createDeviceHash(device);
-      return savedHashes.includes(deviceHash);
+      const savedIds = await this.#getSavedDevices();
+      return savedIds.includes(device.deviceId);
     }
 
     async #renderDevices() {
@@ -283,7 +282,7 @@
 
         const groupId = devices.length === 1
           ? devices[0].deviceId
-          : `group:${__webhid.createDeviceHash(devices[0])}`;
+          : `group:${devices[0].deviceId}`;
         this.#deviceGroups[groupId] = devices.slice();
 
         const device = devices[0];
@@ -348,8 +347,7 @@
         try {
           const saved = await this.#getSavedDevices();
           for (const d of devicesArr) {
-            const h = __webhid.createDeviceHash(d);
-            if (!saved.includes(h)) saved.push(h);
+            if (!saved.includes(d.deviceId)) saved.push(d.deviceId);
           }
           this.#savedDevices = saved;
         } catch (e) { /* ignore */ }

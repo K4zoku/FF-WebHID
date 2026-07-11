@@ -359,9 +359,9 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
           const key = encodeURIComponent(request.origin);
           const result = await browser.storage.local.get(key);
           const hashes = result[key] || [];
-          const deviceHash = request.device.hash;
-          if (!hashes.includes(deviceHash)) {
-            hashes.push(deviceHash);
+          const deviceId = request.device.deviceId;
+          if (!hashes.includes(deviceId)) {
+            hashes.push(deviceId);
             await browser.storage.local.set({ [key]: hashes });
           }
           sendResponse({ success: true, hashes });
@@ -378,8 +378,8 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
           const storageKey = encodeURIComponent(origin);
           const result = await browser.storage.local.get(storageKey);
           let hashes = result[storageKey] || [];
-          if (request.hash) {
-            hashes = hashes.filter(h => h !== request.hash);
+          if (request.deviceId) {
+            hashes = hashes.filter(h => h !== request.deviceId);
             await browser.storage.local.set({ [storageKey]: hashes });
           }
           sendResponse({ success: true, hashes });

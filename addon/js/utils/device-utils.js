@@ -1,18 +1,4 @@
 (function () {
-function createDeviceHash(device) {
-  const vendorId = String(device.vendorId || 0);
-  const productId = String(device.productId || 0);
-  const serialNumber = String(device.serialNumber || "");
-  const deviceId = String(device.deviceId || "");
-  const identifier = vendorId + ":" + productId + ":" + serialNumber + ":" + deviceId;
-  let hash = 5381;
-  for (let i = 0; i < identifier.length; i++) {
-    hash = ((hash << 5) + hash) + identifier.charCodeAt(i);
-    hash = hash & 0xFFFFFFFF;
-  }
-  return Math.abs(hash).toString(16);
-}
-
 function guessDeviceType(device) {
   if (device.usagePage === 0x01) {
     const u = device.usage;
@@ -33,6 +19,5 @@ function guessDeviceType(device) {
 }
 
 globalThis.__webhid = globalThis.__webhid || {};
-globalThis.__webhid.createDeviceHash = createDeviceHash;
 globalThis.__webhid.guessDeviceType = guessDeviceType;
 })();

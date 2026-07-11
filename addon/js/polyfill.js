@@ -40,8 +40,7 @@
       const devices = response.success && Array.isArray(response.devices) ? response.devices : [];
       _deviceInfoCache = new Map();
       for (const device of devices) {
-        const hash = __webhid.createDeviceHash(device);
-        _deviceInfoCache.set(hash, device);
+        _deviceInfoCache.set(device.deviceId, device);
       }
       return _deviceInfoCache;
     } catch (error) {
@@ -55,14 +54,13 @@
     try {
       // Clear cache to force refresh
       _savedDevices = null;
-      const deviceHash = __webhid.createDeviceHash(deviceInfo);
 
       const result = await sendRequest(
         "saveDevice",
         {
           origin: window.location.origin,
           device: {
-            hash: deviceHash,
+            deviceId: deviceInfo.deviceId,
           },
         }
       );
@@ -372,13 +370,7 @@
 
     async forget() {
       if (this.opened) await this.close();
-      const hash = __webhid.createDeviceHash({
-        vendorId: this.vendorId,
-        productId: this.productId,
-        serialNumber: '',
-        deviceId: this.#deviceId,
-      });
-      await sendRequest("forgetDevice", { hash });
+      await sendRequest("forgetDevice", { deviceId: this.#deviceId });
     }
 
     addEventListener(type, listener) {

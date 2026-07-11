@@ -88,7 +88,7 @@
 
     let openCount = 0;
     for (const hash of hashes) {
-      const dev = cache.find(d => __webhid.createDeviceHash(d) === hash);
+      const dev = cache.find(d => d.deviceId === hash);
 
       const name = dev ? (dev.productName || 'Unknown') : 'Saved device';
       const type = __webhid.guessDeviceType(dev || { productName: name });
