@@ -178,21 +178,20 @@
         const response = await browser.runtime.sendMessage({ action: "enumerate" });
         if (response && __webhid.http.isOk(response.s)) {
           this.devices = response.D || [];
-          await this.#renderDevices();
         } else {
           this.devices = [];
           const code = response?.s || 0;
-          const errMsg = __webhid.http.name(code);
-          const userMsg = this.#classifyError(errMsg);
-          __webhid.logger.error('enumerate failed:', errMsg);
-          this.#showMessage(userMsg, true);
+          if (code === 500) {
+            __webhid.logger.warn('enumerate returned 500, treating as empty list');
+          } else {
+            __webhid.logger.warn('enumerate returned status', code);
+          }
         }
+        await this.#renderDevices();
       } catch (error) {
         this.devices = [];
-        const errMsg = error?.message || String(error);
-        const userMsg = this.#classifyError(errMsg);
-        __webhid.logger.error('enumerate exception:', errMsg);
-        this.#showMessage(userMsg, true);
+        __webhid.logger.warn('enumerate exception:', error?.message || error);
+        await this.#renderDevices();
       }
     }
 
