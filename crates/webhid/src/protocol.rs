@@ -8,6 +8,7 @@ use serde::{Serialize, de::DeserializeOwned};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::NmRequest;
+use crate::{PKG_SEND_REPORT, PKG_SEND_FEATURE_REPORT, parse_packed_send};
 
 const MAX_MSG: usize = 1024 * 1024;
 
@@ -35,6 +36,42 @@ pub async fn read_nm_request<R: AsyncRead + Unpin>(
     reader: &mut R,
 ) -> io::Result<NmRequest> {
     let v: serde_json::Value = read_message(reader).await?;
+
+    // Packed messages: {"d":"<b64>"} with no "a" field. msgType byte inside
+    // TLV discriminates send_report (0x02) vs send_feature_report (0x04).
+    // reqId is inside the TLV, not the JSON "n" field.
+    if let Some(d) = v.get("d").and_then(|x| x.as_str()) {
+        if v.get("a").is_none() {
+            let packed = base64::engine::general_purpose::STANDARD.decode(d)
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("bad b64: {e}")))?;
+            if packed.is_empty() {
+                return Err(io::Error::new(io::ErrorKind::InvalidData, "empty packed TLV"));
+            }
+            return Ok(match packed[0] {
+                PKG_SEND_REPORT => {
+                    // Pass raw packed buf to daemon dispatch, which calls
+                    // parse_packed_send again. Slight overhead (re-parse) but
+                    // keeps NmRequest::SendReport variant unchanged.
+                    NmRequest::SendReport { id: None, packed }
+                }
+                PKG_SEND_FEATURE_REPORT => {
+                    let (req_id, device_id, report_id, data) = parse_packed_send(&packed)?;
+                    NmRequest::SendFeatureReport {
+                        id: Some(req_id),
+                        device_id,
+                        report_id,
+                        data: data.to_vec(),
+                    }
+                }
+                other => return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("unknown packed msgType: {other:#x}"),
+                )),
+            });
+        }
+    }
+
+    // Non-packed messages: dispatch by "a" field.
     let action = v.get("a")
         .and_then(|x| x.as_u64())
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing 'a' (action)"))? as u8;
@@ -200,9 +237,63 @@ mod tests {
         let err = read_nm_request(&mut r).await.unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
 
-        // Missing 'a' → error
+        // Missing 'a' → error (but {"d":"..."} without "a" would be packed path)
         let mut buf = Vec::new();
         write_message(&mut buf, &serde_json::json!({"n": 1})).await.unwrap();
+        let mut r: &[u8] = &buf;
+        let err = read_nm_request(&mut r).await.unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+
+        // Packed sendReport: {"d":"<b64>"} with no "a" field. msgType 0x02.
+        // TLV: [0x02][reqId u32 LE][devId u32 LE][reportId u8][payloadLen u16 LE][payload]
+        use base64::Engine;
+        let mut tlv = vec![0x02u8];
+        tlv.extend_from_slice(&42u32.to_le_bytes());       // reqId
+        tlv.extend_from_slice(&0xCAFEBABEu32.to_le_bytes()); // deviceId
+        tlv.push(7);                                         // reportId
+        tlv.extend_from_slice(&3u16.to_le_bytes());          // payloadLen
+        tlv.extend_from_slice(&[0xAA, 0xBB, 0xCC]);          // payload
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&tlv);
+        let mut buf = Vec::new();
+        write_message(&mut buf, &serde_json::json!({"d": b64})).await.unwrap();
+        let mut r: &[u8] = &buf;
+        let req = read_nm_request(&mut r).await.unwrap();
+        match req {
+            NmRequest::SendReport { id, packed } => {
+                assert_eq!(id, None);  // id is inside TLV, not JSON
+                assert_eq!(packed[0], 0x02);
+                assert_eq!(packed.len(), tlv.len());
+            }
+            _ => panic!("expected SendReport"),
+        }
+
+        // Packed sendFeatureReport: msgType 0x04
+        let mut tlv = vec![0x04u8];
+        tlv.extend_from_slice(&99u32.to_le_bytes());        // reqId
+        tlv.extend_from_slice(&0x12345678u32.to_le_bytes()); // deviceId
+        tlv.push(1);                                          // reportId
+        tlv.extend_from_slice(&2u16.to_le_bytes());           // payloadLen
+        tlv.extend_from_slice(&[0xDD, 0xEE]);                 // payload
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&tlv);
+        let mut buf = Vec::new();
+        write_message(&mut buf, &serde_json::json!({"d": b64})).await.unwrap();
+        let mut r: &[u8] = &buf;
+        let req = read_nm_request(&mut r).await.unwrap();
+        match req {
+            NmRequest::SendFeatureReport { id, device_id, report_id, data } => {
+                assert_eq!(id, Some(99));
+                assert_eq!(device_id, 0x12345678);
+                assert_eq!(report_id, 1);
+                assert_eq!(data, vec![0xDD, 0xEE]);
+            }
+            _ => panic!("expected SendFeatureReport"),
+        }
+
+        // Packed with unknown msgType → error
+        let tlv = vec![0xFFu8, 0, 0, 0, 0];
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&tlv);
+        let mut buf = Vec::new();
+        write_message(&mut buf, &serde_json::json!({"d": b64})).await.unwrap();
         let mut r: &[u8] = &buf;
         let err = read_nm_request(&mut r).await.unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);

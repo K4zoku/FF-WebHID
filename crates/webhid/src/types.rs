@@ -203,9 +203,19 @@ pub const EVT_CONNECT: u8 = 2;
 pub const EVT_DISCONNECT: u8 = 3;
 // input_report is packed ({"d":"..."}), no "e" field needed.
 
-// Packed binary message types (first byte of TLV payload)
+// Packed binary message types (first byte of TLV payload).
+// Only hot-path messages with binary payload are packed; all others use JSON.
+// TLV layouts (all multi-byte integers are little-endian):
+//   input_report (daemon→addon):
+//     [0x01][devId u32][reportId u8][payloadLen u16][payload]
+//     (multi-report: reportId+len+payload repeated)
+//   send_report (addon→daemon):
+//     [0x02][reqId u32][devId u32][reportId u8][payloadLen u16][payload]
+//   send_feature_report (addon→daemon):
+//     [0x04][reqId u32][devId u32][reportId u8][payloadLen u16][payload]
 pub const PKG_INPUT_REPORT: u8 = 0x01;
 pub const PKG_SEND_REPORT: u8 = 0x02;
+pub const PKG_SEND_FEATURE_REPORT: u8 = 0x04;
 
 // ---------------------------------------------------------------------------
 // NM request (addon → daemon)
@@ -243,18 +253,18 @@ impl NmRequest {
     }
 }
 
-/// Parse a packed sendReport TLV buffer.
-/// Layout: [msgType=0x02][devIdLen=4][devId u32 LE][reportId][payloadLen u16 LE][payload]
-pub fn parse_packed_send_report(buf: &[u8]) -> std::io::Result<(u32, u8, &[u8])> {
+/// Parse a packed sendReport / sendFeatureReport TLV buffer.
+/// Layout: [msgType][reqId u32 LE][devId u32 LE][reportId u8][payloadLen u16 LE][payload]
+/// Returns (req_id, device_id, report_id, payload slice).
+pub fn parse_packed_send(buf: &[u8]) -> std::io::Result<(u32, u32, u8, &[u8])> {
     let invalid = |msg: &str| std::io::Error::new(std::io::ErrorKind::InvalidData, msg);
-    if buf.len() < 9 { return Err(invalid("short packed sendReport")); }
-    if buf[0] != PKG_SEND_REPORT { return Err(invalid("bad msgType")); }
-    if buf[1] != 4 { return Err(invalid("bad devIdLen (expected 4)")); }
-    let device_id = u32::from_le_bytes([buf[2], buf[3], buf[4], buf[5]]);
-    let report_id = buf[6];
-    let payload_len = u16::from_le_bytes([buf[7], buf[8]]) as usize;
-    if buf.len() < 9 + payload_len { return Err(invalid("truncated payload")); }
-    Ok((device_id, report_id, &buf[9..9+payload_len]))
+    if buf.len() < 12 { return Err(invalid("short packed send TLV")); }
+    let req_id = u32::from_le_bytes([buf[1], buf[2], buf[3], buf[4]]);
+    let device_id = u32::from_le_bytes([buf[5], buf[6], buf[7], buf[8]]);
+    let report_id = buf[9];
+    let payload_len = u16::from_le_bytes([buf[10], buf[11]]) as usize;
+    if buf.len() < 12 + payload_len { return Err(invalid("truncated payload")); }
+    Ok((req_id, device_id, report_id, &buf[12..12+payload_len]))
 }
 
 // ---------------------------------------------------------------------------
@@ -345,15 +355,13 @@ impl Serialize for NmMessage {
 
 impl NmMessage {
     /// Build a packed input_report frame.
-    /// `reports` is a slice of (report_id, payload) pairs; multiple entries
-    /// produce a multi-report batch (JS decoder loops).
+    /// Layout: [0x01][devId u32 LE]([reportId u8][payloadLen u16 LE][payload])*
     pub fn packed_input_report<'a>(
         device_id: u32,
         reports: impl IntoIterator<Item = (u8, &'a [u8])>,
     ) -> Self {
-        let mut buf = Vec::with_capacity(9 + 16);
+        let mut buf = Vec::with_capacity(8 + 16);
         buf.push(PKG_INPUT_REPORT);
-        buf.push(4);  // devIdLen = 4 (u32)
         buf.extend_from_slice(&device_id.to_le_bytes());
         for (report_id, payload) in reports {
             buf.push(report_id);
@@ -499,28 +507,30 @@ mod tests {
         match msg {
             NmMessage::PackedData(buf) => {
                 assert_eq!(buf[0], PKG_INPUT_REPORT);
-                assert_eq!(buf[1], 4);  // devIdLen = 4
-                assert_eq!(&buf[2..6], &device_id.to_le_bytes());
-                assert_eq!(buf[6], 33);  // reportId
-                let payload_len = u16::from_le_bytes([buf[7], buf[8]]) as usize;
+                assert_eq!(&buf[1..5], &device_id.to_le_bytes());
+                assert_eq!(buf[5], 33);  // reportId
+                let payload_len = u16::from_le_bytes([buf[6], buf[7]]) as usize;
                 assert_eq!(payload_len, 3);
-                assert_eq!(&buf[9..9+payload_len], &payload);
+                assert_eq!(&buf[8..8+payload_len], &payload);
             }
             _ => panic!("expected PackedData"),
         }
     }
 
     #[test]
-    fn test_parse_packed_send_report() {
+    fn test_parse_packed_send() {
+        let req_id: u32 = 0xCAFEBABE;
         let device_id: u32 = 0xDEADBEEF;
         let payload = [0x01, 0x02, 0x03];
-        let mut buf = vec![PKG_SEND_REPORT, 4];
+        let mut buf = vec![PKG_SEND_REPORT];
+        buf.extend_from_slice(&req_id.to_le_bytes());
         buf.extend_from_slice(&device_id.to_le_bytes());
         buf.push(42); // reportId
         buf.extend_from_slice(&(payload.len() as u16).to_le_bytes());
         buf.extend_from_slice(&payload);
 
-        let (dev_id, report_id, data) = parse_packed_send_report(&buf).unwrap();
+        let (rid, dev_id, report_id, data) = parse_packed_send(&buf).unwrap();
+        assert_eq!(rid, req_id);
         assert_eq!(dev_id, device_id);
         assert_eq!(report_id, 42);
         assert_eq!(data, &payload);

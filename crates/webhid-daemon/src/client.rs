@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use tokio::io::{AsyncRead, BufReader};
 use tokio::sync::{broadcast, mpsc};
-use webhid::{protocol, IpcResponse, NmMessage, NmRequest, NmResponse, parse_packed_send_report, EVT_HANDSHAKE};
+use webhid::{protocol, IpcResponse, NmMessage, NmRequest, NmResponse, parse_packed_send, EVT_HANDSHAKE};
 
 use crate::{device_mgr::DeviceManager, hid};
 
@@ -86,7 +86,15 @@ async fn dispatch(
     req: NmRequest,
     ws_port: u16,
 ) -> NmMessage {
-    let id = req.id();
+    // For packed SendReport, reqId lives inside the TLV (not in req.id()).
+    // Extract it here so the response gets the right id.
+    let id = if let NmRequest::SendReport { packed, .. } = &req {
+        if packed.len() >= 5 {
+            Some(u32::from_le_bytes([packed[1], packed[2], packed[3], packed[4]]))
+        } else { None }
+    } else {
+        req.id()
+    };
     let resp: NmResponse = match req {
         NmRequest::Enumerate { .. } => match device_mgr.enumerate() {
             Ok(devices) => NmResponse::ok_with_devices(devices),
@@ -115,8 +123,8 @@ async fn dispatch(
         },
 
         NmRequest::SendReport { packed, .. } => {
-            match parse_packed_send_report(&packed) {
-                Ok((device_id, report_id, data)) => {
+            match parse_packed_send(&packed) {
+                Ok((_req_id, device_id, report_id, data)) => {
                     match device_mgr.get_file(device_id, client_id) {
                         Err(_) => NmResponse::err(404),
                         Ok(dev_arc) => {
