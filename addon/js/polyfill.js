@@ -235,7 +235,7 @@
           return;
         }
         if (eventType === "disconnect") {
-          this.dispatchEvent(new HIDConnectionEvent("disconnect", this));
+          this.dispatchEvent(new HIDConnectionEvent("disconnect", { device: this }));
           return;
         }
       };
@@ -279,7 +279,10 @@
     return dev;
   }
 
-  function HIDInputReportEvent() { throw new TypeError('Illegal constructor'); }
+  function HIDInputReportEvent(type, init) {
+    Event.call(this, type, init);
+    _evtState.set(this, { device: init?.device, reportId: init?.reportId, data: init?.data });
+  }
   HIDInputReportEvent.prototype = Object.create(Event.prototype);
   HIDInputReportEvent.prototype.constructor = HIDInputReportEvent;
   Object.defineProperty(HIDInputReportEvent.prototype, Symbol.toStringTag, { value: 'HIDInputReportEvent', configurable: true });
@@ -289,27 +292,16 @@
     data: { get() { return _evtState.get(this)?.data; }, enumerable: true, configurable: true },
   });
 
-  function _createHIDInputReportEvent(type, init) {
-    const obj = Object.create(HIDInputReportEvent.prototype);
-    Event.call(obj, type, init);
-    _evtState.set(obj, { device: init.device, reportId: init.reportId, data: init.data });
-    return obj;
+  function HIDConnectionEvent(type, init) {
+    Event.call(this, type);
+    _evtState.set(this, { device: init?.device ?? init });
   }
-
-  function HIDConnectionEvent() { throw new TypeError('Illegal constructor'); }
   HIDConnectionEvent.prototype = Object.create(Event.prototype);
   HIDConnectionEvent.prototype.constructor = HIDConnectionEvent;
   Object.defineProperty(HIDConnectionEvent.prototype, Symbol.toStringTag, { value: 'HIDConnectionEvent', configurable: true });
   Object.defineProperty(HIDConnectionEvent.prototype, 'device', {
     get() { return _evtState.get(this)?.device; }, enumerable: true, configurable: true,
   });
-
-  function _createHIDConnectionEvent(type, device) {
-    const obj = Object.create(HIDConnectionEvent.prototype);
-    Event.call(obj, type);
-    _evtState.set(obj, { device });
-    return obj;
-  }
 
   function HID() { throw new TypeError('Illegal constructor'); }
   HID.prototype = Object.create(EventTarget.prototype);
