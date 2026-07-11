@@ -379,6 +379,15 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return false;
 
     case 'getDeviceCache':
+      if (_deviceCache.length === 0) {
+        NativeMessaging.enumerateDevices()
+          .then((response) => {
+            if (__webhid.http.isOk(response.s) && response.D) _deviceCache = response.D;
+            sendResponse({ devices: _deviceCache });
+          })
+          .catch(() => sendResponse({ devices: _deviceCache }));
+        return true;
+      }
       sendResponse({ devices: _deviceCache });
       return false;
 
