@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
+use bytes::Bytes;
 use hidapi::HidDevice;
 
 use tokio::task::JoinHandle;
@@ -142,10 +143,17 @@ impl DeviceManager {
 
                 match read_result {
                     Ok(Ok(buf)) => {
-                        let (report_id, data): (u8, Arc<[u8]>) = if uses_numbered_reports {
-                            if !buf.is_empty() { (buf[0], Arc::from(&buf[1..])) } else { (0u8, Arc::from(&[][..])) }
+                        let (report_id, data): (u8, Bytes) = if uses_numbered_reports {
+                            if !buf.is_empty() {
+                                let b = Bytes::from(buf);
+                                let report_id = b[0];
+                                let data = b.slice(1..);
+                                (report_id, data)
+                            } else {
+                                (0u8, Bytes::new())
+                            }
                         } else {
-                            (0u8, Arc::from(buf.as_slice()))
+                            (0u8, Bytes::from(buf))
                         };
                         let _ = tx.send(IpcResponse::InputReport { id: 0, device_id: dev_id, report_id, data });
                     }

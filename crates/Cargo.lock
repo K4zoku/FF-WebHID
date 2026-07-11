@@ -723,6 +723,7 @@ name = "webhid-daemon"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bytes",
  "core-foundation-sys",
  "futures-util",
  "getrandom 0.4.2",

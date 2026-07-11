@@ -19,6 +19,8 @@ const WS_CLOSE_BAD_TOKEN: u16 = 4402;
 use crate::device_mgr::DeviceManager;
 use crate::hid;
 
+use bytes::Bytes;
+
 /// Default flush policy: `0` = adaptive (drain + burst coalescing).
 /// Set `WEBHID_WS_BATCH_MS=N` (N > 0) to use a fixed N ms timer instead.
 const DEFAULT_BATCH_FLUSH_MS: u64 = 0;
@@ -26,7 +28,7 @@ const DEFAULT_BATCH_FLUSH_MS: u64 = 0;
 /// Coalescing window for adaptive burst batching (microseconds).
 /// When a burst is detected (>1 report drained in one cycle), the sender
 /// waits up to this duration for additional reports before flushing.
-const ADAPTIVE_COALESCE_US: u64 = 100;
+const ADAPTIVE_COALESCE_US: u64 = 25;
 
 // ---------------------------------------------------------------------------
 // Wire format for client → daemon binary frames (page → device hot path)
@@ -266,7 +268,8 @@ async fn handle_websocket(
         .unwrap_or(DEFAULT_BATCH_FLUSH_MS);
 
     let mut sender_task = tokio::spawn(async move {
-        let mut batch: Vec<(u8, Arc<[u8]>)> = Vec::with_capacity(8);
+        let mut batch: Vec<(u8, Bytes)> = Vec::with_capacity(8);
+        let mut frame_buf: Vec<u8> = Vec::with_capacity(256);
 
         // Fixed-timer mode.
         if batch_ms > 0 {
@@ -275,7 +278,8 @@ async fn handle_websocket(
                 tokio::select! {
                     _ = flush_interval.tick() => {
                         if !batch.is_empty() {
-                            let frame = create_batch_frame(&batch);
+                            write_batch_frame(&mut frame_buf, &batch);
+                            let frame = std::mem::take(&mut frame_buf);
                             if tx_for_sender.send(Message::Binary(frame.into())).is_err() {
                                 break;
                             }
@@ -320,7 +324,8 @@ async fn handle_websocket(
 
             // 4. Flush.
             if !batch.is_empty() {
-                let frame = create_batch_frame(&batch);
+                write_batch_frame(&mut frame_buf, &batch);
+                let frame = std::mem::take(&mut frame_buf);
                 if tx_for_sender.send(Message::Binary(frame.into())).is_err() {
                     break;
                 }
@@ -391,7 +396,7 @@ async fn handle_control_ws(
 fn handle_event(
     event_result: Result<webhid::IpcResponse, broadcast::error::RecvError>,
     device_id: u32,
-    batch: &mut Vec<(u8, Arc<[u8]>)>,
+    batch: &mut Vec<(u8, Bytes)>,
     tx: &mpsc::UnboundedSender<Message>,
 ) -> bool {
     match event_result {
@@ -409,8 +414,9 @@ fn handle_event(
         Err(broadcast::error::RecvError::Lagged(n)) => {
             log::warn!("[ws] broadcast lagged by {n} events, flushing batch");
             if !batch.is_empty() {
-                let frame = create_batch_frame(batch);
-                if tx.send(Message::Binary(frame.into())).is_err() {
+                let mut tmp = Vec::with_capacity(256);
+                write_batch_frame(&mut tmp, batch);
+                if tx.send(Message::Binary(tmp.into())).is_err() {
                     return false;
                 }
                 batch.clear();
@@ -427,7 +433,7 @@ fn handle_event(
 fn drain_available(
     rx: &mut broadcast::Receiver<webhid::IpcResponse>,
     device_id: u32,
-    batch: &mut Vec<(u8, Arc<[u8]>)>,
+    batch: &mut Vec<(u8, Bytes)>,
     tx: &mpsc::UnboundedSender<Message>,
 ) {
     loop {
@@ -442,8 +448,9 @@ fn drain_available(
             Err(broadcast::error::TryRecvError::Lagged(n)) => {
                 log::warn!("[ws] drain lagged by {n} events");
                 if !batch.is_empty() {
-                    let frame = create_batch_frame(batch);
-                    if tx.send(Message::Binary(frame.into())).is_err() {
+                    let mut tmp = Vec::with_capacity(256);
+                    write_batch_frame(&mut tmp, batch);
+                    if tx.send(Message::Binary(tmp.into())).is_err() {
                         break;
                     }
                     batch.clear();
@@ -453,17 +460,27 @@ fn drain_available(
     }
 }
 
-fn create_batch_frame(reports: &[(u8, Arc<[u8]>)]) -> Vec<u8> {
+/// Write the batch frame into `out`.
+/// Format: `[len_u16 LE][report_id][payload]` repeated.
+fn write_batch_frame(out: &mut Vec<u8>, reports: &[(u8, Bytes)]) {
+    out.clear();
     let total_size: usize = reports.iter().map(|(_, d)| 2 + 1 + d.len()).sum();
-    let mut frame = Vec::with_capacity(total_size);
+    out.reserve(total_size);
     for (report_id, data) in reports {
         let len = (1 + data.len()) as u16;
-        frame.push((len & 0xFF) as u8);
-        frame.push(((len >> 8) & 0xFF) as u8);
-        frame.push(*report_id);
-        frame.extend_from_slice(data);
+        out.push((len & 0xFF) as u8);
+        out.push(((len >> 8) & 0xFF) as u8);
+        out.push(*report_id);
+        out.extend_from_slice(data);
     }
-    frame
+}
+
+/// Build a fresh batch frame (allocates).
+#[cfg(test)]
+fn create_batch_frame(reports: &[(u8, Bytes)]) -> Vec<u8> {
+    let mut out = Vec::new();
+    write_batch_frame(&mut out, reports);
+    out
 }
 
 /// Parse a client-sent binary frame (page → daemon hot path) and dispatch it
@@ -679,7 +696,7 @@ mod tests {
 
     #[test]
     fn test_batch_frame_single_report() {
-        let reports: Vec<(u8, Arc<[u8]>)> = vec![(0x01, Arc::from(&[0xAA, 0xBB][..]))];
+        let reports: Vec<(u8, Bytes)> = vec![(0x01, Bytes::from(&[0xAA, 0xBB][..]))];
         let frame = create_batch_frame(&reports);
         // [len_u16 LE = 3][report_id=0x01][payload 0xAA, 0xBB]
         assert_eq!(frame, vec![0x03, 0x00, 0x01, 0xAA, 0xBB]);
@@ -687,9 +704,9 @@ mod tests {
 
     #[test]
     fn test_batch_frame_multiple_reports() {
-        let reports: Vec<(u8, Arc<[u8]>)> = vec![
-            (0x01, Arc::from(&[0xAA][..])),
-            (0x02, Arc::from(&[0xBB, 0xCC][..])),
+        let reports: Vec<(u8, Bytes)> = vec![
+            (0x01, Bytes::from(&[0xAA][..])),
+            (0x02, Bytes::from(&[0xBB, 0xCC][..])),
         ];
         let frame = create_batch_frame(&reports);
         // [2, 0, 0x01, 0xAA, 3, 0, 0x02, 0xBB, 0xCC]
@@ -698,7 +715,7 @@ mod tests {
 
     #[test]
     fn test_batch_frame_empty_report() {
-        let reports: Vec<(u8, Arc<[u8]>)> = vec![(0x05, Arc::from(&[][..]))];
+        let reports: Vec<(u8, Bytes)> = vec![(0x05, Bytes::from(&[][..]))];
         let frame = create_batch_frame(&reports);
         // [len=1, 0, report_id=0x05]
         assert_eq!(frame, vec![0x01, 0x00, 0x05]);

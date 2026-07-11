@@ -387,7 +387,7 @@ All 6 Firefox profiles are cold-start (browser + daemon restarted before each ru
 - V8 vs SpiderMonkey GC behavior (concurrent vs incremental)
 - Cross-realm postMessage overhead (scheduling latency, not CPU)
 - WebGL/Mesa driver performance
-- HID USB polling rate (~10ms hardware limit)
+- HID USB polling rate (hardware limit; modern gaming devices poll at 1ms / 1000Hz, industrial controllers at 2ms / 500Hz)
 - libxul layout/paint/style vs Blink equivalents
 
 ---
@@ -446,3 +446,28 @@ All 6 Firefox profiles are cold-start (browser + daemon restarted before each ru
 - Custom HIDInputReportEvent batching. spec violation risk
 - Rewrite data plane in C++/WASM. data plane is not the bottleneck, complexity not justified
 - Re-add SharedArrayBuffer. Worker WS postMessage transfer (2 hops, zero-copy) is faster than SAB in cold-start benchmarks and removes COOP/COEP requirement
+
+---
+
+## High-Frequency Polling Optimization (1000Hz Target)
+
+The polyfill sustains ~500Hz input-report throughput (matching or exceeding Chromium's native WebHID, which fails to sustain 500Hz due to its own internal overhead). For gaming peripherals (1000Hz mice/keyboards) and industrial controllers, ~1000Hz (1ms cycle) is the ideal target.
+
+Pipeline: HID device → kernel hidraw → daemon reader → broadcast channel → WS sender task → mpsc → tungstenite write → loopback TCP → Firefox Worker `onmessage` → `pushInputBatch` → MessagePort `postMessage` → page `port.onmessage` → `new HIDInputReportEvent` → `dispatchEvent` → user listener.
+
+Three optimizations landed:
+
+| # | Location | Change | Savings |
+|---|----------|--------|---------|
+| 1 | Daemon `ADAPTIVE_COALESCE_US` | 100µs → 25µs burst wait | up to 75µs on bursts |
+| 2 | Daemon reader `Arc::from(&buf[1..])` → `Bytes::from(buf).slice(1..)` | zero-alloc | ~0.5-1µs per report |
+| 3 | Polyfill `HIDInputReportEvent` state | `WeakMap` → Symbol-keyed property | ~5-10µs per event |
+
+**Estimated total**: ~5-11µs per report on sparse (single-report) batches. Modest but safe. The bulk of the 1000Hz capability comes from the existing architecture (Worker WS + MessagePort + zero-copy ArrayBuffer transfer), not from these micro-optimizations.
+
+**What was tried and abandoned**: a single-report fast path in `pushInputBatch` that transferred the whole WS frame buffer with `{type:'inputReportRaw', buffer, byteOffset:3, byteLength}` instead of copying the payload into a fresh ArrayBuffer. It saved ~30-50µs per report but was reverted because it broke the `event.data.buffer` contract that pages rely on. See AGENTS.md Section 4 for the full postmortem.
+
+**What still limits 1000Hz**:
+- Firefox event loop scheduling: Worker `onmessage` and MessagePort dispatch can add 100-500µs jitter. Not controllable from JS.
+- Page listener execution time: if the page's `oninputreport` handler takes >1ms, the pipeline backs up regardless of polyfill efficiency. This is page-side, not polyfill-side.
+- USB HID polling interval: hardware limit. Gaming mice/keyboards typically poll at 1ms (1000Hz); some industrial devices poll at 125Hz (8ms) or slower. The polyfill cannot receive reports faster than the device sends them.

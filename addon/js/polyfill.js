@@ -99,6 +99,7 @@
   const _devState = new WeakMap();
   const _hidState = new WeakMap();
   const _evtState = new WeakMap();
+  const _irState = Symbol('webhid_ir');
   const _deviceRegistry = new Map();
 
   function HIDDevice() { throw new TypeError('Illegal constructor'); }
@@ -286,16 +287,16 @@
 
   function HIDInputReportEvent(type, init) {
     const obj = Reflect.construct(Event, [type, init], new.target || HIDInputReportEvent);
-    _evtState.set(obj, { device: init?.device, reportId: init?.reportId, data: init?.data });
+    obj[_irState] = { device: init?.device, reportId: init?.reportId, data: init?.data };
     return obj;
   }
   HIDInputReportEvent.prototype = Object.create(Event.prototype);
   HIDInputReportEvent.prototype.constructor = HIDInputReportEvent;
   Object.defineProperty(HIDInputReportEvent.prototype, Symbol.toStringTag, { value: 'HIDInputReportEvent', configurable: true });
   Object.defineProperties(HIDInputReportEvent.prototype, {
-    device: { get() { return _evtState.get(this)?.device; }, enumerable: true, configurable: true },
-    reportId: { get() { return _evtState.get(this)?.reportId; }, enumerable: true, configurable: true },
-    data: { get() { return _evtState.get(this)?.data; }, enumerable: true, configurable: true },
+    device: { get() { return this[_irState]?.device; }, enumerable: true, configurable: true },
+    reportId: { get() { return this[_irState]?.reportId; }, enumerable: true, configurable: true },
+    data: { get() { return this[_irState]?.data; }, enumerable: true, configurable: true },
   });
 
   function HIDConnectionEvent(type, init) {

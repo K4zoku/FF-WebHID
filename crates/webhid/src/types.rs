@@ -1,5 +1,4 @@
-use std::sync::Arc;
-
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
@@ -162,8 +161,8 @@ pub enum IpcResponse {
         id: u32,
         device_id: u32,
         report_id: u8,
-        #[serde(with = "arc_bytes")]
-        data: Arc<[u8]>,
+        #[serde(with = "bytes_serde")]
+        data: Bytes,
     },
     Handshake { id: u32, ws_port: u16 },
 }
@@ -427,18 +426,18 @@ pub(crate) mod base64_opt_serde {
     }
 }
 
-/// Serde helper for `Arc<[u8]>`.
-mod arc_bytes {
-    use std::sync::Arc;
+/// Serde helper for `bytes::Bytes`.
+mod bytes_serde {
+    use bytes::Bytes;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-    pub fn serialize<S: Serializer>(bytes: &Arc<[u8]>, s: S) -> Result<S::Ok, S::Error> {
+    pub fn serialize<S: Serializer>(bytes: &Bytes, s: S) -> Result<S::Ok, S::Error> {
         bytes.as_ref().serialize(s)
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Arc<[u8]>, D::Error> {
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Bytes, D::Error> {
         let v = Vec::<u8>::deserialize(d)?;
-        Ok(Arc::from(v))
+        Ok(Bytes::from(v))
     }
 }
 
