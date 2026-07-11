@@ -2,6 +2,162 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [2.0.0](https://github.com/K4zoku/FF-WebHID/compare/v1.6.6...v2.0.0) (2026-07-11)
+
+
+### ⚠ BREAKING CHANGES
+
+* numberic dev id
+* status code
+* single char fields name
+* packed message
+* remove perf logging
+* remove device hash, use deviceId instead
+* remove bridge ws
+* remove SAB
+
+### Features
+
+* actual daemon-as-nm-host ([8c2e69a](https://github.com/K4zoku/FF-WebHID/commit/8c2e69ae0ef8459cb6e2f6a58e03b0fc4efbf8b8))
+* adaptive batching ([1209587](https://github.com/K4zoku/FF-WebHID/commit/12095876a46e5f896e86839f894db8ff5fbb1b1a))
+* control plane ([6cec6bd](https://github.com/K4zoku/FF-WebHID/commit/6cec6bd96d3f3d303eefd4db234973b317346911))
+* control worker ([f1b416f](https://github.com/K4zoku/FF-WebHID/commit/f1b416f4c13c2e8e89b1d4771ca4d7530ac7c7b4))
+* daemon as nm host ([feea187](https://github.com/K4zoku/FF-WebHID/commit/feea187e8a2a2f17996371f8f527259ae3923bf7))
+* daemon-nm-host wrapper ([40cb39e](https://github.com/K4zoku/FF-WebHID/commit/40cb39e8f629411d90d42dac62c28c901faf0e07))
+* **daemon,nm,linux:** use XDG_RUNTIME_DIR for normal user ([7364de9](https://github.com/K4zoku/FF-WebHID/commit/7364de979985c886b6dbd50543fea87c0dc80111))
+* data plane switcher ([ad3420f](https://github.com/K4zoku/FF-WebHID/commit/ad3420fdf27de14d5151850f95d42c1bf3df7d8e))
+* dynamic buffer size ([4287cdb](https://github.com/K4zoku/FF-WebHID/commit/4287cdbe5313031fff26cdc2cf1eb9897e469da3))
+* fire-and-forget for nm data plane ([f390fd5](https://github.com/K4zoku/FF-WebHID/commit/f390fd56216a4939eaed17b49f2b874b482bbb4b))
+* limit to group permission ([951119b](https://github.com/K4zoku/FF-WebHID/commit/951119b7c20e43be381fb2d652354acfdbad0c0a))
+* log level per-site ([38698d2](https://github.com/K4zoku/FF-WebHID/commit/38698d26253cd82029f5560f60a87fe837d20341))
+* move collections parser to daemon ([ab0f066](https://github.com/K4zoku/FF-WebHID/commit/ab0f0661d9058421935b0a28270784068cd46c3b))
+* multi tab support ([d23f5a5](https://github.com/K4zoku/FF-WebHID/commit/d23f5a594bbcc312ebc50b477981e66f2822833b))
+* nm host now act as a thin forwarder ([33d0f43](https://github.com/K4zoku/FF-WebHID/commit/33d0f43d92becfc52bbc623b2c9024c399f9948d))
+* NM only with message channel & direct port ([63bdb04](https://github.com/K4zoku/FF-WebHID/commit/63bdb0415023bd69d0377488a8e7a0f00758edc1))
+* numberic dev id ([7e2e024](https://github.com/K4zoku/FF-WebHID/commit/7e2e024e6d4f8c6c60b4b93e8f9d2fd627e2d66c))
+* origin gate ([b672c73](https://github.com/K4zoku/FF-WebHID/commit/b672c73946e98af42211a23841f270791722d353))
+* packed message ([9e30d3f](https://github.com/K4zoku/FF-WebHID/commit/9e30d3f254f03ec27b4382bc2ee0c457ec3fe129))
+* popup dataplane toggle ([959680c](https://github.com/K4zoku/FF-WebHID/commit/959680c37d002d0e5bdee406aebf5c78d902572d))
+* remove bridge ws ([eb98d4e](https://github.com/K4zoku/FF-WebHID/commit/eb98d4e36f5a556936840110621b13900aa3b0cf))
+* remove device hash, use deviceId instead ([a7ad348](https://github.com/K4zoku/FF-WebHID/commit/a7ad34864bf747723298b8064be5b313ec9ed13b))
+* remove perf logging ([b2ac4f1](https://github.com/K4zoku/FF-WebHID/commit/b2ac4f1400799280839c2910bcfeb88dbe53c958))
+* remove SAB ([9cc391d](https://github.com/K4zoku/FF-WebHID/commit/9cc391d297e584d1badb9bc2a6cd6e1ae26339c9))
+* sab toggle live ([34eac6c](https://github.com/K4zoku/FF-WebHID/commit/34eac6ca8f345ea6ff4225a1044eee393b2e2a2b))
+* settings store ([9962fb0](https://github.com/K4zoku/FF-WebHID/commit/9962fb0f59f7e81694e26a5649d4c424c6a9d388))
+* status code ([3b90097](https://github.com/K4zoku/FF-WebHID/commit/3b90097cf8b96c6188720c7f8fd795894f74880e))
+* strict permission for user daemon ([e332004](https://github.com/K4zoku/FF-WebHID/commit/e33200444b37f4573295aa5b8c853f445a302ae1))
+* update logger ([8e3a19c](https://github.com/K4zoku/FF-WebHID/commit/8e3a19c7cad158814e3045bf80a436a7839243c9))
+* use native base64 function ([90f2dd3](https://github.com/K4zoku/FF-WebHID/commit/90f2dd3ecfd9dd084b806b2b4eaef1774a06ffb3))
+* worker ws ([d3807e6](https://github.com/K4zoku/FF-WebHID/commit/d3807e6de7283a29961dab8f82ec920ce8550a42))
+
+
+### Bug Fixes
+
+* add back collections normalizer ([c3fcb14](https://github.com/K4zoku/FF-WebHID/commit/c3fcb14d60aef1ff3cc15fc96b121a4d4a096d5a))
+* audit fixes ([3ac81a0](https://github.com/K4zoku/FF-WebHID/commit/3ac81a0989c5e8ed227347edc6d69bb578825a1f))
+* close the correct device ([2b59345](https://github.com/K4zoku/FF-WebHID/commit/2b593451b99984f073f44bcb67d70d0b5f2fd259))
+* control ws spawn even when using control nm ([7f46382](https://github.com/K4zoku/FF-WebHID/commit/7f463827dc06427855b85e06ad88580e2cc9b5f5))
+* device counter & saved device info ([2f624e9](https://github.com/K4zoku/FF-WebHID/commit/2f624e927811a1c61d8d74052c446c9ce7c7e32a))
+* devid u32 fix ([2cdb2a5](https://github.com/K4zoku/FF-WebHID/commit/2cdb2a557c5dbe7a5a1ed58fd2d7d0fee5b9fe6b))
+* do not wait for hot path on nm data plane ([3b9aa22](https://github.com/K4zoku/FF-WebHID/commit/3b9aa226a21c2e7cadb722520d18bb51bffbca0f))
+* event construct ([c3f7f4b](https://github.com/K4zoku/FF-WebHID/commit/c3f7f4b38fb0fd0c3d80005d1e918eb932e179a4))
+* event constructor ([ac8dce9](https://github.com/K4zoku/FF-WebHID/commit/ac8dce90c64b1565d5e664532ab8a98cd73d120f))
+* event not arrive ([ca1e3e3](https://github.com/K4zoku/FF-WebHID/commit/ca1e3e36a4c7a950f2ff109e9467c047bbdfec57))
+* event target ([a71cd0c](https://github.com/K4zoku/FF-WebHID/commit/a71cd0c3e1926f8603b9c5f9bc8f570813db4e93))
+* faf ([2cf02c6](https://github.com/K4zoku/FF-WebHID/commit/2cf02c6520871bcedefe9cd59139f0be655ccfe5))
+* hotplug bypassed blocklist ([5608d42](https://github.com/K4zoku/FF-WebHID/commit/5608d4264cd04fd912148bd4ba6d419f07e42dfa))
+* input report event ([de0d9d6](https://github.com/K4zoku/FF-WebHID/commit/de0d9d6a0e40a23dbf8a2032ea9c1b10fdc63ce6))
+* leftover ([bd6452c](https://github.com/K4zoku/FF-WebHID/commit/bd6452c9e5f279e633c73ccef2f8265f23f994d0))
+* macos build ([f04620a](https://github.com/K4zoku/FF-WebHID/commit/f04620a58b6e35537e93ff41442930d6573b3c38))
+* nm data plane + daemon collections normalizer ([f3c7fc4](https://github.com/K4zoku/FF-WebHID/commit/f3c7fc4805c870aeb1a0da87e0d5fab0a05df5f2))
+* nm error propagation ([e6a2dd1](https://github.com/K4zoku/FF-WebHID/commit/e6a2dd11cdf3b66239f51a144ded3ea7241c9000))
+* packed message ([f15f5e4](https://github.com/K4zoku/FF-WebHID/commit/f15f5e48fd20b0b4ee7c9223776790b8ed33ec23))
+* reference error ([206f70b](https://github.com/K4zoku/FF-WebHID/commit/206f70ba83cc69e6fddea8323bde2b4ebc1e9f0b))
+* remove direct port as it is not supported by firefox ([31e0cd5](https://github.com/K4zoku/FF-WebHID/commit/31e0cd54b15d9c73613503f2e58b58205de385a3))
+* remove predictable token fallback ([92982b2](https://github.com/K4zoku/FF-WebHID/commit/92982b29d097bea1cbd115e3f22458c97aab8a28))
+* remove task scheduler ([c001516](https://github.com/K4zoku/FF-WebHID/commit/c001516f1392e87db176452e149cf04dcd708281))
+* rename to match format `/^\w+(\.\w+)*$/)` for ([ca150f7](https://github.com/K4zoku/FF-WebHID/commit/ca150f78b0a8332a0812429fa26d54a049fd3ffe))
+* sab size ([ab33cca](https://github.com/K4zoku/FF-WebHID/commit/ab33cca2771c01e6ca74a61054eb38cab0e9d0f5))
+* saved device in popup ([21f3ca6](https://github.com/K4zoku/FF-WebHID/commit/21f3ca64a4db6d79fbad193b9d288dec25b2b8bc))
+* security ([d573713](https://github.com/K4zoku/FF-WebHID/commit/d573713a59f29fc2ec5db9ee6d21739cc2d4bca6))
+* settings change bugs ([4c5ec1f](https://github.com/K4zoku/FF-WebHID/commit/4c5ec1fa046aa4f6fa892b6f6287b9de78ada331))
+* settings save & worker tdz ([1cb919b](https://github.com/K4zoku/FF-WebHID/commit/1cb919b19e9ad9a0743dcfb2aeb2cf5fe060e2fa))
+* settings sync, life cycle management ([6d0654c](https://github.com/K4zoku/FF-WebHID/commit/6d0654c85dc9fab10b2f0e4b4ef3674398f45257))
+* site setting for data plane ([8754ab9](https://github.com/K4zoku/FF-WebHID/commit/8754ab9b811fc02e7c7744b793803be627af5dac))
+* split async ([dd6bd7b](https://github.com/K4zoku/FF-WebHID/commit/dd6bd7bec8c14873ce55cb80e3de05789875d441))
+* truncated byte ([d5fa14f](https://github.com/K4zoku/FF-WebHID/commit/d5fa14f2fb5237b5676adb8962a8b4a762fab389))
+* wrong message type ([bd75412](https://github.com/K4zoku/FF-WebHID/commit/bd75412e25f2e8f2b571ff2c98fe57999289f7ee))
+* ws control open device ([e8e9d04](https://github.com/K4zoku/FF-WebHID/commit/e8e9d04f1bcd23535bbebc05ac6474c61e091d91))
+* ws dataplane ([6c40af0](https://github.com/K4zoku/FF-WebHID/commit/6c40af0556eae52858fe8a2dda9f2a539d68149f))
+
+
+### Performance
+
+* default to no batching (consume more cpu but lower latency) ([8763514](https://github.com/K4zoku/FF-WebHID/commit/876351410fec73c66ff954f095923ac0047fb474))
+* early fire-and-forget ([84329e0](https://github.com/K4zoku/FF-WebHID/commit/84329e0d8a89846766439c2e974944e2f1185381))
+* eliminate 8 copy by using rkyv for daemon <-> nm host ([f29d6ae](https://github.com/K4zoku/FF-WebHID/commit/f29d6ae645debf78ecbeaec28703b3bba97231ca))
+* message channel ([e13e5ca](https://github.com/K4zoku/FF-WebHID/commit/e13e5ca5c6de50f34081cf1474d460bea0e172e3))
+* nm host truly forward with zero-copy/alloc & daemon with thread ([05b9f31](https://github.com/K4zoku/FF-WebHID/commit/05b9f31e9989cdecfa134244911884cc27c57b7c))
+* numberic action ([b899f22](https://github.com/K4zoku/FF-WebHID/commit/b899f22068df674e76ddfacf434e196f4481b45f))
+* optimize data hop ([3389c50](https://github.com/K4zoku/FF-WebHID/commit/3389c50e5dbb602289ff61b5b6d623a50178880e))
+* optimize tlv ([58ecf8e](https://github.com/K4zoku/FF-WebHID/commit/58ecf8e1121ab98af598ee6871269ac662bd21c3))
+* postMessage with transfer ([7daf92c](https://github.com/K4zoku/FF-WebHID/commit/7daf92c680382b11b7318c76bbde7b310dfbaf18))
+* reduce data copies, use base64 for context switching copy at O(1) ([b32f1b9](https://github.com/K4zoku/FF-WebHID/commit/b32f1b99c66fe05c9ab604f3a8c06f8ae4636dbe))
+* set TCP_NODELAY ([792d8c4](https://github.com/K4zoku/FF-WebHID/commit/792d8c4b2002430d1925d4fc34bc2fcc6b1d7043))
+* silent copy ([e173b9e](https://github.com/K4zoku/FF-WebHID/commit/e173b9e700088126384a71549b57e4b878704c8c))
+* single char fields name ([503f93f](https://github.com/K4zoku/FF-WebHID/commit/503f93f864d05e06e877370374a1d2e13d3caaf1))
+* skip close/open when switching data plane ([b418c7f](https://github.com/K4zoku/FF-WebHID/commit/b418c7febd09722b2f7fb33fbc8dedc5553214c8))
+* uint8array for nm ([7e98317](https://github.com/K4zoku/FF-WebHID/commit/7e98317d1eea4b37359221b9777d4c2bb61aa609))
+* use string/base64 instead of u8 array ([b5eb364](https://github.com/K4zoku/FF-WebHID/commit/b5eb364c680ae10c7bc2d23200b6328b9d96b2fd))
+
+
+### Code Refactoring
+
+* addon cleanup ([864eaef](https://github.com/K4zoku/FF-WebHID/commit/864eaef8aa90411e7e02b31c490ca9a43bb350fe))
+* **addon:** cleanup deadcode, extract common utils ([4fac06d](https://github.com/K4zoku/FF-WebHID/commit/4fac06d143cc5142fa7a2ac5c124bf0225bf0021))
+* buffer pool instead of alloc ([e1e4648](https://github.com/K4zoku/FF-WebHID/commit/e1e4648fec7a5822d74885d2bace8dd99b11676f))
+* camelCase ([102cb5f](https://github.com/K4zoku/FF-WebHID/commit/102cb5ffb3e4988896d820c3aa1b1b134c084ef6))
+* change polyfill log prefix ([fb85e82](https://github.com/K4zoku/FF-WebHID/commit/fb85e82d0e62f12e6d29d41bf2c516f68a2127ca))
+* cleanup ([64b0eb9](https://github.com/K4zoku/FF-WebHID/commit/64b0eb91f01295606bcf0e4f8b49ef4de179d7a9))
+* cleanup ([b4ec1ac](https://github.com/K4zoku/FF-WebHID/commit/b4ec1aca9df4baf69b376f63168de4949bac6e4f))
+* cleanup dead code ([d4ee9fc](https://github.com/K4zoku/FF-WebHID/commit/d4ee9fc5206095659315ba7f5890c7b76aa6cf52))
+* cleanup dead code ([57fc029](https://github.com/K4zoku/FF-WebHID/commit/57fc029358db73f21172f4f91756d41b7a3b3d36))
+* cleanup, ogranize code ([4384670](https://github.com/K4zoku/FF-WebHID/commit/43846704cfa122fa05426796c668ffe831d0db6b))
+* extract common logger, error log, fallback handling ([b133a6b](https://github.com/K4zoku/FF-WebHID/commit/b133a6b1f4ade84c16b32febe1aef69a59670d1e))
+* mchan for sab wake ([0abe670](https://github.com/K4zoku/FF-WebHID/commit/0abe67098bcc816c31df64519b30130a245f75f0))
+* optimize binary size ([00be78d](https://github.com/K4zoku/FF-WebHID/commit/00be78dd8913d2fc9f4ba57b1d207ea8cb08db7c))
+* polyfill weakmap ([602e503](https://github.com/K4zoku/FF-WebHID/commit/602e503c7bcb51056858a3f4139b2a5e53267477))
+* reduce deps ([7ca2317](https://github.com/K4zoku/FF-WebHID/commit/7ca2317e9f803e34d51c14d7a0ed392f7f87211a))
+* remove deadcode ([a6933ef](https://github.com/K4zoku/FF-WebHID/commit/a6933ef6065070551c5ca7c07d69c2ff823e5824))
+* rename event ([5037b85](https://github.com/K4zoku/FF-WebHID/commit/5037b85cd998b865b5637fd7743af5fc827e653b))
+* settings utils merge ([3acb6fe](https://github.com/K4zoku/FF-WebHID/commit/3acb6fe8a3318ba2d9fd054ed91abc7b333a0430))
+
+
+### Documentation
+
+* add AGENTS.md ([e44fa02](https://github.com/K4zoku/FF-WebHID/commit/e44fa02479b6130c587a43d23de47d6c057fda4b))
+* add DATA_PATH.md ([e785098](https://github.com/K4zoku/FF-WebHID/commit/e7850981835f84533fe477d56d2fde3639ba7317))
+* guide for daemon-as-nm-host ([9c321d7](https://github.com/K4zoku/FF-WebHID/commit/9c321d7eff7442bf9877f0c66c5986721b158dc6))
+* update benchmark, add skill ([816d4fd](https://github.com/K4zoku/FF-WebHID/commit/816d4fdce4cef4157f0522b07ddebc8dad506188))
+* update docs ([46b7f02](https://github.com/K4zoku/FF-WebHID/commit/46b7f02cfceac1e615ed025eccf8a73c7fdb3866))
+* update docs ([3b01463](https://github.com/K4zoku/FF-WebHID/commit/3b01463afe054f291e249a23e51ad1459f6f6391))
+* update docs ([6c5ac70](https://github.com/K4zoku/FF-WebHID/commit/6c5ac708d8d10364d964b28926047b2c09e72efd))
+* update docs ([4b1cc0e](https://github.com/K4zoku/FF-WebHID/commit/4b1cc0eeb567ea98ba5d72dc24293aebb86a6bba))
+* update documents ([386d2bc](https://github.com/K4zoku/FF-WebHID/commit/386d2bc58e00531a6dec57c4d667a2598ae589c9))
+* update documents ([2f8a5eb](https://github.com/K4zoku/FF-WebHID/commit/2f8a5eb5d1d85ba737d464d3edb0297e1a2f7b1b))
+* update README ([d749d9e](https://github.com/K4zoku/FF-WebHID/commit/d749d9e2bbb00e2ce8e9f16a7321e918603b19be))
+* update readme, installation guide and data path ([7bdfd1d](https://github.com/K4zoku/FF-WebHID/commit/7bdfd1d805fdf30a1f09398c13a120023a16c9a4))
+
+
+### CI/CD
+
+* archive false for single file artifact ([cfc1a9d](https://github.com/K4zoku/FF-WebHID/commit/cfc1a9d03f226056f74a8175510fda6499388a61))
+* optimize ci ([d64c9c8](https://github.com/K4zoku/FF-WebHID/commit/d64c9c81705241ad7f0835210e679bc23f9fe387))
+* optimize even more ([bb57396](https://github.com/K4zoku/FF-WebHID/commit/bb573968c00bd6d57e9f3f43276ee7348250e456))
+* organize steps ([ca6e79b](https://github.com/K4zoku/FF-WebHID/commit/ca6e79b547798e2a7fe5900be59ea39293560656))
+* skip wasm build, addon build now run in parallel ([f9bdbd2](https://github.com/K4zoku/FF-WebHID/commit/f9bdbd2776f7e7ea2eb054554b3af5e99552d52d))
+* split addon build ([7628444](https://github.com/K4zoku/FF-WebHID/commit/762844458a9eff5f51119d3a4e3332dd019f25e1))
+
 ## [1.6.6](https://github.com/K4zoku/FF-WebHID/compare/v1.6.5...v1.6.6) (2026-07-08)
 
 
