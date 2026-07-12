@@ -9,6 +9,7 @@
     #pairedDevices = null;
     #deviceGroups = {};
     #cssReady = null;
+    #svgCache = {};
 
     constructor() {
       this.devices = [];
@@ -57,9 +58,9 @@
         ]);
         const theme = await themeResp.text();
         const css   = await cssResp.text();
-        const style = document.createElement("style");
-        style.textContent = theme + "\n" + css;
-        this.shadowRoot.appendChild(style);
+        const sheet = new CSSStyleSheet();
+        sheet.replaceSync(theme + "\n" + css);
+        this.shadowRoot.adoptedStyleSheets = [sheet];
       } catch (e) {
         __webhid.logger.warn("Failed to load shadow styles", e);
       }
@@ -82,7 +83,7 @@
             <template id="webhid-device-item-template">
               <label class="webhid-device-item" tabindex="0">
                 <input type="radio" name="webhid-device" class="webhid-device-radio">
-                <img class="webhid-device-icon" draggable="false">
+                <span class="webhid-device-icon"></span>
                 <div class="webhid-device-body">
                   <div class="webhid-device-name"></div>
                   <div class="webhid-device-vendor"></div>
@@ -238,6 +239,16 @@
       }
     }
 
+    async #getSvg(type) {
+      if (this.#svgCache[type]) return this.#svgCache[type];
+      try {
+        const resp = await fetch(browser.runtime.getURL(`res/${type}.svg`));
+        const svg = await resp.text();
+        this.#svgCache[type] = svg;
+        return svg;
+      } catch { return null; }
+    }
+
     async #deviceMatchesSaved(device) {
       const pairedIds = await this.#getPairedDevices();
       return pairedIds.includes(device.deviceId);
@@ -292,7 +303,6 @@
         const device = devices[0];
         const deviceId = groupId;
         const type = __webhid.guessDeviceType(device);
-        const iconUrl = browser.runtime.getURL(`res/${type}.svg`);
 
         const clone = tpl.content.cloneNode(true);
         const item  = clone.querySelector(".webhid-device-item");
@@ -302,9 +312,8 @@
         item.classList.toggle("webhid-device-paired", isPaired);
         item.dataset.deviceId = deviceId;
 
-        const icon = clone.querySelector(".webhid-device-icon");
-        icon.src = iconUrl;
-        icon.alt = type;
+        const iconSpan = clone.querySelector(".webhid-device-icon");
+        this.#getSvg(type).then(svg => { if (svg) iconSpan.innerHTML = svg; });
 
         clone.querySelector(".webhid-device-name").textContent = name;
 

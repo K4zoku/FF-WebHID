@@ -26,12 +26,12 @@
   },
   "page_action": {
     "default_popup": "html/popup.html",
-    "default_icon": "icons/icon.svg",
+    "default_icon": "res/gamepad.svg",
     "show_matches": ["http://*/*", "https://*/*"]
   },
   "action": {
     "default_icon": "icons/icon.svg",
-    "default_title": "WebHID — Global settings"
+    "default_title": "WebHID"
   },
   "options_ui": {
     "page": "html/settings.html",
@@ -65,22 +65,14 @@
         "js/utils/http-status.js",
         "js/bridge.js"
       ],
+      "world": "ISOLATED",
       "run_at": "document_start"
     }
   ],
   "web_accessible_resources": [
     {
       "resources": [
-        "res/*.svg",
-        "css/theme.css",
-        "css/device-picker.css",
-        "js/utils/browser-compat.js",
-        "js/utils/logger.js",
-        "js/utils/settings.js",
-        "js/utils/http-status.js",
-        "js/utils/ws-transport.js",
-        "js/worker.js",
-        "js/control.js"
+        "res/*.svg"
       ],
       "matches": [
         "<all_urls>"

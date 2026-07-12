@@ -108,6 +108,14 @@
   height: 32px;
   flex-shrink: 0;
   opacity: 0.55;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.webhid-device-icon svg {
+  width: 24px;
+  height: 24px;
 }
 
 .webhid-device-body {
