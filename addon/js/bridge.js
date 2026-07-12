@@ -8,7 +8,7 @@
   // Initialize device picker custom element
   // ---------------------------------------------------------------------------
   const devicePicker = new __webhid.WebHidDevicePicker();
-  document.documentElement.appendChild(devicePicker);
+  document.documentElement.appendChild(devicePicker.host);
 
   // ---------------------------------------------------------------------------
   // Content script ↔ Page bridge
@@ -564,7 +564,6 @@
 
       window.addEventListener("webhid-device-selected", onSelected);
       window.addEventListener("webhid-device-cancelled", onCancelled);
-      __webhid.logger.debug(devicePicker);
       devicePicker.show((payload && payload.filters) || []);
       return;
     }
