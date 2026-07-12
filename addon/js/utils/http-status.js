@@ -16,6 +16,6 @@
     503: "Service Unavailable",
   };
   const name = (s) => NAME[s] || "HTTP " + s;
-  window.__webhid = window.__webhid || {};
-  window.__webhid.http = { isOk, name };
+  globalThis.__webhid = globalThis.__webhid || {};
+  globalThis.__webhid.http = { isOk, name };
 })();

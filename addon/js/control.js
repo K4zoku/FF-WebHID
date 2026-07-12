@@ -1,7 +1,9 @@
 "use strict";
-const { logger } = self.__webhid;
-self.__webhid.logger.initLogger("control");
-const settings = self.__webhid.createSettingsStore(self.__webhid.GLOBAL_DEFAULTS);
+const { logger } = globalThis.__webhid;
+globalThis.__webhid.logger.initLogger("control");
+const settings = globalThis.__webhid.createSettingsStore(
+  globalThis.__webhid.GLOBAL_DEFAULTS,
+);
 settings.on("logLevel", (v) => logger.applyLevel(v));
 let _port = null;
 let _transport = null;
@@ -20,7 +22,7 @@ self.onmessage = ({ data: msg, ports }) => {
         }
       };
     }
-    _transport = self.__webhid.createWsTransport({
+    _transport = globalThis.__webhid.createWsTransport({
       tag: "control",
       onReady: () => {
         if (_port) _port.postMessage({ type: "ready" });

@@ -1,6 +1,6 @@
 (function () {
   "use strict";
-  const { logger, fetchResource, http, guessDeviceType } = window.__webhid;
+  const { logger, fetchResource, http, guessDeviceType } = globalThis.__webhid;
   logger.initLogger("picker");
 
   const _svgCache = {};
@@ -242,7 +242,10 @@
         const iconSpan = clone.querySelector(".webhid-device-icon");
         _getSvg(type).then((svg) => {
           if (svg) {
-            const svgDoc = new DOMParser().parseFromString(svg, "image/svg+xml");
+            const svgDoc = new DOMParser().parseFromString(
+              svg,
+              "image/svg+xml",
+            );
             const svgEl = svgDoc.documentElement;
             if (svgEl) iconSpan.replaceChildren(svgEl.cloneNode(true));
           }
@@ -304,6 +307,6 @@
     }
   }
 
-  window.__webhid = window.__webhid || {};
-  window.__webhid.WebHidDevicePicker = WebHidDevicePicker;
+  globalThis.__webhid = globalThis.__webhid || {};
+  globalThis.__webhid.WebHidDevicePicker = WebHidDevicePicker;
 })();

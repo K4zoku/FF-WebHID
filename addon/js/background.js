@@ -730,81 +730,105 @@
         return true;
       }
 
-    case "show-picker": {
-      const tabId = sender.tab?.id;
-      if (tabId == null) { sendResponse({ error: "no tab" }); return false; }
-      const req = { requestId: request.requestId, tabId, filters: request.filters || [], origin: request.origin, mode: request.mode || "pageAction" };
-      _pendingPicker.set(tabId, req);
+      case "show-picker": {
+        const tabId = sender.tab?.id;
+        if (tabId == null) {
+          sendResponse({ error: "no tab" });
+          return false;
+        }
+        const req = {
+          requestId: request.requestId,
+          tabId,
+          filters: request.filters || [],
+          origin: request.origin,
+          mode: request.mode || "pageAction",
+        };
+        _pendingPicker.set(tabId, req);
 
-      if (req.mode === "window") {
-        const screenW = globalThis.screen?.availWidth || 1280;
-        const screenH = globalThis.screen?.availHeight || 720;
-        const winW = Math.min(380, screenW - 20);
-        const winH = Math.min(480, screenH - 80);
-        const left = Math.max(0, Math.round((screenW - winW) / 2));
-        const top = Math.max(0, Math.round((screenH - winH) / 2));
-        browser.windows.create({
-          type: "popup",
-          url: "html/picker-popup.html",
-          width: winW,
-          height: winH,
-          left,
-          top,
-        }).catch(() => {});
-      } else {
-        browser.pageAction.setIcon({ tabId, path: "icons/gamepad.alert.svg" });
-        browser.pageAction.setPopup({ tabId, popup: "html/picker-popup.html" });
-        browser.pageAction.openPopup?.().catch(() => {});
-        browser.tabs.query({ active: true, currentWindow: true }).then((tabs) => {
-          const tab = tabs[0];
-          if (tab && tab.id !== tabId) {
-            browser.notifications.create("webhid-picker", {
-              type: "basic",
-              iconUrl: browser.runtime.getURL("icons/icon.svg"),
-              title: "WebHID",
-              message: `A website (${request.origin}) is requesting a HID device. Click to choose.`,
-            });
-          }
-        }).catch(() => {});
+        if (req.mode === "window") {
+          const screenW = globalThis.screen?.availWidth || 1280;
+          const screenH = globalThis.screen?.availHeight || 720;
+          const winW = Math.min(380, screenW - 20);
+          const winH = Math.min(480, screenH - 80);
+          const left = Math.max(0, Math.round((screenW - winW) / 2));
+          const top = Math.max(0, Math.round((screenH - winH) / 2));
+          browser.windows
+            .create({
+              type: "popup",
+              url: "html/picker-popup.html",
+              width: winW,
+              height: winH,
+              left,
+              top,
+            })
+            .catch(() => {});
+        } else {
+          browser.pageAction.setIcon({
+            tabId,
+            path: "icons/gamepad.alert.svg",
+          });
+          browser.pageAction.setPopup({
+            tabId,
+            popup: "html/picker-popup.html",
+          });
+          browser.pageAction.openPopup?.().catch(() => {});
+          browser.tabs
+            .query({ active: true, currentWindow: true })
+            .then((tabs) => {
+              const tab = tabs[0];
+              if (tab && tab.id !== tabId) {
+                browser.notifications.create("webhid-picker", {
+                  type: "basic",
+                  iconUrl: browser.runtime.getURL("icons/icon.svg"),
+                  title: "WebHID",
+                  message: `A website (${request.origin}) is requesting a HID device. Click to choose.`,
+                });
+              }
+            })
+            .catch(() => {});
+        }
+        sendResponse({ ok: true });
+        return false;
       }
-      sendResponse({ ok: true });
-      return false;
-    }
 
-    case "getPendingPicker": {
-      sendResponse(_pendingPicker.size > 0 ? [..._pendingPicker.values()][0] : null);
-      return false;
-    }
+      case "getPendingPicker": {
+        sendResponse(
+          _pendingPicker.size > 0 ? [..._pendingPicker.values()][0] : null,
+        );
+        return false;
+      }
 
-    case "picker-result": {
-      const { requestId, selected, devices } = request;
-      let tabId = request.tabId;
-      if (tabId == null && _pendingPicker.size > 0) {
-        tabId = [..._pendingPicker.keys()][0];
+      case "picker-result": {
+        const { requestId, selected, devices } = request;
+        let tabId = request.tabId;
+        if (tabId == null && _pendingPicker.size > 0) {
+          tabId = [..._pendingPicker.keys()][0];
+        }
+        const req = tabId != null ? _pendingPicker.get(tabId) : null;
+        if (tabId != null) _pendingPicker.delete(tabId);
+        if (req?.mode === "pageAction") {
+          browser.pageAction.setIcon({ tabId, path: "icons/gamepad.svg" });
+          browser.pageAction.setPopup({ tabId, popup: "html/popup.html" });
+          browser.notifications?.clear("webhid-picker").catch(() => {});
+        }
+        if (request.windowId != null) {
+          browser.windows.remove(request.windowId).catch(() => {});
+        }
+        if (tabId != null) {
+          browser.tabs
+            .sendMessage(tabId, {
+              action: "picker-result",
+              requestId,
+              selected,
+              devices: selected ? devices : null,
+            })
+            .catch(() => {});
+        }
+        sendResponse({ ok: true });
+        return false;
       }
-      const req = tabId != null ? _pendingPicker.get(tabId) : null;
-      if (tabId != null) _pendingPicker.delete(tabId);
-      if (req?.mode === "pageAction") {
-        browser.pageAction.setIcon({ tabId, path: "icons/gamepad.svg" });
-        browser.pageAction.setPopup({ tabId, popup: "html/popup.html" });
-        browser.notifications?.clear("webhid-picker").catch(() => {});
-      }
-      if (request.windowId != null) {
-        browser.windows.remove(request.windowId).catch(() => {});
-      }
-      if (tabId != null) {
-        browser.tabs.sendMessage(tabId, {
-          action: "picker-result",
-          requestId,
-          selected,
-          devices: selected ? devices : null,
-        }).catch(() => {});
-      }
-      sendResponse({ ok: true });
-      return false;
-    }
 
-    default:
+      default:
         return false;
     }
   });

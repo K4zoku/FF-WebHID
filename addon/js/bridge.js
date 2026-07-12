@@ -8,13 +8,13 @@
     guessDeviceType,
     createSettingsStore,
     GLOBAL_DEFAULTS,
-  } = window.__webhid;
+  } = globalThis.__webhid;
   logger.initLogger("bridge");
 
   // ---------------------------------------------------------------------------
   // Initialize device picker custom element
   // ---------------------------------------------------------------------------
-  const devicePicker = new __webhid.WebHidDevicePicker();
+  const devicePicker = new globalThis.__webhid.WebHidDevicePicker();
   document.documentElement.appendChild(devicePicker.host);
 
   // ---------------------------------------------------------------------------
@@ -696,25 +696,42 @@
     if (action === "requestDevice") {
       const filters = (payload && payload.filters) || [];
 
-      if (settings.devicePickerMode === "pageAction" || settings.devicePickerMode === "window") {
-        browser.runtime.sendMessage({
-          action: "show-picker",
-          requestId: id,
-          filters,
-          origin: window.location.origin,
-          mode: settings.devicePickerMode,
-        }).catch(() => {});
+      if (
+        settings.devicePickerMode === "pageAction" ||
+        settings.devicePickerMode === "window"
+      ) {
+        browser.runtime
+          .sendMessage({
+            action: "show-picker",
+            requestId: id,
+            filters,
+            origin: window.location.origin,
+            mode: settings.devicePickerMode,
+          })
+          .catch(() => {});
         const pickerTimeout = setTimeout(() => {
-          _replyToPage({ __webhid_bridge: "res", id, result: { cancelled: true } });
+          _replyToPage({
+            __webhid_bridge: "res",
+            id,
+            result: { cancelled: true },
+          });
         }, 30000);
         const onPickerResult = (msg) => {
           if (msg.action !== "picker-result" || msg.requestId !== id) return;
           clearTimeout(pickerTimeout);
           browser.runtime.onMessage.removeListener(onPickerResult);
           if (msg.selected && msg.devices) {
-            _replyToPage({ __webhid_bridge: "res", id, result: { devices: msg.devices } });
+            _replyToPage({
+              __webhid_bridge: "res",
+              id,
+              result: { devices: msg.devices },
+            });
           } else {
-            _replyToPage({ __webhid_bridge: "res", id, result: { cancelled: true } });
+            _replyToPage({
+              __webhid_bridge: "res",
+              id,
+              result: { cancelled: true },
+            });
           }
         };
         browser.runtime.onMessage.addListener(onPickerResult);
@@ -728,11 +745,19 @@
       };
       onSelected = (e) => {
         cleanup();
-        _replyToPage({ __webhid_bridge: "res", id, result: { devices: e.detail.devices } });
+        _replyToPage({
+          __webhid_bridge: "res",
+          id,
+          result: { devices: e.detail.devices },
+        });
       };
       onCancelled = () => {
         cleanup();
-        _replyToPage({ __webhid_bridge: "res", id, result: { cancelled: true } });
+        _replyToPage({
+          __webhid_bridge: "res",
+          id,
+          result: { cancelled: true },
+        });
       };
       window.addEventListener("webhid-device-selected", onSelected);
       window.addEventListener("webhid-device-cancelled", onCancelled);

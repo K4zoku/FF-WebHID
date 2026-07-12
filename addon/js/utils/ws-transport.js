@@ -117,9 +117,9 @@
     };
   }
 
-  const _g = typeof self !== "undefined" ? self : globalThis;
-  _g.__webhid = _g.__webhid || {};
-  _g.__webhid.createWsTransport = createWsTransport;
-  _g.__webhid.WS_CLOSE_UNKNOWN_TOKEN = WS_CLOSE_UNKNOWN_TOKEN;
-  _g.__webhid.WS_CLOSE_BAD_TOKEN = WS_CLOSE_BAD_TOKEN;
+  
+  globalThis.__webhid = globalThis.__webhid || {};
+  globalThis.__webhid.createWsTransport = createWsTransport;
+  globalThis.__webhid.WS_CLOSE_UNKNOWN_TOKEN = WS_CLOSE_UNKNOWN_TOKEN;
+  globalThis.__webhid.WS_CLOSE_BAD_TOKEN = WS_CLOSE_BAD_TOKEN;
 })();

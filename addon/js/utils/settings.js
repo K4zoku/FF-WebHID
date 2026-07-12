@@ -100,7 +100,7 @@
     });
   }
 
-  window.__webhid = window.__webhid || {};
-  window.__webhid.GLOBAL_DEFAULTS = GLOBAL_DEFAULTS;
-  window.__webhid.createSettingsStore = createSettingsStore;
+  globalThis.__webhid = globalThis.__webhid || {};
+  globalThis.__webhid.GLOBAL_DEFAULTS = GLOBAL_DEFAULTS;
+  globalThis.__webhid.createSettingsStore = createSettingsStore;
 })();
