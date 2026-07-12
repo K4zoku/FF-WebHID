@@ -27,6 +27,12 @@ UDEV_DIR          ?= /etc/udev/rules.d
 USER_NM_DIR       ?= $(HOME)/.mozilla/native-messaging-hosts
 USER_SYSTEMD_DIR  ?= $(HOME)/.config/systemd/user
 
+CHROMIUM_NM_MANIFEST       := $(MANIFEST_DIR)/webhid.forwarder_nm_host.chromium.json
+CHROMIUM_DAEMON_NM_MANIFEST:= $(MANIFEST_DIR)/webhid.daemon_nm_host.chromium.json
+
+CHROMIUM_SYSTEM_NM_DIR ?= /etc/opt/chrome/native-messaging-hosts
+CHROMIUM_USER_NM_DIR   ?= $(HOME)/.config/google-chrome/NativeMessagingHosts
+
 .PHONY: all build build-addon package \
 		install install-system install-user install-udev-rule \
 		install-webhid-group \
@@ -159,6 +165,50 @@ install-daemon-nm-host-user: build
 	@echo "Make sure the udev rule is installed:  sudo make install-udev-rule"
 	@echo "Stop any root daemon if running:       sudo systemctl disable --now webhid-daemon"
 
+## ---- Chromium support ----
+
+install-chromium: install-chromium-system
+
+install-chromium-system: build
+	@echo "==> Installing binaries to $(PREFIX)/bin/"
+	install -Dm755 "$(DAEMON_BIN)" "$(DESTDIR)$(PREFIX)/bin/webhid-daemon"
+	install -Dm755 "$(NM_BIN)"       "$(DESTDIR)$(PREFIX)/bin/webhid-native-messaging"
+	@echo "==> Installing Chromium NM manifests to $(CHROMIUM_SYSTEM_NM_DIR)"
+	sed 's|{{NM_BIN}}|$(PREFIX)/bin/webhid-native-messaging|g' \
+	  "$(CHROMIUM_NM_MANIFEST)" | install -Dm644 /dev/stdin "$(DESTDIR)$(CHROMIUM_SYSTEM_NM_DIR)/$(NM_NAME)"
+	sed 's|{{DAEMON_BIN}}|$(PREFIX)/bin/webhid-daemon|g' \
+	  "$(CHROMIUM_DAEMON_NM_MANIFEST)" | install -Dm644 /dev/stdin "$(DESTDIR)$(CHROMIUM_SYSTEM_NM_DIR)/$(DAEMON_NM_NAME)"
+	@echo "Load the addon in Chromium: chrome://extensions -> Developer mode -> Load unpacked -> select addon/"
+
+install-chromium-user: build
+	@echo "==> Installing binaries to $(USER_PREFIX)/bin/"
+	install -Dm755 "$(DAEMON_BIN)" "$(USER_PREFIX)/bin/webhid-daemon"
+	install -Dm755 "$(NM_BIN)"       "$(USER_PREFIX)/bin/webhid-native-messaging"
+	@echo "==> Installing Chromium NM manifests to $(CHROMIUM_USER_NM_DIR)"
+	@mkdir -p "$(CHROMIUM_USER_NM_DIR)"
+	sed 's|{{NM_BIN}}|$(USER_PREFIX)/bin/webhid-native-messaging|g' \
+	  "$(CHROMIUM_NM_MANIFEST)" > "$(CHROMIUM_USER_NM_DIR)/$(NM_NAME)"
+	chmod 644 "$(CHROMIUM_USER_NM_DIR)/$(NM_NAME)"
+	sed 's|{{DAEMON_BIN}}|$(USER_PREFIX)/bin/webhid-daemon|g' \
+	  "$(CHROMIUM_DAEMON_NM_MANIFEST)" > "$(CHROMIUM_USER_NM_DIR)/$(DAEMON_NM_NAME)"
+	chmod 644 "$(CHROMIUM_USER_NM_DIR)/$(DAEMON_NM_NAME)"
+
+install-chromium-daemon-nm-host-system: build
+	@echo "==> Installing daemon binary to $(PREFIX)/bin/"
+	install -Dm755 "$(DAEMON_BIN)" "$(DESTDIR)$(PREFIX)/bin/webhid-daemon"
+	@echo "==> Installing Chromium daemon-as-NM-host manifest to $(CHROMIUM_SYSTEM_NM_DIR)"
+	sed 's|{{DAEMON_BIN}}|$(PREFIX)/bin/webhid-daemon|g' \
+	  "$(CHROMIUM_DAEMON_NM_MANIFEST)" | install -Dm644 /dev/stdin "$(DESTDIR)$(CHROMIUM_SYSTEM_NM_DIR)/$(DAEMON_NM_NAME)"
+
+install-chromium-daemon-nm-host-user: build
+	@echo "==> Installing daemon binary to $(USER_PREFIX)/bin/"
+	install -Dm755 "$(DAEMON_BIN)" "$(USER_PREFIX)/bin/webhid-daemon"
+	@echo "==> Installing Chromium daemon-as-NM-host manifest to $(CHROMIUM_USER_NM_DIR)"
+	@mkdir -p "$(CHROMIUM_USER_NM_DIR)"
+	sed 's|{{DAEMON_BIN}}|$(USER_PREFIX)/bin/webhid-daemon|g' \
+	  "$(CHROMIUM_DAEMON_NM_MANIFEST)" > "$(CHROMIUM_USER_NM_DIR)/$(DAEMON_NM_NAME)"
+	chmod 644 "$(CHROMIUM_USER_NM_DIR)/$(DAEMON_NM_NAME)"
+
 uninstall: uninstall-system
 
 uninstall-system:
@@ -166,6 +216,8 @@ uninstall-system:
 	rm -f "$(DESTDIR)$(PREFIX)/bin/webhid-native-messaging"
 	rm -f "$(DESTDIR)$(SYSTEM_NM_DIR)/$(NM_NAME)"
 	rm -f "$(DESTDIR)$(SYSTEM_NM_DIR)/$(DAEMON_NM_NAME)"
+	rm -f "$(DESTDIR)$(CHROMIUM_SYSTEM_NM_DIR)/$(NM_NAME)"
+	rm -f "$(DESTDIR)$(CHROMIUM_SYSTEM_NM_DIR)/$(DAEMON_NM_NAME)"
 	rm -f "$(DESTDIR)$(SYSTEMD_DIR)/webhid-daemon.service"
 
 uninstall-user:
@@ -173,6 +225,8 @@ uninstall-user:
 	rm -f "$(USER_PREFIX)/bin/webhid-native-messaging"
 	rm -f "$(USER_NM_DIR)/$(NM_NAME)"
 	rm -f "$(USER_NM_DIR)/$(DAEMON_NM_NAME)"
+	rm -f "$(CHROMIUM_USER_NM_DIR)/$(NM_NAME)"
+	rm -f "$(CHROMIUM_USER_NM_DIR)/$(DAEMON_NM_NAME)"
 	rm -f "$(USER_SYSTEMD_DIR)/webhid-daemon.service"
 
 ## ---- Misc ----
@@ -193,5 +247,8 @@ help:
 	@echo "  install-udev-rule  - install udev rule for hidraw access (needs root)"
 	@echo "  install-daemon-nm-host-system - install daemon + daemon-as-NM-host manifest (needs root)"
 	@echo "  install-daemon-nm-host-user   - same, user-local (no root)"
+	@echo "  install-chromium-system  - install binaries + Chromium NM manifests (needs root)"
+	@echo "  install-chromium-user    - same, user-local (no root)"
+	@echo "  install-chromium-daemon-nm-host-system/user - daemon-as-NM-host for Chromium"
 	@echo "  uninstall-system / uninstall-user"
 	@echo "  clean                    - remove build artifacts"

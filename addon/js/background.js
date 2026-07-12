@@ -3,6 +3,34 @@ __webhid.logger.initLogger('bg');
 let _deviceCache = [];
 
 const _deviceTabMap = new Map();
+const _cspWorkerBlocked = new Map();
+
+function _parseWorkerAllowed(cspValue) {
+  if (!cspValue) return true;
+  const directives = {};
+  for (const part of cspValue.split(';')) {
+    const tokens = part.trim().split(/\s+/);
+    if (tokens.length > 1) directives[tokens[0].toLowerCase()] = tokens.slice(1).map(s => s.toLowerCase());
+  }
+  const src = directives['worker-src'] || directives['child-src'] || directives['default-src'] || null;
+  if (!src) return true;
+  return src.some(s => s === 'blob:' || s === '*' || s === 'moz-extension:' || s.startsWith('moz-extension://'));
+}
+
+if (browser.webRequest?.onHeadersReceived) {
+  browser.webRequest.onHeadersReceived.addListener(
+    (details) => {
+      if (details.tabId < 0) return;
+      const cspHeader = details.responseHeaders?.find(
+        h => h.name.toLowerCase() === 'content-security-policy'
+      );
+      if (!cspHeader) return;
+      _cspWorkerBlocked.set(details.tabId, !_parseWorkerAllowed(cspHeader.value));
+    },
+    { urls: ['<all_urls>'], types: ['main_frame'] },
+    ['responseHeaders']
+  );
+}
 
 function registerDeviceTab(deviceId, tabId) {
   if (!deviceId || tabId == null) return;
@@ -33,6 +61,7 @@ function purgeTab(tabId) {
       NativeMessaging.closeDevice(deviceId).catch(() => {});
     }
   }
+  _cspWorkerBlocked.delete(tabId);
 }
 
 // NM event codes (must match Rust constants)
@@ -440,6 +469,10 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return true;
       }
       sendResponse({ devices: _deviceCache });
+      return false;
+
+    case 'checkWorkerCsp':
+      sendResponse({ blocked: !!_cspWorkerBlocked.get(sender.tab?.id) });
       return false;
 
     default:

@@ -396,6 +396,7 @@
   async function _getWorkerBlobUrl(kind) {
     if (_workerBlobUrls[kind]) return _workerBlobUrls[kind];
     const baseUrls = [
+      'js/utils/browser-compat.js',
       'js/utils/logger.js',
       'js/utils/settings.js',
       'js/utils/ws-transport.js',
@@ -413,20 +414,47 @@
 
   async function _spawnControlWorker(token, wsPort) {
     if (_controlWorker) return;
+    let cspBlocked = false;
+    try {
+      const check = await browser.runtime.sendMessage({ action: 'checkWorkerCsp' });
+      cspBlocked = !!check?.blocked;
+    } catch {}
+    if (cspBlocked) {
+      __webhid.logger.warn('control worker skipped: CSP worker-src blocks blob:; control plane uses NM');
+      return;
+    }
+    let worker;
     try {
       const url = await _getWorkerBlobUrl('control');
-      _controlWorker = new Worker(url);
+      worker = new Worker(url);
     } catch (e) {
       __webhid.logger.error('control worker spawn failed:', e);
-      _controlWorker = null;
       return;
     }
 
     const { port1, port2 } = new MessageChannel();
     _controlPort = port1;
+    _controlWorker = worker;
+
+    let resolved = false;
+    let readyTimer = null;
+
+    const fail = (reason) => {
+      if (resolved) return;
+      resolved = true;
+      if (readyTimer) clearTimeout(readyTimer);
+      _terminateControlWorker();
+      __webhid.logger.warn('control worker failed:', reason, '; control plane falls back to NM');
+    };
+
+    worker.onerror = (e) => fail('onerror: ' + (e.message || 'unknown'));
+    readyTimer = setTimeout(() => fail('ready timeout'), 3000);
 
     _controlPort.onmessage = ({ data }) => {
       if (data.type === 'ready') {
+        if (resolved) return;
+        resolved = true;
+        if (readyTimer) clearTimeout(readyTimer);
         __webhid.logger.info('control worker ready');
       } else if (data.type === 'closed') {
         __webhid.logger.warn('control worker WS closed; will auto-reconnect');
@@ -510,94 +538,148 @@
   }
 
   async function _spawnWorker(deviceId, sessionToken, wsPort, opts = {}, gen) {
-    if (_workers.has(deviceId)) return;
+    if (_workers.has(deviceId)) return true;
+    let cspBlocked = false;
+    try {
+      const check = await browser.runtime.sendMessage({ action: 'checkWorkerCsp' });
+      cspBlocked = !!check?.blocked;
+    } catch {}
+    if (cspBlocked) {
+      __webhid.logger.warn('worker skipped for', deviceId, ': CSP worker-src blocks blob:');
+      return false;
+    }
     let worker;
     try {
       const url = await _getWorkerBlobUrl('worker');
       worker = new Worker(url);
     } catch (e) {
       __webhid.logger.error('worker fetch/spawn failed:', e);
-      return;
+      return false;
     }
 
     if (_spawnGen.get(deviceId) !== gen) {
       __webhid.logger.info('worker spawn stale, discarding for', deviceId);
       worker.terminate();
-      _workers.delete(deviceId);
-      return;
+      return false;
     }
     _workers.set(deviceId, worker);
 
-    worker.onmessage = ({ data }) => {
-      if (data.type === 'ready') {
-        __webhid.logger.info('worker ready for', deviceId);
-        _workerReady.add(deviceId);
+    return new Promise((resolveSpawn) => {
+      let resolved = false;
+      let readyTimer = null;
+
+      const fail = (reason) => {
+        if (resolved) return;
+        resolved = true;
+        if (readyTimer) clearTimeout(readyTimer);
+        worker.onerror = null;
+        worker.onmessage = null;
+        worker.terminate();
+        _workers.delete(deviceId);
+        _workerReady.delete(deviceId);
+        _workerPorts.delete(deviceId);
         const queue = _workerQueues.get(deviceId);
         if (queue) {
+          const cbMap = _workerCallbacks.get(deviceId);
           for (const wMsg of queue) {
-            worker.postMessage(wMsg, wMsg.data ? [wMsg.data.buffer] : []);
+            if (cbMap && cbMap.has(wMsg.reqId)) {
+              cbMap.get(wMsg.reqId)({ error: 'worker spawn failed' });
+              cbMap.delete(wMsg.reqId);
+            }
           }
           _workerQueues.delete(deviceId);
         }
-        const { port1, port2 } = new MessageChannel();
-        worker.postMessage({ type: 'setPort' }, [port1]);
-        _workerPorts.set(deviceId, true);
-        __webhid.logger.info('MessageChannel created for', deviceId, '- input reports bypass bridge');
-        window.postMessage({
-          __webhid_bridge: 'evt',
-          event: { eventType: 'webhid-data-ready', deviceId: deviceId, port: port2 }
-        }, '*', [port2]);
-      } else if (data.type === 'auth-failed') {
-        __webhid.logger.warn('worker auth-failed for', deviceId, 'code=' + data.code + '; re-opening');
-        _workers.delete(deviceId);
-        _workerReady.delete(deviceId);
-        _workerPorts.delete(deviceId);
-        _refreshDataPlaneToken(deviceId);
-      } else if (data.type === 'closed') {
-        __webhid.logger.warn('worker closed for', deviceId);
-        _workers.delete(deviceId);
-        _workerReady.delete(deviceId);
-        _workerPorts.delete(deviceId);
-        window.postMessage({
-          __webhid_bridge: 'evt',
-          event: { eventType: 'disconnect', deviceId: deviceId }
-        }, '*');
-      } else if (data.type === 'inputReport') {
-        if (_workerPorts.has(deviceId)) return;
-        const view = data.data ? new Uint8Array(data.data) : null;
-        if (view && __webhid.logger._level >= 3 && data.reportId !== 33) {
-          let hex = '';
-          for (let i = 0; i < Math.min(8, view.length); i++) hex += view[i].toString(16).padStart(2, '0') + ' ';
-          __webhid.logger.debug('worker→page inputReport device=' + deviceId + ' reportId=' + data.reportId + ' len=' + view.length + ' first8=' + hex);
-        }
-        window.postMessage({
-          __webhid_bridge: 'evt',
-          event: {
-            eventType: 'input_report',
-            deviceId: deviceId,
-            reportId: data.reportId,
-            data: view,
+        __webhid.logger.warn('worker spawn failed for', deviceId, ':', reason);
+        resolveSpawn(false);
+      };
+
+      worker.onerror = (e) => fail('onerror: ' + (e.message || 'unknown'));
+      readyTimer = setTimeout(() => fail('ready timeout'), 3000);
+
+      worker.onmessage = ({ data }) => {
+        if (data.type === 'ready') {
+          if (resolved) return;
+          resolved = true;
+          if (readyTimer) clearTimeout(readyTimer);
+          __webhid.logger.info('worker ready for', deviceId);
+          _workerReady.add(deviceId);
+          const queue = _workerQueues.get(deviceId);
+          if (queue) {
+            for (const wMsg of queue) {
+              worker.postMessage(wMsg, wMsg.data ? [wMsg.data.buffer] : []);
+            }
+            _workerQueues.delete(deviceId);
           }
-        }, '*', view ? [view.buffer] : []);
-      } else if (data.type === 'sendResult' || data.type === 'featureResult') {
-        const cbMap = _workerCallbacks.get(deviceId);
-        if (cbMap && cbMap.has(data.reqId)) {
-          const cb = cbMap.get(data.reqId);
-          cbMap.delete(data.reqId);
-          if (data.error) cb({ s: 500 });
-          else if (data.data) cb({ s: 200, d: data.data });
-          else cb({ s: 204 });
+          const { port1, port2 } = new MessageChannel();
+          worker.postMessage({ type: 'setPort' }, [port1]);
+          _workerPorts.set(deviceId, true);
+          __webhid.logger.info('MessageChannel created for', deviceId, '- input reports bypass bridge');
+          window.postMessage({
+            __webhid_bridge: 'evt',
+            event: { eventType: 'webhid-data-ready', deviceId: deviceId, port: port2 }
+          }, '*', [port2]);
+          resolveSpawn(true);
+          return;
         }
-      }
-    };
-    worker.postMessage({ type: 'connect', wsPort, token: sessionToken, reportSize: opts.reportSize || 64 });
+        if (data.type === 'auth-failed') {
+          __webhid.logger.warn('worker auth-failed for', deviceId, 'code=' + data.code + '; re-opening');
+          _workers.delete(deviceId);
+          _workerReady.delete(deviceId);
+          _workerPorts.delete(deviceId);
+          _refreshDataPlaneToken(deviceId);
+          return;
+        }
+        if (data.type === 'closed') {
+          __webhid.logger.warn('worker closed for', deviceId);
+          _workers.delete(deviceId);
+          _workerReady.delete(deviceId);
+          _workerPorts.delete(deviceId);
+          window.postMessage({
+            __webhid_bridge: 'evt',
+            event: { eventType: 'disconnect', deviceId: deviceId }
+          }, '*');
+          return;
+        }
+        if (data.type === 'inputReport') {
+          if (_workerPorts.has(deviceId)) return;
+          const view = data.data ? new Uint8Array(data.data) : null;
+          if (view && __webhid.logger._level >= 3 && data.reportId !== 33) {
+            let hex = '';
+            for (let i = 0; i < Math.min(8, view.length); i++) hex += view[i].toString(16).padStart(2, '0') + ' ';
+            __webhid.logger.debug('worker→page inputReport device=' + deviceId + ' reportId=' + data.reportId + ' len=' + view.length + ' first8=' + hex);
+          }
+          window.postMessage({
+            __webhid_bridge: 'evt',
+            event: {
+              eventType: 'input_report',
+              deviceId: deviceId,
+              reportId: data.reportId,
+              data: view,
+            }
+          }, '*', view ? [view.buffer] : []);
+          return;
+        }
+        if (data.type === 'sendResult' || data.type === 'featureResult') {
+          const cbMap = _workerCallbacks.get(deviceId);
+          if (cbMap && cbMap.has(data.reqId)) {
+            const cb = cbMap.get(data.reqId);
+            cbMap.delete(data.reqId);
+            if (data.error) cb({ s: 500 });
+            else if (data.data) cb({ s: 200, d: data.data });
+            else cb({ s: 204 });
+          }
+        }
+      };
+
+      worker.postMessage({ type: 'connect', wsPort, token: sessionToken, reportSize: opts.reportSize || 64 });
+    });
   }
 
   async function _spawnDataPlane(deviceId, sessionToken, wsPort, opts = {}) {
     const gen = (_spawnGen.get(deviceId) || 0) + 1;
     _spawnGen.set(deviceId, gen);
-    await _spawnWorker(deviceId, sessionToken, wsPort, opts, gen);
-    if (!_workers.has(deviceId) && _spawnGen.get(deviceId) === gen) {
+    const ok = await _spawnWorker(deviceId, sessionToken, wsPort, opts, gen);
+    if (!ok && _spawnGen.get(deviceId) === gen) {
       __webhid.logger.warn('worker spawn failed for', deviceId, '; falling back to NM');
       browser.runtime.sendMessage({
         action: 'setdataplane', deviceId: deviceId, mode: 'nm'
