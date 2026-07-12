@@ -161,6 +161,7 @@
       if (typeof this.dialog.showModal === "function") {
         if (this.dialog.open) this.dialog.close();
         this.dialog.style.display = "";
+        await new Promise(r => requestAnimationFrame(r));
         this.dialog.showModal();
       } else {
         this.dialog.setAttribute("open", "");
