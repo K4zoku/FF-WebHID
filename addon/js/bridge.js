@@ -167,7 +167,7 @@
         this.dialog.setAttribute("open", "");
       }
 
-      await this.#loadDevices();
+      this.#loadDevices();
     }
 
     async refreshDevices() {
