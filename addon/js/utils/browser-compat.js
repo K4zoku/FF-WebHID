@@ -8,8 +8,14 @@
   const _resourceCache = new Map();
   globalThis.__webhid.fetchResource = async function (path) {
     if (_resourceCache.has(path)) return _resourceCache.get(path);
-    const runtime = typeof browser !== "undefined" ? browser : chrome;
-    const resp = await runtime.sendMessage({ action: "fetchResource", path });
+    const rt = globalThis.browser || globalThis.chrome;
+    if (!rt || !rt.runtime || !rt.runtime.sendMessage) {
+      const resp = await fetch(globalThis.browser?.runtime?.getURL(path) || globalThis.chrome?.runtime?.getURL(path));
+      const text = await resp.text();
+      _resourceCache.set(path, text);
+      return text;
+    }
+    const resp = await rt.runtime.sendMessage({ action: "fetchResource", path });
     if (resp?.error) throw new Error(resp.error);
     const text = resp?.text || "";
     _resourceCache.set(path, text);
