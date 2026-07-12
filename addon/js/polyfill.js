@@ -595,6 +595,12 @@
     },
     requestDevice: {
       value: async function (options = {}) {
+        if (navigator.userActivation && !navigator.userActivation.isActive) {
+          throw new DOMException(
+            "Must be handling a user gesture to perform a hid.requestDevice() call.",
+            "SecurityError",
+          );
+        }
         const filters = Array.isArray(options.filters) ? options.filters : [];
         __webhid.logger.debug(
           "requestDevice filters=" + JSON.stringify(filters),
