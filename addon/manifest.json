@@ -15,7 +15,6 @@
   "host_permissions": [
     "<all_urls>"
   ],
-  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAk96mWjQCCsh9jPZHdycnvM7YAeGusnuz0SJk6vKONEvnRRMLYfL7cwh3UjlqOQ2AtsmvUw/tO7G5WaO4dTbJ03/qO2wIkepp26qxfuoRH60MszINXAbgUTFxSTSxV16duDnTl5wzSrXlNO5JR5YfwnS+wMZZW496+e7uwMCT7Gi+ISeea7SGXYp4DYrVJKPoxjXtYdoatXwWnTpUlXe1GVHJfiojQlEQjqJnugW45ZHlVoNOf2HW2gPHv54kfk1UyZFAMLU4yyu1Q/p2sLMc/OwRbQ9v5NOOLWjO9eJMW8qUEGLhAlsuzShaTUSg1lyZN40JJxZYpYX73yCR9kHoKQIDAQAB",
   "background": {
     "scripts": [
       "js/utils/browser-compat.js",
