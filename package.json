@@ -3,9 +3,13 @@
   "private": true,
   "version": "2.0.0",
   "scripts": {
-    "release": "commit-and-tag-version"
+    "release": "npx commit-and-tag-version",
+    "lint": "npx addons-linter addon",
+    "format": "npx prettier addon/**/*.js -w"
   },
   "devDependencies": {
-    "commit-and-tag-version": "^12.7.3"
+    "addons-linter": "^10.8.1",
+    "commit-and-tag-version": "^12.7.3",
+    "prettier": "^3.9.5"
   }
 }
