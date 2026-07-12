@@ -697,12 +697,13 @@
     if (action === "requestDevice") {
       const filters = (payload && payload.filters) || [];
 
-      if (settings.devicePickerMode === "pageAction") {
+      if (settings.devicePickerMode === "pageAction" || settings.devicePickerMode === "window") {
         browser.runtime.sendMessage({
           action: "show-picker",
           requestId: id,
           filters,
           origin: window.location.origin,
+          mode: settings.devicePickerMode,
         }).catch(() => {});
         const pickerTimeout = setTimeout(() => {
           _replyToPage({ __webhid_bridge: "res", id, result: { cancelled: true } });

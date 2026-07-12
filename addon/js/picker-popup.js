@@ -125,6 +125,7 @@ connectBtn.addEventListener("click", async () => {
     action: "picker-result",
     requestId: pendingRequest.requestId,
     tabId: pendingRequest.tabId,
+    windowId: browser.windows?.getCurrent ? (await browser.windows.getCurrent()).id : undefined,
     selected: true,
     devices,
   });
@@ -138,6 +139,7 @@ cancelBtn.addEventListener("click", async () => {
       action: "picker-result",
       requestId: pendingRequest.requestId,
       tabId: pendingRequest.tabId,
+      windowId: browser.windows?.getCurrent ? (await browser.windows.getCurrent()).id : undefined,
       selected: false,
     });
     pendingRequest = null;
@@ -151,6 +153,7 @@ window.addEventListener("unload", () => {
       action: "picker-result",
       requestId: pendingRequest.requestId,
       tabId: pendingRequest.tabId,
+      windowId: browser.windows?.getCurrent ? undefined : undefined,
       selected: false,
     });
   }

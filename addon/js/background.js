@@ -733,22 +733,32 @@
     case "show-picker": {
       const tabId = sender.tab?.id;
       if (tabId == null) { sendResponse({ error: "no tab" }); return false; }
-      const req = { requestId: request.requestId, tabId, filters: request.filters || [], origin: request.origin };
+      const req = { requestId: request.requestId, tabId, filters: request.filters || [], origin: request.origin, mode: request.mode || "pageAction" };
       _pendingPicker.set(tabId, req);
-      browser.pageAction.setIcon({ tabId, path: "icons/gamepad.alert.svg" });
-      browser.pageAction.setPopup({ tabId, popup: "html/picker-popup.html" });
-      browser.pageAction.openPopup?.().catch(() => {});
-      browser.tabs.query({ active: true, currentWindow: true }).then((tabs) => {
-        const tab = tabs[0];
-        if (tab && tab.id !== tabId) {
-          browser.notifications.create("webhid-picker", {
-            type: "basic",
-            iconUrl: browser.runtime.getURL("icons/icon.svg"),
-            title: "WebHID",
-            message: `A website (${request.origin}) is requesting a HID device. Click to choose.`,
-          });
-        }
-      }).catch(() => {});
+
+      if (req.mode === "window") {
+        browser.windows.create({
+          type: "popup",
+          url: "html/picker-popup.html",
+          width: 380,
+          height: 460,
+        }).catch(() => {});
+      } else {
+        browser.pageAction.setIcon({ tabId, path: "icons/gamepad.alert.svg" });
+        browser.pageAction.setPopup({ tabId, popup: "html/picker-popup.html" });
+        browser.pageAction.openPopup?.().catch(() => {});
+        browser.tabs.query({ active: true, currentWindow: true }).then((tabs) => {
+          const tab = tabs[0];
+          if (tab && tab.id !== tabId) {
+            browser.notifications.create("webhid-picker", {
+              type: "basic",
+              iconUrl: browser.runtime.getURL("icons/icon.svg"),
+              title: "WebHID",
+              message: `A website (${request.origin}) is requesting a HID device. Click to choose.`,
+            });
+          }
+        }).catch(() => {});
+      }
       sendResponse({ ok: true });
       return false;
     }
@@ -764,10 +774,16 @@
       if (tabId == null && _pendingPicker.size > 0) {
         tabId = [..._pendingPicker.keys()][0];
       }
+      const req = tabId != null ? _pendingPicker.get(tabId) : null;
       if (tabId != null) _pendingPicker.delete(tabId);
-      browser.pageAction.setIcon({ tabId, path: "icons/gamepad.svg" });
-      browser.pageAction.setPopup({ tabId, popup: "html/popup.html" });
-      browser.notifications?.clear("webhid-picker").catch(() => {});
+      if (req?.mode === "pageAction") {
+        browser.pageAction.setIcon({ tabId, path: "icons/gamepad.svg" });
+        browser.pageAction.setPopup({ tabId, popup: "html/popup.html" });
+        browser.notifications?.clear("webhid-picker").catch(() => {});
+      }
+      if (request.windowId != null) {
+        browser.windows.remove(request.windowId).catch(() => {});
+      }
       if (tabId != null) {
         browser.tabs.sendMessage(tabId, {
           action: "picker-result",
