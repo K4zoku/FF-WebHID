@@ -732,14 +732,17 @@
     }
 
     case "getPendingPicker": {
-      const tabId = sender.tab?.id;
-      sendResponse(tabId != null ? _pendingPicker.get(tabId) || null : null);
+      sendResponse(_pendingPicker.size > 0 ? [..._pendingPicker.values()][0] : null);
       return false;
     }
 
     case "picker-result": {
-      const { requestId, tabId, selected, devices } = request;
-      _pendingPicker.delete(tabId);
+      const { requestId, selected, devices } = request;
+      let tabId = request.tabId;
+      if (tabId == null && _pendingPicker.size > 0) {
+        tabId = [..._pendingPicker.keys()][0];
+      }
+      if (tabId != null) _pendingPicker.delete(tabId);
       browser.pageAction.setIcon({ tabId, path: "icons/gamepad.svg" });
       browser.pageAction.setPopup({ tabId, popup: "html/popup.html" });
       if (tabId != null) {

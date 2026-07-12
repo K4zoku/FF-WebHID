@@ -111,27 +111,29 @@ function applyFilters(devices, filters) {
   );
 }
 
-connectBtn.addEventListener("click", () => {
+connectBtn.addEventListener("click", async () => {
   if (!selectedDeviceId || !pendingRequest) return;
   const devices = deviceGroups[selectedDeviceId] || [];
-  browser.runtime.sendMessage({
+  await browser.runtime.sendMessage({
     action: "picker-result",
     requestId: pendingRequest.requestId,
     tabId: pendingRequest.tabId,
     selected: true,
     devices,
   });
+  pendingRequest = null;
   window.close();
 });
 
-cancelBtn.addEventListener("click", () => {
+cancelBtn.addEventListener("click", async () => {
   if (pendingRequest) {
-    browser.runtime.sendMessage({
+    await browser.runtime.sendMessage({
       action: "picker-result",
       requestId: pendingRequest.requestId,
       tabId: pendingRequest.tabId,
       selected: false,
     });
+    pendingRequest = null;
   }
   window.close();
 });

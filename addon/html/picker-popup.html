@@ -5,13 +5,28 @@
 <link rel="stylesheet" href="../css/theme.css">
 <link rel="stylesheet" href="../css/shared.css">
 <link rel="stylesheet" href="../css/device-picker.css">
+<style>
+  body { width: 360px; padding: 0; margin: 0; }
+  #picker { display: flex; flex-direction: column; max-height: 400px; }
+  .picker-header { padding: 16px 20px 12px; border-bottom: 1px solid var(--border-subtle); }
+  .picker-header h2 { margin: 0; font-size: 15px; font-weight: 600; text-transform: none; color: var(--text); }
+  #picker-list { overflow-y: auto; flex: 1; padding: 12px 20px; }
+  .picker-footer { padding: 12px 20px; border-top: 1px solid var(--border-subtle); display: flex; justify-content: flex-end; gap: 10px; }
+  #picker-cancel { padding: 8px 16px; border: 1px solid var(--border-default); border-radius: var(--radius-md); background: var(--bg); color: var(--text-muted); font-size: 13px; cursor: pointer; }
+  #picker-cancel:hover { background: var(--surface-hover); }
+  #picker-connect { padding: 8px 16px; border: none; border-radius: var(--radius-md); background: var(--accent); color: var(--accent-text); font-size: 13px; font-weight: 600; cursor: pointer; }
+  #picker-connect:hover:not(:disabled) { background: var(--accent-hover); }
+  #picker-connect:disabled { opacity: 0.4; cursor: default; }
+  .webhid-device-item { margin-bottom: 8px; }
+  .webhid-device-list { padding: 0; max-height: none; }
+</style>
 </head>
 <body>
 <div id="picker">
   <div class="picker-header">
     <h2>Select a HID Device</h2>
   </div>
-  <div id="picker-list"></div>
+  <div id="picker-list" class="webhid-device-list"></div>
   <div class="picker-footer">
     <button id="picker-cancel">Cancel</button>
     <button id="picker-connect" disabled>Connect</button>
