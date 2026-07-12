@@ -473,6 +473,17 @@
     });
   }
 
+  if (browser.notifications?.onClicked) {
+    browser.notifications.onClicked.addListener(() => {
+      if (_pendingPicker.size > 0) {
+        const [tabId, req] = [..._pendingPicker.entries()][0];
+        browser.tabs.update(tabId, { active: true }).catch(() => {});
+        browser.pageAction.openPopup?.().catch(() => {});
+        browser.notifications.clear("webhid-picker").catch(() => {});
+      }
+    });
+  }
+
   browser.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return;
     const patch = {};
@@ -727,6 +738,17 @@
       browser.pageAction.setIcon({ tabId, path: "icons/gamepad.alert.svg" });
       browser.pageAction.setPopup({ tabId, popup: "html/picker-popup.html" });
       browser.pageAction.openPopup?.().catch(() => {});
+      browser.tabs.query({ active: true, currentWindow: true }).then((tabs) => {
+        const tab = tabs[0];
+        if (tab && tab.id !== tabId) {
+          browser.notifications.create("webhid-picker", {
+            type: "basic",
+            iconUrl: browser.runtime.getURL("icons/icon.svg"),
+            title: "WebHID",
+            message: `A website (${request.origin}) is requesting a HID device. Click to choose.`,
+          });
+        }
+      }).catch(() => {});
       sendResponse({ ok: true });
       return false;
     }
@@ -745,6 +767,7 @@
       if (tabId != null) _pendingPicker.delete(tabId);
       browser.pageAction.setIcon({ tabId, path: "icons/gamepad.svg" });
       browser.pageAction.setPopup({ tabId, popup: "html/popup.html" });
+      browser.notifications?.clear("webhid-picker").catch(() => {});
       if (tabId != null) {
         browser.tabs.sendMessage(tabId, {
           action: "picker-result",
