@@ -14,6 +14,8 @@
   dataPlaneSelect.value = current.dataPlane;
   const controlPlaneSelect = document.getElementById("controlPlane");
   controlPlaneSelect.value = current.controlPlane;
+  const devicePickerModeSelect = document.getElementById("devicePickerMode");
+  devicePickerModeSelect.value = current.devicePickerMode || "modal";
 
   function showStatus(msg) {
     const el = document.getElementById("status");
@@ -42,5 +44,9 @@
   controlPlaneSelect.addEventListener("change", async (e) => {
     await browser.storage.local.set({ controlPlane: e.target.value });
     showStatus(`controlPlane = ${e.target.value}`);
+  });
+  devicePickerModeSelect.addEventListener("change", async (e) => {
+    await browser.storage.local.set({ devicePickerMode: e.target.value });
+    showStatus(`devicePickerMode = ${e.target.value}`);
   });
 })();

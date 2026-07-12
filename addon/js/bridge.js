@@ -695,34 +695,48 @@
     }
 
     if (action === "requestDevice") {
-      let onSelected, onCancelled;
+      const filters = (payload && payload.filters) || [];
 
+      if (settings.devicePickerMode === "pageAction") {
+        browser.runtime.sendMessage({
+          action: "show-picker",
+          requestId: id,
+          filters,
+          origin: window.location.origin,
+        }).catch(() => {});
+        const pickerTimeout = setTimeout(() => {
+          _replyToPage({ __webhid_bridge: "res", id, result: { cancelled: true } });
+        }, 30000);
+        const onPickerResult = (msg) => {
+          if (msg.action !== "picker-result" || msg.requestId !== id) return;
+          clearTimeout(pickerTimeout);
+          browser.runtime.onMessage.removeListener(onPickerResult);
+          if (msg.selected && msg.devices) {
+            _replyToPage({ __webhid_bridge: "res", id, result: { devices: msg.devices } });
+          } else {
+            _replyToPage({ __webhid_bridge: "res", id, result: { cancelled: true } });
+          }
+        };
+        browser.runtime.onMessage.addListener(onPickerResult);
+        return;
+      }
+
+      let onSelected, onCancelled;
       const cleanup = () => {
         window.removeEventListener("webhid-device-selected", onSelected);
         window.removeEventListener("webhid-device-cancelled", onCancelled);
       };
-
       onSelected = (e) => {
         cleanup();
-        _replyToPage({
-          __webhid_bridge: "res",
-          id,
-          result: { devices: e.detail.devices },
-        });
+        _replyToPage({ __webhid_bridge: "res", id, result: { devices: e.detail.devices } });
       };
-
       onCancelled = () => {
         cleanup();
-        _replyToPage({
-          __webhid_bridge: "res",
-          id,
-          result: { cancelled: true },
-        });
+        _replyToPage({ __webhid_bridge: "res", id, result: { cancelled: true } });
       };
-
       window.addEventListener("webhid-device-selected", onSelected);
       window.addEventListener("webhid-device-cancelled", onCancelled);
-      devicePicker.show((payload && payload.filters) || []);
+      devicePicker.show(filters);
       return;
     }
 

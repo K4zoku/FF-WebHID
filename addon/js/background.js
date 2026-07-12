@@ -4,6 +4,7 @@
   logger.initLogger("bg");
 
   let _deviceCache = [];
+  const _pendingPicker = new Map();
 
   async function _saveDeviceInfo(device) {
     if (!device || !device.deviceId) return;
@@ -718,7 +719,42 @@
         return true;
       }
 
-      default:
+    case "show-picker": {
+      const tabId = sender.tab?.id;
+      if (tabId == null) { sendResponse({ error: "no tab" }); return false; }
+      const req = { requestId: request.requestId, tabId, filters: request.filters || [], origin: request.origin };
+      _pendingPicker.set(tabId, req);
+      browser.pageAction.setIcon({ tabId, path: "icons/gamepad.alert.svg" });
+      browser.pageAction.setPopup({ tabId, popup: "html/picker-popup.html" });
+      browser.pageAction.openPopup?.().catch(() => {});
+      sendResponse({ ok: true });
+      return false;
+    }
+
+    case "getPendingPicker": {
+      const tabId = sender.tab?.id;
+      sendResponse(tabId != null ? _pendingPicker.get(tabId) || null : null);
+      return false;
+    }
+
+    case "picker-result": {
+      const { requestId, tabId, selected, devices } = request;
+      _pendingPicker.delete(tabId);
+      browser.pageAction.setIcon({ tabId, path: "icons/gamepad.svg" });
+      browser.pageAction.setPopup({ tabId, popup: "html/popup.html" });
+      if (tabId != null) {
+        browser.tabs.sendMessage(tabId, {
+          action: "picker-result",
+          requestId,
+          selected,
+          devices: selected ? devices : null,
+        }).catch(() => {});
+      }
+      sendResponse({ ok: true });
+      return false;
+    }
+
+    default:
         return false;
     }
   });

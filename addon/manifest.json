@@ -26,7 +26,7 @@
   },
   "page_action": {
     "default_popup": "html/popup.html",
-    "default_icon": "res/gamepad.svg",
+    "default_icon": "icons/gamepad.svg",
     "show_matches": ["http://*/*", "https://*/*"]
   },
   "action": {

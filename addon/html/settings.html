@@ -51,6 +51,16 @@
 </div>
 <div class="setting">
   <div class="setting-info">
+    <h3>Device Picker Mode</h3>
+    <p><strong>Modal</strong>: show a shadow DOM overlay on the page when <code>requestDevice()</code> is called (default, matches native WebHID behavior).<br><strong>Page Action</strong>: switch the url bar icon to alert mode and open the device picker as a popup. User must click the icon to open the picker. Firefox only — Chromium will fall back to modal.</p>
+  </div>
+  <select id="devicePickerMode">
+    <option value="modal">Modal (overlay)</option>
+    <option value="pageAction">Page Action (url bar popup)</option>
+  </select>
+</div>
+<div class="setting">
+  <div class="setting-info">
     <h3>Log Level</h3>
     <p>Controls console output verbosity. Error = errors only, Warn = +warnings, Info = +info, Debug = +debug (includes performance timing). Reload pages after changing.</p>
   </div>

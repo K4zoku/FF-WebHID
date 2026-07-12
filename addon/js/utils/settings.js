@@ -23,6 +23,7 @@
     controlPlane: "nm",
     logLevel: 1,
     daemonAsNmHost: false,
+    devicePickerMode: "modal",
   };
 
   function createSettingsStore(defaults) {
