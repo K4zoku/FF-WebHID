@@ -1,5 +1,6 @@
 'use strict';
 __webhid.logger.initLogger('picker');
+__webhid.logger.info('device-picker.js loaded');
 
 const _svgCache = {};
 
@@ -77,8 +78,13 @@ class WebHidDevicePicker extends HTMLElement {
 
   constructor() {
     super();
-    this.#shadow = this.attachShadow({ mode: 'closed' });
-    this.#fragmentReady = this.#loadFragment();
+    try {
+      this.#shadow = this.attachShadow({ mode: 'closed' });
+      this.#fragmentReady = this.#loadFragment();
+    } catch (e) {
+      __webhid.logger.error('WebHidDevicePicker constructor failed:', e?.message || e);
+      this.#fragmentReady = Promise.reject(e);
+    }
   }
 
   async #loadFragment() {
@@ -309,3 +315,4 @@ class WebHidDevicePicker extends HTMLElement {
   }
 }
 customElements.define('webhid-device-picker', WebHidDevicePicker);
+__webhid.logger.info('custom elements registered: webhid-device-picker, webhid-device');

@@ -9,6 +9,7 @@
   // ---------------------------------------------------------------------------
   const devicePicker = document.createElement('webhid-device-picker');
   document.documentElement.appendChild(devicePicker);
+  __webhid.logger.info('devicePicker created, instanceof WebHidDevicePicker:', devicePicker.constructor.name, 'show:', typeof devicePicker.show);
 
   // ---------------------------------------------------------------------------
   // Content script ↔ Page bridge
@@ -19,6 +20,13 @@
   // ---------------------------------------------------------------------------
   const _openDevices = new Set();
   const _sessionTokens = new Map();
+
+  browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === "getOpenDeviceIds") {
+      sendResponse({ ids: Array.from(_openDevices) });
+      return true;
+    }
+  });
   const _workers = new Map();
   const _workerCallbacks = new Map();
   const _workerReady = new Set();
