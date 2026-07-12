@@ -5,6 +5,10 @@
   let _reqId = 0;
   const _pending = {};
 
+  const _channel = new MessageChannel();
+  const _bridgePort = _channel.port1;
+  globalThis.postMessage({ __webhid_bridge: "init" }, "*", [_channel.port2]);
+
   let _savedDevices = null;
   let _deviceInfoCache = null;
 
@@ -46,8 +50,7 @@
   const _defs = globalThis.__webhid.GLOBAL_DEFAULTS;
   const settings = __webhid.createSettingsStore(_defs);
 
-  globalThis.addEventListener("message", (event) => {
-    if (event.source !== globalThis) return;
+  _bridgePort.onmessage = (event) => {
     if (!event.data) return;
     if (event.data.__webhid_bridge === "res") {
       const handler = _pending[event.data.id];
@@ -60,7 +63,7 @@
     if (event.data.__webhid_bridge === "settings") {
       settings.set(event.data.settings || {});
     }
-  });
+  };
 
   function sendRequest(action, payload) {
     return new Promise((resolve) => {
@@ -72,7 +75,7 @@
         msg.__transfer = true;
         xfers.push(payload.data.buffer);
       }
-      globalThis.postMessage(msg, "*", xfers.length ? xfers : undefined);
+      _bridgePort.postMessage(msg, xfers.length ? xfers : undefined);
     });
   }
 
@@ -83,7 +86,7 @@
       msg.__transfer = true;
       xfers.push(payload.data.buffer);
     }
-    globalThis.postMessage(msg, "*", xfers.length ? xfers : undefined);
+    _bridgePort.postMessage(msg, xfers.length ? xfers : undefined);
   }
 
   settings.on('dataPlane', (v) => __webhid.logger.info('data plane changed: ' + v));
@@ -204,7 +207,6 @@
       if (!s) return;
       if (s.wrappers.has(listener)) return;
       const wrapper = (event) => {
-        if (event.source !== globalThis) return;
         if (!event.data || event.data.__webhid_bridge !== "evt") return;
         const detail = event.data.event;
         if (!detail) return;
@@ -243,7 +245,7 @@
         }
       };
       s.wrappers.set(listener, wrapper);
-      globalThis.addEventListener("message", wrapper);
+      _bridgePort.addEventListener("message", wrapper);
     }, enumerable: true, configurable: true, writable: true },
     removeEventListener: { value: function(type, listener) {
       const s = _devState.get(this);
@@ -253,7 +255,7 @@
       const wrapper = s.wrappers.get(listener);
       if (!wrapper) return;
       s.wrappers.delete(listener);
-      globalThis.removeEventListener("message", wrapper);
+      _bridgePort.removeEventListener("message", wrapper);
     }, enumerable: true, configurable: true, writable: true },
   });
 
@@ -343,7 +345,7 @@
           for (const d of devices) saveDevice(d);
           resolve(devices.map((d) => getOrCreateDevice(d)));
         };
-        globalThis.postMessage({ __webhid_bridge: "req", id, action: "requestDevice", payload: { filters } }, "*");
+        _bridgePort.postMessage({ __webhid_bridge: "req", id, action: "requestDevice", payload: { filters } });
       });
     }, enumerable: true, configurable: true, writable: true },
     addEventListener: { value: function(type, listener) {

@@ -45,7 +45,8 @@
         "js/utils/http-status.js",
         "js/polyfill.js"
       ],
-      "world": "MAIN"
+      "world": "MAIN",
+      "run_at": "document_start"
     },
     {
       "matches": [
@@ -58,7 +59,8 @@
         "js/utils/settings.js",
         "js/utils/http-status.js",
         "js/bridge.js"
-      ]
+      ],
+      "run_at": "document_start"
     }
   ],
   "web_accessible_resources": [

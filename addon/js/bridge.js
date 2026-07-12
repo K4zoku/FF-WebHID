@@ -372,9 +372,9 @@
   // ---------------------------------------------------------------------------
   // Content script ↔ Page bridge
   //
-  // Page  →  content script:  postMessage({ __webhid_bridge: 'req', id, action, payload })
-  // Content script  →  page:  postMessage({ __webhid_bridge: 'res', id, result })
-  //                           postMessage({ __webhid_bridge: 'evt', event })
+  // Page  →  content script:  port.postMessage({ __webhid_bridge: 'req', id, action, payload })
+  // Content script  →  page:  port.postMessage({ __webhid_bridge: 'res', id, result })
+  //                           port.postMessage({ __webhid_bridge: 'evt', event })
   // ---------------------------------------------------------------------------
   const _openDevices = new Set();
   const _sessionTokens = new Map();
@@ -387,6 +387,7 @@
   const settings = __webhid.createSettingsStore(__webhid.GLOBAL_DEFAULTS);
   let _controlWorker = null;
   let _controlPort = null;
+  let _pagePort = null;
   const _controlPending = new Map();
   let _controlReqId = 1;
   const _spawnGen = new Map();
@@ -614,10 +615,10 @@
           worker.postMessage({ type: 'setPort' }, [port1]);
           _workerPorts.set(deviceId, true);
           __webhid.logger.info('MessageChannel created for', deviceId, '- input reports bypass bridge');
-          window.postMessage({
+          _replyToPage({
             __webhid_bridge: 'evt',
             event: { eventType: 'webhid-data-ready', deviceId: deviceId, port: port2 }
-          }, '*', [port2]);
+          }, [port2]);
           resolveSpawn(true);
           return;
         }
@@ -634,10 +635,10 @@
           _workers.delete(deviceId);
           _workerReady.delete(deviceId);
           _workerPorts.delete(deviceId);
-          window.postMessage({
+          _replyToPage({
             __webhid_bridge: 'evt',
             event: { eventType: 'disconnect', deviceId: deviceId }
-          }, '*');
+          });
           return;
         }
         if (data.type === 'inputReport') {
@@ -648,7 +649,7 @@
             for (let i = 0; i < Math.min(8, view.length); i++) hex += view[i].toString(16).padStart(2, '0') + ' ';
             __webhid.logger.debug('worker→page inputReport device=' + deviceId + ' reportId=' + data.reportId + ' len=' + view.length + ' first8=' + hex);
           }
-          window.postMessage({
+          _replyToPage({
             __webhid_bridge: 'evt',
             event: {
               eventType: 'input_report',
@@ -656,7 +657,7 @@
               reportId: data.reportId,
               data: view,
             }
-          }, '*', view ? [view.buffer] : []);
+          }, view ? [view.buffer] : []);
           return;
         }
         if (data.type === 'sendResult' || data.type === 'featureResult') {
@@ -712,13 +713,28 @@
     }
   })();
 
-  window.addEventListener("message", async (event) => {
-    if (event.source !== window) return;
-    if (!event.data || event.data.__webhid_bridge !== "req") return;
+  function _replyToPage(msg, transfer) {
+    if (!_pagePort) return;
+    _pagePort.postMessage(msg, transfer);
+  }
 
-    const { id, action: reqAction, payload } = event.data;
+  window.addEventListener("message", (event) => {
+    if (event.source !== window) return;
+    if (!event.data || event.data.__webhid_bridge !== "init") return;
+    if (_pagePort) return;
+    const port = event.ports && event.ports[0];
+    if (!port) return;
+    _pagePort = port;
+    _pagePort.onmessage = (ev) => { handleRequest(ev.data); };
+    __webhid.logger.debug('[bridge] page port established');
+  });
+
+  async function handleRequest(data) {
+    if (!data || data.__webhid_bridge !== "req") return;
+
+    const { id, action: reqAction, payload } = data;
     let action = reqAction;
-    const isFireAndForget = event.data.fireAndForget === true;
+    const isFireAndForget = data.fireAndForget === true;
     __webhid.logger.debug('req action=' + action + ' id=' + id + (isFireAndForget ? ' (faf)' : ''));
 
     if (action === "getSettings") {
@@ -734,9 +750,9 @@
           }
         }
         settings.set(global);
-        window.postMessage({ __webhid_bridge: "res", id, result: global }, "*");
+        _replyToPage({ __webhid_bridge: "res", id, result: global });
       } catch (e) {
-        window.postMessage({ __webhid_bridge: "res", id, result: {} }, "*");
+        _replyToPage({ __webhid_bridge: "res", id, result: {} });
       }
       return;
     }
@@ -771,7 +787,7 @@
                         : data.data ? { s: 200, d: data.data }
                         : { s: 204 };
             const xfers = result.d instanceof Uint8Array ? [result.d.buffer] : [];
-            window.postMessage({ __webhid_bridge: "res", id, result }, "*", xfers.length ? xfers : undefined);
+            _replyToPage({ __webhid_bridge: "res", id, result }, xfers.length ? xfers : undefined);
           });
         }
         worker.postMessage(wMsg);
@@ -794,7 +810,7 @@
                         : data.data ? { s: 200, d: data.data }
                         : { s: 204 };
             const xfers = result.d instanceof Uint8Array ? [result.d.buffer] : [];
-            window.postMessage({ __webhid_bridge: "res", id, result }, "*", xfers.length ? xfers : undefined);
+            _replyToPage({ __webhid_bridge: "res", id, result }, xfers.length ? xfers : undefined);
           });
         }
 
@@ -816,9 +832,9 @@
         }
         const response = await browser.runtime.sendMessage(msg);
         const _xfers = (response && response.d instanceof Uint8Array) ? [response.d.buffer] : [];
-        window.postMessage({ __webhid_bridge: "res", id, result: response }, "*", _xfers.length ? _xfers : undefined);
+        _replyToPage({ __webhid_bridge: "res", id, result: response }, _xfers.length ? _xfers : undefined);
       } catch (error) {
-        window.postMessage({ __webhid_bridge: "res", id, result: { s: 500 } }, "*");
+        _replyToPage({ __webhid_bridge: "res", id, result: { s: 500 } });
       }
       return;
     }
@@ -833,18 +849,12 @@
 
       onSelected = (e) => {
         cleanup();
-        window.postMessage(
-          { __webhid_bridge: "res", id, result: { devices: e.detail.devices } },
-          "*",
-        );
+        _replyToPage({ __webhid_bridge: "res", id, result: { devices: e.detail.devices } });
       };
 
       onCancelled = () => {
         cleanup();
-        window.postMessage(
-          { __webhid_bridge: "res", id, result: { cancelled: true } },
-          "*",
-        );
+        _replyToPage({ __webhid_bridge: "res", id, result: { cancelled: true } });
       };
 
       window.addEventListener("webhid-device-selected", onSelected);
@@ -907,25 +917,16 @@
       }
 
       const _xfers = (response && response.d instanceof Uint8Array) ? [response.d.buffer] : [];
-      window.postMessage({ __webhid_bridge: "res", id, result: response }, "*", _xfers.length ? _xfers : undefined);
+      _replyToPage({ __webhid_bridge: "res", id, result: response }, _xfers.length ? _xfers : undefined);
     } catch (error) {
-      window.postMessage(
-        {
-          __webhid_bridge: "res",
-          id,
-          result: { s: 500 },
-        },
-        "*",
-      );
+      _replyToPage({ __webhid_bridge: "res", id, result: { s: 500 } });
     }
-  });
-
-
+  }
 
   // Forward events pushed by background.js into the page world.
   browser.runtime.onMessage.addListener((message) => {
     if (message.action === "webhid-device-event" && message.event) {
-      window.postMessage({ __webhid_bridge: "evt", event: message.event }, "*");
+      _replyToPage({ __webhid_bridge: "evt", event: message.event });
     }
   });
 
@@ -973,7 +974,7 @@
     for (const k of ['dataPlane', 'controlPlane', 'fireAndForget', 'logLevel']) {
       patch[k] = all[k];
     }
-    window.postMessage({ __webhid_bridge: "settings", settings: patch }, "*");
+    _replyToPage({ __webhid_bridge: "settings", settings: patch });
     const workerMsg = { type: 'settings', ...patch };
     for (const worker of _workers.values()) worker.postMessage(workerMsg);
     if (_controlWorker) _controlWorker.postMessage(workerMsg);
