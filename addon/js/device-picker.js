@@ -1,6 +1,6 @@
 (function () {
   "use strict";
-  const { logger, fetchResource, http, guessDeviceType } = __webhid;
+  const { logger, fetchResource, http, guessDeviceType } = window.__webhid;
   logger.initLogger("picker");
 
   const _svgCache = {};
@@ -304,6 +304,6 @@
     }
   }
 
-  globalThis.__webhid = globalThis.__webhid || {};
-  globalThis.__webhid.WebHidDevicePicker = WebHidDevicePicker;
+  window.__webhid = window.__webhid || {};
+  window.__webhid.WebHidDevicePicker = WebHidDevicePicker;
 })();

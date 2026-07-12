@@ -1,6 +1,6 @@
 (function () {
   if (typeof browser === "undefined" && typeof chrome !== "undefined") {
-    globalThis.browser = chrome;
+    window.browser = chrome;
   }
 
   if (
@@ -44,8 +44,8 @@
 
   const _resourceCache = new Map();
 
-  globalThis.__webhid = globalThis.__webhid || {};
-  globalThis.__webhid.fetchResource = async function (path) {
+  window.__webhid = window.__webhid || {};
+  window.__webhid.fetchResource = async function (path) {
     if (_resourceCache.has(path)) return _resourceCache.get(path);
     const resp = await browser.runtime.sendMessage({
       action: "fetchResource",

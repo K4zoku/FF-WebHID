@@ -1,6 +1,5 @@
 (function () {
   // WebHID Standard implementation with injected modal
-
   "use strict";
   const {
     logger,
@@ -9,7 +8,7 @@
     guessDeviceType,
     createSettingsStore,
     GLOBAL_DEFAULTS,
-  } = __webhid;
+  } = window.__webhid;
   logger.initLogger("bridge");
 
   // ---------------------------------------------------------------------------

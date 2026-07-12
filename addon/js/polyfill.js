@@ -1,13 +1,13 @@
 (function () {
-  if (globalThis.navigator?.hid) return;
-  __webhid.logger.initLogger("polyfill");
+  if (window.navigator?.hid) return;
+  window.__webhid.logger.initLogger("polyfill");
 
   let _reqId = 0;
   const _pending = {};
 
   const _channel = new MessageChannel();
   const _bridgePort = _channel.port1;
-  globalThis.postMessage({ __webhid_bridge: "init" }, "*", [_channel.port2]);
+  window.postMessage({ __webhid_bridge: "init" }, "*", [_channel.port2]);
 
   let _pairedDevices = null;
   let _deviceInfoCache = null;
@@ -16,7 +16,7 @@
     if (_pairedDevices !== null) return _pairedDevices;
     try {
       const result = await sendRequest("getPairedDevices", {
-        origin: globalThis.location?.origin || "",
+        origin: window.location?.origin || "",
       });
       _pairedDevices = result.hashes || [];
       _deviceInfoCache = null;
@@ -31,7 +31,7 @@
     try {
       const response = await sendRequest("enumerate");
       const devices =
-        __webhid.http.isOk(response.s) && Array.isArray(response.D)
+        window.__webhid.http.isOk(response.s) && Array.isArray(response.D)
           ? response.D
           : [];
       _deviceInfoCache = new Map();
@@ -47,7 +47,7 @@
     try {
       _pairedDevices = null;
       const result = await sendRequest("pairDevice", {
-        origin: globalThis.location?.origin || "",
+        origin: window.location?.origin || "",
         device: { deviceId: deviceInfo.deviceId },
       });
       if (result.success) {
@@ -57,8 +57,8 @@
     } catch {}
   }
 
-  const _defs = globalThis.__webhid.GLOBAL_DEFAULTS;
-  const settings = __webhid.createSettingsStore(_defs);
+  const _defs = window.__webhid.GLOBAL_DEFAULTS;
+  const settings = window.__webhid.createSettingsStore(_defs);
 
   _bridgePort.onmessage = (event) => {
     if (!event.data) return;
@@ -115,19 +115,19 @@
   }
 
   settings.on("dataPlane", (v) =>
-    __webhid.logger.info("data plane changed: " + v),
+    window.__webhid.logger.info("data plane changed: " + v),
   );
   settings.on("fireAndForget", (v) =>
-    __webhid.logger.info("fire-and-forget: " + v),
+    window.__webhid.logger.info("fire-and-forget: " + v),
   );
   settings.on("logLevel", (v) => {
-    if (__webhid.logger.applyLevel) __webhid.logger.applyLevel(v);
+    if (window.__webhid.logger.applyLevel) window.__webhid.logger.applyLevel(v);
   });
 
   sendRequest("getSettings", {}).then((s) => {
     if (!s) return;
     settings.set(s);
-    __webhid.logger.info(
+    window.__webhid.logger.info(
       "data plane: " +
         settings.dataPlane +
         " (fire-and-forget: " +
@@ -214,7 +214,7 @@
             deviceId: s.deviceId,
             reportSize: s.maxInputReportSize + 3,
           });
-          if (__webhid.http.isOk(response.s)) {
+          if (window.__webhid.http.isOk(response.s)) {
             s.opened = true;
             const dataChannel = new MessageChannel();
             s.dataPort = dataChannel.port1;
@@ -228,12 +228,12 @@
               },
               [dataChannel.port2],
             );
-            __webhid.logger.info("open deviceId=" + s.deviceId);
+            window.__webhid.logger.info("open deviceId=" + s.deviceId);
             this.dispatchEvent(new Event("open"));
             return true;
           }
           throw new Error(
-            "Open failed: " + __webhid.http.name(response.s || 0),
+            "Open failed: " + window.__webhid.http.name(response.s || 0),
           );
         } catch (error) {
           throw new DOMException(error.message, "InvalidStateError");
@@ -248,10 +248,10 @@
         const s = _devState.get(this);
         if (!s) return;
         if (!s.opened) return;
-        __webhid.logger.debug("close deviceId=" + s.deviceId);
+        window.__webhid.logger.debug("close deviceId=" + s.deviceId);
         try {
           const response = await sendRequest("close", { deviceId: s.deviceId });
-          if (__webhid.http.isOk(response.s)) {
+          if (window.__webhid.http.isOk(response.s)) {
             s.opened = false;
             if (s.dataPort) {
               s.dataPort.onmessage = null;
@@ -282,7 +282,7 @@
             : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
         const buffer = view.slice();
         try {
-          __webhid.logger.debug(
+          window.__webhid.logger.debug(
             "sendReport reportId=" + reportId + " len=" + buffer.length,
           );
           if (!s.dataPort) throw new Error("data port not connected");
@@ -352,7 +352,7 @@
             ? new Uint8Array(data)
             : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
         const buffer = view.slice();
-        __webhid.logger.debug(
+        window.__webhid.logger.debug(
           "sendFeatureReport reportId=" + reportId + " len=" + buffer.length,
         );
         try {
@@ -571,7 +571,7 @@
   Object.defineProperties(HID.prototype, {
     getDevices: {
       value: async function () {
-        __webhid.logger.debug("getDevices");
+        window.__webhid.logger.debug("getDevices");
         try {
           const pairedHashes = await getPairedDevices();
           const deviceCache = await getDeviceCache();
@@ -580,12 +580,12 @@
             const device = deviceCache.get(hash);
             if (device) granted.push(getOrCreateDevice(device));
           }
-          __webhid.logger.debug(
+          window.__webhid.logger.debug(
             "getDevices returned " + granted.length + " device(s)",
           );
           return granted;
         } catch (error) {
-          __webhid.logger.warn("getDevices error:", error);
+          window.__webhid.logger.warn("getDevices error:", error);
           return [];
         }
       },
@@ -602,7 +602,7 @@
           );
         }
         const filters = Array.isArray(options.filters) ? options.filters : [];
-        __webhid.logger.debug(
+        window.__webhid.logger.debug(
           "requestDevice filters=" + JSON.stringify(filters),
         );
         return new Promise((resolve, reject) => {
@@ -713,7 +713,7 @@
     configurable: true,
     enumerable: false,
   });
-  Object.defineProperty(globalThis.navigator, "hid", {
+  Object.defineProperty(window.navigator, "hid", {
     value: _createHID(),
     writable: false,
     configurable: true,

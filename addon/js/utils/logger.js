@@ -92,6 +92,6 @@
   _applyLevel(LEVEL_WARN);
   _load();
 
-  globalThis.__webhid = globalThis.__webhid || {};
-  globalThis.__webhid.logger = logger;
+  window.__webhid = window.__webhid || {};
+  window.__webhid.logger = logger;
 })();
