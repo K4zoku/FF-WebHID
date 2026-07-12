@@ -31,4 +31,16 @@
     value: function toBase64() { return b64encode(this); },
     writable: true, configurable: true,
   });
+
+  const _resourceCache = new Map();
+
+  globalThis.__webhid = globalThis.__webhid || {};
+  globalThis.__webhid.fetchResource = async function (path) {
+    if (_resourceCache.has(path)) return _resourceCache.get(path);
+    const resp = await browser.runtime.sendMessage({ action: 'fetchResource', path });
+    if (resp?.error) throw new Error(resp.error);
+    const text = resp?.text || '';
+    _resourceCache.set(path, text);
+    return text;
+  };
 })();

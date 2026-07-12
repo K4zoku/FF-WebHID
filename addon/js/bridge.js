@@ -52,17 +52,15 @@
 
     async #loadCSS() {
       try {
-        const [themeResp, cssResp] = await Promise.all([
-          fetch(browser.runtime.getURL("css/theme.css")),
-          fetch(browser.runtime.getURL("css/device-picker.css")),
+        const [theme, css] = await Promise.all([
+          __webhid.fetchResource("css/theme.css"),
+          __webhid.fetchResource("css/device-picker.css"),
         ]);
-        const theme = await themeResp.text();
-        const css   = await cssResp.text();
-        const sheet = new CSSStyleSheet();
-        sheet.replaceSync(theme + "\n" + css);
-        this.shadowRoot.adoptedStyleSheets = [sheet];
+        const style = document.createElement("style");
+        style.textContent = theme + "\n" + css;
+        this.shadowRoot.appendChild(style);
       } catch (e) {
-        __webhid.logger.warn("Failed to load shadow styles", e);
+        __webhid.logger.warn("Failed to load shadow styles:", e?.message || e);
       }
     }
 
@@ -242,8 +240,7 @@
     async #getSvg(type) {
       if (this.#svgCache[type]) return this.#svgCache[type];
       try {
-        const resp = await fetch(browser.runtime.getURL(`res/${type}.svg`));
-        const svg = await resp.text();
+        const svg = await __webhid.fetchResource(`res/${type}.svg`);
         this.#svgCache[type] = svg;
         return svg;
       } catch { return null; }
@@ -415,10 +412,9 @@
       'js/utils/ws-transport.js',
     ];
     const workerUrl = kind === 'control' ? 'js/control.js' : 'js/worker.js';
-    const fetches = await Promise.all(
-      [...baseUrls, workerUrl].map(u => fetch(browser.runtime.getURL(u)))
+    const texts = await Promise.all(
+      [...baseUrls, workerUrl].map(u => __webhid.fetchResource(u))
     );
-    const texts = await Promise.all(fetches.map(r => r.text()));
     const blob = new Blob([texts.join('\n')], { type: 'application/javascript' });
     const url = URL.createObjectURL(blob);
     _workerBlobUrls[kind] = url;

@@ -69,16 +69,7 @@
       "run_at": "document_start"
     }
   ],
-  "web_accessible_resources": [
-    {
-      "resources": [
-        "res/*.svg"
-      ],
-      "matches": [
-        "<all_urls>"
-      ]
-    }
-  ],
+  "web_accessible_resources": [],
   "browser_specific_settings": {
     "gecko": {
       "id": "webhid@k4zoku.dev",

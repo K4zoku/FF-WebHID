@@ -547,6 +547,19 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
       sendResponse({ blocked: !!_cspWorkerBlocked.get(sender.tab?.id) });
       return false;
 
+    case 'fetchResource': {
+      const path = request.path;
+      if (!path || typeof path !== 'string' || path.includes('..')) {
+        sendResponse({ error: 'invalid path' });
+        return false;
+      }
+      fetch(browser.runtime.getURL(path))
+        .then(r => r.text())
+        .then(text => sendResponse({ text }))
+        .catch(e => sendResponse({ error: e.message || String(e) }));
+      return true;
+    }
+
     default:
       return false;
   }
