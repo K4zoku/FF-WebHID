@@ -123,7 +123,7 @@ fn start_udev(event_tx: broadcast::Sender<IpcResponse>) -> anyhow::Result<()> {
                         }
                         udev::EventType::Remove => {
                             let mut cache = DEVICE_CACHE.lock().unwrap();
-                            let info = cache.as_mut().and_then(|c| c.remove(&webhid::hash_device_id(&devnode)));
+                            let info = cache.as_mut().and_then(|c| c.remove(&crate::hid::make_device_id_from_devnode(&devnode)));
                             match info {
                                 Some(i) => {
                                     log::info!("device disconnected: {:04x}:{:04x} ({})", i.vendor_id, i.product_id, i.device_id);

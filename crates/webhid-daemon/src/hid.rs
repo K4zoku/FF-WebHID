@@ -24,7 +24,33 @@ const DEFAULT_READ_SIZE: usize = 4096;
 /// reboots. Two devices with identical vid/pid/serial but different
 /// physical ports have different paths → different hashes.
 pub fn make_device_id(info: &HidDeviceInfo) -> u32 {
-    webhid::hash_device_id(&info.path().to_string_lossy())
+    let path = info.path().to_string_lossy();
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(syspath) = resolve_linux_syspath(&path) {
+            return webhid::hash_device_id(&syspath);
+        }
+    }
+    webhid::hash_device_id(&path)
+}
+
+#[cfg(target_os = "linux")]
+fn resolve_linux_syspath(devnode: &str) -> Option<String> {
+    let name = std::path::Path::new(devnode).file_name()?.to_str()?;
+    let syslink = format!("/sys/class/hidraw/{name}/device");
+    let realpath = std::fs::canonicalize(&syslink).ok()?;
+    let parent = realpath.parent()?;
+    Some(parent.to_string_lossy().into_owned())
+}
+
+pub fn make_device_id_from_devnode(devnode: &str) -> u32 {
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(syspath) = resolve_linux_syspath(devnode) {
+            return webhid::hash_device_id(&syspath);
+        }
+    }
+    webhid::hash_device_id(devnode)
 }
 
 // ---------------------------------------------------------------------------
