@@ -96,8 +96,15 @@
 
     let openCount = 0;
     for (const hash of hashes) {
-      const dev = cache.find(d => d.deviceId === hash);
+      let dev = cache.find(d => d.deviceId === hash);
+      if (!dev) {
+        try {
+          const r = await browser.runtime.sendMessage({ action: 'getDeviceInfo', deviceId: hash });
+          dev = r?.device || null;
+        } catch {}
+      }
 
+      const isDisconnected = !cache.some(d => d.deviceId === hash);
       const name = dev ? (dev.productName || 'Unknown') : 'Paired device';
       const type = __webhid.guessDeviceType(dev || { productName: name });
       const vid = dev ? (dev.vendorId || 0) : 0;
@@ -106,7 +113,8 @@
 
       const card = document.createElement('div');
       card.className = 'device-card';
-      if (dev && openIds.has(dev.deviceId)) card.classList.add('open');
+      if (isDisconnected) card.classList.add('disconnected');
+      if (dev && !isDisconnected && openIds.has(dev.deviceId)) card.classList.add('open');
 
       const icon = document.createElement('img');
       icon.className = 'device-icon';
@@ -143,12 +151,21 @@
       card.appendChild(btn);
 
       list.appendChild(card);
-      if (dev && openIds.has(dev.deviceId)) openCount++;
+      if (dev && !isDisconnected && openIds.has(dev.deviceId)) openCount++;
     }
     document.getElementById('device-count').textContent = `(${openCount}/${hashes.length})`;
   }
 
   await renderDevices();
+
+  browser.runtime.onMessage.addListener((message) => {
+    if (message.action === 'webhid-device-event' && message.event) {
+      const ev = message.event;
+      if (ev.eventType === 'connect' || ev.eventType === 'disconnect') {
+        renderDevices();
+      }
+    }
+  });
 
   document.getElementById('open-settings').onclick = () => {
     browser.runtime.openOptionsPage();

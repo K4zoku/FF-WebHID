@@ -2,6 +2,37 @@ __webhid.logger.initLogger('bg');
 
 let _deviceCache = [];
 
+async function _saveDeviceInfo(device) {
+  if (!device || !device.deviceId) return;
+  try {
+    await browser.storage.local.set({ [`deviceInfo:${device.deviceId}`]: device });
+  } catch {}
+}
+
+async function _saveDeviceInfoBatch(devices) {
+  if (!devices || !devices.length) return;
+  const entries = {};
+  for (const d of devices) {
+    if (d && d.deviceId) entries[`deviceInfo:${d.deviceId}`] = d;
+  }
+  try { await browser.storage.local.set(entries); } catch {}
+}
+
+async function _getDeviceInfo(deviceId) {
+  if (!deviceId) return null;
+  const live = _deviceCache.find(d => d.deviceId === deviceId);
+  if (live) return live;
+  try {
+    const result = await browser.storage.local.get(`deviceInfo:${deviceId}`);
+    return result[`deviceInfo:${deviceId}`] || null;
+  } catch { return null; }
+}
+
+async function _removeDeviceInfo(deviceId) {
+  if (!deviceId) return;
+  try { await browser.storage.local.remove(`deviceInfo:${deviceId}`); } catch {}
+}
+
 const _deviceTabMap = new Map();
 const _cspWorkerBlocked = new Map();
 
@@ -278,23 +309,50 @@ const NativeMessaging = {
 
   onControlEvent(message) {
     if (message.e === undefined) return;
+    if (message.e === EVT_CONNECT || message.e === EVT_DISCONNECT) {
+      if (message.v) {
+        if (message.e === EVT_CONNECT) {
+          if (!_deviceCache.some(d => d.deviceId === message.v.deviceId)) _deviceCache.push(message.v);
+          _saveDeviceInfo(message.v);
+        } else {
+          _deviceCache = _deviceCache.filter(d => d.deviceId !== message.i);
+        }
+      } else {
+        NativeMessaging.enumerateDevices().then((resp) => {
+          if (__webhid.http.isOk(resp.s) && resp.D) _deviceCache = resp.D;
+        }).catch(() => {});
+      }
+      const normalized = {
+        eventType: message.e === EVT_CONNECT ? 'connect' : 'disconnect',
+        deviceId: message.i,
+        device: message.v || null,
+      };
+      browser.runtime.sendMessage({ action: 'webhid-device-event', event: normalized }).catch(() => {});
+      const targets = tabsForEvent(message);
+      if (targets) {
+        for (const tabId of targets) {
+          browser.tabs.sendMessage(tabId, { action: 'webhid-device-event', event: normalized }).catch(() => {});
+        }
+      } else if (message.i) {
+        browser.tabs.query({}).then((tabs) => {
+          for (const tab of tabs) {
+            if (!tab.url) continue;
+            try {
+              const origin = new URL(tab.url).origin;
+              isDeviceAllowedForOrigin(origin, message.i).then((allowed) => {
+                if (allowed) browser.tabs.sendMessage(tab.id, { action: 'webhid-device-event', event: normalized }).catch(() => {});
+              });
+            } catch {}
+          }
+        }).catch(() => {});
+      }
+      return;
+    }
     const targets = tabsForEvent(message);
     if (targets) {
       for (const tabId of targets) {
         browser.tabs.sendMessage(tabId, { action: 'webhid-device-event', event: message }).catch(() => {});
       }
-    } else if (message.i && (message.e === EVT_CONNECT || message.e === EVT_DISCONNECT)) {
-      browser.tabs.query({}).then((tabs) => {
-        for (const tab of tabs) {
-          if (!tab.url) continue;
-          try {
-            const origin = new URL(tab.url).origin;
-            isDeviceAllowedForOrigin(origin, message.i).then((allowed) => {
-              if (allowed) browser.tabs.sendMessage(tab.id, { action: 'webhid-device-event', event: message }).catch(() => {});
-            });
-          } catch {}
-        }
-      }).catch(() => {});
     }
   },
 };
@@ -323,7 +381,10 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
     case 'enumerate':
       NativeMessaging.enumerateDevices()
         .then((response) => {
-          if (__webhid.http.isOk(response.s) && response.D) _deviceCache = response.D;
+          if (__webhid.http.isOk(response.s) && response.D) {
+            _deviceCache = response.D;
+            _saveDeviceInfoBatch(response.D);
+          }
           sendResponse(response);
         })
         .catch((e) => sendResponse({ s: 500 }));
@@ -429,6 +490,7 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
           if (request.deviceId) {
             hashes = hashes.filter(h => h !== request.deviceId);
             await browser.storage.local.set({ [storageKey]: hashes });
+            _removeDeviceInfo(request.deviceId);
           }
           sendResponse({ success: true, hashes });
         } catch (e) {
@@ -462,14 +524,24 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
       if (_deviceCache.length === 0) {
         NativeMessaging.enumerateDevices()
           .then((response) => {
-            if (__webhid.http.isOk(response.s) && response.D) _deviceCache = response.D;
+            if (__webhid.http.isOk(response.s) && response.D) {
+              _deviceCache = response.D;
+            }
+            _saveDeviceInfoBatch(_deviceCache);
             sendResponse({ devices: _deviceCache });
           })
           .catch(() => sendResponse({ devices: _deviceCache }));
         return true;
       }
+      _saveDeviceInfoBatch(_deviceCache);
       sendResponse({ devices: _deviceCache });
       return false;
+
+    case 'getDeviceInfo':
+      _getDeviceInfo(request.deviceId).then((device) => {
+        sendResponse({ device });
+      });
+      return true;
 
     case 'checkWorkerCsp':
       sendResponse({ blocked: !!_cspWorkerBlocked.get(sender.tab?.id) });

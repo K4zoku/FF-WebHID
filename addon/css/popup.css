@@ -58,6 +58,18 @@ input:checked + .slider:before {
   background: var(--accent-selected);
 }
 
+.device-card.disconnected {
+  opacity: 0.5;
+  border-style: dashed;
+}
+
+.device-card.disconnected .device-name::after {
+  content: " (disconnected)";
+  font-weight: 400;
+  color: var(--text-muted);
+  font-size: 0.9em;
+}
+
 .device-icon {
   width: 20px;
   height: 20px;

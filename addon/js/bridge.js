@@ -173,6 +173,12 @@
       await this.#loadDevices();
     }
 
+    async refreshDevices() {
+      if (!this.dialog || !this.dialog.open) return;
+      this.#pairedDevices = null;
+      await this.#loadDevices();
+    }
+
     async #loadDevices() {
       try {
         const response = await browser.runtime.sendMessage({ action: "enumerate" });
@@ -1007,6 +1013,9 @@
         if (port) {
           try { port.postMessage({ type: 'disconnect' }); } catch {}
         }
+      }
+      if (devicePicker && devicePicker.dialog && devicePicker.dialog.open && (ev.eventType === 'connect' || ev.eventType === 'disconnect')) {
+        devicePicker.refreshDevices();
       }
       _replyToPage({ __webhid_bridge: "evt", event: ev });
     }
