@@ -1,9 +1,16 @@
 (function () {
-// WebHID Standard implementation with injected modal
+  // WebHID Standard implementation with injected modal
 
-"use strict";
-const { logger, fetchResource, http, guessDeviceType, createSettingsStore, GLOBAL_DEFAULTS } = __webhid;
-  logger.initLogger('bridge');
+  "use strict";
+  const {
+    logger,
+    fetchResource,
+    http,
+    guessDeviceType,
+    createSettingsStore,
+    GLOBAL_DEFAULTS,
+  } = __webhid;
+  logger.initLogger("bridge");
 
   // ---------------------------------------------------------------------------
   // Initialize device picker custom element
@@ -46,16 +53,18 @@ const { logger, fetchResource, http, guessDeviceType, createSettingsStore, GLOBA
   async function _getWorkerBlobUrl(kind) {
     if (_workerBlobUrls[kind]) return _workerBlobUrls[kind];
     const baseUrls = [
-      'js/utils/browser-compat.js',
-      'js/utils/logger.js',
-      'js/utils/settings.js',
-      'js/utils/ws-transport.js',
+      "js/utils/browser-compat.js",
+      "js/utils/logger.js",
+      "js/utils/settings.js",
+      "js/utils/ws-transport.js",
     ];
-    const workerUrl = kind === 'control' ? 'js/control.js' : 'js/worker.js';
+    const workerUrl = kind === "control" ? "js/control.js" : "js/worker.js";
     const texts = await Promise.all(
-      [...baseUrls, workerUrl].map(u => fetchResource(u))
+      [...baseUrls, workerUrl].map((u) => fetchResource(u)),
     );
-    const blob = new Blob([texts.join('\n')], { type: 'application/javascript' });
+    const blob = new Blob([texts.join("\n")], {
+      type: "application/javascript",
+    });
     const url = URL.createObjectURL(blob);
     _workerBlobUrls[kind] = url;
     return url;
@@ -65,19 +74,23 @@ const { logger, fetchResource, http, guessDeviceType, createSettingsStore, GLOBA
     if (_controlWorker) return;
     let cspBlocked = false;
     try {
-      const check = await browser.runtime.sendMessage({ action: 'checkWorkerCsp' });
+      const check = await browser.runtime.sendMessage({
+        action: "checkWorkerCsp",
+      });
       cspBlocked = !!check?.blocked;
     } catch {}
     if (cspBlocked) {
-      logger.warn('control worker skipped: CSP worker-src blocks blob:; control plane uses NM');
+      logger.warn(
+        "control worker skipped: CSP worker-src blocks blob:; control plane uses NM",
+      );
       return;
     }
     let worker;
     try {
-      const url = await _getWorkerBlobUrl('control');
+      const url = await _getWorkerBlobUrl("control");
       worker = new Worker(url);
     } catch (e) {
-      logger.error('control worker spawn failed:', e);
+      logger.error("control worker spawn failed:", e);
       return;
     }
 
@@ -93,42 +106,63 @@ const { logger, fetchResource, http, guessDeviceType, createSettingsStore, GLOBA
       resolved = true;
       if (readyTimer) clearTimeout(readyTimer);
       _terminateControlWorker();
-      logger.warn('control worker failed:', reason, '; control plane falls back to NM');
+      logger.warn(
+        "control worker failed:",
+        reason,
+        "; control plane falls back to NM",
+      );
     };
 
-    worker.onerror = (e) => fail('onerror: ' + (e.message || 'unknown'));
-    readyTimer = setTimeout(() => fail('ready timeout'), 3000);
+    worker.onerror = (e) => fail("onerror: " + (e.message || "unknown"));
+    readyTimer = setTimeout(() => fail("ready timeout"), 3000);
 
     _controlPort.onmessage = ({ data }) => {
-      if (data.type === 'ready') {
+      if (data.type === "ready") {
         if (resolved) return;
         resolved = true;
         if (readyTimer) clearTimeout(readyTimer);
-        logger.info('control worker ready');
-      } else if (data.type === 'closed') {
-        logger.warn('control worker WS closed; will auto-reconnect');
+        logger.info("control worker ready");
+      } else if (data.type === "closed") {
+        logger.warn("control worker WS closed; will auto-reconnect");
         for (const [, { resolve }] of _controlPending) resolve({ s: 503 });
         _controlPending.clear();
-      } else if (data.type === 'auth-failed') {
-        logger.warn('control worker auth-failed code=' + data.code + '; re-handshaking');
+      } else if (data.type === "auth-failed") {
+        logger.warn(
+          "control worker auth-failed code=" + data.code + "; re-handshaking",
+        );
         for (const [, { resolve }] of _controlPending) resolve({ s: 503 });
         _controlPending.clear();
         _terminateControlWorker();
         _refreshControlToken();
-      } else if (data.type === 'response' && data.id && _controlPending.has(data.id)) {
+      } else if (
+        data.type === "response" &&
+        data.id &&
+        _controlPending.has(data.id)
+      ) {
         const { resolve } = _controlPending.get(data.id);
         _controlPending.delete(data.id);
         resolve(data.result);
       }
     };
 
-    _controlWorker.postMessage({ type: 'connect', token, wsPort, logLevel: logger._level }, [port2]);
-    logger.info('control worker spawned');
+    _controlWorker.postMessage(
+      { type: "connect", token, wsPort, logLevel: logger._level },
+      [port2],
+    );
+    logger.info("control worker spawned");
   }
 
   function _terminateControlWorker() {
-    if (_controlPort) { _controlPort.onmessage = null; _controlPort.close(); _controlPort = null; }
-    if (_controlWorker) { _controlWorker.postMessage({ type: 'disconnect' }); _controlWorker.terminate(); _controlWorker = null; }
+    if (_controlPort) {
+      _controlPort.onmessage = null;
+      _controlPort.close();
+      _controlPort = null;
+    }
+    if (_controlWorker) {
+      _controlWorker.postMessage({ type: "disconnect" });
+      _controlWorker.terminate();
+      _controlWorker = null;
+    }
     for (const [, { resolve }] of _controlPending) resolve({ s: 503 });
     _controlPending.clear();
   }
@@ -136,15 +170,15 @@ const { logger, fetchResource, http, guessDeviceType, createSettingsStore, GLOBA
   async function _refreshControlToken() {
     if (_controlWorker) return;
     try {
-      const resp = await browser.runtime.sendMessage({ action: 'handshake' });
+      const resp = await browser.runtime.sendMessage({ action: "handshake" });
       if (http.isOk(resp.s) && resp.c && resp.w) {
         _wsPort = resp.w;
         _spawnControlWorker(resp.c, resp.w);
       } else {
-        logger.error('token refresh failed: s=' + (resp?.s || 0));
+        logger.error("token refresh failed: s=" + (resp?.s || 0));
       }
     } catch (e) {
-      logger.error('token refresh error:', e.message);
+      logger.error("token refresh error:", e.message);
     }
   }
 
@@ -163,7 +197,7 @@ const { logger, fetchResource, http, guessDeviceType, createSettingsStore, GLOBA
       }
       const id = _controlReqId++;
       _controlPending.set(id, { resolve });
-      _controlPort.postMessage({ type: 'command', id, action, payload });
+      _controlPort.postMessage({ type: "command", id, action, payload });
     });
   }
 
@@ -174,19 +208,27 @@ const { logger, fetchResource, http, guessDeviceType, createSettingsStore, GLOBA
     if (worker) {
       const port = _dataPorts.get(deviceId);
       if (port && keepPort) {
-        try { worker.postMessage({ type: 'unset-port' }); } catch {}
+        try {
+          worker.postMessage({ type: "unset-port" });
+        } catch {}
         const returned = await new Promise((resolve) => {
           let done = false;
           const onMsg = (ev) => {
             if (done) return;
-            if (ev.data && ev.data.type === 'return-port') {
+            if (ev.data && ev.data.type === "return-port") {
               done = true;
               worker.onmessage = null;
-              resolve(ev.ports && ev.ports[0] || null);
+              resolve((ev.ports && ev.ports[0]) || null);
             }
           };
           worker.onmessage = onMsg;
-          setTimeout(() => { if (!done) { done = true; worker.onmessage = null; resolve(null); } }, 500);
+          setTimeout(() => {
+            if (!done) {
+              done = true;
+              worker.onmessage = null;
+              resolve(null);
+            }
+          }, 500);
         });
         if (returned) {
           _dataPorts.set(deviceId, returned);
@@ -194,14 +236,25 @@ const { logger, fetchResource, http, guessDeviceType, createSettingsStore, GLOBA
         }
       } else if (port) {
         _dataPorts.delete(deviceId);
-        try { worker.postMessage({ type: 'unset-port' }); } catch {}
-        try { port.onmessage = null; port.close(); } catch {}
+        try {
+          worker.postMessage({ type: "unset-port" });
+        } catch {}
+        try {
+          port.onmessage = null;
+          port.close();
+        } catch {}
       }
       worker.terminate();
       _workers.delete(deviceId);
     } else if (!keepPort) {
       const port = _dataPorts.get(deviceId);
-      if (port) { try { port.onmessage = null; port.close(); } catch {} _dataPorts.delete(deviceId); }
+      if (port) {
+        try {
+          port.onmessage = null;
+          port.close();
+        } catch {}
+        _dataPorts.delete(deviceId);
+      }
     }
     _workerCallbacks.delete(deviceId);
     _workerReady.delete(deviceId);
@@ -211,15 +264,22 @@ const { logger, fetchResource, http, guessDeviceType, createSettingsStore, GLOBA
   async function _refreshDataPlaneToken(deviceId) {
     if (_workers.has(deviceId)) return;
     try {
-      const resp = await browser.runtime.sendMessage({ action: 'open', deviceId });
+      const resp = await browser.runtime.sendMessage({
+        action: "open",
+        deviceId,
+      });
       if (http.isOk(resp.s) && resp.t) {
         _sessionTokens.set(deviceId, resp.t);
         _spawnDataPlane(deviceId, resp.t, resp.w || _wsPort);
       } else {
-        logger.error('data plane token refresh failed for', deviceId, 's=' + (resp?.s || 0));
+        logger.error(
+          "data plane token refresh failed for",
+          deviceId,
+          "s=" + (resp?.s || 0),
+        );
       }
     } catch (e) {
-      logger.error('data plane token refresh error:', e.message);
+      logger.error("data plane token refresh error:", e.message);
     }
   }
 
@@ -227,24 +287,30 @@ const { logger, fetchResource, http, guessDeviceType, createSettingsStore, GLOBA
     if (_workers.has(deviceId)) return true;
     let cspBlocked = false;
     try {
-      const check = await browser.runtime.sendMessage({ action: 'checkWorkerCsp' });
+      const check = await browser.runtime.sendMessage({
+        action: "checkWorkerCsp",
+      });
       cspBlocked = !!check?.blocked;
     } catch {}
     if (cspBlocked) {
-      logger.warn('worker skipped for', deviceId, ': CSP worker-src blocks blob:');
+      logger.warn(
+        "worker skipped for",
+        deviceId,
+        ": CSP worker-src blocks blob:",
+      );
       return false;
     }
     let worker;
     try {
-      const url = await _getWorkerBlobUrl('worker');
+      const url = await _getWorkerBlobUrl("worker");
       worker = new Worker(url);
     } catch (e) {
-      logger.error('worker fetch/spawn failed:', e);
+      logger.error("worker fetch/spawn failed:", e);
       return false;
     }
 
     if (_spawnGen.get(deviceId) !== gen) {
-      logger.info('worker spawn stale, discarding for', deviceId);
+      logger.info("worker spawn stale, discarding for", deviceId);
       worker.terminate();
       return false;
     }
@@ -269,25 +335,25 @@ const { logger, fetchResource, http, guessDeviceType, createSettingsStore, GLOBA
           const cbMap = _workerCallbacks.get(deviceId);
           for (const wMsg of queue) {
             if (cbMap && cbMap.has(wMsg.reqId)) {
-              cbMap.get(wMsg.reqId)({ error: 'worker spawn failed' });
+              cbMap.get(wMsg.reqId)({ error: "worker spawn failed" });
               cbMap.delete(wMsg.reqId);
             }
           }
           _workerQueues.delete(deviceId);
         }
-        logger.warn('worker spawn failed for', deviceId, ':', reason);
+        logger.warn("worker spawn failed for", deviceId, ":", reason);
         resolveSpawn(false);
       };
 
-      worker.onerror = (e) => fail('onerror: ' + (e.message || 'unknown'));
-      readyTimer = setTimeout(() => fail('ready timeout'), 3000);
+      worker.onerror = (e) => fail("onerror: " + (e.message || "unknown"));
+      readyTimer = setTimeout(() => fail("ready timeout"), 3000);
 
       worker.onmessage = ({ data }) => {
-        if (data.type === 'ready') {
+        if (data.type === "ready") {
           if (resolved) return;
           resolved = true;
           if (readyTimer) clearTimeout(readyTimer);
-          logger.info('worker ready for', deviceId);
+          logger.info("worker ready for", deviceId);
           _workerReady.add(deviceId);
           const queue = _workerQueues.get(deviceId);
           if (queue) {
@@ -299,53 +365,77 @@ const { logger, fetchResource, http, guessDeviceType, createSettingsStore, GLOBA
           const port = _dataPorts.get(deviceId);
           if (port) {
             port.onmessage = null;
-            try { worker.postMessage({ type: 'set-port' }, [port]); } catch (e) {
-              logger.warn('set-port transfer failed for', deviceId, ':', e.message);
+            try {
+              worker.postMessage({ type: "set-port" }, [port]);
+            } catch (e) {
+              logger.warn(
+                "set-port transfer failed for",
+                deviceId,
+                ":",
+                e.message,
+              );
               port.onmessage = (e2) => _onDataPortMessage(deviceId, e2.data);
             }
           }
           resolveSpawn(true);
           return;
         }
-        if (data.type === 'auth-failed') {
-          logger.warn('worker auth-failed for', deviceId, 'code=' + data.code + '; re-opening');
+        if (data.type === "auth-failed") {
+          logger.warn(
+            "worker auth-failed for",
+            deviceId,
+            "code=" + data.code + "; re-opening",
+          );
           _workers.delete(deviceId);
           _workerReady.delete(deviceId);
           _dataPorts.delete(deviceId);
           _refreshDataPlaneToken(deviceId);
           return;
         }
-        if (data.type === 'closed') {
-          logger.warn('worker closed for', deviceId);
+        if (data.type === "closed") {
+          logger.warn("worker closed for", deviceId);
           _workers.delete(deviceId);
           _workerReady.delete(deviceId);
           _dataPorts.delete(deviceId);
           _replyToPage({
-            __webhid_bridge: 'evt',
-            event: { eventType: 'disconnect', deviceId: deviceId }
+            __webhid_bridge: "evt",
+            event: { eventType: "disconnect", deviceId: deviceId },
           });
           return;
         }
-        if (data.type === 'inputReport') {
+        if (data.type === "inputReport") {
           return;
           const view = data.data ? new Uint8Array(data.data) : null;
           if (view && logger._level >= 3 && data.reportId !== 33) {
-            let hex = '';
-            for (let i = 0; i < Math.min(8, view.length); i++) hex += view[i].toString(16).padStart(2, '0') + ' ';
-            logger.debug('worker→page inputReport device=' + deviceId + ' reportId=' + data.reportId + ' len=' + view.length + ' first8=' + hex);
+            let hex = "";
+            for (let i = 0; i < Math.min(8, view.length); i++)
+              hex += view[i].toString(16).padStart(2, "0") + " ";
+            logger.debug(
+              "worker→page inputReport device=" +
+                deviceId +
+                " reportId=" +
+                data.reportId +
+                " len=" +
+                view.length +
+                " first8=" +
+                hex,
+            );
           }
-          _replyToPage({
-            __webhid_bridge: 'evt',
-            event: {
-              eventType: 'input_report',
-              deviceId: deviceId,
-              reportId: data.reportId,
-              data: view,
-            }
-          }, view ? [view.buffer] : []);
+          _replyToPage(
+            {
+              __webhid_bridge: "evt",
+              event: {
+                eventType: "input_report",
+                deviceId: deviceId,
+                reportId: data.reportId,
+                data: view,
+              },
+            },
+            view ? [view.buffer] : [],
+          );
           return;
         }
-        if (data.type === 'sendResult' || data.type === 'featureResult') {
+        if (data.type === "sendResult" || data.type === "featureResult") {
           const cbMap = _workerCallbacks.get(deviceId);
           if (cbMap && cbMap.has(data.reqId)) {
             const cb = cbMap.get(data.reqId);
@@ -357,7 +447,12 @@ const { logger, fetchResource, http, guessDeviceType, createSettingsStore, GLOBA
         }
       };
 
-      worker.postMessage({ type: 'connect', wsPort, token: sessionToken, reportSize: opts.reportSize || 64 });
+      worker.postMessage({
+        type: "connect",
+        wsPort,
+        token: sessionToken,
+        reportSize: opts.reportSize || 64,
+      });
     });
   }
 
@@ -366,16 +461,20 @@ const { logger, fetchResource, http, guessDeviceType, createSettingsStore, GLOBA
     _spawnGen.set(deviceId, gen);
     const ok = await _spawnWorker(deviceId, sessionToken, wsPort, opts, gen);
     if (!ok && _spawnGen.get(deviceId) === gen) {
-      logger.warn('worker spawn failed for', deviceId, '; falling back to NM');
-      browser.runtime.sendMessage({
-        action: 'setdataplane', deviceId: deviceId, mode: 'nm'
-      }).catch(() => {});
+      logger.warn("worker spawn failed for", deviceId, "; falling back to NM");
+      browser.runtime
+        .sendMessage({
+          action: "setdataplane",
+          deviceId: deviceId,
+          mode: "nm",
+        })
+        .catch(() => {});
     }
   }
 
   (async () => {
     try {
-      const resp = await browser.runtime.sendMessage({ action: 'handshake' });
+      const resp = await browser.runtime.sendMessage({ action: "handshake" });
       if (http.isOk(resp.s) && resp.w) {
         _wsPort = resp.w;
         const global = await browser.storage.local.get(GLOBAL_DEFAULTS);
@@ -389,12 +488,12 @@ const { logger, fetchResource, http, guessDeviceType, createSettingsStore, GLOBA
           }
         }
         settings.set(global);
-        if (settings.controlPlane === 'ws' && resp.c) {
+        if (settings.controlPlane === "ws" && resp.c) {
           _spawnControlWorker(resp.c, resp.w);
         }
       }
     } catch (e) {
-      logger.warn('handshake failed:', e.message);
+      logger.warn("handshake failed:", e.message);
     }
   })();
 
@@ -410,8 +509,10 @@ const { logger, fetchResource, http, guessDeviceType, createSettingsStore, GLOBA
     const port = event.ports && event.ports[0];
     if (!port) return;
     _pagePort = port;
-    _pagePort.onmessage = (ev) => { handleRequest(ev.data, ev.ports); };
-    logger.debug('[bridge] page port established');
+    _pagePort.onmessage = (ev) => {
+      handleRequest(ev.data, ev.ports);
+    };
+    logger.debug("[bridge] page port established");
   });
 
   async function handleRequest(data, ports) {
@@ -420,21 +521,25 @@ const { logger, fetchResource, http, guessDeviceType, createSettingsStore, GLOBA
     const { id, action: reqAction, payload } = data;
     let action = reqAction;
     const isFireAndForget = data.fireAndForget === true;
-    logger.debug('req action=' + action + ' id=' + id + (isFireAndForget ? ' (faf)' : ''));
+    logger.debug(
+      "req action=" + action + " id=" + id + (isFireAndForget ? " (faf)" : ""),
+    );
 
     if (action === "data-port") {
       const deviceId = payload.deviceId;
       const port = ports && ports[0];
       if (!deviceId || !port) {
-        logger.warn('data-port: missing deviceId or port');
+        logger.warn("data-port: missing deviceId or port");
         return;
       }
       _dataPorts.set(deviceId, port);
-      logger.debug('data port received for device', deviceId);
+      logger.debug("data port received for device", deviceId);
       const worker = _workers.get(deviceId);
       if (worker && _workerReady.has(deviceId)) {
-        try { worker.postMessage({ type: 'set-port' }, [port]); } catch (e) {
-          logger.warn('set-port transfer failed for', deviceId, ':', e.message);
+        try {
+          worker.postMessage({ type: "set-port" }, [port]);
+        } catch (e) {
+          logger.warn("set-port transfer failed for", deviceId, ":", e.message);
           port.onmessage = (ev) => _onDataPortMessage(deviceId, ev.data);
         }
       } else {
@@ -463,37 +568,61 @@ const { logger, fetchResource, http, guessDeviceType, createSettingsStore, GLOBA
       return;
     }
 
-    if ((action === "sendreport" || action === "sendfeaturereport" || action === "receivefeaturereport")
-        && payload && payload.deviceId
-        && _workers.has(payload.deviceId)) {
-      action = action === "sendreport" ? "worker-send"
-             : action === "sendfeaturereport" ? "worker-sendFeature"
-             : "worker-receiveFeature";
+    if (
+      (action === "sendreport" ||
+        action === "sendfeaturereport" ||
+        action === "receivefeaturereport") &&
+      payload &&
+      payload.deviceId &&
+      _workers.has(payload.deviceId)
+    ) {
+      action =
+        action === "sendreport"
+          ? "worker-send"
+          : action === "sendfeaturereport"
+            ? "worker-sendFeature"
+            : "worker-receiveFeature";
     }
 
     // Hot-path actions: use worker WS → NM (priority order).
-    if (action === "worker-send" || action === "worker-sendFeature" || action === "worker-receiveFeature") {
+    if (
+      action === "worker-send" ||
+      action === "worker-sendFeature" ||
+      action === "worker-receiveFeature"
+    ) {
       const deviceId = payload.deviceId;
 
       // Worker WS data plane.
       const worker = _workers.get(deviceId);
       if (worker && _workerReady.has(deviceId)) {
         const wType =
-          action === "worker-send" ? "send" :
-          action === "worker-sendFeature" ? "sendFeature" :
-          "receiveFeature";
+          action === "worker-send"
+            ? "send"
+            : action === "worker-sendFeature"
+              ? "sendFeature"
+              : "receiveFeature";
         const wMsg = { type: wType, reqId: id, reportId: payload.reportId };
-        if (action === "worker-send" || action === "worker-sendFeature") wMsg.data = payload.data;
+        if (action === "worker-send" || action === "worker-sendFeature")
+          wMsg.data = payload.data;
 
         if (!isFireAndForget || action === "worker-receiveFeature") {
           let cbMap = _workerCallbacks.get(deviceId);
-          if (!cbMap) { cbMap = new Map(); _workerCallbacks.set(deviceId, cbMap); }
+          if (!cbMap) {
+            cbMap = new Map();
+            _workerCallbacks.set(deviceId, cbMap);
+          }
           cbMap.set(id, (data) => {
-            const result = data.error ? { s: 500 }
-                        : data.data ? { s: 200, d: data.data }
-                        : { s: 204 };
-            const xfers = result.d instanceof Uint8Array ? [result.d.buffer] : [];
-            _replyToPage({ __webhid_bridge: "res", id, result }, xfers.length ? xfers : undefined);
+            const result = data.error
+              ? { s: 500 }
+              : data.data
+                ? { s: 200, d: data.data }
+                : { s: 204 };
+            const xfers =
+              result.d instanceof Uint8Array ? [result.d.buffer] : [];
+            _replyToPage(
+              { __webhid_bridge: "res", id, result },
+              xfers.length ? xfers : undefined,
+            );
           });
         }
         worker.postMessage(wMsg);
@@ -502,21 +631,33 @@ const { logger, fetchResource, http, guessDeviceType, createSettingsStore, GLOBA
 
       if (worker) {
         const wType =
-          action === "worker-send" ? "send" :
-          action === "worker-sendFeature" ? "sendFeature" :
-          "receiveFeature";
+          action === "worker-send"
+            ? "send"
+            : action === "worker-sendFeature"
+              ? "sendFeature"
+              : "receiveFeature";
         const wMsg = { type: wType, reqId: id, reportId: payload.reportId };
-        if (action === "worker-send" || action === "worker-sendFeature") wMsg.data = payload.data;
+        if (action === "worker-send" || action === "worker-sendFeature")
+          wMsg.data = payload.data;
 
         if (!isFireAndForget || action === "worker-receiveFeature") {
           let cbMap = _workerCallbacks.get(deviceId);
-          if (!cbMap) { cbMap = new Map(); _workerCallbacks.set(deviceId, cbMap); }
+          if (!cbMap) {
+            cbMap = new Map();
+            _workerCallbacks.set(deviceId, cbMap);
+          }
           cbMap.set(id, (data) => {
-            const result = data.error ? { s: 500 }
-                        : data.data ? { s: 200, d: data.data }
-                        : { s: 204 };
-            const xfers = result.d instanceof Uint8Array ? [result.d.buffer] : [];
-            _replyToPage({ __webhid_bridge: "res", id, result }, xfers.length ? xfers : undefined);
+            const result = data.error
+              ? { s: 500 }
+              : data.data
+                ? { s: 200, d: data.data }
+                : { s: 204 };
+            const xfers =
+              result.d instanceof Uint8Array ? [result.d.buffer] : [];
+            _replyToPage(
+              { __webhid_bridge: "res", id, result },
+              xfers.length ? xfers : undefined,
+            );
           });
         }
 
@@ -525,11 +666,13 @@ const { logger, fetchResource, http, guessDeviceType, createSettingsStore, GLOBA
         return;
       }
 
-      logger.warn('no worker for', deviceId, '; falling back to NM');
+      logger.warn("no worker for", deviceId, "; falling back to NM");
       const fallbackAction =
-        action === "worker-send" ? "sendreport" :
-        action === "worker-sendFeature" ? "sendfeaturereport" :
-        "receivefeaturereport";
+        action === "worker-send"
+          ? "sendreport"
+          : action === "worker-sendFeature"
+            ? "sendfeaturereport"
+            : "receivefeaturereport";
       try {
         const msg = Object.assign({ action: fallbackAction }, payload || {});
         if (isFireAndForget && action !== "worker-receiveFeature") {
@@ -537,8 +680,14 @@ const { logger, fetchResource, http, guessDeviceType, createSettingsStore, GLOBA
           return;
         }
         const response = await browser.runtime.sendMessage(msg);
-        const _xfers = (response && response.d instanceof Uint8Array) ? [response.d.buffer] : [];
-        _replyToPage({ __webhid_bridge: "res", id, result: response }, _xfers.length ? _xfers : undefined);
+        const _xfers =
+          response && response.d instanceof Uint8Array
+            ? [response.d.buffer]
+            : [];
+        _replyToPage(
+          { __webhid_bridge: "res", id, result: response },
+          _xfers.length ? _xfers : undefined,
+        );
       } catch (error) {
         _replyToPage({ __webhid_bridge: "res", id, result: { s: 500 } });
       }
@@ -555,12 +704,20 @@ const { logger, fetchResource, http, guessDeviceType, createSettingsStore, GLOBA
 
       onSelected = (e) => {
         cleanup();
-        _replyToPage({ __webhid_bridge: "res", id, result: { devices: e.detail.devices } });
+        _replyToPage({
+          __webhid_bridge: "res",
+          id,
+          result: { devices: e.detail.devices },
+        });
       };
 
       onCancelled = () => {
         cleanup();
-        _replyToPage({ __webhid_bridge: "res", id, result: { cancelled: true } });
+        _replyToPage({
+          __webhid_bridge: "res",
+          id,
+          result: { cancelled: true },
+        });
       };
 
       window.addEventListener("webhid-device-selected", onSelected);
@@ -572,16 +729,22 @@ const { logger, fetchResource, http, guessDeviceType, createSettingsStore, GLOBA
     try {
       let response;
       let viaControlWs = false;
-      if (action === 'open') {
+      if (action === "open") {
         const origin = window.location.origin;
-        const allowed = await _isDeviceAllowedForOrigin(origin, payload.deviceId);
+        const allowed = await _isDeviceAllowedForOrigin(
+          origin,
+          payload.deviceId,
+        );
         if (!allowed) {
           _replyToPage({ __webhid_bridge: "res", id, result: { s: 403 } });
           return;
         }
       }
-      if (settings.controlPlane === 'ws' && _controlPort
-          && (action === 'enumerate' || action === 'close' || action === 'open')) {
+      if (
+        settings.controlPlane === "ws" &&
+        _controlPort &&
+        (action === "enumerate" || action === "close" || action === "open")
+      ) {
         response = await _sendControlCommand(action, payload || {});
         viaControlWs = true;
       } else {
@@ -593,45 +756,65 @@ const { logger, fetchResource, http, guessDeviceType, createSettingsStore, GLOBA
         const deviceId = response.i;
         _openDevices.add(deviceId);
         _sessionTokens.set(deviceId, response.t);
-        browser.runtime.sendMessage({ action: "device-count-changed", count: _openDevices.size }).catch(() => {});
-        logger.debug('open ok deviceId=' + deviceId + ' wsPort=' + response.w);
+        browser.runtime
+          .sendMessage({
+            action: "device-count-changed",
+            count: _openDevices.size,
+          })
+          .catch(() => {});
+        logger.debug("open ok deviceId=" + deviceId + " wsPort=" + response.w);
 
         const dataPlane = settings.dataPlane;
         if (viaControlWs) {
-          browser.runtime.sendMessage({
-            action: "registerDevice",
-            deviceId: deviceId,
-          }).catch(() => {});
+          browser.runtime
+            .sendMessage({
+              action: "registerDevice",
+              deviceId: deviceId,
+            })
+            .catch(() => {});
         }
 
-        browser.runtime.sendMessage({
-          action: "setdataplane",
-          deviceId: deviceId,
-          mode: dataPlane,
-        }).catch(() => {});
+        browser.runtime
+          .sendMessage({
+            action: "setdataplane",
+            deviceId: deviceId,
+            mode: dataPlane,
+          })
+          .catch(() => {});
 
-        if (dataPlane === 'ws') {
+        if (dataPlane === "ws") {
           _spawnDataPlane(deviceId, response.t, response.w || _wsPort);
         }
       }
 
       if (action === "close") {
         const deviceId = payload.deviceId;
-        logger.debug('close deviceId=' + deviceId);
+        logger.debug("close deviceId=" + deviceId);
         _openDevices.delete(deviceId);
         _sessionTokens.delete(deviceId);
-        browser.runtime.sendMessage({ action: "device-count-changed", count: _openDevices.size }).catch(() => {});
+        browser.runtime
+          .sendMessage({
+            action: "device-count-changed",
+            count: _openDevices.size,
+          })
+          .catch(() => {});
         if (viaControlWs) {
-          browser.runtime.sendMessage({
-            action: "unregisterDevice",
-            deviceId: deviceId,
-          }).catch(() => {});
+          browser.runtime
+            .sendMessage({
+              action: "unregisterDevice",
+              deviceId: deviceId,
+            })
+            .catch(() => {});
         }
         _despawnDataPlane(deviceId);
       }
 
-      const _xfers = (response && response.d instanceof Uint8Array) ? [response.d.buffer] : [];
-      _replyToPage({ __webhid_bridge: "res", id, result: response }, _xfers.length ? _xfers : undefined);
+      const _xfers =
+        response && response.d instanceof Uint8Array ? [response.d.buffer] : [];
+      _replyToPage(
+        { __webhid_bridge: "res", id, result: response },
+        _xfers.length ? _xfers : undefined,
+      );
     } catch (error) {
       _replyToPage({ __webhid_bridge: "res", id, result: { s: 500 } });
     }
@@ -641,22 +824,33 @@ const { logger, fetchResource, http, guessDeviceType, createSettingsStore, GLOBA
   browser.runtime.onMessage.addListener((message) => {
     if (message.action === "webhid-device-event" && message.event) {
       const ev = message.event;
-      if (ev.eventType === 'input_report') {
+      if (ev.eventType === "input_report") {
         const port = _dataPorts.get(ev.deviceId);
         if (port) {
           const view = ev.data;
-          const buf = view ? (view.buffer || view) : null;
-          try { port.postMessage({ type: 'inputReport', reportId: ev.reportId, data: buf }, buf ? [buf] : []); } catch {}
+          const buf = view ? view.buffer || view : null;
+          try {
+            port.postMessage(
+              { type: "inputReport", reportId: ev.reportId, data: buf },
+              buf ? [buf] : [],
+            );
+          } catch {}
           return;
         }
       }
-      if (ev.eventType === 'disconnect') {
+      if (ev.eventType === "disconnect") {
         const port = _dataPorts.get(ev.deviceId);
         if (port) {
-          try { port.postMessage({ type: 'disconnect' }); } catch {}
+          try {
+            port.postMessage({ type: "disconnect" });
+          } catch {}
         }
       }
-      if (devicePicker && devicePicker.isOpen && (ev.eventType === 'connect' || ev.eventType === 'disconnect')) {
+      if (
+        devicePicker &&
+        devicePicker.isOpen &&
+        (ev.eventType === "connect" || ev.eventType === "disconnect")
+      ) {
         devicePicker.refreshDevices();
       }
       _replyToPage({ __webhid_bridge: "evt", event: ev });
@@ -665,25 +859,49 @@ const { logger, fetchResource, http, guessDeviceType, createSettingsStore, GLOBA
 
   function _onDataPortMessage(deviceId, msg) {
     if (!msg) return;
-    if (msg.type === 'send' || msg.type === 'sendFeature' || msg.type === 'receiveFeature') {
-      const action = msg.type === 'send' ? 'sendreport'
-                   : msg.type === 'sendFeature' ? 'sendfeaturereport'
-                   : 'receivefeaturereport';
+    if (
+      msg.type === "send" ||
+      msg.type === "sendFeature" ||
+      msg.type === "receiveFeature"
+    ) {
+      const action =
+        msg.type === "send"
+          ? "sendreport"
+          : msg.type === "sendFeature"
+            ? "sendfeaturereport"
+            : "receivefeaturereport";
       const payload = { deviceId, reportId: msg.reportId };
-      if (msg.type === 'send' || msg.type === 'sendFeature') payload.data = msg.data;
+      if (msg.type === "send" || msg.type === "sendFeature")
+        payload.data = msg.data;
       const port = _dataPorts.get(deviceId);
       const cb = (response) => {
         if (!port) return;
-        if (msg.type === 'receiveFeature') {
-          const data = (response && http.isOk(response.s) && response.d) ? response.d : null;
-          try { port.postMessage({ type: 'featureResult', reqId: msg.reqId, data: data || null }); } catch {}
+        if (msg.type === "receiveFeature") {
+          const data =
+            response && http.isOk(response.s) && response.d ? response.d : null;
+          try {
+            port.postMessage({
+              type: "featureResult",
+              reqId: msg.reqId,
+              data: data || null,
+            });
+          } catch {}
         } else {
-          const err = (response && !http.isOk(response.s)) ? 'send failed' : null;
-          try { port.postMessage({ type: msg.type === 'send' ? 'sendResult' : 'featureResult', reqId: msg.reqId, error: err }); } catch {}
+          const err = response && !http.isOk(response.s) ? "send failed" : null;
+          try {
+            port.postMessage({
+              type: msg.type === "send" ? "sendResult" : "featureResult",
+              reqId: msg.reqId,
+              error: err,
+            });
+          } catch {}
         }
       };
       const m = Object.assign({ action }, payload);
-      browser.runtime.sendMessage(m).then(cb).catch(() => cb({ s: 500 }));
+      browser.runtime
+        .sendMessage(m)
+        .then(cb)
+        .catch(() => cb({ s: 500 }));
       return;
     }
   }
@@ -691,22 +909,27 @@ const { logger, fetchResource, http, guessDeviceType, createSettingsStore, GLOBA
   // ── Settings observer ─────────────────────────────────────────────
 
   function _applyControlPlane(cp) {
-    logger.info('control plane changed:', cp);
-    if (cp === 'ws' && _wsPort && !_controlWorker) {
-      browser.runtime.sendMessage({ action: 'handshake' }).then((resp) => {
-        if (http.isOk(resp.s) && resp.c && resp.w) {
-          _wsPort = resp.w;
-          _spawnControlWorker(resp.c, resp.w);
-        }
-      }).catch(() => {});
-    } else if (cp === 'nm' && _controlWorker) {
+    logger.info("control plane changed:", cp);
+    if (cp === "ws" && _wsPort && !_controlWorker) {
+      browser.runtime
+        .sendMessage({ action: "handshake" })
+        .then((resp) => {
+          if (http.isOk(resp.s) && resp.c && resp.w) {
+            _wsPort = resp.w;
+            _spawnControlWorker(resp.c, resp.w);
+          }
+        })
+        .catch(() => {});
+    } else if (cp === "nm" && _controlWorker) {
       _terminateControlWorker();
     }
   }
 
   async function _applyDataPlane(dp) {
-    for (const id of _openDevices) { await _despawnDataPlane(id, { keepPort: true }); }
-    if (dp === 'ws') {
+    for (const id of _openDevices) {
+      await _despawnDataPlane(id, { keepPort: true });
+    }
+    if (dp === "ws") {
       for (const id of _openDevices) {
         const token = _sessionTokens.get(id);
         if (token) _spawnDataPlane(id, token, _wsPort);
@@ -720,33 +943,43 @@ const { logger, fetchResource, http, guessDeviceType, createSettingsStore, GLOBA
       }
     }
     for (const id of _openDevices) {
-      browser.runtime.sendMessage({
-        action: "setdataplane",
-        deviceId: id,
-        mode: dp,
-      }).catch(() => {});
+      browser.runtime
+        .sendMessage({
+          action: "setdataplane",
+          deviceId: id,
+          mode: dp,
+        })
+        .catch(() => {});
     }
-    logger.info('data plane changed:', dp, 'open devices:', _openDevices.size);
+    logger.info("data plane changed:", dp, "open devices:", _openDevices.size);
   }
 
-  settings.on('controlPlane', (cp) => _applyControlPlane(cp));
-  settings.on('dataPlane', (dp) => _applyDataPlane(dp));
+  settings.on("controlPlane", (cp) => _applyControlPlane(cp));
+  settings.on("dataPlane", (dp) => _applyDataPlane(dp));
 
   // Push any settings change to page + workers.
-  settings.on(['dataPlane', 'controlPlane', 'fireAndForget', 'logLevel'], () => {
-    const all = settings.getAll();
-    const patch = {};
-    for (const k of ['dataPlane', 'controlPlane', 'fireAndForget', 'logLevel']) {
-      patch[k] = all[k];
-    }
-    _replyToPage({ __webhid_bridge: "settings", settings: patch });
-    const workerMsg = { type: 'settings', ...patch };
-    for (const worker of _workers.values()) worker.postMessage(workerMsg);
-    if (_controlWorker) _controlWorker.postMessage(workerMsg);
-  });
+  settings.on(
+    ["dataPlane", "controlPlane", "fireAndForget", "logLevel"],
+    () => {
+      const all = settings.getAll();
+      const patch = {};
+      for (const k of [
+        "dataPlane",
+        "controlPlane",
+        "fireAndForget",
+        "logLevel",
+      ]) {
+        patch[k] = all[k];
+      }
+      _replyToPage({ __webhid_bridge: "settings", settings: patch });
+      const workerMsg = { type: "settings", ...patch };
+      for (const worker of _workers.values()) worker.postMessage(workerMsg);
+      if (_controlWorker) _controlWorker.postMessage(workerMsg);
+    },
+  );
 
   browser.storage.onChanged.addListener((changes, area) => {
-    if (area !== 'local') return;
+    if (area !== "local") return;
     const origin = window.location.origin;
     const siteKey = origin ? `site:${origin}` : null;
     const patch = {};
