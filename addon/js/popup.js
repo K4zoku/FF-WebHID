@@ -98,7 +98,7 @@
     for (const hash of hashes) {
       const dev = cache.find(d => d.deviceId === hash);
 
-      const name = dev ? (dev.productName || 'Unknown') : 'Saved device';
+      const name = dev ? (dev.productName || 'Unknown') : 'Paired device';
       const type = __webhid.guessDeviceType(dev || { productName: name });
       const vid = dev ? (dev.vendorId || 0) : 0;
       const pid = dev ? (dev.productId || 0) : 0;

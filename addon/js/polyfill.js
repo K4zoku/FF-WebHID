@@ -9,16 +9,16 @@
   const _bridgePort = _channel.port1;
   globalThis.postMessage({ __webhid_bridge: "init" }, "*", [_channel.port2]);
 
-  let _savedDevices = null;
+  let _pairedDevices = null;
   let _deviceInfoCache = null;
 
-  async function getSavedDevices() {
-    if (_savedDevices !== null) return _savedDevices;
+  async function getPairedDevices() {
+    if (_pairedDevices !== null) return _pairedDevices;
     try {
-      const result = await sendRequest("getSavedDevices", { origin: globalThis.location?.origin || '' });
-      _savedDevices = result.hashes || [];
+      const result = await sendRequest("getPairedDevices", { origin: globalThis.location?.origin || '' });
+      _pairedDevices = result.hashes || [];
       _deviceInfoCache = null;
-      return _savedDevices;
+      return _pairedDevices;
     } catch { return []; }
   }
 
@@ -33,15 +33,15 @@
     } catch { _deviceInfoCache = new Map(); return _deviceInfoCache; }
   }
 
-  async function saveDevice(deviceInfo) {
+  async function pairDevice(deviceInfo) {
     try {
-      _savedDevices = null;
-      const result = await sendRequest("saveDevice", {
+      _pairedDevices = null;
+      const result = await sendRequest("pairDevice", {
         origin: globalThis.location?.origin || '',
         device: { deviceId: deviceInfo.deviceId },
       });
       if (result.success) {
-        _savedDevices = result.hashes || [];
+        _pairedDevices = result.hashes || [];
         _deviceInfoCache = null;
       }
     } catch {}
@@ -227,7 +227,7 @@
     forget: { value: async function() {
       const s = _devState.get(this); if (!s) return;
       if (s.opened) await this.close();
-      await sendRequest("forgetDevice", { deviceId: s.deviceId });
+      await sendRequest("unpairDevice", { deviceId: s.deviceId });
     }, enumerable: true, configurable: true, writable: true },
     addEventListener: { value: function(type, listener) {
       const s = _devState.get(this);
@@ -341,10 +341,10 @@
     getDevices: { value: async function() {
       __webhid.logger.debug('getDevices');
       try {
-        const savedHashes = await getSavedDevices();
+        const pairedHashes = await getPairedDevices();
         const deviceCache = await getDeviceCache();
         const granted = [];
-        for (const hash of savedHashes) {
+        for (const hash of pairedHashes) {
           const device = deviceCache.get(hash);
           if (device) granted.push(getOrCreateDevice(device));
         }
@@ -361,7 +361,7 @@
           if (result.cancelled) { reject(new DOMException("No device selected", "NotFoundError")); return; }
           const devices = result.devices;
           if (!devices || devices.length === 0) { reject(new DOMException("No device selected", "NotFoundError")); return; }
-          for (const d of devices) saveDevice(d);
+          for (const d of devices) pairDevice(d);
           resolve(devices.map((d) => getOrCreateDevice(d)));
         };
         _bridgePort.postMessage({ __webhid_bridge: "req", id, action: "requestDevice", payload: { filters } });

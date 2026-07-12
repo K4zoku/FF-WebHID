@@ -6,7 +6,7 @@
 
   // Device Picker Modal Class
   class WebHIDDevicePicker {
-    #savedDevices = null;
+    #pairedDevices = null;
     #deviceGroups = {};
     #cssReady = null;
 
@@ -219,25 +219,25 @@
       deviceList.appendChild(div);
     }
 
-    async #getSavedDevices() {
-      if (this.#savedDevices !== null) {
-        return this.#savedDevices;
+    async #getPairedDevices() {
+      if (this.#pairedDevices !== null) {
+        return this.#pairedDevices;
       }
       try {
         const result = await browser.runtime.sendMessage({
-          action: "getSavedDevices",
+          action: "getPairedDevices",
           origin: window.location.origin,
         });
-        this.#savedDevices = result.hashes || [];
-        return this.#savedDevices;
+        this.#pairedDevices = result.hashes || [];
+        return this.#pairedDevices;
       } catch (error) {
         return [];
       }
     }
 
     async #deviceMatchesSaved(device) {
-      const savedIds = await this.#getSavedDevices();
-      return savedIds.includes(device.deviceId);
+      const pairedIds = await this.#getPairedDevices();
+      return pairedIds.includes(device.deviceId);
     }
 
     async #renderDevices() {
@@ -346,11 +346,11 @@
 
       (async () => {
         try {
-          const saved = await this.#getSavedDevices();
+          const paired = await this.#getPairedDevices();
           for (const d of devicesArr) {
-            if (!saved.includes(d.deviceId)) saved.push(d.deviceId);
+            if (!paired.includes(d.deviceId)) paired.push(d.deviceId);
           }
-          this.#savedDevices = saved;
+          this.#pairedDevices = paired;
         } catch (e) { /* ignore */ }
       })();
 
@@ -498,6 +498,13 @@
     } catch (e) {
       __webhid.logger.error('token refresh error:', e.message);
     }
+  }
+
+  async function _isDeviceAllowedForOrigin(origin, deviceId) {
+    if (!origin || !deviceId) return false;
+    const key = encodeURIComponent(origin);
+    const result = await browser.storage.local.get(key);
+    return (result[key] || []).includes(deviceId);
   }
 
   function _sendControlCommand(action, payload) {
@@ -917,6 +924,14 @@
     try {
       let response;
       let viaControlWs = false;
+      if (action === 'open') {
+        const origin = window.location.origin;
+        const allowed = await _isDeviceAllowedForOrigin(origin, payload.deviceId);
+        if (!allowed) {
+          _replyToPage({ __webhid_bridge: "res", id, result: { s: 403 } });
+          return;
+        }
+      }
       if (settings.controlPlane === 'ws' && _controlPort
           && (action === 'enumerate' || action === 'close' || action === 'open')) {
         response = await _sendControlCommand(action, payload || {});

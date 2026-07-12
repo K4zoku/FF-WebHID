@@ -390,7 +390,7 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
         .catch((e) => sendResponse({ s: 500 }));
       return true;
 
-    case 'getSavedDevices':
+    case 'getPairedDevices':
       (async () => {
         try {
           const key = encodeURIComponent(request.origin);
@@ -402,7 +402,7 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
       })();
       return true;
 
-    case 'saveDevice':
+    case 'pairDevice':
       (async () => {
         try {
           const key = encodeURIComponent(request.origin);
@@ -419,7 +419,7 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
       })();
       return true;
 
-    case 'forgetDevice':
+    case 'unpairDevice':
       (async () => {
         try {
           const origin = new URL(sender.tab?.url || 'http://localhost').origin;
