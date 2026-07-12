@@ -108,6 +108,12 @@
         } else {
           this.#onDeviceCancelled();
         }
+
+        const hide = () => {
+          this.dialog.style.display = "none";
+        };
+        this.dialog.addEventListener("transitionend", hide, { once: true });
+        setTimeout(hide, 300);
       });
 
       this.dialog.addEventListener("change", (e) => {
@@ -154,6 +160,7 @@
 
       if (typeof this.dialog.showModal === "function") {
         if (this.dialog.open) this.dialog.close();
+        this.dialog.style.display = "";
         this.dialog.showModal();
       } else {
         this.dialog.setAttribute("open", "");

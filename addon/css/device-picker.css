@@ -9,6 +9,7 @@
   margin: 0;
   border: none;
   background: var(--overlay);
+  display: flex;
   align-items: flex-start;
   justify-content: flex-start;
   padding: 8px 0 0 10px;
@@ -17,18 +18,12 @@
   opacity: 0;
   visibility: hidden;
   transition-property: opacity, visibility;
-  transition-behavior: allow-discrete;
   transition-duration: 0.2s;
 }
 
 .webhid-modal[open] {
-  display: flex;
   opacity: 1;
   visibility: visible;
-  @starting-style {
-    visibility: hidden;
-    opacity: 0;
-  }
 }
 
 .webhid-modal::backdrop {
@@ -45,17 +40,15 @@
   flex-direction: column;
   position: relative;
   filter: var(--shadow-drop);
-  transform: translateY(0);
-  opacity: 1;
+  transform: translateY(-8px);
+  opacity: 0;
   transition-property: transform, opacity;
   transition-duration: 0.2s;
 }
 
 .webhid-modal[open] .webhid-modal-form {
-  @starting-style {
-    transform: translateY(-8px);
-    opacity: 0;
-  }
+  transform: translateY(0);
+  opacity: 1;
 }
 
 .webhid-modal-form::before {
