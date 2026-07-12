@@ -224,7 +224,7 @@ async fn handle_websocket(
                     let mgr = Arc::clone(&device_mgr_for_receiver);
                     let dev_id = device_id_for_receiver;
                     tokio::spawn(async move {
-                        handle_client_text(&text, &mgr, dev_id, tx_clone, ws_port).await;
+                        handle_client_text(&text, &mgr, dev_id, tx_clone, ws_port, false).await;
                     });
                 }
                 Err(e) => {
@@ -350,7 +350,7 @@ async fn handle_control_ws(
                 let tx_clone = tx.clone();
                 let mgr = Arc::clone(&device_mgr);
                 tokio::spawn(async move {
-                    handle_client_text(&text, &mgr, 0, tx_clone, ws_port).await;
+                    handle_client_text(&text, &mgr, 0, tx_clone, ws_port, true).await;
                 });
             }
             Ok(Message::Ping(data)) => { let _ = tx.send(Message::Pong(data)); }
@@ -564,6 +564,7 @@ async fn handle_client_text(
     device_id: u32,
     tx: mpsc::UnboundedSender<Message>,
     ws_port: u16,
+    is_control: bool,
 ) {
     let req: serde_json::Value = match serde_json::from_str(text) {
         Ok(v) => v,
@@ -593,18 +594,22 @@ async fn handle_client_text(
             }
         }
         "open" => {
-            let req_dev_id = req.get("deviceId").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-            match device_mgr.open(req_dev_id) {
-                Ok((dev_id, session_token)) => serde_json::json!({
-                    "n": id, "s": 201, "i": dev_id,
-                    "t": session_token, "w": ws_port
-                }),
-                Err(e) => {
-                    let msg = e.to_string();
-                    let code = if msg.contains("open by") { 403 }
-                               else if msg.contains("not found") || msg.contains("No such") { 404 }
-                               else { 500 };
-                    serde_json::json!({ "n": id, "s": code })
+            if is_control {
+                serde_json::json!({ "n": id, "s": 403 })
+            } else {
+                let req_dev_id = req.get("deviceId").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                match device_mgr.open(req_dev_id) {
+                    Ok((dev_id, session_token)) => serde_json::json!({
+                        "n": id, "s": 201, "i": dev_id,
+                        "t": session_token, "w": ws_port
+                    }),
+                    Err(e) => {
+                        let msg = e.to_string();
+                        let code = if msg.contains("open by") { 403 }
+                                   else if msg.contains("not found") || msg.contains("No such") { 404 }
+                                   else { 500 };
+                        serde_json::json!({ "n": id, "s": code })
+                    }
                 }
             }
         }
