@@ -737,11 +737,19 @@
       _pendingPicker.set(tabId, req);
 
       if (req.mode === "window") {
+        const screenW = globalThis.screen?.availWidth || 1280;
+        const screenH = globalThis.screen?.availHeight || 720;
+        const winW = Math.min(380, screenW - 20);
+        const winH = Math.min(480, screenH - 80);
+        const left = Math.max(0, Math.round((screenW - winW) / 2));
+        const top = Math.max(0, Math.round((screenH - winH) / 2));
         browser.windows.create({
           type: "popup",
           url: "html/picker-popup.html",
-          width: 380,
-          height: 460,
+          width: winW,
+          height: winH,
+          left,
+          top,
         }).catch(() => {});
       } else {
         browser.pageAction.setIcon({ tabId, path: "icons/gamepad.alert.svg" });
