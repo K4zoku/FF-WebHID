@@ -62,6 +62,10 @@
     }
     if (event.data.__webhid_bridge === "settings") {
       settings.set(event.data.settings || {});
+      return;
+    }
+    if (event.data.__webhid_bridge === "evt") {
+      _dispatchDeviceEvent(event.data.event);
     }
   };
 
@@ -134,7 +138,11 @@
         const response = await sendRequest("open", { deviceId: s.deviceId, reportSize: s.maxInputReportSize + 3 });
         if (__webhid.http.isOk(response.s)) {
           s.opened = true;
-          __webhid.logger.info('open deviceId=' + s.deviceId + ' dataPlane=' + settings.dataPlane);
+          const dataChannel = new MessageChannel();
+          s.dataPort = dataChannel.port1;
+          s.dataPort.onmessage = (ev) => _onDataPortMessage(s, ev.data);
+          _bridgePort.postMessage({ __webhid_bridge: "req", id: 0, action: "data-port", payload: { deviceId: s.deviceId } }, [dataChannel.port2]);
+          __webhid.logger.info('open deviceId=' + s.deviceId);
           this.dispatchEvent(new Event("open"));
           return true;
         }
@@ -149,7 +157,7 @@
         const response = await sendRequest("close", { deviceId: s.deviceId });
         if (__webhid.http.isOk(response.s)) {
           s.opened = false;
-          if (s.port) { s.port.onmessage = null; s.port.close(); s.port = null; }
+          if (s.dataPort) { s.dataPort.onmessage = null; s.dataPort.close(); s.dataPort = null; }
           this.dispatchEvent(new Event("close"));
         } else { throw new Error("Failed to close device"); }
       } catch (error) { throw new DOMException(error.message, "InvalidStateError"); }
@@ -160,25 +168,39 @@
       const view = data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
       const buffer = view.slice();
       try {
-        const action = settings.dataPlane === 'nm' ? "sendreport" : "worker-send";
         __webhid.logger.debug('sendReport reportId=' + reportId + ' len=' + buffer.length);
-        if (settings.fireAndForget) { sendFireAndForget(action, { deviceId: s.deviceId, reportId, data: buffer }); return; }
-        const response = await sendRequest(action, { deviceId: s.deviceId, reportId, data: buffer });
-        if (__webhid.http.isOk(response.s)) return;
-        throw new Error("sendReport failed");
+        if (!s.dataPort) throw new Error("data port not connected");
+        const reqId = ++_reqId;
+        const msg = { type: 'send', reqId, reportId, data: buffer };
+        if (settings.fireAndForget) {
+          s.dataPort.postMessage(msg, [buffer.buffer]);
+          return;
+        }
+        return new Promise((resolve, reject) => {
+          s.dataPending = s.dataPending || new Map();
+          s.dataPending.set(reqId, { resolve: () => resolve(), reject: (e) => reject(new DOMException(e.message || e, "NetworkError")) });
+          s.dataPort.postMessage(msg, [buffer.buffer]);
+        });
       } catch (error) { throw new DOMException(error.message, "NetworkError"); }
     }, enumerable: true, configurable: true, writable: true },
     receiveFeatureReport: { value: async function(reportId) {
       const s = _devState.get(this); if (!s) throw new DOMException("Invalid state", "InvalidStateError");
       if (!s.opened) throw new DOMException("Device is not open", "InvalidStateError");
       try {
-        const action = settings.dataPlane === 'nm' ? "receivefeaturereport" : "worker-receiveFeature";
-        const response = await sendRequest(action, { deviceId: s.deviceId, reportId });
-        if (__webhid.http.isOk(response.s) && response.d) {
-          const buf = typeof response.d === 'string' ? Uint8Array.fromBase64(response.d) : response.d;
-          return new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
-        }
-        throw new Error("receiveFeatureReport failed");
+        if (!s.dataPort) throw new Error("data port not connected");
+        const reqId = ++_reqId;
+        return new Promise((resolve, reject) => {
+          s.dataPending = s.dataPending || new Map();
+          s.dataPending.set(reqId, {
+            resolve: (d) => {
+              if (!d) return resolve(new DataView(new ArrayBuffer(0)));
+              const buf = d instanceof Uint8Array ? d : new Uint8Array(d);
+              resolve(new DataView(buf.buffer, buf.byteOffset, buf.byteLength));
+            },
+            reject: (e) => reject(new DOMException(e.message || e, "NetworkError")),
+          });
+          s.dataPort.postMessage({ type: 'receiveFeature', reqId, reportId });
+        });
       } catch (error) { throw new DOMException(error.message, "NetworkError"); }
     }, enumerable: true, configurable: true, writable: true },
     sendFeatureReport: { value: async function(reportId, data) {
@@ -188,11 +210,18 @@
       const buffer = view.slice();
       __webhid.logger.debug('sendFeatureReport reportId=' + reportId + ' len=' + buffer.length);
       try {
-        const action = settings.dataPlane === 'nm' ? "sendfeaturereport" : "worker-sendFeature";
-        if (settings.fireAndForget) { sendFireAndForget(action, { deviceId: s.deviceId, reportId, data: buffer }); return undefined; }
-        const response = await sendRequest(action, { deviceId: s.deviceId, reportId, data: buffer });
-        if (__webhid.http.isOk(response.s)) return undefined;
-        throw new Error("sendFeatureReport failed");
+        if (!s.dataPort) throw new Error("data port not connected");
+        const reqId = ++_reqId;
+        const msg = { type: 'sendFeature', reqId, reportId, data: buffer };
+        if (settings.fireAndForget) {
+          s.dataPort.postMessage(msg, [buffer.buffer]);
+          return undefined;
+        }
+        return new Promise((resolve, reject) => {
+          s.dataPending = s.dataPending || new Map();
+          s.dataPending.set(reqId, { resolve: () => resolve(undefined), reject: (e) => reject(new DOMException(e.message || e, "NetworkError")) });
+          s.dataPort.postMessage(msg, [buffer.buffer]);
+        });
       } catch (error) { throw new DOMException(error.message, "NetworkError"); }
     }, enumerable: true, configurable: true, writable: true },
     forget: { value: async function() {
@@ -203,79 +232,69 @@
     addEventListener: { value: function(type, listener) {
       const s = _devState.get(this);
       if (s) s.et.addEventListener(type, listener);
-      if (type !== "inputreport") return;
-      if (!s) return;
-      if (s.wrappers.has(listener)) return;
-      const wrapper = (event) => {
-        if (!event.data || event.data.__webhid_bridge !== "evt") return;
-        const detail = event.data.event;
-        if (!detail) return;
-        const eventType = detail.eventType;
-        const evDeviceId = detail.deviceId;
-        if (eventType === "webhid-data-ready") {
-          if (detail.port && !s.port) {
-            s.port = detail.port;
-            s.port.onmessage = (portEvent) => {
-              const d = portEvent.data;
-              if (d.type !== 'inputReport') return;
-              if (s.deviceId && d.deviceId && d.deviceId !== s.deviceId) return;
-              const dataView = d.data ? new DataView(d.data) : new DataView(new ArrayBuffer(0));
-              this.dispatchEvent(new HIDInputReportEvent('inputreport', { device: this, reportId: d.reportId, data: dataView }));
-            };
-            __webhid.logger.info('MessagePort connected for device=' + s.deviceId);
-          }
-          return;
-        }
-        if (eventType === "input_report") {
-          if (evDeviceId && s.deviceId && evDeviceId !== s.deviceId) return;
-          let dataView;
-          if (typeof detail.data === 'string') {
-            const buf = Uint8Array.fromBase64(detail.data);
-            dataView = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
-          } else if (detail.data) {
-            dataView = new DataView(detail.data.buffer, detail.data.byteOffset, detail.data.byteLength);
-          } else { dataView = new DataView(new ArrayBuffer(0)); }
-          this.dispatchEvent(new HIDInputReportEvent('inputreport', { device: this, reportId: detail.reportId, data: dataView }));
-          return;
-        }
-        if (eventType === "disconnect") {
-          _deviceInfoCache = null;
-          this.dispatchEvent(new HIDConnectionEvent("disconnect", { device: this }));
-          return;
-        }
-      };
-      s.wrappers.set(listener, wrapper);
-      _bridgePort.addEventListener("message", wrapper);
     }, enumerable: true, configurable: true, writable: true },
     removeEventListener: { value: function(type, listener) {
       const s = _devState.get(this);
       if (s) s.et.removeEventListener(type, listener);
-      if (type !== "inputreport") return;
-      if (!s) return;
-      const wrapper = s.wrappers.get(listener);
-      if (!wrapper) return;
-      s.wrappers.delete(listener);
-      _bridgePort.removeEventListener("message", wrapper);
     }, enumerable: true, configurable: true, writable: true },
   });
+
+  function _dispatchDeviceEvent(detail) {
+    if (!detail) return;
+    if (detail.eventType === 'connect' || detail.eventType === 'disconnect') {
+      const dev = detail.deviceId ? _deviceRegistry.get(detail.deviceId) : null;
+      if (dev) {
+        if (detail.eventType === 'disconnect') _deviceInfoCache = null;
+        dev.dispatchEvent(new HIDConnectionEvent(detail.eventType, { device: dev }));
+      }
+      return;
+    }
+  }
+
+  function _onDataPortMessage(s, d) {
+    if (!d) return;
+    if (d.type === 'sendResult' || d.type === 'featureResult') {
+      const p = s.dataPending?.get(d.reqId);
+      if (!p) return;
+      s.dataPending.delete(d.reqId);
+      if (d.error) p.reject(new Error(d.error));
+      else if (d.type === 'featureResult') p.resolve(d.data);
+      else p.resolve();
+      return;
+    }
+    if (d.type === 'inputReport') {
+      const dataView = d.data ? new DataView(d.data) : new DataView(new ArrayBuffer(0));
+      const dev = s.self;
+      if (dev) dev.dispatchEvent(new HIDInputReportEvent('inputreport', { device: dev, reportId: d.reportId, data: dataView }));
+      return;
+    }
+    if (d.type === 'disconnect') {
+      _deviceInfoCache = null;
+      const dev = s.self;
+      if (dev) dev.dispatchEvent(new HIDConnectionEvent("disconnect", { device: dev }));
+      return;
+    }
+  }
 
   function _createHIDDevice(deviceInfo) {
     const obj = Object.create(HIDDevice.prototype);
     const _et = new EventTarget();
     obj.dispatchEvent = _et.dispatchEvent.bind(_et);
-    _devState.set(obj, {
+    const state = {
       et: _et,
+      self: obj,
       deviceId: deviceInfo.deviceId,
       vendorId: deviceInfo.vendorId,
       productId: deviceInfo.productId,
       productName: deviceInfo.productName,
       collections: deviceInfo.collections || [],
       opened: false,
-      port: null,
+      dataPort: null,
+      dataPending: null,
       maxInputReportSize: deviceInfo.maxInputReportSize || 64,
       oninputreport: null,
-      wrappers: new Map(),
-    });
+    };
+    _devState.set(obj, state);
     return obj;
   }
 

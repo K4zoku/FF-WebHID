@@ -382,7 +382,7 @@
   const _workerCallbacks = new Map();
   const _workerReady = new Set();
   const _workerQueues = new Map();
-  const _workerPorts = new Map();
+  const _dataPorts = new Map();
   let _wsPort = null;
   const settings = __webhid.createSettingsStore(__webhid.GLOBAL_DEFAULTS);
   let _controlWorker = null;
@@ -512,15 +512,45 @@
     });
   }
 
-  function _despawnDataPlane(deviceId) {
+  async function _despawnDataPlane(deviceId, { keepPort = false } = {}) {
     const gen = (_spawnGen.get(deviceId) || 0) + 1;
     _spawnGen.set(deviceId, gen);
     const worker = _workers.get(deviceId);
-    if (worker) { worker.terminate(); _workers.delete(deviceId); }
+    if (worker) {
+      const port = _dataPorts.get(deviceId);
+      if (port && keepPort) {
+        try { worker.postMessage({ type: 'unset-port' }); } catch {}
+        const returned = await new Promise((resolve) => {
+          let done = false;
+          const onMsg = (ev) => {
+            if (done) return;
+            if (ev.data && ev.data.type === 'return-port') {
+              done = true;
+              worker.onmessage = null;
+              resolve(ev.ports && ev.ports[0] || null);
+            }
+          };
+          worker.onmessage = onMsg;
+          setTimeout(() => { if (!done) { done = true; worker.onmessage = null; resolve(null); } }, 500);
+        });
+        if (returned) {
+          _dataPorts.set(deviceId, returned);
+          returned.onmessage = (e) => _onDataPortMessage(deviceId, e.data);
+        }
+      } else if (port) {
+        _dataPorts.delete(deviceId);
+        try { worker.postMessage({ type: 'unset-port' }); } catch {}
+        try { port.onmessage = null; port.close(); } catch {}
+      }
+      worker.terminate();
+      _workers.delete(deviceId);
+    } else if (!keepPort) {
+      const port = _dataPorts.get(deviceId);
+      if (port) { try { port.onmessage = null; port.close(); } catch {} _dataPorts.delete(deviceId); }
+    }
     _workerCallbacks.delete(deviceId);
     _workerReady.delete(deviceId);
     _workerQueues.delete(deviceId);
-    _workerPorts.delete(deviceId);
   }
 
   async function _refreshDataPlaneToken(deviceId) {
@@ -578,7 +608,7 @@
         worker.terminate();
         _workers.delete(deviceId);
         _workerReady.delete(deviceId);
-        _workerPorts.delete(deviceId);
+        _dataPorts.delete(deviceId);
         const queue = _workerQueues.get(deviceId);
         if (queue) {
           const cbMap = _workerCallbacks.get(deviceId);
@@ -611,14 +641,14 @@
             }
             _workerQueues.delete(deviceId);
           }
-          const { port1, port2 } = new MessageChannel();
-          worker.postMessage({ type: 'setPort' }, [port1]);
-          _workerPorts.set(deviceId, true);
-          __webhid.logger.info('MessageChannel created for', deviceId, '- input reports bypass bridge');
-          _replyToPage({
-            __webhid_bridge: 'evt',
-            event: { eventType: 'webhid-data-ready', deviceId: deviceId, port: port2 }
-          }, [port2]);
+          const port = _dataPorts.get(deviceId);
+          if (port) {
+            port.onmessage = null;
+            try { worker.postMessage({ type: 'set-port' }, [port]); } catch (e) {
+              __webhid.logger.warn('set-port transfer failed for', deviceId, ':', e.message);
+              port.onmessage = (e2) => _onDataPortMessage(deviceId, e2.data);
+            }
+          }
           resolveSpawn(true);
           return;
         }
@@ -626,7 +656,7 @@
           __webhid.logger.warn('worker auth-failed for', deviceId, 'code=' + data.code + '; re-opening');
           _workers.delete(deviceId);
           _workerReady.delete(deviceId);
-          _workerPorts.delete(deviceId);
+          _dataPorts.delete(deviceId);
           _refreshDataPlaneToken(deviceId);
           return;
         }
@@ -634,7 +664,7 @@
           __webhid.logger.warn('worker closed for', deviceId);
           _workers.delete(deviceId);
           _workerReady.delete(deviceId);
-          _workerPorts.delete(deviceId);
+          _dataPorts.delete(deviceId);
           _replyToPage({
             __webhid_bridge: 'evt',
             event: { eventType: 'disconnect', deviceId: deviceId }
@@ -642,7 +672,7 @@
           return;
         }
         if (data.type === 'inputReport') {
-          if (_workerPorts.has(deviceId)) return;
+          return;
           const view = data.data ? new Uint8Array(data.data) : null;
           if (view && __webhid.logger._level >= 3 && data.reportId !== 33) {
             let hex = '';
@@ -725,17 +755,38 @@
     const port = event.ports && event.ports[0];
     if (!port) return;
     _pagePort = port;
-    _pagePort.onmessage = (ev) => { handleRequest(ev.data); };
+    _pagePort.onmessage = (ev) => { handleRequest(ev.data, ev.ports); };
     __webhid.logger.debug('[bridge] page port established');
   });
 
-  async function handleRequest(data) {
+  async function handleRequest(data, ports) {
     if (!data || data.__webhid_bridge !== "req") return;
 
     const { id, action: reqAction, payload } = data;
     let action = reqAction;
     const isFireAndForget = data.fireAndForget === true;
     __webhid.logger.debug('req action=' + action + ' id=' + id + (isFireAndForget ? ' (faf)' : ''));
+
+    if (action === "data-port") {
+      const deviceId = payload.deviceId;
+      const port = ports && ports[0];
+      if (!deviceId || !port) {
+        __webhid.logger.warn('data-port: missing deviceId or port');
+        return;
+      }
+      _dataPorts.set(deviceId, port);
+      __webhid.logger.debug('data port received for device', deviceId);
+      const worker = _workers.get(deviceId);
+      if (worker && _workerReady.has(deviceId)) {
+        try { worker.postMessage({ type: 'set-port' }, [port]); } catch (e) {
+          __webhid.logger.warn('set-port transfer failed for', deviceId, ':', e.message);
+          port.onmessage = (ev) => _onDataPortMessage(deviceId, ev.data);
+        }
+      } else {
+        port.onmessage = (ev) => _onDataPortMessage(deviceId, ev.data);
+      }
+      return;
+    }
 
     if (action === "getSettings") {
       try {
@@ -926,9 +977,50 @@
   // Forward events pushed by background.js into the page world.
   browser.runtime.onMessage.addListener((message) => {
     if (message.action === "webhid-device-event" && message.event) {
-      _replyToPage({ __webhid_bridge: "evt", event: message.event });
+      const ev = message.event;
+      if (ev.eventType === 'input_report') {
+        const port = _dataPorts.get(ev.deviceId);
+        if (port) {
+          const view = ev.data;
+          const buf = view ? (view.buffer || view) : null;
+          try { port.postMessage({ type: 'inputReport', reportId: ev.reportId, data: buf }, buf ? [buf] : []); } catch {}
+          return;
+        }
+      }
+      if (ev.eventType === 'disconnect') {
+        const port = _dataPorts.get(ev.deviceId);
+        if (port) {
+          try { port.postMessage({ type: 'disconnect' }); } catch {}
+        }
+      }
+      _replyToPage({ __webhid_bridge: "evt", event: ev });
     }
   });
+
+  function _onDataPortMessage(deviceId, msg) {
+    if (!msg) return;
+    if (msg.type === 'send' || msg.type === 'sendFeature' || msg.type === 'receiveFeature') {
+      const action = msg.type === 'send' ? 'sendreport'
+                   : msg.type === 'sendFeature' ? 'sendfeaturereport'
+                   : 'receivefeaturereport';
+      const payload = { deviceId, reportId: msg.reportId };
+      if (msg.type === 'send' || msg.type === 'sendFeature') payload.data = msg.data;
+      const port = _dataPorts.get(deviceId);
+      const cb = (response) => {
+        if (!port) return;
+        if (msg.type === 'receiveFeature') {
+          const data = (response && __webhid.http.isOk(response.s) && response.d) ? response.d : null;
+          try { port.postMessage({ type: 'featureResult', reqId: msg.reqId, data: data || null }); } catch {}
+        } else {
+          const err = (response && !__webhid.http.isOk(response.s)) ? 'send failed' : null;
+          try { port.postMessage({ type: msg.type === 'send' ? 'sendResult' : 'featureResult', reqId: msg.reqId, error: err }); } catch {}
+        }
+      };
+      const m = Object.assign({ action }, payload);
+      browser.runtime.sendMessage(m).then(cb).catch(() => cb({ s: 500 }));
+      return;
+    }
+  }
 
   // ── Settings observer ─────────────────────────────────────────────
 
@@ -946,12 +1038,19 @@
     }
   }
 
-  function _applyDataPlane(dp) {
-    for (const id of _openDevices) { _despawnDataPlane(id); }
+  async function _applyDataPlane(dp) {
+    for (const id of _openDevices) { await _despawnDataPlane(id, { keepPort: true }); }
     if (dp === 'ws') {
       for (const id of _openDevices) {
         const token = _sessionTokens.get(id);
         if (token) _spawnDataPlane(id, token, _wsPort);
+      }
+    } else {
+      for (const id of _openDevices) {
+        const port = _dataPorts.get(id);
+        if (port && !port.onmessage) {
+          port.onmessage = (ev) => _onDataPortMessage(id, ev.data);
+        }
       }
     }
     for (const id of _openDevices) {

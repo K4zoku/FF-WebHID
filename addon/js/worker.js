@@ -9,8 +9,8 @@ const settings = __webhid.createSettingsStore(self.__webhid.GLOBAL_DEFAULTS);
 settings.on('logLevel', (v) => logger.applyLevel(v));
 let _nextReqId = 1;
 const _pending = new Map();
-let _port = null;
 let _transport = null;
+let _dataPort = null;
 
 self.onmessage = ({ data: msg, ports }) => {
   if (msg.type === 'connect') {
@@ -27,19 +27,35 @@ self.onmessage = ({ data: msg, ports }) => {
     _transport.connect(msg);
     return;
   }
-  if (msg.type === 'setPort') {
-    _port = ports[0];
-    logger.debug('received MessagePort for direct input reports');
+  if (msg.type === 'set-port') {
+    _dataPort = ports[0];
+    _dataPort.onmessage = (ev) => handleDataPortMessage(ev.data);
+    logger.debug('data port received from bridge');
+    return;
+  }
+  if (msg.type === 'unset-port') {
+    if (_dataPort) {
+      const port = _dataPort;
+      _dataPort.onmessage = null;
+      _dataPort = null;
+      self.postMessage({ type: 'return-port' }, [port]);
+    } else {
+      self.postMessage({ type: 'return-port' });
+    }
     return;
   }
   if (msg.type === 'settings') {
     settings.set(msg);
     return;
   }
+};
+
+function handleDataPortMessage(msg) {
+  if (!msg) return;
   if (msg.type === 'send') return handleSend(msg, MSG_SEND_REPORT);
   if (msg.type === 'sendFeature') return handleSend(msg, MSG_SEND_FEATURE_REPORT);
   if (msg.type === 'receiveFeature') return handleReceiveFeature(msg);
-};
+}
 
 function pushInputBatch(batch) {
   let offset = 0, count = 0;
@@ -58,33 +74,29 @@ function pushInputBatch(batch) {
         for (let i = 0; i < Math.min(8, view.length); i++) hex += view[i].toString(16).padStart(2, '0') + ' ';
         logger.debug('inputReport reportId=' + reportId + ' len=' + payloadLen + ' first8=' + hex);
       }
-      if (_port) {
-        _port.postMessage({ type: 'inputReport', reportId, data: buf }, [buf]);
-      } else {
-        self.postMessage({ type: 'inputReport', reportId, data: buf }, [buf]);
+      if (_dataPort) {
+        _dataPort.postMessage({ type: 'inputReport', reportId, data: buf }, [buf]);
       }
     } else {
-      if (_port) {
-        _port.postMessage({ type: 'inputReport', reportId, data: null });
-      } else {
-        self.postMessage({ type: 'inputReport', reportId, data: null });
+      if (_dataPort) {
+        _dataPort.postMessage({ type: 'inputReport', reportId, data: null });
       }
     }
     offset += len;
     count++;
   }
-  if (count > 0) logger.debug('forwarded ' + count + ' reports via ' + (_port ? 'MessagePort' : 'postMessage'));
+  if (count > 0) logger.debug('forwarded ' + count + ' reports via data port');
 }
 
 function handleSend(msg, msgType) {
   if (!_transport || !_transport.isOpen()) {
     logger.warn('send: WS not open');
-    self.postMessage({ type: 'sendResult', reqId: msg.reqId, error: 'ws not open' });
+    replyData({ type: msgType === MSG_SEND_REPORT ? 'sendResult' : 'featureResult', reqId: msg.reqId, error: 'ws not open' });
     return;
   }
   const payload = msg.data;
   if (!(payload instanceof Uint8Array)) {
-    self.postMessage({ type: 'sendResult', reqId: msg.reqId, error: 'bad payload' });
+    replyData({ type: msgType === MSG_SEND_REPORT ? 'sendResult' : 'featureResult', reqId: msg.reqId, error: 'bad payload' });
     return;
   }
   const reqId = _nextReqId++;
@@ -94,21 +106,22 @@ function handleSend(msg, msgType) {
   dv.setUint32(1, reqId, true);
   frame[5] = msg.reportId;
   frame.set(payload, 6);
+  const isFeature = msgType !== MSG_SEND_REPORT;
   if (settings.fireAndForget) {
     _transport.send(frame);
-    self.postMessage({ type: 'sendResult', reqId: msg.reqId, success: true });
+    replyData({ type: isFeature ? 'featureResult' : 'sendResult', reqId: msg.reqId });
     return;
   }
   _pending.set(reqId, {
-    resolve: () => self.postMessage({ type: 'sendResult', reqId: msg.reqId, success: true }),
-    reject: (e) => self.postMessage({ type: 'sendResult', reqId: msg.reqId, error: String(e.message || e) }),
+    resolve: () => replyData({ type: isFeature ? 'featureResult' : 'sendResult', reqId: msg.reqId }),
+    reject: (e) => replyData({ type: isFeature ? 'featureResult' : 'sendResult', reqId: msg.reqId, error: String(e.message || e) }),
   });
   _transport.send(frame);
 }
 
 function handleReceiveFeature(msg) {
   if (!_transport || !_transport.isOpen()) {
-    self.postMessage({ type: 'featureResult', reqId: msg.reqId, error: 'ws not open' });
+    replyData({ type: 'featureResult', reqId: msg.reqId, error: 'ws not open' });
     return;
   }
   const reqId = _nextReqId++;
@@ -119,12 +132,16 @@ function handleReceiveFeature(msg) {
   frame[5] = msg.reportId;
   _pending.set(reqId, {
     resolve: (data) => {
-      const transfer = (data instanceof Uint8Array) ? [data.buffer] : [];
-      self.postMessage({ type: 'featureResult', reqId: msg.reqId, data }, transfer);
+      const transfer = (data instanceof Uint8Array && data.buffer) ? [data.buffer] : [];
+      replyData({ type: 'featureResult', reqId: msg.reqId, data }, transfer);
     },
-    reject: (e) => self.postMessage({ type: 'featureResult', reqId: msg.reqId, error: String(e.message || e) }),
+    reject: (e) => replyData({ type: 'featureResult', reqId: msg.reqId, error: String(e.message || e) }),
   });
   _transport.send(frame);
+}
+
+function replyData(msg, transfer) {
+  if (_dataPort) _dataPort.postMessage(msg, transfer || []);
 }
 
 function handleControlResponse(batch) {
