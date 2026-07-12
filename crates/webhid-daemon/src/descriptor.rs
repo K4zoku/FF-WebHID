@@ -5,11 +5,11 @@
 //! collections tree matching Chromium's `HIDDevice.collections` exactly.
 
 use hidreport::{
-    ReportDescriptor, Field, FieldAttributes,
-    Collection as HidCollection, UnitSystem, Units, Usage, VariableField,
+    Collection as HidCollection, Field, FieldAttributes, ReportDescriptor, UnitSystem, Units,
+    Usage, VariableField,
 };
 use std::collections::HashMap;
-use webhid::types::{Collection, Report, Field as WebHidField};
+use webhid::types::{Collection, Field as WebHidField, Report};
 
 /// Parse a raw HID report descriptor into a Chromium-shaped collections tree.
 pub fn parse_report_descriptor(bytes: &[u8]) -> Vec<Collection> {
@@ -179,9 +179,10 @@ fn detect_contiguous_range(usages: Vec<u32>) -> (Vec<u32>, bool, Option<u32>, Op
         let page = (usages[0] >> 16) as u16;
         let lo = (usages[0] & 0xFFFF) as u16;
         let same_page = usages.iter().all(|u| ((*u >> 16) as u16) == page);
-        let sequential = usages.iter().enumerate().all(|(i, u)| {
-            ((*u & 0xFFFF) as u16) == lo.saturating_add(i as u16)
-        });
+        let sequential = usages
+            .iter()
+            .enumerate()
+            .all(|(i, u)| ((*u & 0xFFFF) as u16) == lo.saturating_add(i as u16));
         if same_page && sequential {
             let hi = lo + (usages.len() as u16) - 1;
             let lo_packed = ((page as u32) << 16) | (lo as u32);
@@ -214,7 +215,11 @@ fn make_array_field(a: &hidreport::ArrayField) -> WebHidField {
     let count: usize = a.report_count.into();
     let count_u32 = count as u32;
     let total_bits = (a.bits.end - a.bits.start) as u32;
-    let per_item_bits = if count > 0 { total_bits / count_u32 } else { total_bits };
+    let per_item_bits = if count > 0 {
+        total_bits / count_u32
+    } else {
+        total_bits
+    };
 
     WebHidField {
         usages,
@@ -332,28 +337,38 @@ impl CollectionTreeBuilder {
                 let collection_type: u8 = col.collection_type().into();
                 let usage_page = col.usages().first().map(|u| u.usage_page.into());
                 let usage = col.usages().first().map(|u| u.usage_id.into());
-                self.nodes.insert(id_str, ColNode {
-                    collection_type,
-                    usage_page,
-                    usage,
-                    children: Vec::new(),
-                    input_reports: Vec::new(),
-                    output_reports: Vec::new(),
-                    feature_reports: Vec::new(),
-                });
+                self.nodes.insert(
+                    id_str,
+                    ColNode {
+                        collection_type,
+                        usage_page,
+                        usage,
+                        children: Vec::new(),
+                        input_reports: Vec::new(),
+                        output_reports: Vec::new(),
+                        feature_reports: Vec::new(),
+                    },
+                );
             }
         }
     }
 
     fn add_report(&mut self, report: &impl hidreport::Report, rtype: &str) {
-        let rid: u8 = report.report_id().as_ref().map(|id| (*id).into()).unwrap_or(0);
+        let rid: u8 = report
+            .report_id()
+            .as_ref()
+            .map(|id| (*id).into())
+            .unwrap_or(0);
         let items = convert_fields_aggregate(report.fields());
 
         if items.is_empty() {
             return;
         }
 
-        let web_report = Report { report_id: rid, items };
+        let web_report = Report {
+            report_id: rid,
+            items,
+        };
 
         let chain: &[HidCollection] = report
             .fields()
@@ -410,7 +425,11 @@ impl CollectionTreeBuilder {
             collection_type: n.collection_type,
             usage_page: n.usage_page,
             usage: n.usage,
-            children: n.children.iter().filter_map(|c| self.build_node(c)).collect(),
+            children: n
+                .children
+                .iter()
+                .filter_map(|c| self.build_node(c))
+                .collect(),
             input_reports: n.input_reports.clone(),
             output_reports: n.output_reports.clone(),
             feature_reports: n.feature_reports.clone(),
@@ -426,7 +445,9 @@ pub fn max_input_report_size(collections: &[Collection]) -> u32 {
         let mut max = 0u32;
         for c in collections {
             for r in &c.input_reports {
-                let bits: u32 = r.items.iter()
+                let bits: u32 = r
+                    .items
+                    .iter()
                     .map(|f| f.report_size.saturating_mul(f.report_count))
                     .fold(0u32, |a, b| a.saturating_add(b));
                 let bytes = bits.div_ceil(8);

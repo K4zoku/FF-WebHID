@@ -5,10 +5,10 @@ use anyhow::Context as _;
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::TcpListener;
 use tokio::sync::{broadcast, mpsc};
+use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
 use tokio_tungstenite::tungstenite::http::StatusCode;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
-use tokio_tungstenite::tungstenite::Message;
 
 // Custom WebSocket close codes (4xxx range = application-defined).
 // 4401: token unknown (daemon restarted / session invalidated)
@@ -89,11 +89,16 @@ pub async fn start_server(
                 if let Err(e) = &nodelay {
                     log::warn!("[ws] set_nodelay failed for {addr}: {e}");
                 }
-                log::info!("[ws] client connected from {addr} (TCP_NODELAY={})", if nodelay.is_ok() { "on" } else { "off" });
+                log::info!(
+                    "[ws] client connected from {addr} (TCP_NODELAY={})",
+                    if nodelay.is_ok() { "on" } else { "off" }
+                );
                 let event_tx_clone = event_tx.clone();
                 let device_mgr_clone = Arc::clone(&device_mgr);
                 tokio::spawn(async move {
-                    if let Err(e) = handle_websocket(stream, event_tx_clone, device_mgr_clone, port).await {
+                    if let Err(e) =
+                        handle_websocket(stream, event_tx_clone, device_mgr_clone, port).await
+                    {
                         log::warn!("[ws] {addr} error: {e:#}");
                     }
                 });
@@ -111,35 +116,39 @@ async fn handle_websocket(
     ws_port: u16,
 ) -> anyhow::Result<()> {
     // Capture the session token from the HTTP upgrade request.
-    let token_holder: Arc<std::sync::Mutex<Option<String>>> =
-        Arc::new(std::sync::Mutex::new(None));
+    let token_holder: Arc<std::sync::Mutex<Option<String>>> = Arc::new(std::sync::Mutex::new(None));
     let token_ref = Arc::clone(&token_holder);
 
-    let ws_stream = tokio_tungstenite::accept_hdr_async(stream, move |req: &Request, res: Response| {
-        let host = req.uri().host().unwrap_or("");
-        let is_loopback = host.is_empty() || host == "127.0.0.1" || host == "localhost" || host == "::1";
-        if !is_loopback {
-            log::warn!("[ws] rejected connection from host: {host}");
-            let resp = Response::builder()
-                .status(StatusCode::FORBIDDEN)
-                .body(Some("Access denied".into()))
-                .unwrap();
-            return Err(resp);
-        }
-        // Read token from Sec-WebSocket-Protocol header (subprotocol).
-        let token = req.headers().get("sec-websocket-protocol")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|s| s.strip_prefix("webhid."))
-            .map(String::from);
-        let mut holder = token_ref.lock().unwrap();
-        *holder = token;
-        let mut res = res;
-        if let Some(proto) = req.headers().get("sec-websocket-protocol") {
-            res.headers_mut().insert("sec-websocket-protocol", proto.clone());
-        }
-        Ok(res)
-    })
-    .await;
+    let ws_stream =
+        tokio_tungstenite::accept_hdr_async(stream, move |req: &Request, res: Response| {
+            let host = req.uri().host().unwrap_or("");
+            let is_loopback =
+                host.is_empty() || host == "127.0.0.1" || host == "localhost" || host == "::1";
+            if !is_loopback {
+                log::warn!("[ws] rejected connection from host: {host}");
+                let resp = Response::builder()
+                    .status(StatusCode::FORBIDDEN)
+                    .body(Some("Access denied".into()))
+                    .unwrap();
+                return Err(resp);
+            }
+            // Read token from Sec-WebSocket-Protocol header (subprotocol).
+            let token = req
+                .headers()
+                .get("sec-websocket-protocol")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.strip_prefix("webhid."))
+                .map(String::from);
+            let mut holder = token_ref.lock().unwrap();
+            *holder = token;
+            let mut res = res;
+            if let Some(proto) = req.headers().get("sec-websocket-protocol") {
+                res.headers_mut()
+                    .insert("sec-websocket-protocol", proto.clone());
+            }
+            Ok(res)
+        })
+        .await;
 
     let ws_stream = match ws_stream {
         Ok(s) => s,
@@ -278,12 +287,22 @@ async fn handle_websocket(
         loop {
             // 1. Block for first event.
             let event_result = event_rx.recv().await;
-            if !handle_event(event_result, device_id_for_sender, &mut batch, &tx_for_sender) {
+            if !handle_event(
+                event_result,
+                device_id_for_sender,
+                &mut batch,
+                &tx_for_sender,
+            ) {
                 break;
             }
 
             // 2. Drain immediately-available events.
-            drain_available(&mut event_rx, device_id_for_sender, &mut batch, &tx_for_sender);
+            drain_available(
+                &mut event_rx,
+                device_id_for_sender,
+                &mut batch,
+                &tx_for_sender,
+            );
 
             // 3. Burst coalescing: if multiple reports accumulated, wait
             //    briefly for more before flushing.
@@ -340,7 +359,9 @@ async fn handle_control_ws(
 
     let outgoing = tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
-            if ws_sender.send(msg).await.is_err() { break; }
+            if ws_sender.send(msg).await.is_err() {
+                break;
+            }
         }
     });
 
@@ -353,12 +374,17 @@ async fn handle_control_ws(
                     handle_client_text(&text, &mgr, 0, tx_clone, ws_port).await;
                 });
             }
-            Ok(Message::Ping(data)) => { let _ = tx.send(Message::Pong(data)); }
+            Ok(Message::Ping(data)) => {
+                let _ = tx.send(Message::Pong(data));
+            }
             Ok(Message::Close(_)) => break,
             Ok(Message::Binary(_)) => {
                 log::warn!("[ws-control] binary frames not allowed on control connection");
             }
-            Err(e) => { log::warn!("[ws-control] read error: {e}"); break; }
+            Err(e) => {
+                log::warn!("[ws-control] read error: {e}");
+                break;
+            }
             _ => {}
         }
     }
@@ -476,7 +502,10 @@ async fn handle_client_binary(
     let msg_type = frame[0];
 
     if frame.len() < 5 {
-        log::warn!("[ws] short frame (len={}, need ≥5 for type+req_id)", frame.len());
+        log::warn!(
+            "[ws] short frame (len={}, need ≥5 for type+req_id)",
+            frame.len()
+        );
         return;
     }
     let req_id = u32::from_le_bytes([frame[1], frame[2], frame[3], frame[4]]);
@@ -485,7 +514,11 @@ async fn handle_client_binary(
         MSG_SEND_REPORT | MSG_SEND_FEATURE_REPORT => {
             // [type][req_id_u32 LE][report_id_u8][...payload]
             if frame.len() < 6 {
-                let resp_type = if msg_type == MSG_SEND_REPORT { RESP_SEND_REPORT } else { RESP_SEND_FEATURE_REPORT };
+                let resp_type = if msg_type == MSG_SEND_REPORT {
+                    RESP_SEND_REPORT
+                } else {
+                    RESP_SEND_FEATURE_REPORT
+                };
                 let _ = tx.send(make_status_resp(resp_type, req_id, 1));
                 return;
             }
@@ -496,7 +529,11 @@ async fn handle_client_binary(
                 Ok(f) => f,
                 Err(e) => {
                     log::warn!("[ws] get_file '{device_id}': {e}");
-                    let resp_type = if msg_type == MSG_SEND_REPORT { RESP_SEND_REPORT } else { RESP_SEND_FEATURE_REPORT };
+                    let resp_type = if msg_type == MSG_SEND_REPORT {
+                        RESP_SEND_REPORT
+                    } else {
+                        RESP_SEND_FEATURE_REPORT
+                    };
                     let _ = tx.send(make_status_resp(resp_type, req_id, 1));
                     return;
                 }
@@ -512,8 +549,15 @@ async fn handle_client_binary(
             })
             .await;
 
-            let status = match result { Ok(Ok(())) => 0u8, _ => 1u8 };
-            let resp_type = if msg_type == MSG_SEND_REPORT { RESP_SEND_REPORT } else { RESP_SEND_FEATURE_REPORT };
+            let status = match result {
+                Ok(Ok(())) => 0u8,
+                _ => 1u8,
+            };
+            let resp_type = if msg_type == MSG_SEND_REPORT {
+                RESP_SEND_REPORT
+            } else {
+                RESP_SEND_FEATURE_REPORT
+            };
             let _ = tx.send(make_status_resp(resp_type, req_id, status));
         }
 
@@ -569,7 +613,9 @@ async fn handle_client_text(
         Ok(v) => v,
         Err(e) => {
             let _ = tx.send(Message::Text(
-                serde_json::json!({ "err": format!("JSON parse: {e}") }).to_string().into(),
+                serde_json::json!({ "err": format!("JSON parse: {e}") })
+                    .to_string()
+                    .into(),
             ));
             return;
         }
@@ -579,14 +625,15 @@ async fn handle_client_text(
     let action = req.get("action").and_then(|v| v.as_str()).unwrap_or("");
 
     let result = match action {
-        "enumerate" => {
-            match device_mgr.enumerate() {
-                Ok(devices) => serde_json::json!({ "n": id, "s": 200, "D": devices }),
-                Err(_) => serde_json::json!({ "n": id, "s": 500 }),
-            }
-        }
+        "enumerate" => match device_mgr.enumerate() {
+            Ok(devices) => serde_json::json!({ "n": id, "s": 200, "D": devices }),
+            Err(_) => serde_json::json!({ "n": id, "s": 500 }),
+        },
         "close" => {
-            let req_dev_id = req.get("deviceId").and_then(|v| v.as_u64()).unwrap_or(device_id as u64) as u32;
+            let req_dev_id = req
+                .get("deviceId")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(device_id as u64) as u32;
             match device_mgr.close(req_dev_id) {
                 Ok(()) => serde_json::json!({ "n": id, "s": 204 }),
                 Err(_) => serde_json::json!({ "n": id, "s": 404 }),
@@ -601,9 +648,13 @@ async fn handle_client_text(
                 }),
                 Err(e) => {
                     let msg = e.to_string();
-                    let code = if msg.contains("open by") { 403 }
-                               else if msg.contains("not found") || msg.contains("No such") { 404 }
-                               else { 500 };
+                    let code = if msg.contains("open by") {
+                        403
+                    } else if msg.contains("not found") || msg.contains("No such") {
+                        404
+                    } else {
+                        500
+                    };
                     serde_json::json!({ "n": id, "s": code })
                 }
             }
@@ -648,10 +699,12 @@ async fn send_close(
 ) -> Result<(), tokio_tungstenite::tungstenite::Error> {
     use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode as Cc;
     let (mut sender, mut receiver) = ws_stream.split();
-    let _ = sender.send(Message::Close(Some(CloseFrame {
-        code: Cc::from(code),
-        reason: reason.into(),
-    }))).await;
+    let _ = sender
+        .send(Message::Close(Some(CloseFrame {
+            code: Cc::from(code),
+            reason: reason.into(),
+        })))
+        .await;
     // Drain any incoming frames until the client acknowledges the close.
     while receiver.next().await.is_some() {}
     Ok(())
@@ -685,7 +738,10 @@ mod tests {
         ];
         let frame = create_batch_frame(&reports);
         // [2, 0, 0x01, 0xAA, 3, 0, 0x02, 0xBB, 0xCC]
-        assert_eq!(frame, vec![0x02, 0x00, 0x01, 0xAA, 0x03, 0x00, 0x02, 0xBB, 0xCC]);
+        assert_eq!(
+            frame,
+            vec![0x02, 0x00, 0x01, 0xAA, 0x03, 0x00, 0x02, 0xBB, 0xCC]
+        );
     }
 
     #[test]
@@ -714,7 +770,10 @@ mod tests {
     #[test]
     fn test_status_resp_large_req_id() {
         let msg = make_status_resp(0x81, 0xDEAD, 0);
-        assert_eq!(msg, Message::Binary(vec![0x81, 0xAD, 0xDE, 0x00, 0x00, 0x00].into()));
+        assert_eq!(
+            msg,
+            Message::Binary(vec![0x81, 0xAD, 0xDE, 0x00, 0x00, 0x00].into())
+        );
     }
 
     // ── make_feature_read_resp ──────────────────────────────────────────
@@ -731,10 +790,7 @@ mod tests {
     #[test]
     fn test_feature_read_resp_error() {
         let msg = make_feature_read_resp(7, 1, &[]);
-        assert_eq!(
-            msg,
-            Message::Binary(vec![0x83, 7, 0, 0, 0, 1, 0, 0].into())
-        );
+        assert_eq!(msg, Message::Binary(vec![0x83, 7, 0, 0, 0, 1, 0, 0].into()));
     }
 
     #[test]

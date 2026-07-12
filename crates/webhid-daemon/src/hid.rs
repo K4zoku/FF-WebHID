@@ -1,7 +1,6 @@
 //! HID device access via hidapi (cross-platform) + udev hot-plug (Linux).
 
-
-use hidapi::{HidApi, HidDevice, DeviceInfo as HidDeviceInfo};
+use hidapi::{DeviceInfo as HidDeviceInfo, HidApi, HidDevice};
 use std::cell::RefCell;
 use webhid::DeviceInfo;
 
@@ -70,16 +69,23 @@ pub fn make_device_id_from_devnode(devnode: &str) -> u32 {
 pub fn enumerate() -> anyhow::Result<Vec<DeviceInfo>> {
     let api = HidApi::new()?;
 
-    let mut groups: std::collections::HashMap<(u16, u16, String), Vec<&HidDeviceInfo>> = std::collections::HashMap::new();
+    let mut groups: std::collections::HashMap<(u16, u16, String), Vec<&HidDeviceInfo>> =
+        std::collections::HashMap::new();
     for info in api.device_list() {
-        if is_blocked_pub(info) { continue; }
+        if is_blocked_pub(info) {
+            continue;
+        }
         let serial = info.serial_number().unwrap_or("").to_string();
-        groups.entry((info.vendor_id(), info.product_id(), serial)).or_default().push(info);
+        groups
+            .entry((info.vendor_id(), info.product_id(), serial))
+            .or_default()
+            .push(info);
     }
 
     let mut devices = Vec::new();
     for ifaces in groups.values() {
-        let mut seen_descriptors: std::collections::HashSet<Vec<u8>> = std::collections::HashSet::new();
+        let mut seen_descriptors: std::collections::HashSet<Vec<u8>> =
+            std::collections::HashSet::new();
         for info in ifaces {
             let desc = read_raw_report_descriptor_with_api(&api, info);
             if !seen_descriptors.insert(desc.clone()) {
@@ -121,14 +127,20 @@ fn info_from_hidapi_pub_with_desc(info: &HidDeviceInfo, desc: Vec<u8>) -> Option
 }
 
 fn read_raw_report_descriptor(info: &HidDeviceInfo) -> Vec<u8> {
-    let Ok(api) = HidApi::new() else { return Vec::new() };
+    let Ok(api) = HidApi::new() else {
+        return Vec::new();
+    };
     read_raw_report_descriptor_with_api(&api, info)
 }
 
 fn read_raw_report_descriptor_with_api(api: &HidApi, info: &HidDeviceInfo) -> Vec<u8> {
-    let Ok(dev) = api.open_path(info.path()) else { return Vec::new() };
+    let Ok(dev) = api.open_path(info.path()) else {
+        return Vec::new();
+    };
     let mut buf = vec![0u8; hidapi::MAX_REPORT_DESCRIPTOR_SIZE];
-    let Ok(n) = dev.get_report_descriptor(&mut buf) else { return Vec::new() };
+    let Ok(n) = dev.get_report_descriptor(&mut buf) else {
+        return Vec::new();
+    };
     buf.truncate(n);
     buf
 }
@@ -159,8 +171,12 @@ const FIDO_USAGE_PAGE: u16 = 0xF1D0;
 /// Returns true if a device should be blocked from WebHID access.
 pub fn is_blocked_pub(info: &HidDeviceInfo) -> bool {
     let vid = info.vendor_id();
-    if BLOCKED_VIDS.contains(&vid) { return true; }
-    if info.usage_page() == FIDO_USAGE_PAGE { return true; }
+    if BLOCKED_VIDS.contains(&vid) {
+        return true;
+    }
+    if info.usage_page() == FIDO_USAGE_PAGE {
+        return true;
+    }
     false
 }
 
@@ -173,7 +189,9 @@ pub fn is_blocked_pub(info: &HidDeviceInfo) -> bool {
 pub fn open_by_device_id(device_id: u32) -> anyhow::Result<(DeviceInfo, bool, HidDevice)> {
     let api = HidApi::new()?;
     for info in api.device_list() {
-        if is_blocked_pub(info) { continue; }
+        if is_blocked_pub(info) {
+            continue;
+        }
         if make_device_id(info) == device_id {
             let desc = read_raw_report_descriptor_with_api(&api, info);
             let device_info = info_from_hidapi_pub_with_desc(info, desc.clone())
@@ -197,14 +215,22 @@ pub fn uses_numbered_reports(buf: &[u8]) -> bool {
     while i < buf.len() {
         let prefix = buf[i];
         if prefix == 0xFE {
-            if i + 1 >= buf.len() { break; }
+            if i + 1 >= buf.len() {
+                break;
+            }
             let data_size = buf[i + 1] as usize;
             i = i.saturating_add(3).saturating_add(data_size);
             continue;
         }
-        if (prefix & 0xFC) == 0x84 { return true; }
+        if (prefix & 0xFC) == 0x84 {
+            return true;
+        }
         let payload = match prefix & 0x03 {
-            0 => 0, 1 => 1, 2 => 2, 3 => 4, _ => unreachable!(),
+            0 => 0,
+            1 => 1,
+            2 => 2,
+            3 => 4,
+            _ => unreachable!(),
         };
         i = i.saturating_add(1).saturating_add(payload);
     }
@@ -213,15 +239,23 @@ pub fn uses_numbered_reports(buf: &[u8]) -> bool {
 
 /// Block until a HID input report is available (or `timeout_ms` expires).
 /// hidapi's `read_timeout` handles polling internally.
-pub fn read_with_timeout(dev: &HidDevice, timeout_ms: i32, buf_size: usize) -> std::io::Result<Vec<u8>> {
+pub fn read_with_timeout(
+    dev: &HidDevice,
+    timeout_ms: i32,
+    buf_size: usize,
+) -> std::io::Result<Vec<u8>> {
     READ_BUF.with(|buf| {
         let mut buf = buf.borrow_mut();
         let size = buf_size.max(DEFAULT_READ_SIZE);
         buf.resize(size, 0);
-        let n = dev.read_timeout(&mut buf, timeout_ms)
+        let n = dev
+            .read_timeout(&mut buf, timeout_ms)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
         if n == 0 {
-            return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "HID read timed out"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "HID read timed out",
+            ));
         }
         Ok(buf[..n].to_vec())
     })
@@ -234,7 +268,8 @@ pub fn write_report(dev: &HidDevice, report_id: u8, payload: &[u8]) -> std::io::
         buf.clear();
         buf.push(report_id);
         buf.extend_from_slice(payload);
-        let n = dev.write(&buf)
+        let n = dev
+            .write(&buf)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
         if n != buf.len() {
             return Err(std::io::Error::new(
@@ -253,7 +288,8 @@ pub fn read_feature_report(dev: &HidDevice, report_id: u8) -> std::io::Result<Ve
         let mut buf = buf.borrow_mut();
         buf.resize(DEFAULT_READ_SIZE, 0);
         buf[0] = report_id;
-        let n = dev.get_feature_report(&mut buf)
+        let n = dev
+            .get_feature_report(&mut buf)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
         Ok(buf[..n].to_vec())
     })
@@ -279,7 +315,9 @@ pub fn info_by_raw_path(raw_path: &str) -> Option<DeviceInfo> {
     let api = HidApi::new().ok()?;
     for info in api.device_list() {
         if info.path().to_string_lossy() == raw_path {
-            if is_blocked_pub(info) { return None; }
+            if is_blocked_pub(info) {
+                return None;
+            }
             return info_from_hidapi_pub(info);
         }
     }
@@ -310,7 +348,7 @@ mod tests {
             0x75, 0x08, // Report Size (8)
             0x95, 0x03, // Report Count (3)
             0x81, 0x02, // Input (Data,Var,Abs)
-            0xC0,       // End Collection
+            0xC0, // End Collection
         ];
         assert!(!uses_numbered_reports(&desc));
     }
@@ -327,7 +365,7 @@ mod tests {
             0x75, 0x08, // Report Size (8)
             0x95, 0x03, // Report Count (3)
             0x81, 0x02, // Input (Data,Var,Abs)
-            0xC0,       // End Collection
+            0xC0, // End Collection
         ];
         assert!(uses_numbered_reports(&desc));
     }
@@ -338,13 +376,13 @@ mod tests {
         // Long item: 0xFE, data_size, tag, data...
         let desc = vec![
             0xFE, 0x02, 0x00, 0x00, 0x00, // Long item with 2 data bytes (all zero)
-            0x05, 0x01,                    // Usage Page (Generic Desktop)
-            0x09, 0x02,                    // Usage (Mouse)
-            0xA1, 0x01,                    // Collection
-            0x75, 0x08,                    // Report Size
-            0x95, 0x01,                    // Report Count
-            0x81, 0x02,                    // Input
-            0xC0,                          // End Collection
+            0x05, 0x01, // Usage Page (Generic Desktop)
+            0x09, 0x02, // Usage (Mouse)
+            0xA1, 0x01, // Collection
+            0x75, 0x08, // Report Size
+            0x95, 0x01, // Report Count
+            0x81, 0x02, // Input
+            0xC0, // End Collection
         ];
         assert!(!uses_numbered_reports(&desc));
     }
@@ -355,10 +393,10 @@ mod tests {
         // Parser skips 3+0=3 bytes from start, landing on 0x85
         let desc = vec![
             0xFE, 0x00, 0x00, // Long item (data_size=0, tag=0x00)
-            0x85, 0x02,       // Report ID (2)
-            0x75, 0x08,       // Report Size
-            0x95, 0x01,       // Report Count
-            0x81, 0x02,       // Input
+            0x85, 0x02, // Report ID (2)
+            0x75, 0x08, // Report Size
+            0x95, 0x01, // Report Count
+            0x81, 0x02, // Input
         ];
         assert!(uses_numbered_reports(&desc));
     }
@@ -392,15 +430,15 @@ mod tests {
         // Usage Page, Logical Minimum/Maximum, Report Size, Report Count etc.
         // No Report ID – should return false
         let desc = vec![
-            0x05, 0x01,       // Usage Page (Generic Desktop)
-            0x15, 0x00,       // Logical Minimum (0)
-            0x25, 0x01,       // Logical Maximum (1)
-            0x75, 0x08,       // Report Size (8)
-            0x95, 0x01,       // Report Count (1)
-            0x35, 0x00,       // Physical Minimum (0)
-            0x45, 0x00,       // Physical Maximum (0)
-            0x65, 0x00,       // Unit (None)
-            0x55, 0x00,       // Unit Exponent (0)
+            0x05, 0x01, // Usage Page (Generic Desktop)
+            0x15, 0x00, // Logical Minimum (0)
+            0x25, 0x01, // Logical Maximum (1)
+            0x75, 0x08, // Report Size (8)
+            0x95, 0x01, // Report Count (1)
+            0x35, 0x00, // Physical Minimum (0)
+            0x45, 0x00, // Physical Maximum (0)
+            0x65, 0x00, // Unit (None)
+            0x55, 0x00, // Unit Exponent (0)
         ];
         assert!(!uses_numbered_reports(&desc));
     }

@@ -8,7 +8,7 @@ use serde::{Serialize, de::DeserializeOwned};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::NmRequest;
-use crate::{PKG_SEND_REPORT, PKG_SEND_FEATURE_REPORT, parse_packed_send};
+use crate::{PKG_SEND_FEATURE_REPORT, PKG_SEND_REPORT, parse_packed_send};
 
 const MAX_MSG: usize = 1024 * 1024;
 
@@ -27,14 +27,11 @@ where
     let mut buf = BytesMut::with_capacity(len);
     buf.resize(len, 0);
     reader.read_exact(&mut buf).await?;
-    serde_json::from_slice(&buf).map_err(|e| {
-        io::Error::new(io::ErrorKind::InvalidData, format!("JSON decode: {e}"))
-    })
+    serde_json::from_slice(&buf)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("JSON decode: {e}")))
 }
 
-pub async fn read_nm_request<R: AsyncRead + Unpin>(
-    reader: &mut R,
-) -> io::Result<NmRequest> {
+pub async fn read_nm_request<R: AsyncRead + Unpin>(reader: &mut R) -> io::Result<NmRequest> {
     let v: serde_json::Value = read_message(reader).await?;
 
     // Packed messages: {"d":"<b64>"} with no "a" field. msgType byte inside
@@ -42,15 +39,17 @@ pub async fn read_nm_request<R: AsyncRead + Unpin>(
     // reqId is inside the TLV, not the JSON "n" field.
     if let Some(d) = v.get("d").and_then(|x| x.as_str()) {
         if v.get("a").is_none() {
-            let packed = base64::engine::general_purpose::STANDARD.decode(d)
+            let packed = base64::engine::general_purpose::STANDARD
+                .decode(d)
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("bad b64: {e}")))?;
             if packed.is_empty() {
-                return Err(io::Error::new(io::ErrorKind::InvalidData, "empty packed TLV"));
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "empty packed TLV",
+                ));
             }
             return Ok(match packed[0] {
-                PKG_SEND_REPORT => {
-                    NmRequest::SendReport { id: None, packed }
-                }
+                PKG_SEND_REPORT => NmRequest::SendReport { id: None, packed },
                 PKG_SEND_FEATURE_REPORT => {
                     let (req_id, device_id, report_id, data) = parse_packed_send(&packed)?;
                     NmRequest::SendFeatureReport {
@@ -60,62 +59,97 @@ pub async fn read_nm_request<R: AsyncRead + Unpin>(
                         data: data.to_vec(),
                     }
                 }
-                other => return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("unknown packed msgType: {other:#x}"),
-                )),
+                other => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("unknown packed msgType: {other:#x}"),
+                    ));
+                }
             });
         }
     }
 
     // Non-packed messages: dispatch by "a" field.
-    let action = v.get("a")
+    let action = v
+        .get("a")
         .and_then(|x| x.as_u64())
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing 'a' (action)"))? as u8;
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing 'a' (action)"))?
+        as u8;
     let id = v.get("n").and_then(|x| x.as_u64()).map(|n| n as u32);
     Ok(match action {
         1 => NmRequest::Enumerate { id },
-        2 => NmRequest::Open { id, device_id: get_u32(&v, "i")? },
-        3 => NmRequest::Close { id, device_id: get_u32(&v, "i")? },
-        4 => NmRequest::SendReport { id, packed: get_b64(&v, "d")? },
+        2 => NmRequest::Open {
+            id,
+            device_id: get_u32(&v, "i")?,
+        },
+        3 => NmRequest::Close {
+            id,
+            device_id: get_u32(&v, "i")?,
+        },
+        4 => NmRequest::SendReport {
+            id,
+            packed: get_b64(&v, "d")?,
+        },
         5 => NmRequest::ReceiveFeatureReport {
-            id, device_id: get_u32(&v, "i")?, report_id: get_u8(&v, "r")?,
+            id,
+            device_id: get_u32(&v, "i")?,
+            report_id: get_u8(&v, "r")?,
         },
         6 => NmRequest::SendFeatureReport {
-            id, device_id: get_u32(&v, "i")?, report_id: get_u8(&v, "r")?,
+            id,
+            device_id: get_u32(&v, "i")?,
+            report_id: get_u8(&v, "r")?,
             data: get_b64(&v, "d")?,
         },
         7 => NmRequest::SetDataPlane {
-            id, device_id: get_u32(&v, "i")?, mode: get_str(&v, "m")?,
+            id,
+            device_id: get_u32(&v, "i")?,
+            mode: get_str(&v, "m")?,
         },
         8 => NmRequest::Handshake { id },
-        _ => return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("unknown action: {action}"),
-        )),
+        _ => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("unknown action: {action}"),
+            ));
+        }
     })
 }
 
 fn get_str(v: &serde_json::Value, key: &str) -> io::Result<String> {
-    v.get(key).and_then(|x| x.as_str()).map(String::from)
+    v.get(key)
+        .and_then(|x| x.as_str())
+        .map(String::from)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, format!("missing '{key}'")))
 }
 
 fn get_u8(v: &serde_json::Value, key: &str) -> io::Result<u8> {
-    v.get(key).and_then(|x| x.as_u64()).map(|n| n as u8)
+    v.get(key)
+        .and_then(|x| x.as_u64())
+        .map(|n| n as u8)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, format!("missing '{key}'")))
 }
 
 fn get_u32(v: &serde_json::Value, key: &str) -> io::Result<u32> {
-    v.get(key).and_then(|x| x.as_u64()).map(|n| n as u32)
+    v.get(key)
+        .and_then(|x| x.as_u64())
+        .map(|n| n as u32)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, format!("missing '{key}'")))
 }
 
 fn get_b64(v: &serde_json::Value, key: &str) -> io::Result<Vec<u8>> {
-    let s = v.get(key).and_then(|x| x.as_str())
+    let s = v
+        .get(key)
+        .and_then(|x| x.as_str())
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, format!("missing '{key}'")))?;
-    base64::engine::general_purpose::STANDARD.decode(s)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("bad b64 in '{key}': {e}")))
+    base64::engine::general_purpose::STANDARD
+        .decode(s)
+        .map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("bad b64 in '{key}': {e}"),
+            )
+        })
 }
 
 /// Serialise `value` as JSON, prefix with its length, and write to `writer`.
@@ -124,9 +158,8 @@ where
     W: AsyncWrite + Unpin,
     T: Serialize,
 {
-    let json = serde_json::to_vec(value).map_err(|e| {
-        io::Error::new(io::ErrorKind::InvalidData, format!("JSON encode: {e}"))
-    })?;
+    let json = serde_json::to_vec(value)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("JSON encode: {e}")))?;
     let buf = BytesMut::from(&json[..]);
 
     let len = buf.len() as u32;
@@ -162,7 +195,10 @@ mod tests {
     #[tokio::test]
     async fn test_write_then_read_struct() {
         #[derive(serde::Serialize, serde::Deserialize)]
-        struct Point { x: i32, y: i32 }
+        struct Point {
+            x: i32,
+            y: i32,
+        }
 
         let pt = Point { x: 10, y: -5 };
         let mut buf = Vec::new();
@@ -200,14 +236,21 @@ mod tests {
         use crate::NmRequest;
         // Enumerate: {"a":1}
         let mut buf = Vec::new();
-        write_message(&mut buf, &serde_json::json!({"a": 1})).await.unwrap();
+        write_message(&mut buf, &serde_json::json!({"a": 1}))
+            .await
+            .unwrap();
         let mut r: &[u8] = &buf;
         let req = read_nm_request(&mut r).await.unwrap();
         assert!(matches!(req, NmRequest::Enumerate { id: None }));
 
         // Open with id + deviceId
         let mut buf = Vec::new();
-        write_message(&mut buf, &serde_json::json!({"a": 2, "n": 5, "i": 305419896})).await.unwrap();
+        write_message(
+            &mut buf,
+            &serde_json::json!({"a": 2, "n": 5, "i": 305419896}),
+        )
+        .await
+        .unwrap();
         let mut r: &[u8] = &buf;
         let req = read_nm_request(&mut r).await.unwrap();
         match req {
@@ -220,21 +263,27 @@ mod tests {
 
         // Handshake
         let mut buf = Vec::new();
-        write_message(&mut buf, &serde_json::json!({"a": 8, "n": 7})).await.unwrap();
+        write_message(&mut buf, &serde_json::json!({"a": 8, "n": 7}))
+            .await
+            .unwrap();
         let mut r: &[u8] = &buf;
         let req = read_nm_request(&mut r).await.unwrap();
         assert!(matches!(req, NmRequest::Handshake { id: Some(7) }));
 
         // Unknown action → error
         let mut buf = Vec::new();
-        write_message(&mut buf, &serde_json::json!({"a": 99})).await.unwrap();
+        write_message(&mut buf, &serde_json::json!({"a": 99}))
+            .await
+            .unwrap();
         let mut r: &[u8] = &buf;
         let err = read_nm_request(&mut r).await.unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
 
         // Missing 'a' → error
         let mut buf = Vec::new();
-        write_message(&mut buf, &serde_json::json!({"n": 1})).await.unwrap();
+        write_message(&mut buf, &serde_json::json!({"n": 1}))
+            .await
+            .unwrap();
         let mut r: &[u8] = &buf;
         let err = read_nm_request(&mut r).await.unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
@@ -243,19 +292,21 @@ mod tests {
         // TLV: [0x02][reqId u32 LE][devId u32 LE][reportId u8][payloadLen u16 LE][payload]
         use base64::Engine;
         let mut tlv = vec![0x02u8];
-        tlv.extend_from_slice(&42u32.to_le_bytes());       // reqId
+        tlv.extend_from_slice(&42u32.to_le_bytes()); // reqId
         tlv.extend_from_slice(&0xCAFEBABEu32.to_le_bytes()); // deviceId
-        tlv.push(7);                                         // reportId
-        tlv.extend_from_slice(&3u16.to_le_bytes());          // payloadLen
-        tlv.extend_from_slice(&[0xAA, 0xBB, 0xCC]);          // payload
+        tlv.push(7); // reportId
+        tlv.extend_from_slice(&3u16.to_le_bytes()); // payloadLen
+        tlv.extend_from_slice(&[0xAA, 0xBB, 0xCC]); // payload
         let b64 = base64::engine::general_purpose::STANDARD.encode(&tlv);
         let mut buf = Vec::new();
-        write_message(&mut buf, &serde_json::json!({"d": b64})).await.unwrap();
+        write_message(&mut buf, &serde_json::json!({"d": b64}))
+            .await
+            .unwrap();
         let mut r: &[u8] = &buf;
         let req = read_nm_request(&mut r).await.unwrap();
         match req {
             NmRequest::SendReport { id, packed } => {
-                assert_eq!(id, None);  // id is inside TLV, not JSON
+                assert_eq!(id, None); // id is inside TLV, not JSON
                 assert_eq!(packed[0], 0x02);
                 assert_eq!(packed.len(), tlv.len());
             }
@@ -264,18 +315,25 @@ mod tests {
 
         // Packed sendFeatureReport: msgType 0x04
         let mut tlv = vec![0x04u8];
-        tlv.extend_from_slice(&99u32.to_le_bytes());        // reqId
+        tlv.extend_from_slice(&99u32.to_le_bytes()); // reqId
         tlv.extend_from_slice(&0x12345678u32.to_le_bytes()); // deviceId
-        tlv.push(1);                                          // reportId
-        tlv.extend_from_slice(&2u16.to_le_bytes());           // payloadLen
-        tlv.extend_from_slice(&[0xDD, 0xEE]);                 // payload
+        tlv.push(1); // reportId
+        tlv.extend_from_slice(&2u16.to_le_bytes()); // payloadLen
+        tlv.extend_from_slice(&[0xDD, 0xEE]); // payload
         let b64 = base64::engine::general_purpose::STANDARD.encode(&tlv);
         let mut buf = Vec::new();
-        write_message(&mut buf, &serde_json::json!({"d": b64})).await.unwrap();
+        write_message(&mut buf, &serde_json::json!({"d": b64}))
+            .await
+            .unwrap();
         let mut r: &[u8] = &buf;
         let req = read_nm_request(&mut r).await.unwrap();
         match req {
-            NmRequest::SendFeatureReport { id, device_id, report_id, data } => {
+            NmRequest::SendFeatureReport {
+                id,
+                device_id,
+                report_id,
+                data,
+            } => {
                 assert_eq!(id, Some(99));
                 assert_eq!(device_id, 0x12345678);
                 assert_eq!(report_id, 1);
@@ -288,7 +346,9 @@ mod tests {
         let tlv = vec![0xFFu8, 0, 0, 0, 0];
         let b64 = base64::engine::general_purpose::STANDARD.encode(&tlv);
         let mut buf = Vec::new();
-        write_message(&mut buf, &serde_json::json!({"d": b64})).await.unwrap();
+        write_message(&mut buf, &serde_json::json!({"d": b64}))
+            .await
+            .unwrap();
         let mut r: &[u8] = &buf;
         let err = read_nm_request(&mut r).await.unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);

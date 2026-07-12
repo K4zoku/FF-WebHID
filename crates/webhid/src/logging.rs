@@ -16,7 +16,12 @@ impl log::Log for SimpleLogger {
     }
     fn log(&self, record: &log::Record) {
         if self.enabled(record.metadata()) {
-            eprintln!("[{:5} {}] {}", record.level(), record.target(), record.args());
+            eprintln!(
+                "[{:5} {}] {}",
+                record.level(),
+                record.target(),
+                record.args()
+            );
         }
     }
     fn flush(&self) {}

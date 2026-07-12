@@ -102,7 +102,9 @@ async fn main() -> anyhow::Result<()> {
         let device_mgr_clone = Arc::clone(&device_mgr);
         let (port_tx, port_rx) = tokio::sync::oneshot::channel();
         tokio::spawn(async move {
-            match websocket::start_server(ws_port, event_tx_clone, device_mgr_clone, Some(port_tx)).await {
+            match websocket::start_server(ws_port, event_tx_clone, device_mgr_clone, Some(port_tx))
+                .await
+            {
                 Ok(_) => {}
                 Err(e) => log::error!("WebSocket server error: {e:#}"),
             }
@@ -132,13 +134,16 @@ async fn main() -> anyhow::Result<()> {
                 .with_context(|| format!("create socket dir '{}'", parent.display()))?;
         }
         let _ = std::fs::remove_file(&socket_path);
-        let listener = UnixListener::bind(&socket_path)
-            .with_context(|| format!("bind '{socket_path}'"))?;
+        let listener =
+            UnixListener::bind(&socket_path).with_context(|| format!("bind '{socket_path}'"))?;
 
         {
             use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(socket_mode(&socket_path)))
-                .context("set socket permissions")?;
+            std::fs::set_permissions(
+                &socket_path,
+                std::fs::Permissions::from_mode(socket_mode(&socket_path)),
+            )
+            .context("set socket permissions")?;
         }
 
         log::info!("webhid-daemon listening on {socket_path}");
@@ -152,7 +157,9 @@ async fn main() -> anyhow::Result<()> {
                     tokio::spawn(async move {
                         log::info!("[client] connected");
                         let (reader, writer) = tokio::io::split(stream);
-                        if let Err(e) = client::handle(reader, writer, mgr, rx, actual_ws_port).await {
+                        if let Err(e) =
+                            client::handle(reader, writer, mgr, rx, actual_ws_port).await
+                        {
                             log::warn!("[client] error: {e:#}");
                         }
                         log::info!("[client] disconnected");
@@ -166,8 +173,7 @@ async fn main() -> anyhow::Result<()> {
     #[cfg(windows)]
     {
         use tokio::net::windows::named_pipe::ServerOptions;
-        let pipe_name = std::env::var("WEBHID_PIPE")
-            .unwrap_or_else(|_| DEFAULT_PIPE.to_string());
+        let pipe_name = std::env::var("WEBHID_PIPE").unwrap_or_else(|_| DEFAULT_PIPE.to_string());
 
         log::info!("webhid-daemon listening on {pipe_name}");
         log::info!("WebSocket server on port {actual_ws_port}");
@@ -199,5 +205,3 @@ async fn main() -> anyhow::Result<()> {
         Ok(())
     }
 }
-
-

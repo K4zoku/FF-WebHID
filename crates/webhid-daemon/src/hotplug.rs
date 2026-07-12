@@ -19,15 +19,35 @@ fn refresh_and_diff(event_tx: &broadcast::Sender<IpcResponse>) {
 
     for (id, info) in &current {
         if !cache.contains_key(id) {
-            log::info!("device connected: {:04x}:{:04x} ({})", info.vendor_id, info.product_id, info.device_id);
-            let _ = event_tx.send(IpcResponse::DeviceConnected { id: 0, device: info.clone() });
+            log::info!(
+                "device connected: {:04x}:{:04x} ({})",
+                info.vendor_id,
+                info.product_id,
+                info.device_id
+            );
+            let _ = event_tx.send(IpcResponse::DeviceConnected {
+                id: 0,
+                device: info.clone(),
+            });
         }
     }
-    let removed: Vec<_> = cache.keys().filter(|id| !current.contains_key(*id)).cloned().collect();
+    let removed: Vec<_> = cache
+        .keys()
+        .filter(|id| !current.contains_key(*id))
+        .cloned()
+        .collect();
     for id in &removed {
         if let Some(info) = cache.get(id) {
-            log::info!("device disconnected: {:04x}:{:04x} ({})", info.vendor_id, info.product_id, info.device_id);
-            let _ = event_tx.send(IpcResponse::DeviceDisconnected { id: 0, device: info.clone() });
+            log::info!(
+                "device disconnected: {:04x}:{:04x} ({})",
+                info.vendor_id,
+                info.product_id,
+                info.device_id
+            );
+            let _ = event_tx.send(IpcResponse::DeviceDisconnected {
+                id: 0,
+                device: info.clone(),
+            });
         }
     }
     cache.retain(|id, _| current.contains_key(id));
@@ -97,7 +117,9 @@ fn start_udev(event_tx: broadcast::Sender<IpcResponse>) -> anyhow::Result<()> {
                 let mut dnmap = DEVNODE_TO_ID.lock().unwrap();
                 let dnmap = dnmap.get_or_insert_with(HashMap::new);
                 for info in api.device_list() {
-                    if crate::hid::is_blocked_pub(info) { continue; }
+                    if crate::hid::is_blocked_pub(info) {
+                        continue;
+                    }
                     if let Some(d) = crate::hid::info_from_hidapi_pub(info) {
                         let devnode = info.path().to_string_lossy().into_owned();
                         cache.insert(d.device_id, d.clone());
@@ -108,9 +130,15 @@ fn start_udev(event_tx: broadcast::Sender<IpcResponse>) -> anyhow::Result<()> {
 
             let fd = socket.as_raw_fd();
             loop {
-                let mut pfd = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
+                let mut pfd = libc::pollfd {
+                    fd,
+                    events: libc::POLLIN,
+                    revents: 0,
+                };
                 let ret = unsafe { libc::poll(&mut pfd as *mut _, 1, -1) };
-                if ret <= 0 { continue; }
+                if ret <= 0 {
+                    continue;
+                }
 
                 for event in socket.iter() {
                     let devnode = match event.device().devnode().and_then(|p| p.to_str()) {
@@ -119,15 +147,25 @@ fn start_udev(event_tx: broadcast::Sender<IpcResponse>) -> anyhow::Result<()> {
                     };
                     let response = match event.event_type() {
                         udev::EventType::Add => {
-                            let Some(info) = crate::hid::info_by_raw_path(&devnode) else { continue };
-                            log::info!("device connected: {:04x}:{:04x} ({})", info.vendor_id, info.product_id, info.device_id);
+                            let Some(info) = crate::hid::info_by_raw_path(&devnode) else {
+                                continue;
+                            };
+                            log::info!(
+                                "device connected: {:04x}:{:04x} ({})",
+                                info.vendor_id,
+                                info.product_id,
+                                info.device_id
+                            );
                             let mut cache = DEVICE_CACHE.lock().unwrap();
                             let cache = cache.get_or_insert_with(HashMap::new);
                             cache.insert(info.device_id, info.clone());
                             let mut dnmap = DEVNODE_TO_ID.lock().unwrap();
                             let dnmap = dnmap.get_or_insert_with(HashMap::new);
                             dnmap.insert(devnode, info.device_id);
-                            IpcResponse::DeviceConnected { id: 0, device: info }
+                            IpcResponse::DeviceConnected {
+                                id: 0,
+                                device: info,
+                            }
                         }
                         udev::EventType::Remove => {
                             let device_id = {
@@ -140,10 +178,17 @@ fn start_udev(event_tx: broadcast::Sender<IpcResponse>) -> anyhow::Result<()> {
                             });
                             match info {
                                 Some(i) => {
-                                    log::info!("device disconnected: {:04x}:{:04x} ({})", i.vendor_id, i.product_id, i.device_id);
+                                    log::info!(
+                                        "device disconnected: {:04x}:{:04x} ({})",
+                                        i.vendor_id,
+                                        i.product_id,
+                                        i.device_id
+                                    );
                                     IpcResponse::DeviceDisconnected { id: 0, device: i }
                                 }
-                                None => { continue; }
+                                None => {
+                                    continue;
+                                }
                             }
                         }
                         _ => continue,
@@ -176,7 +221,7 @@ fn run_windows(event_tx: broadcast::Sender<IpcResponse>) {
     type HMODULE = isize;
     type HWND = isize;
     type HINSTANCE = isize;
-    
+
     type UINT = u32;
     type WPARAM = usize;
     type LPARAM = isize;
@@ -220,13 +265,13 @@ fn run_windows(event_tx: broadcast::Sender<IpcResponse>) {
         dbcc_devicetype: DWORD,
         dbcc_reserved: DWORD,
         dbcc_classguid: [u8; 16], // GUID
-        dbcc_name: [u16; 1], // variable-length, we don't use it
+        dbcc_name: [u16; 1],      // variable-length, we don't use it
     }
 
     // GUID_DEVINTERFACE_HID: {4D1E55B2-F16F-11CF-88CB-001111000030}
     const GUID_DEVINTERFACE_HID: [u8; 16] = [
-        0xB2, 0x55, 0x1E, 0x4D, 0x6F, 0xF1, 0xCF, 0x11,
-        0x88, 0xCB, 0x00, 0x11, 0x11, 0x00, 0x00, 0x30,
+        0xB2, 0x55, 0x1E, 0x4D, 0x6F, 0xF1, 0xCF, 0x11, 0x88, 0xCB, 0x00, 0x11, 0x11, 0x00, 0x00,
+        0x30,
     ];
 
     #[link(name = "user32")]
@@ -234,14 +279,30 @@ fn run_windows(event_tx: broadcast::Sender<IpcResponse>) {
         fn GetModuleHandleW(lpModuleName: *const u16) -> HMODULE;
         fn RegisterClassW(lpWndClass: *const WNDCLASSW) -> WORD;
         fn CreateWindowExW(
-            dwExStyle: DWORD, lpClassName: *const u16, lpWindowName: *const u16,
-            dwStyle: DWORD, x: i32, y: i32, nWidth: i32, nHeight: i32,
-            hWndParent: HWND, hMenu: isize, hInstance: HINSTANCE, lpParam: *mut std::ffi::c_void,
+            dwExStyle: DWORD,
+            lpClassName: *const u16,
+            lpWindowName: *const u16,
+            dwStyle: DWORD,
+            x: i32,
+            y: i32,
+            nWidth: i32,
+            nHeight: i32,
+            hWndParent: HWND,
+            hMenu: isize,
+            hInstance: HINSTANCE,
+            lpParam: *mut std::ffi::c_void,
         ) -> HWND;
-        fn GetMessageW(lpMsg: *mut MSG, hWnd: HWND, wMsgFilterMin: UINT, wMsgFilterMax: UINT) -> BOOL;
+        fn GetMessageW(
+            lpMsg: *mut MSG,
+            hWnd: HWND,
+            wMsgFilterMin: UINT,
+            wMsgFilterMax: UINT,
+        ) -> BOOL;
         fn DefWindowProcW(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRESULT;
         fn RegisterDeviceNotificationW(
-            hRecipient: HANDLE, NotificationFilter: *const std::ffi::c_void, Flags: DWORD,
+            hRecipient: HANDLE,
+            NotificationFilter: *const std::ffi::c_void,
+            Flags: DWORD,
         ) -> HANDLE;
     }
 
@@ -270,8 +331,18 @@ fn run_windows(event_tx: broadcast::Sender<IpcResponse>) {
         RegisterClassW(&wc);
 
         let hwnd = CreateWindowExW(
-            0, class_name.as_ptr(), std::ptr::null(), 0,
-            0, 0, 0, 0, 0, 0, hinst, std::ptr::null_mut(),
+            0,
+            class_name.as_ptr(),
+            std::ptr::null(),
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            hinst,
+            std::ptr::null_mut(),
         );
 
         if hwnd == 0 {
@@ -297,7 +368,9 @@ fn run_windows(event_tx: broadcast::Sender<IpcResponse>) {
         let mut msg: MSG = std::mem::zeroed();
         loop {
             let ret = GetMessageW(&mut msg, 0, 0, 0);
-            if ret <= 0 { break; }
+            if ret <= 0 {
+                break;
+            }
             if msg.message == WM_DEVICECHANGE {
                 refresh_and_diff(&tx);
             }
@@ -320,20 +393,37 @@ fn run_macos(event_tx: broadcast::Sender<IpcResponse>) {
     static DEVICE_CACHE: Mutex<Option<HashMap<u32, webhid::DeviceInfo>>> = Mutex::new(None);
 
     unsafe extern "C" {
-        fn IOHIDManagerCreate(allocator: CFAllocatorRef, options: IOOptionBits) -> *mut std::ffi::c_void;
+        fn IOHIDManagerCreate(
+            allocator: CFAllocatorRef,
+            options: IOOptionBits,
+        ) -> *mut std::ffi::c_void;
         fn IOHIDManagerOpen(manager: *mut std::ffi::c_void, options: IOOptionBits) -> IOReturn;
         fn IOHIDManagerSetDeviceMatching(manager: *mut std::ffi::c_void, matching: CFDictionaryRef);
         fn IOHIDManagerRegisterDeviceMatchingCallback(
             manager: *mut std::ffi::c_void,
-            callback: extern "C" fn(*mut std::ffi::c_void, IOReturn, *mut std::ffi::c_void, *mut std::ffi::c_void),
+            callback: extern "C" fn(
+                *mut std::ffi::c_void,
+                IOReturn,
+                *mut std::ffi::c_void,
+                *mut std::ffi::c_void,
+            ),
             context: *mut std::ffi::c_void,
         );
         fn IOHIDManagerRegisterDeviceRemovalCallback(
             manager: *mut std::ffi::c_void,
-            callback: extern "C" fn(*mut std::ffi::c_void, IOReturn, *mut std::ffi::c_void, *mut std::ffi::c_void),
+            callback: extern "C" fn(
+                *mut std::ffi::c_void,
+                IOReturn,
+                *mut std::ffi::c_void,
+                *mut std::ffi::c_void,
+            ),
             context: *mut std::ffi::c_void,
         );
-        fn IOHIDManagerScheduleWithRunLoop(manager: *mut std::ffi::c_void, run_loop: CFRunLoopRef, mode: CFStringRef);
+        fn IOHIDManagerScheduleWithRunLoop(
+            manager: *mut std::ffi::c_void,
+            run_loop: CFRunLoopRef,
+            mode: CFStringRef,
+        );
     }
 
     type IOReturn = i32;
@@ -355,7 +445,8 @@ fn run_macos(event_tx: broadcast::Sender<IpcResponse>) {
         return;
     }
 
-    static GLOBAL_TX: std::sync::Mutex<Option<broadcast::Sender<IpcResponse>>> = std::sync::Mutex::new(None);
+    static GLOBAL_TX: std::sync::Mutex<Option<broadcast::Sender<IpcResponse>>> =
+        std::sync::Mutex::new(None);
     *GLOBAL_TX.lock().unwrap() = Some(event_tx);
 
     unsafe {
@@ -366,14 +457,24 @@ fn run_macos(event_tx: broadcast::Sender<IpcResponse>) {
             return;
         }
 
-        extern "C" fn on_matching(_ctx: *mut std::ffi::c_void, _result: IOReturn, _sender: *mut std::ffi::c_void, _device: *mut std::ffi::c_void) {
+        extern "C" fn on_matching(
+            _ctx: *mut std::ffi::c_void,
+            _result: IOReturn,
+            _sender: *mut std::ffi::c_void,
+            _device: *mut std::ffi::c_void,
+        ) {
             std::thread::sleep(std::time::Duration::from_millis(100));
             if let Some(tx) = GLOBAL_TX.lock().unwrap().as_ref() {
                 refresh_and_diff(tx);
             }
         }
 
-        extern "C" fn on_removal(_ctx: *mut std::ffi::c_void, _result: IOReturn, _sender: *mut std::ffi::c_void, _device: *mut std::ffi::c_void) {
+        extern "C" fn on_removal(
+            _ctx: *mut std::ffi::c_void,
+            _result: IOReturn,
+            _sender: *mut std::ffi::c_void,
+            _device: *mut std::ffi::c_void,
+        ) {
             if let Some(tx) = GLOBAL_TX.lock().unwrap().as_ref() {
                 refresh_and_diff(tx);
             }

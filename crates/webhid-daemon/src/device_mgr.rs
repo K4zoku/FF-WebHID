@@ -1,12 +1,12 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
 use hidapi::HidDevice;
 
-use tokio::task::JoinHandle;
 use tokio::sync::broadcast;
+use tokio::task::JoinHandle;
 
 use anyhow::anyhow;
 use webhid::{DeviceInfo, IpcResponse};
@@ -85,7 +85,10 @@ impl DeviceManager {
                 entry.refcount += 1;
                 let rc = entry.refcount;
                 drop(map);
-                self.tokens.lock().unwrap().insert(session_token.clone(), device_id);
+                self.tokens
+                    .lock()
+                    .unwrap()
+                    .insert(session_token.clone(), device_id);
                 log::info!("[device_mgr] {device_id:#x} refcount → {rc} (existing session)");
                 return Ok((device_id, Some(session_token)));
             }
@@ -104,7 +107,10 @@ impl DeviceManager {
             entry.refcount += 1;
             let rc = entry.refcount;
             drop(map);
-            self.tokens.lock().unwrap().insert(session_token.clone(), id);
+            self.tokens
+                .lock()
+                .unwrap()
+                .insert(session_token.clone(), id);
             log::info!("[device_mgr] {id:#x} refcount → {rc} (existing session)");
             return Ok((id, Some(session_token)));
         }
@@ -119,7 +125,10 @@ impl DeviceManager {
         };
 
         map.insert(id, entry);
-        self.tokens.lock().unwrap().insert(session_token.clone(), id);
+        self.tokens
+            .lock()
+            .unwrap()
+            .insert(session_token.clone(), id);
 
         let dev_id = id;
         let dev_for_task = Arc::clone(&reader_arc);
@@ -127,10 +136,14 @@ impl DeviceManager {
         let tx = self.event_tx.clone();
         let read_buf_size = info.max_input_report_size as usize + 1;
 
-        log::info!("[reader] starting for {dev_id:#x} (numbered_reports={uses_numbered_reports}, buf_size={read_buf_size})");
+        log::info!(
+            "[reader] starting for {dev_id:#x} (numbered_reports={uses_numbered_reports}, buf_size={read_buf_size})"
+        );
         let handle = tokio::spawn(async move {
             loop {
-                if stop_for_task.load(Ordering::SeqCst) { break; }
+                if stop_for_task.load(Ordering::SeqCst) {
+                    break;
+                }
 
                 let read_result = tokio::task::spawn_blocking({
                     let dev = Arc::clone(&dev_for_task);
@@ -155,10 +168,17 @@ impl DeviceManager {
                         } else {
                             (0u8, Bytes::from(buf))
                         };
-                        let _ = tx.send(IpcResponse::InputReport { id: 0, device_id: dev_id, report_id, data });
+                        let _ = tx.send(IpcResponse::InputReport {
+                            id: 0,
+                            device_id: dev_id,
+                            report_id,
+                            data,
+                        });
                     }
                     Ok(Err(e)) => {
-                        if e.kind() == std::io::ErrorKind::TimedOut { continue; }
+                        if e.kind() == std::io::ErrorKind::TimedOut {
+                            continue;
+                        }
                         log::warn!("[reader {dev_id:#x}] read error: {e}; stopping");
                         break;
                     }
@@ -180,15 +200,22 @@ impl DeviceManager {
 
     pub fn close(&self, device_id: u32) -> anyhow::Result<()> {
         let mut map = self.devices.lock().unwrap();
-        let entry = map.get_mut(&device_id).ok_or_else(|| anyhow!("'{device_id:#x}' not open"))?;
+        let entry = map
+            .get_mut(&device_id)
+            .ok_or_else(|| anyhow!("'{device_id:#x}' not open"))?;
         if entry.refcount > 1 {
             entry.refcount -= 1;
-            log::info!("[device_mgr] {device_id:#x} refcount → {} (session closed, device stays open)", entry.refcount);
+            log::info!(
+                "[device_mgr] {device_id:#x} refcount → {} (session closed, device stays open)",
+                entry.refcount
+            );
             return Ok(());
         }
         let mut entry = map.remove(&device_id).unwrap();
         entry.stop_flag.store(true, Ordering::SeqCst);
-        if let Some(handle) = entry.handle.take() { handle.abort(); }
+        if let Some(handle) = entry.handle.take() {
+            handle.abort();
+        }
         drop(map);
 
         let mut tokens = self.tokens.lock().unwrap();
@@ -199,7 +226,9 @@ impl DeviceManager {
 
     pub fn get_file(&self, device_id: u32) -> anyhow::Result<Arc<Mutex<HidDevice>>> {
         let map = self.devices.lock().unwrap();
-        let entry = map.get(&device_id).ok_or_else(|| anyhow!("'{device_id:#x}' not open"))?;
+        let entry = map
+            .get(&device_id)
+            .ok_or_else(|| anyhow!("'{device_id:#x}' not open"))?;
         Ok(Arc::clone(&entry.device))
     }
 
@@ -218,7 +247,9 @@ impl DeviceManager {
             *entry.dataplane_mode.lock().unwrap() = "ws".to_string();
             log::info!("[device_mgr] {device_id:#x} WS connect gen={g}");
             g
-        } else { 0 }
+        } else {
+            0
+        }
     }
 
     pub fn ws_disconnect(&self, device_id: u32, generation: u64) {
@@ -229,7 +260,9 @@ impl DeviceManager {
                 *entry.dataplane_mode.lock().unwrap() = "nm".to_string();
                 log::info!("[device_mgr] {device_id:#x} WS disconnect gen={generation} → nm");
             } else {
-                log::info!("[device_mgr] {device_id:#x} WS disconnect gen={generation} stale (current={current}), keeping ws");
+                log::info!(
+                    "[device_mgr] {device_id:#x} WS disconnect gen={generation} stale (current={current}), keeping ws"
+                );
             }
         }
     }
@@ -247,7 +280,9 @@ impl DeviceManager {
         for k in keys {
             if let Some(mut entry) = map.remove(&k) {
                 entry.stop_flag.store(true, Ordering::SeqCst);
-                if let Some(handle) = entry.handle.take() { handle.abort(); }
+                if let Some(handle) = entry.handle.take() {
+                    handle.abort();
+                }
             }
         }
         drop(map);

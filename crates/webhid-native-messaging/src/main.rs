@@ -119,8 +119,7 @@ async fn main() -> anyhow::Result<()> {
     #[cfg(windows)]
     let daemon = {
         use tokio::net::windows::named_pipe::ClientOptions;
-        let pipe_name =
-            std::env::var("WEBHID_PIPE").unwrap_or_else(|_| DEFAULT_PIPE.to_string());
+        let pipe_name = std::env::var("WEBHID_PIPE").unwrap_or_else(|_| DEFAULT_PIPE.to_string());
         let mut delay = 100u64;
         let mut total_waited = 0u64;
         let stream = loop {
@@ -251,5 +250,3 @@ async fn read_frame<R: AsyncRead + Unpin>(
     reader.read_exact(buf).await?;
     Ok(true)
 }
-
-
