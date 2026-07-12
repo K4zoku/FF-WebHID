@@ -44,12 +44,7 @@
         "<all_urls>"
       ],
       "js": [
-        "js/utils/browser-compat.js",
-        "js/utils/logger.js",
-        "js/utils/device-utils.js",
-        "js/utils/settings.js",
-        "js/utils/http-status.js",
-        "js/polyfill.js"
+        "js/bootstrap-main.js"
       ],
       "world": "MAIN",
       "run_at": "document_start"
@@ -59,13 +54,7 @@
         "<all_urls>"
       ],
       "js": [
-        "js/utils/browser-compat.js",
-        "js/utils/logger.js",
-        "js/utils/device-utils.js",
-        "js/utils/settings.js",
-        "js/utils/http-status.js",
-        "js/device-picker.js",
-        "js/bridge.js"
+        "js/bootstrap-isolated.js"
       ],
       "world": "ISOLATED",
       "run_at": "document_start"
