@@ -1,244 +1,8 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<title>WebHID Test</title>
-<link rel="icon" type="image/svg+xml" href="favicon.svg">
-<style>
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-  :root {
-    --bg:      #0f1117;
-    --surface: #1a1d27;
-    --border:  #2d3148;
-    --text:    #cdd6f4;
-    --muted:   #6c7086;
-    --green:   #a6e3a1;
-    --red:     #f38ba8;
-    --yellow:  #f9e2af;
-    --blue:    #89b4fa;
-    --purple:  #cba6f7;
-  }
-
-  body {
-    background: var(--bg);
-    color: var(--text);
-    font: 14px/1.6 "JetBrains Mono", "Cascadia Code", monospace;
-    padding: 1.5rem;
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    grid-template-rows: auto 1fr;
-    gap: 1rem;
-    height: 100dvh;
-  }
-
-  h1 { font-size: 1rem; letter-spacing: .1em; text-transform: uppercase; color: var(--blue); }
-  h2 { font-size: .75rem; letter-spacing: .15em; text-transform: uppercase; color: var(--muted); margin-bottom: .5rem; }
-
-  /* ── header ─────────────────────────────────────────────────────── */
-  #header {
-    grid-column: 1 / -1;
-    display: flex;
-    align-items: center;
-    gap: 1.5rem;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: .75rem 1rem;
-  }
-
-  #header h1 { flex: 1; }
-
-  .badge {
-    font-size: .7rem;
-    padding: .2em .6em;
-    border-radius: 4px;
-    font-weight: 700;
-  }
-  .badge-ok  { background: #1e3a2a; color: var(--green); }
-  .badge-err { background: #3a1e23; color: var(--red);   }
-  .badge-warn{ background: #3a301e; color: var(--yellow); }
-
-  /* ── panels ─────────────────────────────────────────────────────── */
-  .panel {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 1rem;
-    display: flex;
-    flex-direction: column;
-    gap: .75rem;
-    overflow: hidden;
-  }
-
-  /* ── controls ───────────────────────────────────────────────────── */
-  .row { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
-
-  button {
-    background: #252836;
-    color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: .3em .9em;
-    font: inherit;
-    cursor: pointer;
-    transition: background .15s;
-  }
-  button:hover:not(:disabled)  { background: #2e3250; border-color: var(--blue); }
-  button:disabled               { opacity: .4; cursor: default; }
-  button.primary                { background: #1e2d50; border-color: var(--blue); color: var(--blue); }
-
-  input[type=text], input[type=number], select {
-    background: #252836;
-    color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: .3em .6em;
-    font: inherit;
-    flex: 1;
-    min-width: 0;
-  }
-
-  label { font-size: .75rem; color: var(--muted); white-space: nowrap; }
-
-  /* ── device list ─────────────────────────────────────────────────── */
-  #device-list { display: flex; flex-direction: column; gap: .4rem; overflow-y: auto; }
-
-  .device-card {
-    background: #151720;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: .5rem .75rem;
-    cursor: pointer;
-    transition: border-color .15s;
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: .1rem .75rem;
-    align-items: center;
-  }
-  .device-card:hover           { border-color: var(--blue); }
-  .device-card.selected        { border-color: var(--purple); background: #1c1a2e; }
-  .device-card.opened          { border-color: var(--green); }
-
-  .device-vid  { color: var(--yellow); font-size: .85rem; grid-row: span 2; align-self: center; }
-  .device-name { color: var(--text);   font-size: .85rem; }
-  .device-path { color: var(--muted);  font-size: .7rem;  }
-
-  /* ── io panel ────────────────────────────────────────────────────── */
-  #io-panel { grid-row: 2; }
-
-  .hex-input {
-    font-family: monospace;
-    width: 100%;
-    background: #151720;
-    border: 1px solid var(--border);
-    color: var(--yellow);
-    border-radius: 6px;
-    padding: .4em .6em;
-  }
-
-  /* ── log ─────────────────────────────────────────────────────────── */
-  #log-panel { grid-row: 2; }
-
-  #log {
-    flex: 1;
-    overflow-y: auto;
-    font-size: .75rem;
-    line-height: 1.8;
-    display: flex;
-    flex-direction: column-reverse; /* newest at bottom = reverse display */
-  }
-
-  .log-entry { white-space: pre-wrap; word-break: break-all; }
-  .log-ok    { color: var(--green);  }
-  .log-err   { color: var(--red);    }
-  .log-warn  { color: var(--yellow); }
-  .log-info  { color: var(--muted);  }
-  .log-data  { color: var(--blue);   }
-  .log-event { color: var(--purple); }
-  .log-ts    { color: #45475a; user-select: none; }
-</style>
-</head>
-<body>
-
-<!-- ── Header ──────────────────────────────────────────────────────────────── -->
-<header id="header">
-  <h1>⬡ WebHID Test</h1>
-  <span id="badge-api"  class="badge badge-warn">API: checking…</span>
-  <span id="badge-nm"   class="badge badge-warn">NM: unknown</span>
-  <span id="badge-dev"  class="badge badge-warn">no device selected</span>
-</header>
-
-<!-- ── Left column: device list ────────────────────────────────────────────── -->
-<section class="panel">
-  <h2>Devices</h2>
-  <div class="row">
-    <button class="primary" id="btn-enumerate">Enumerate</button>
-    <button id="btn-request">Request Device…</button>
-    <button id="btn-open"   disabled>Open</button>
-    <button id="btn-close"  disabled>Close</button>
-  </div>
-  <div id="device-list"><span style="color:var(--muted);font-size:.8rem">Click Enumerate to list connected devices.</span></div>
-</section>
-
-<!-- ── Right column: I/O ───────────────────────────────────────────────────── -->
-<section class="panel" id="io-panel">
-  <h2>Standard I/O</h2>
-
-  <!-- Input Reports (Events) -->
-  <fieldset style="border:1px solid var(--border);border-radius:6px;padding:.6rem">
-    <legend style="color:var(--muted);font-size:.7rem;padding:0 .3em">INPUT REPORTS (oninputreport)</legend>
-    <div class="row">
-      <button id="btn-listen"   disabled>Start listening</button>
-      <button id="btn-unlisten" disabled>Stop</button>
-      <span id="event-count" style="color:var(--muted);font-size:.75rem">0 events</span>
-    </div>
-    <div style="margin-top:.4rem;font-size:.7rem;color:var(--muted)">
-      Standard event-driven input. High-frequency devices (8000Hz) use binary WebSocket data plane with postMessage transfer.
-    </div>
-  </fieldset>
-
-  <!-- Output Reports -->
-  <fieldset style="border:1px solid var(--border);border-radius:6px;padding:.6rem">
-    <legend style="color:var(--muted);font-size:.7rem;padding:0 .3em">OUTPUT REPORTS (sendReport)</legend>
-    <div class="row">
-      <label>ID</label>
-      <input type="number" id="output-report-id" value="0" style="width:3rem;flex:none">
-      <label>hex bytes</label>
-      <input type="text" class="hex-input" id="output-hex" value="00" placeholder="00 01 02 …">
-    </div>
-    <div class="row" style="margin-top:.4rem">
-      <button id="btn-send-report" disabled>sendReport()</button>
-    </div>
-  </fieldset>
-
-  <!-- Feature Reports -->
-  <fieldset style="border:1px solid var(--border);border-radius:6px;padding:.6rem">
-    <legend style="color:var(--muted);font-size:.7rem;padding:0 .3em">FEATURE REPORTS</legend>
-    <div class="row">
-      <label>ID</label>
-      <input type="number" id="feature-report-id" value="0" style="width:3rem;flex:none">
-      <button id="btn-receive-feature" disabled>receiveFeatureReport()</button>
-    </div>
-    <div class="row" style="margin-top:.4rem">
-      <label>hex bytes</label>
-      <input type="text" class="hex-input" id="feature-hex" value="00" placeholder="00 01 02 …">
-      <button id="btn-send-feature" disabled>sendFeatureReport()</button>
-    </div>
-  </fieldset>
-</section>
-
-<!-- ── Log ─────────────────────────────────────────────────────────────────── -->
-<section class="panel" id="log-panel">
-  <h2 style="display:flex;justify-content:space-between">
-    Log
-    <button onclick="document.getElementById('log').innerHTML=''" style="font-size:.65rem;padding:.1em .4em">clear</button>
-  </h2>
-  <div id="log"></div>
-</section>
-
-<script>
 'use strict';
+
+document.getElementById('btn-clear-log').addEventListener('click', () => {
+  document.getElementById('log').replaceChildren();
+});
 
 // ── Logging ────────────────────────────────────────────────────────────────────
 const $log = document.getElementById('log');
@@ -246,8 +10,12 @@ function log(msg, cls = 'log-info') {
   const ts  = new Date().toTimeString().slice(0, 8);
   const div = document.createElement('div');
   div.className = `log-entry ${cls}`;
-  div.innerHTML = `<span class="log-ts">${ts} </span>${escHtml(msg)}`;
-  $log.prepend(div);    // newest at top (column-reverse shows it at bottom)
+  const span = document.createElement('span');
+  span.className = 'log-ts';
+  span.textContent = ts + ' ';
+  div.appendChild(span);
+  div.appendChild(document.createTextNode(msg));
+  $log.prepend(div);
 }
 function logOk(m)    { log('✓ ' + m, 'log-ok');    }
 function logErr(m)   { log('✗ ' + m, 'log-err');   }
@@ -379,18 +147,30 @@ document.getElementById('btn-request').addEventListener('click', async () => {
 // ── Device list rendering ─────────────────────────────────────────────────────
 function renderDeviceList(devices) {
   const list = document.getElementById('device-list');
-  list.innerHTML = '';
+  list.replaceChildren();
   if (devices.length === 0) {
-    list.innerHTML = '<span style="color:var(--muted);font-size:.8rem">No devices</span>';
+    const empty = document.createElement('span');
+    empty.style.cssText = 'color:var(--muted);font-size:.8rem';
+    empty.textContent = 'No devices';
+    list.appendChild(empty);
     return;
   }
   devices.forEach(dev => {
     const card = document.createElement('div');
     card.className = 'device-card' + (isDeviceSelected(dev) ? ' selected' : '') + (dev.opened ? ' opened' : '');
-    card.innerHTML = `
-      <div class="device-vid">${dev.vendorId.toString(16).padStart(4,'0')}<br>${dev.productId.toString(16).padStart(4,'0')}</div>
-      <div class="device-name">${escHtml(dev.productName || '(no name)')}</div>
-      <div class="device-path">${escHtml(dev.manufacturer||'')} · ${escHtml(dev.serialNumber||'')}</div>`;
+    const vid = document.createElement('div');
+    vid.className = 'device-vid';
+    vid.textContent = dev.vendorId.toString(16).padStart(4,'0') + '\n' + dev.productId.toString(16).padStart(4,'0');
+    vid.style.whiteSpace = 'pre';
+    const name = document.createElement('div');
+    name.className = 'device-name';
+    name.textContent = dev.productName || '(no name)';
+    const path = document.createElement('div');
+    path.className = 'device-path';
+    path.textContent = (dev.manufacturer||'') + ' · ' + (dev.serialNumber||'');
+    card.appendChild(vid);
+    card.appendChild(name);
+    card.appendChild(path);
     card.addEventListener('click', () => selectDevice(dev));
     list.appendChild(card);
   });
@@ -535,6 +315,3 @@ function stopListening() {
   document.getElementById('btn-unlisten').disabled = true;
   log('Stopped listening');
 }
-</script>
-</body>
-</html>
