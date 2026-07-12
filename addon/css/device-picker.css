@@ -9,12 +9,26 @@
   margin: 0;
   border: none;
   background: var(--overlay);
-  display: flex;
   align-items: flex-start;
   justify-content: flex-start;
   padding: 8px 0 0 10px;
-  z-index: 2147483647;
+  z-index: calc(infinity);
   font-family: var(--font-sans);
+  opacity: 0;
+  visibility: hidden;
+  transition-property: opacity, visibility;
+  transition-behavior: allow-discrete;
+  transition-duration: 0.2s;
+}
+
+.webhid-modal[open] {
+  display: flex;
+  opacity: 1;
+  visibility: visible;
+  @starting-style {
+    visibility: hidden;
+    opacity: 0;
+  }
 }
 
 .webhid-modal::backdrop {
@@ -31,15 +45,17 @@
   flex-direction: column;
   position: relative;
   filter: var(--shadow-drop);
-  animation: webhidModalSlideIn 0.2s ease-out;
+  transform: translateY(0);
+  opacity: 1;
+  transition-property: transform, opacity;
+  transition-duration: 0.2s;
 }
 
-.webhid-modal.closing .webhid-modal-form {
-  animation: webhidModalSlideOut 0.15s ease-in forwards;
-}
-
-.webhid-modal.closing::backdrop {
-  animation: webhidBackdropFadeOut 0.15s ease-in forwards;
+.webhid-modal[open] .webhid-modal-form {
+  @starting-style {
+    transform: translateY(-8px);
+    opacity: 0;
+  }
 }
 
 .webhid-modal-form::before {
@@ -50,33 +66,6 @@
   border: 9px solid transparent;
   border-top: none;
   border-bottom-color: var(--bg);
-}
-
-@keyframes webhidModalSlideIn {
-  from {
-    transform: translateY(-8px);
-    opacity: 0;
-  }
-  to   {
-    transform: translateY(0);
-    opacity: 1;
-  }
-}
-
-@keyframes webhidModalSlideOut {
-  from {
-    transform: translateY(0);
-    opacity: 1;
-  }
-  to   {
-    transform: translateY(-8px);
-    opacity: 0;
-  }
-}
-
-@keyframes webhidBackdropFadeOut {
-  from { opacity: 1; }
-  to   { opacity: 0; }
 }
 
 .webhid-modal-header {

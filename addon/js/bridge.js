@@ -66,43 +66,61 @@
     }
 
     #createTemplates() {
-      if (this.shadowRoot.getElementById("webhid-modal-template")) return;
+      if (this.shadowRoot.querySelector(".webhid-modal")) return;
 
-      const tpl = document.createElement("template");
-      tpl.id = "webhid-modal-template";
-      tpl.innerHTML = `
-        <dialog class="webhid-modal">
-          <form method="dialog" class="webhid-modal-form">
-            <div class="webhid-modal-header">
-              <h2>Select a HID Device</h2>
-            </div>
-            <div class="webhid-modal-content">
-              <div class="webhid-device-list" id="webhidDeviceList">
-                <div class="webhid-loading" id="webhidLoading">Loading devices...</div>
-              </div>
-            </div>
-            <div class="webhid-modal-footer">
-              <button type="submit" class="webhid-cancel-button" id="webhidCancelBtn" value="cancel">Cancel</button>
-              <button type="submit" class="webhid-connect-button" id="webhidConnectBtn" value="selected" disabled>Connect</button>
-            </div>
-          </form>
-        </dialog>
-      `;
-      const itemTpl = document.createElement("template");
-      itemTpl.id = "webhid-device-item-template";
-      itemTpl.innerHTML = `
-        <label class="webhid-device-item" tabindex="0">
-          <input type="radio" name="webhid-device" class="webhid-device-radio">
-          <img class="webhid-device-icon" draggable="false">
-          <div class="webhid-device-body">
-            <div class="webhid-device-name"></div>
-            <div class="webhid-device-vendor"></div>
-            <div class="webhid-device-iface"></div>
+      this.dialog = document.createElement("dialog");
+      this.dialog.className = "webhid-modal";
+      this.dialog.innerHTML = `
+        <form method="dialog" class="webhid-modal-form">
+          <div class="webhid-modal-header">
+            <h2>Select a HID Device</h2>
           </div>
-        </label>
+          <div class="webhid-modal-content">
+            <div class="webhid-device-list" id="webhidDeviceList">
+              <div class="webhid-loading" id="webhidLoading">Loading devices...</div>
+              <template id="webhid-device-item-template">
+                <label class="webhid-device-item" tabindex="0">
+                  <input type="radio" name="webhid-device" class="webhid-device-radio">
+                  <img class="webhid-device-icon" draggable="false">
+                  <div class="webhid-device-body">
+                    <div class="webhid-device-name"></div>
+                    <div class="webhid-device-vendor"></div>
+                    <div class="webhid-device-iface"></div>
+                  </div>
+                </label>
+              </template>
+            </div>
+          </div>
+          <div class="webhid-modal-footer">
+            <button type="submit" class="webhid-cancel-button" id="webhidCancelBtn" value="cancel">Cancel</button>
+            <button type="submit" class="webhid-connect-button" id="webhidConnectBtn" value="selected" disabled>Connect</button>
+          </div>
+        </form>
       `;
-      this.shadowRoot.appendChild(tpl);
-      this.shadowRoot.appendChild(itemTpl);
+      this.shadowRoot.appendChild(this.dialog);
+
+      this.dialog.addEventListener("close", () => {
+        const returnValue = this.dialog.returnValue;
+        const checked = this.dialog.querySelector(".webhid-device-radio:checked");
+        const deviceId = checked?.value;
+        if (returnValue === "selected" && deviceId) {
+          this.#onDeviceSelected(this.#deviceGroups[deviceId] || []);
+        } else {
+          this.#onDeviceCancelled();
+        }
+      });
+
+      this.dialog.addEventListener("change", (e) => {
+        if (!e.target.matches(".webhid-device-radio")) return;
+        this.dialog.querySelectorAll(".webhid-device-item")
+          .forEach((el) => el.classList.remove("selected"));
+        e.target.closest(".webhid-device-item").classList.add("selected");
+        this.dialog.querySelector("#webhidConnectBtn").disabled = false;
+      });
+
+      this.dialog.addEventListener("click", (e) => {
+        if (e.target === this.dialog) this.dialog.close();
+      });
     }
 
     #setupEventListeners() {
@@ -116,7 +134,6 @@
 
     async show(filters = []) {
       this.filters = filters;
-      this._pendingResolve = null;
 
       let tries = 0;
       while (!this.shadowRoot && tries < 100) {
@@ -132,42 +149,9 @@
       await this.#cssReady;
 
       if (!this.dialog) {
-        const tpl = this.shadowRoot.getElementById("webhid-modal-template");
-        this.dialog = tpl.content.firstElementChild.cloneNode(true);
-        this.shadowRoot.appendChild(this.dialog);
-
-        this.dialog.addEventListener("close", () => {
-          const returnValue = this.dialog.returnValue;
-          const checked = this.dialog.querySelector(".webhid-device-radio:checked");
-          const deviceId = checked?.value;
-          const devices = (returnValue === "selected" && deviceId)
-            ? (this.#deviceGroups[deviceId] || [])
-            : null;
-          this.dialog.classList.add("closing");
-          this.dialog.addEventListener("animationend", () => {
-            this.dialog.classList.remove("closing");
-          }, { once: true });
-          if (devices) {
-            this.#onDeviceSelected(devices);
-          } else {
-            this.#onDeviceCancelled();
-          }
-        });
-
-        this.dialog.addEventListener("change", (e) => {
-          if (!e.target.matches(".webhid-device-radio")) return;
-          this.dialog.querySelectorAll(".webhid-device-item")
-            .forEach((el) => el.classList.remove("selected"));
-          e.target.closest(".webhid-device-item").classList.add("selected");
-          this.dialog.querySelector("#webhidConnectBtn").disabled = false;
-        });
-
-        this.dialog.addEventListener("click", (e) => {
-          if (e.target === this.dialog) this.dialog.close();
-        });
+        this.#createTemplates();
       }
 
-      this.dialog.classList.remove("closing");
       if (typeof this.dialog.showModal === "function") {
         if (this.dialog.open) this.dialog.close();
         this.dialog.showModal();
