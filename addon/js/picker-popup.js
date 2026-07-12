@@ -1,5 +1,5 @@
 (async () => {
-const { logger, http, guessDeviceType, GLOBAL_DEFAULTS } = __webhid;
+const { logger, http, guessDeviceType, GLOBAL_DEFAULTS, fetchResource } = __webhid;
 logger.initLogger("picker-popup");
 
 const listEl = document.getElementById("picker-list");
@@ -87,6 +87,13 @@ async function loadDevices() {
     item.appendChild(radio);
     item.appendChild(iconSpan);
     item.appendChild(body);
+    fetchResource(`res/${type}.svg`).then((svg) => {
+      if (svg) {
+        const svgDoc = new DOMParser().parseFromString(svg, "image/svg+xml");
+        const svgEl = svgDoc.documentElement;
+        if (svgEl) iconSpan.replaceChildren(svgEl.cloneNode(true));
+      }
+    }).catch(() => {});
     radio.addEventListener("change", () => {
       selectedDeviceId = groupId;
       connectBtn.disabled = false;
