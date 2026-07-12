@@ -34,6 +34,14 @@
   animation: webhidModalSlideIn 0.2s ease-out;
 }
 
+.webhid-modal.closing .webhid-modal-form {
+  animation: webhidModalSlideOut 0.15s ease-in forwards;
+}
+
+.webhid-modal.closing::backdrop {
+  animation: webhidBackdropFadeOut 0.15s ease-in forwards;
+}
+
 .webhid-modal-form::before {
   content: '';
   position: absolute;
@@ -53,6 +61,22 @@
     transform: translateY(0);
     opacity: 1;
   }
+}
+
+@keyframes webhidModalSlideOut {
+  from {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  to   {
+    transform: translateY(-8px);
+    opacity: 0;
+  }
+}
+
+@keyframes webhidBackdropFadeOut {
+  from { opacity: 1; }
+  to   { opacity: 0; }
 }
 
 .webhid-modal-header {

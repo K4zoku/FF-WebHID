@@ -24,9 +24,14 @@
       "js/background.js"
     ]
   },
-  "action": {
+  "page_action": {
     "default_popup": "html/popup.html",
-    "default_icon": "icons/icon.svg"
+    "default_icon": "icons/icon.svg",
+    "show_matches": ["http://*/*", "https://*/*"]
+  },
+  "action": {
+    "default_icon": "icons/icon.svg",
+    "default_title": "WebHID — Global settings"
   },
   "options_ui": {
     "page": "html/settings.html",

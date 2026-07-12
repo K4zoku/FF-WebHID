@@ -355,6 +355,12 @@ browser.runtime.onInstalled.addListener(() => {
 loadNmHostSetting().then(() => NativeMessaging.connect());
 browser.tabs.onRemoved.addListener((tabId) => purgeTab(tabId));
 
+if (browser.action?.onClicked) {
+  browser.action.onClicked.addListener(() => {
+    browser.runtime.openOptionsPage();
+  });
+}
+
 browser.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
   const patch = {};
@@ -503,10 +509,15 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     case 'device-count-changed':
-      browser.action.setBadgeText({
-        text: request.count > 0 ? String(request.count) : '',
-        tabId: sender.tab?.id,
-      });
+      if (browser.pageAction) {
+        const tabId = sender.tab?.id;
+        if (tabId != null) {
+          browser.pageAction.setBadgeText({
+            text: request.count > 0 ? String(request.count) : '',
+            tabId,
+          });
+        }
+      }
       return false;
 
     case 'getDeviceCache':

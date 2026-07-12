@@ -115,11 +115,8 @@
     }
 
     async show(filters = []) {
-      if (this.dialog?.open) {
-        this.dialog.close();
-      }
-
       this.filters = filters;
+      this._pendingResolve = null;
 
       let tries = 0;
       while (!this.shadowRoot && tries < 100) {
@@ -134,37 +131,45 @@
 
       await this.#cssReady;
 
-      const tpl = this.shadowRoot.getElementById("webhid-modal-template");
-      this.dialog = tpl.content.firstElementChild.cloneNode(true);
-      this.shadowRoot.appendChild(this.dialog);
+      if (!this.dialog) {
+        const tpl = this.shadowRoot.getElementById("webhid-modal-template");
+        this.dialog = tpl.content.firstElementChild.cloneNode(true);
+        this.shadowRoot.appendChild(this.dialog);
 
-      this.dialog.addEventListener("close", () => {
-        const returnValue = this.dialog.returnValue;
-        const checked = this.dialog.querySelector(".webhid-device-radio:checked");
-        const deviceId = checked?.value;
-        this.dialog.remove();
-        this.dialog = null;
-        if (returnValue === "selected" && deviceId) {
-          const devices = this.#deviceGroups[deviceId] || [];
-          this.#onDeviceSelected(devices);
-        } else {
-          this.#onDeviceCancelled();
-        }
-      });
+        this.dialog.addEventListener("close", () => {
+          const returnValue = this.dialog.returnValue;
+          const checked = this.dialog.querySelector(".webhid-device-radio:checked");
+          const deviceId = checked?.value;
+          const devices = (returnValue === "selected" && deviceId)
+            ? (this.#deviceGroups[deviceId] || [])
+            : null;
+          this.dialog.classList.add("closing");
+          this.dialog.addEventListener("animationend", () => {
+            this.dialog.classList.remove("closing");
+          }, { once: true });
+          if (devices) {
+            this.#onDeviceSelected(devices);
+          } else {
+            this.#onDeviceCancelled();
+          }
+        });
 
-      this.dialog.addEventListener("change", (e) => {
-        if (!e.target.matches(".webhid-device-radio")) return;
-        this.dialog.querySelectorAll(".webhid-device-item")
-          .forEach((el) => el.classList.remove("selected"));
-        e.target.closest(".webhid-device-item").classList.add("selected");
-        this.dialog.querySelector("#webhidConnectBtn").disabled = false;
-      });
+        this.dialog.addEventListener("change", (e) => {
+          if (!e.target.matches(".webhid-device-radio")) return;
+          this.dialog.querySelectorAll(".webhid-device-item")
+            .forEach((el) => el.classList.remove("selected"));
+          e.target.closest(".webhid-device-item").classList.add("selected");
+          this.dialog.querySelector("#webhidConnectBtn").disabled = false;
+        });
 
-      this.dialog.addEventListener("click", (e) => {
-        if (e.target === this.dialog) this.dialog.close();
-      });
+        this.dialog.addEventListener("click", (e) => {
+          if (e.target === this.dialog) this.dialog.close();
+        });
+      }
 
+      this.dialog.classList.remove("closing");
       if (typeof this.dialog.showModal === "function") {
+        if (this.dialog.open) this.dialog.close();
         this.dialog.showModal();
       } else {
         this.dialog.setAttribute("open", "");
