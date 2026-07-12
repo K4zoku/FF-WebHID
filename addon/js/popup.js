@@ -73,10 +73,14 @@
     renderDevices();
   }
 
+  let renderToken = 0;
   async function renderDevices() {
+    const token = ++renderToken;
     const list = document.getElementById('device-list');
     const noDevices = document.getElementById('no-devices');
     const hashes = await loadDevices();
+
+    if (token !== renderToken) return;
 
     list.innerHTML = '';
     if (hashes.length === 0) {
@@ -86,6 +90,7 @@
     noDevices.style.display = 'none';
 
     const response = await browser.runtime.sendMessage({ action: 'getDeviceCache' });
+    if (token !== renderToken) return;
     const cache = (response && response.devices) || [];
 
     let openIds = new Set();
@@ -93,6 +98,8 @@
       const r = await browser.tabs.sendMessage(tab.id, { action: 'getOpenDeviceIds' });
       if (r?.ids) openIds = new Set(r.ids);
     } catch {}
+
+    if (token !== renderToken) return;
 
     let openCount = 0;
     for (const hash of hashes) {
@@ -103,6 +110,7 @@
           dev = r?.device || null;
         } catch {}
       }
+      if (token !== renderToken) return;
 
       const isDisconnected = !cache.some(d => d.deviceId === hash);
       const name = dev ? (dev.productName || 'Unknown') : 'Paired device';
