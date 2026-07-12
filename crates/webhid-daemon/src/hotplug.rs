@@ -75,6 +75,7 @@ fn start_udev(event_tx: broadcast::Sender<IpcResponse>) -> anyhow::Result<()> {
     use std::sync::Mutex;
 
     static DEVICE_CACHE: Mutex<Option<HashMap<u32, webhid::DeviceInfo>>> = Mutex::new(None);
+    static DEVNODE_TO_ID: Mutex<Option<HashMap<String, u32>>> = Mutex::new(None);
 
     std::thread::Builder::new()
         .name("udev-monitor".into())
@@ -93,10 +94,14 @@ fn start_udev(event_tx: broadcast::Sender<IpcResponse>) -> anyhow::Result<()> {
             if let Ok(api) = hidapi::HidApi::new() {
                 let mut cache = DEVICE_CACHE.lock().unwrap();
                 let cache = cache.get_or_insert_with(HashMap::new);
+                let mut dnmap = DEVNODE_TO_ID.lock().unwrap();
+                let dnmap = dnmap.get_or_insert_with(HashMap::new);
                 for info in api.device_list() {
                     if crate::hid::is_blocked_pub(info) { continue; }
                     if let Some(d) = crate::hid::info_from_hidapi_pub(info) {
-                        cache.insert(d.device_id, d);
+                        let devnode = info.path().to_string_lossy().into_owned();
+                        cache.insert(d.device_id, d.clone());
+                        dnmap.insert(devnode, d.device_id);
                     }
                 }
             }
@@ -119,11 +124,20 @@ fn start_udev(event_tx: broadcast::Sender<IpcResponse>) -> anyhow::Result<()> {
                             let mut cache = DEVICE_CACHE.lock().unwrap();
                             let cache = cache.get_or_insert_with(HashMap::new);
                             cache.insert(info.device_id, info.clone());
+                            let mut dnmap = DEVNODE_TO_ID.lock().unwrap();
+                            let dnmap = dnmap.get_or_insert_with(HashMap::new);
+                            dnmap.insert(devnode, info.device_id);
                             IpcResponse::DeviceConnected { id: 0, device: info }
                         }
                         udev::EventType::Remove => {
-                            let mut cache = DEVICE_CACHE.lock().unwrap();
-                            let info = cache.as_mut().and_then(|c| c.remove(&crate::hid::make_device_id_from_devnode(&devnode)));
+                            let device_id = {
+                                let mut dnmap = DEVNODE_TO_ID.lock().unwrap();
+                                dnmap.get_or_insert_with(HashMap::new).remove(&devnode)
+                            };
+                            let info = device_id.and_then(|id| {
+                                let mut cache = DEVICE_CACHE.lock().unwrap();
+                                cache.as_mut().and_then(|c| c.remove(&id))
+                            });
                             match info {
                                 Some(i) => {
                                     log::info!("device disconnected: {:04x}:{:04x} ({})", i.vendor_id, i.product_id, i.device_id);
