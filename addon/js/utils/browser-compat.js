@@ -3,6 +3,19 @@
     window.browser = chrome;
   }
 
+  window.__webhid = window.__webhid || {};
+
+  const _resourceCache = new Map();
+  window.__webhid.fetchResource = async function (path) {
+    if (_resourceCache.has(path)) return _resourceCache.get(path);
+    const runtime = typeof browser !== "undefined" ? browser : chrome;
+    const resp = await runtime.sendMessage({ action: "fetchResource", path });
+    if (resp?.error) throw new Error(resp.error);
+    const text = resp?.text || "";
+    _resourceCache.set(path, text);
+    return text;
+  };
+
   if (
     typeof Uint8Array.prototype.fromBase64 === "function" &&
     typeof Uint8Array.prototype.toBase64 === "function"
@@ -41,19 +54,4 @@
     writable: true,
     configurable: true,
   });
-
-  const _resourceCache = new Map();
-
-  window.__webhid = window.__webhid || {};
-  window.__webhid.fetchResource = async function (path) {
-    if (_resourceCache.has(path)) return _resourceCache.get(path);
-    const resp = await browser.runtime.sendMessage({
-      action: "fetchResource",
-      path,
-    });
-    if (resp?.error) throw new Error(resp.error);
-    const text = resp?.text || "";
-    _resourceCache.set(path, text);
-    return text;
-  };
 })();
