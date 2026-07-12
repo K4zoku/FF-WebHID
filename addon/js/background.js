@@ -667,10 +667,10 @@
       }
 
       case "device-count-changed":
-        if (browser.pageAction) {
+        if (browser.action) {
           const tabId = sender.tab?.id;
           if (tabId != null) {
-            browser.pageAction.setBadgeText({
+            browser.action.setBadgeText({
               text: request.count > 0 ? String(request.count) : "",
               tabId,
             });

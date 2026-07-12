@@ -39,13 +39,12 @@
 
     async #loadFragment() {
       const html = await fetchResource("html/device-picker.fragment.html");
-      const tmp = document.createElement("div");
-      tmp.innerHTML = html;
+      const doc = new DOMParser().parseFromString(html, "text/html");
 
-      const pickerTpl = tmp.querySelector("#webhid-picker-template");
+      const pickerTpl = doc.querySelector("#webhid-picker-template");
       this.#shadow.appendChild(pickerTpl.content.cloneNode(true));
 
-      const deviceTpl = tmp.querySelector("#webhid-device-template");
+      const deviceTpl = doc.querySelector("#webhid-device-template");
       this.#shadow.appendChild(deviceTpl);
 
       this.#dialog = this.#shadow.querySelector(".webhid-modal");
@@ -242,7 +241,11 @@
 
         const iconSpan = clone.querySelector(".webhid-device-icon");
         _getSvg(type).then((svg) => {
-          if (svg) iconSpan.innerHTML = svg;
+          if (svg) {
+            const svgDoc = new DOMParser().parseFromString(svg, "image/svg+xml");
+            const svgEl = svgDoc.documentElement;
+            if (svgEl) iconSpan.replaceChildren(svgEl.cloneNode(true));
+          }
         });
 
         clone.querySelector(".webhid-device-name").textContent = name;
