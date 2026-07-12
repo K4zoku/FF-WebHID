@@ -1,3 +1,4 @@
+(function () {
 // WebHID Standard implementation with injected modal
 
 "use strict";
@@ -759,3 +760,4 @@ const { logger, fetchResource, http, guessDeviceType, createSettingsStore, GLOBA
     if (Object.keys(patch).length === 0) return;
     settings.set(patch);
   });
+})();

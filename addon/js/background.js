@@ -1,3 +1,4 @@
+(function () {
 const { logger, http, createSettingsStore, GLOBAL_DEFAULTS, fetchResource } = __webhid;
 logger.initLogger('bg');
 
@@ -565,3 +566,4 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return false;
   }
 });
+})();

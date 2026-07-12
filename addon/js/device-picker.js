@@ -1,3 +1,4 @@
+(function () {
 "use strict";
 const { logger, fetchResource, http, guessDeviceType } = __webhid;
 logger.initLogger('picker');
@@ -279,3 +280,4 @@ class WebHidDevicePicker {
 
 globalThis.__webhid = globalThis.__webhid || {};
 globalThis.__webhid.WebHidDevicePicker = WebHidDevicePicker;
+})();
