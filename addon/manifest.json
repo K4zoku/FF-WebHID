@@ -63,6 +63,7 @@
         "js/utils/device-utils.js",
         "js/utils/settings.js",
         "js/utils/http-status.js",
+        "js/device-picker.js",
         "js/bridge.js"
       ],
       "world": "ISOLATED",
