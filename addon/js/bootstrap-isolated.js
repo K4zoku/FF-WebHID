@@ -2,11 +2,11 @@
 // Chromium gives each content script file its own scope,
 // so we fetch all sources and eval them in one shared scope.
 if (typeof browser === "undefined" && typeof chrome !== "undefined") {
-  browser = chrome;
+  var browser = chrome;
 }
 
 (async function () {
-  var runtime = typeof browser !== "undefined" ? browser : chrome;
+  var runtime = (typeof browser !== "undefined") ? browser : chrome;
 
   var _resourceCache = {};
   async function fetchResource(path) {

@@ -1,10 +1,10 @@
 // Bootstrap for MAIN world content script.
 if (typeof browser === "undefined" && typeof chrome !== "undefined") {
-  browser = chrome;
+  var browser = chrome;
 }
 
 (async function () {
-  var runtime = typeof browser !== "undefined" ? browser : chrome;
+  var runtime = (typeof browser !== "undefined") ? browser : chrome;
 
   var _resourceCache = {};
   async function fetchResource(path) {
