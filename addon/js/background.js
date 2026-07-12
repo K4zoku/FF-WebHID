@@ -328,24 +328,13 @@ const NativeMessaging = {
         device: message.v || null,
       };
       browser.runtime.sendMessage({ action: 'webhid-device-event', event: normalized }).catch(() => {});
-      const targets = tabsForEvent(message);
-      if (targets) {
-        for (const tabId of targets) {
-          browser.tabs.sendMessage(tabId, { action: 'webhid-device-event', event: normalized }).catch(() => {});
+      browser.tabs.query({}).then((tabs) => {
+        for (const tab of tabs) {
+          if (!tab.url) continue;
+          try { new URL(tab.url); } catch { continue; }
+          browser.tabs.sendMessage(tab.id, { action: 'webhid-device-event', event: normalized }).catch(() => {});
         }
-      } else if (message.i) {
-        browser.tabs.query({}).then((tabs) => {
-          for (const tab of tabs) {
-            if (!tab.url) continue;
-            try {
-              const origin = new URL(tab.url).origin;
-              isDeviceAllowedForOrigin(origin, message.i).then((allowed) => {
-                if (allowed) browser.tabs.sendMessage(tab.id, { action: 'webhid-device-event', event: normalized }).catch(() => {});
-              });
-            } catch {}
-          }
-        }).catch(() => {});
-      }
+      }).catch(() => {});
       return;
     }
     const targets = tabsForEvent(message);
