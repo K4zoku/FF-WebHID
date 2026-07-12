@@ -78,18 +78,18 @@
           <div class="webhid-modal-content">
             <div class="webhid-device-list" id="webhidDeviceList">
               <div class="webhid-loading" id="webhidLoading">Loading devices...</div>
-              <template id="webhid-device-item-template">
-                <label class="webhid-device-item" tabindex="0">
-                  <input type="radio" name="webhid-device" class="webhid-device-radio">
-                  <img class="webhid-device-icon" draggable="false">
-                  <div class="webhid-device-body">
-                    <div class="webhid-device-name"></div>
-                    <div class="webhid-device-vendor"></div>
-                    <div class="webhid-device-iface"></div>
-                  </div>
-                </label>
-              </template>
             </div>
+            <template id="webhid-device-item-template">
+              <label class="webhid-device-item" tabindex="0">
+                <input type="radio" name="webhid-device" class="webhid-device-radio">
+                <img class="webhid-device-icon" draggable="false">
+                <div class="webhid-device-body">
+                  <div class="webhid-device-name"></div>
+                  <div class="webhid-device-vendor"></div>
+                  <div class="webhid-device-iface"></div>
+                </div>
+              </label>
+            </template>
           </div>
           <div class="webhid-modal-footer">
             <button type="submit" class="webhid-cancel-button" id="webhidCancelBtn" value="cancel">Cancel</button>
