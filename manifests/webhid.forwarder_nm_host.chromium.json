@@ -1,7 +1,0 @@
-{
-  "name": "webhid.forwarder_nm_host",
-  "description": "WebHID native messaging host",
-  "path": "{{NM_BIN}}",
-  "type": "stdio",
-  "allowed_origins": ["chrome-extension://cmoeblnljlpdnbhi/"]
-}

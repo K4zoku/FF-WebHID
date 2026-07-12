@@ -1,7 +1,0 @@
-{
-  "name": "webhid.daemon_nm_host",
-  "description": "WebHID daemon as native-messaging host (no separate forwarder)",
-  "path": "{{DAEMON_BIN}}",
-  "type": "stdio",
-  "allowed_origins": ["chrome-extension://cmoeblnljlpdnbhi/"]
-}
