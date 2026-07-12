@@ -1,4 +1,5 @@
-__webhid.logger.initLogger('bg');
+const { logger, http, createSettingsStore, GLOBAL_DEFAULTS, fetchResource } = __webhid;
+logger.initLogger('bg');
 
 let _deviceCache = [];
 
@@ -68,7 +69,7 @@ function registerDeviceTab(deviceId, tabId) {
   let tabs = _deviceTabMap.get(deviceId);
   if (!tabs) { tabs = new Set(); _deviceTabMap.set(deviceId, tabs); }
   tabs.add(tabId);
-  __webhid.logger.debug('register device ' + deviceId + ' tab ' + tabId);
+  logger.debug('register device ' + deviceId + ' tab ' + tabId);
 }
 
 function unregisterDeviceTab(deviceId, tabId) {
@@ -125,17 +126,17 @@ async function isDeviceAllowedForOrigin(origin, deviceId) {
 const NM_HOST_FORWARDER = "webhid.forwarder_nm_host";
 const NM_HOST_DAEMON = "webhid.daemon_nm_host";
 
-const settings = __webhid.createSettingsStore(__webhid.GLOBAL_DEFAULTS);
+const settings = createSettingsStore(GLOBAL_DEFAULTS);
 function _nmHostName() { return settings.daemonAsNmHost ? NM_HOST_DAEMON : NM_HOST_FORWARDER; }
 
 async function loadNmHostSetting() {
-  const global = await browser.storage.local.get(__webhid.GLOBAL_DEFAULTS);
+  const global = await browser.storage.local.get(GLOBAL_DEFAULTS);
   settings.set(global);
-  __webhid.logger.info('NM host:', _nmHostName());
+  logger.info('NM host:', _nmHostName());
 }
 
 settings.on('daemonAsNmHost', () => {
-  __webhid.logger.info('NM host changed:', _nmHostName());
+  logger.info('NM host changed:', _nmHostName());
   NativeMessaging.reconnectWithNewHost();
 });
 
@@ -160,15 +161,15 @@ const NativeMessaging = {
 
   connect() {
     if (this.port) return Promise.resolve();
-    __webhid.logger.debug('connecting to ' + _nmHostName() + '...');
+    logger.debug('connecting to ' + _nmHostName() + '...');
     try {
       this.port = browser.runtime.connectNative(_nmHostName());
       this._reconnectDelay = 1000;
-      __webhid.logger.debug('connected');
+      logger.debug('connected');
 
       this.port.onMessage.addListener((message) => {
         if (message.E !== undefined && message.s !== undefined && message.n === undefined) {
-          __webhid.logger.error('host error: ' + message.E);
+          logger.error('host error: ' + message.E);
           for (const [, p] of this._pending) p.resolve(message);
           this._pending.clear();
           return;
@@ -185,11 +186,11 @@ const NativeMessaging = {
           const p = this._pending.get(message.n);
           if (p) { this._pending.delete(message.n); p.resolve(message); return; }
         }
-        __webhid.logger.warn('unmatched:', message);
+        logger.warn('unmatched:', message);
       });
 
       this.port.onDisconnect.addListener(() => {
-        __webhid.logger.warn('disconnected; will retry in ' + this._reconnectDelay + 'ms. ' +
+        logger.warn('disconnected; will retry in ' + this._reconnectDelay + 'ms. ' +
           'If persistent: check daemon status (systemctl status webhid-daemon), ' +
           'group membership (groups), and NM host manifest.');
         this.port = null;
@@ -200,7 +201,7 @@ const NativeMessaging = {
 
       return Promise.resolve();
     } catch (error) {
-      __webhid.logger.error('connect failed:', error);
+      logger.error('connect failed:', error);
       this._scheduleReconnect();
       return Promise.reject(error);
     }
@@ -217,7 +218,7 @@ const NativeMessaging = {
     if (this._reconnectTimer) return;
     this._reconnectTimer = setTimeout(() => {
       this._reconnectTimer = null;
-      __webhid.logger.debug('reconnecting...');
+      logger.debug('reconnecting...');
       this.connect().catch(() => {});
     }, this._reconnectDelay);
     this._reconnectDelay = Math.min(this._reconnectDelay * 2, 10000);
@@ -232,7 +233,7 @@ const NativeMessaging = {
       }
       const id = this._nextId++;
       this._pending.set(id, { resolve, reject });
-      __webhid.logger.debug('sendRequest a=' + (request.a || 'packed') + ' n=' + id);
+      logger.debug('sendRequest a=' + (request.a || 'packed') + ' n=' + id);
       try {
         this.port.postMessage({ ...request, n: id });
       } catch (e) {
@@ -252,7 +253,7 @@ const NativeMessaging = {
       const id = this._nextId++;
       this._pending.set(id, { resolve, reject });
       const packedBuf = buildPackedFn(id);
-      __webhid.logger.debug('sendPacked msgType=0x' + packedBuf[0].toString(16) + ' n=' + id);
+      logger.debug('sendPacked msgType=0x' + packedBuf[0].toString(16) + ' n=' + id);
       try {
         this.port.postMessage({ d: packedBuf.toBase64() });
       } catch (e) {
@@ -319,7 +320,7 @@ const NativeMessaging = {
         }
       } else {
         NativeMessaging.enumerateDevices().then((resp) => {
-          if (__webhid.http.isOk(resp.s) && resp.D) _deviceCache = resp.D;
+          if (http.isOk(resp.s) && resp.D) _deviceCache = resp.D;
         }).catch(() => {});
       }
       const normalized = {
@@ -364,7 +365,7 @@ if (browser.action?.onClicked) {
 browser.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
   const patch = {};
-  for (const k of Object.keys(__webhid.GLOBAL_DEFAULTS)) {
+  for (const k of Object.keys(GLOBAL_DEFAULTS)) {
     if (changes[k]) patch[k] = changes[k].newValue;
   }
   if (Object.keys(patch).length === 0) return;
@@ -376,7 +377,7 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
     case 'enumerate':
       NativeMessaging.enumerateDevices()
         .then((response) => {
-          if (__webhid.http.isOk(response.s) && response.D) {
+          if (http.isOk(response.s) && response.D) {
             _deviceCache = response.D;
             _saveDeviceInfoBatch(response.D);
           }
@@ -398,7 +399,7 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
         if (!allowed) { sendResponse({ s: 403 }); return; }
         NativeMessaging.openDevice(request.deviceId)
           .then((response) => {
-            if (__webhid.http.isOk(response.s) && response.i) registerDeviceTab(response.i, tabId);
+            if (http.isOk(response.s) && response.i) registerDeviceTab(response.i, tabId);
             sendResponse(response);
           })
           .catch((e) => sendResponse({ s: 500 }));
@@ -410,7 +411,7 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
       const tabId = sender.tab?.id;
       NativeMessaging.closeDevice(request.deviceId)
         .then((response) => {
-          if (__webhid.http.isOk(response.s)) unregisterDeviceTab(request.deviceId, tabId);
+          if (http.isOk(response.s)) unregisterDeviceTab(request.deviceId, tabId);
           sendResponse(response);
         })
         .catch((e) => sendResponse({ s: 500 }));
@@ -426,10 +427,10 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     case 'sendreport':
       if (!isTabAuthorizedForDevice(sender.tab?.id, request.deviceId)) { sendResponse({ s: 403 }); return true; }
-      __webhid.logger.debug('sendreport: deviceId=' + request.deviceId + ' reportId=' + (request.reportId || 0) + ' dataLen=' + (request.data?.length ?? 'undefined') + ' dataCtor=' + (request.data?.constructor?.name ?? 'undefined'));
+      logger.debug('sendreport: deviceId=' + request.deviceId + ' reportId=' + (request.reportId || 0) + ' dataLen=' + (request.data?.length ?? 'undefined') + ' dataCtor=' + (request.data?.constructor?.name ?? 'undefined'));
       NativeMessaging.sendReport(request.deviceId, request.reportId || 0, request.data)
-        .then((resp) => { __webhid.logger.debug('sendreport resp:', resp); sendResponse(resp); })
-        .catch((e) => { __webhid.logger.error('sendreport error:', e.message); sendResponse({ s: 500 }); });
+        .then((resp) => { logger.debug('sendreport resp:', resp); sendResponse(resp); })
+        .catch((e) => { logger.error('sendreport error:', e.message); sendResponse({ s: 500 }); });
       return true;
 
     case 'receivefeaturereport':
@@ -524,7 +525,7 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
       if (_deviceCache.length === 0) {
         NativeMessaging.enumerateDevices()
           .then((response) => {
-            if (__webhid.http.isOk(response.s) && response.D) {
+            if (http.isOk(response.s) && response.D) {
               _deviceCache = response.D;
             }
             _saveDeviceInfoBatch(_deviceCache);

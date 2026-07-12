@@ -1,12 +1,13 @@
 "use strict";
-__webhid.logger.initLogger('picker');
+const { logger, fetchResource, http, guessDeviceType } = __webhid;
+logger.initLogger('picker');
 
 const _svgCache = {};
 
 async function _getSvg(type) {
   if (_svgCache[type]) return _svgCache[type];
   try {
-    const svg = await __webhid.fetchResource(`res/${type}.svg`);
+    const svg = await fetchResource(`res/${type}.svg`);
     _svgCache[type] = svg;
     return svg;
   } catch { return null; }
@@ -32,7 +33,7 @@ class WebHidDevicePicker {
   get host() { return this.#host; }
 
   async #loadFragment() {
-    const html = await __webhid.fetchResource('html/device-picker.fragment.html');
+    const html = await fetchResource('html/device-picker.fragment.html');
     const tmp = document.createElement('div');
     tmp.innerHTML = html;
 
@@ -103,21 +104,21 @@ class WebHidDevicePicker {
   async #loadDevices() {
     try {
       const response = await browser.runtime.sendMessage({ action: 'enumerate' });
-      if (response && __webhid.http.isOk(response.s)) {
+      if (response && http.isOk(response.s)) {
         this.#devices = response.D || [];
       } else {
         this.#devices = [];
         const code = response?.s || 0;
         if (code === 500) {
-          __webhid.logger.warn('enumerate returned 500, treating as empty list');
+          logger.warn('enumerate returned 500, treating as empty list');
         } else {
-          __webhid.logger.warn('enumerate returned status', code);
+          logger.warn('enumerate returned status', code);
         }
       }
       this.#renderDevices();
     } catch (error) {
       this.#devices = [];
-      __webhid.logger.warn('enumerate exception:', error?.message || error);
+      logger.warn('enumerate exception:', error?.message || error);
       this.#renderDevices();
     }
   }
@@ -212,7 +213,7 @@ class WebHidDevicePicker {
       this.#deviceGroups[groupId] = devices.slice();
 
       const device = devices[0];
-      const type = __webhid.guessDeviceType(device);
+      const type = guessDeviceType(device);
 
       const clone = tpl.content.cloneNode(true);
       const item = clone.querySelector('.webhid-device-item');

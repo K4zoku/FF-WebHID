@@ -1,8 +1,8 @@
 // WebHID Standard implementation with injected modal
 
-(function () {
-  "use strict";
-  __webhid.logger.initLogger('bridge');
+"use strict";
+const { logger, fetchResource, http, guessDeviceType, createSettingsStore, GLOBAL_DEFAULTS } = __webhid;
+  logger.initLogger('bridge');
 
   // ---------------------------------------------------------------------------
   // Initialize device picker custom element
@@ -32,7 +32,7 @@
   const _workerQueues = new Map();
   const _dataPorts = new Map();
   let _wsPort = null;
-  const settings = __webhid.createSettingsStore(__webhid.GLOBAL_DEFAULTS);
+  const settings = createSettingsStore(GLOBAL_DEFAULTS);
   let _controlWorker = null;
   let _controlPort = null;
   let _pagePort = null;
@@ -52,7 +52,7 @@
     ];
     const workerUrl = kind === 'control' ? 'js/control.js' : 'js/worker.js';
     const texts = await Promise.all(
-      [...baseUrls, workerUrl].map(u => __webhid.fetchResource(u))
+      [...baseUrls, workerUrl].map(u => fetchResource(u))
     );
     const blob = new Blob([texts.join('\n')], { type: 'application/javascript' });
     const url = URL.createObjectURL(blob);
@@ -68,7 +68,7 @@
       cspBlocked = !!check?.blocked;
     } catch {}
     if (cspBlocked) {
-      __webhid.logger.warn('control worker skipped: CSP worker-src blocks blob:; control plane uses NM');
+      logger.warn('control worker skipped: CSP worker-src blocks blob:; control plane uses NM');
       return;
     }
     let worker;
@@ -76,7 +76,7 @@
       const url = await _getWorkerBlobUrl('control');
       worker = new Worker(url);
     } catch (e) {
-      __webhid.logger.error('control worker spawn failed:', e);
+      logger.error('control worker spawn failed:', e);
       return;
     }
 
@@ -92,7 +92,7 @@
       resolved = true;
       if (readyTimer) clearTimeout(readyTimer);
       _terminateControlWorker();
-      __webhid.logger.warn('control worker failed:', reason, '; control plane falls back to NM');
+      logger.warn('control worker failed:', reason, '; control plane falls back to NM');
     };
 
     worker.onerror = (e) => fail('onerror: ' + (e.message || 'unknown'));
@@ -103,13 +103,13 @@
         if (resolved) return;
         resolved = true;
         if (readyTimer) clearTimeout(readyTimer);
-        __webhid.logger.info('control worker ready');
+        logger.info('control worker ready');
       } else if (data.type === 'closed') {
-        __webhid.logger.warn('control worker WS closed; will auto-reconnect');
+        logger.warn('control worker WS closed; will auto-reconnect');
         for (const [, { resolve }] of _controlPending) resolve({ s: 503 });
         _controlPending.clear();
       } else if (data.type === 'auth-failed') {
-        __webhid.logger.warn('control worker auth-failed code=' + data.code + '; re-handshaking');
+        logger.warn('control worker auth-failed code=' + data.code + '; re-handshaking');
         for (const [, { resolve }] of _controlPending) resolve({ s: 503 });
         _controlPending.clear();
         _terminateControlWorker();
@@ -121,8 +121,8 @@
       }
     };
 
-    _controlWorker.postMessage({ type: 'connect', token, wsPort, logLevel: __webhid.logger._level }, [port2]);
-    __webhid.logger.info('control worker spawned');
+    _controlWorker.postMessage({ type: 'connect', token, wsPort, logLevel: logger._level }, [port2]);
+    logger.info('control worker spawned');
   }
 
   function _terminateControlWorker() {
@@ -136,14 +136,14 @@
     if (_controlWorker) return;
     try {
       const resp = await browser.runtime.sendMessage({ action: 'handshake' });
-      if (__webhid.http.isOk(resp.s) && resp.c && resp.w) {
+      if (http.isOk(resp.s) && resp.c && resp.w) {
         _wsPort = resp.w;
         _spawnControlWorker(resp.c, resp.w);
       } else {
-        __webhid.logger.error('token refresh failed: s=' + (resp?.s || 0));
+        logger.error('token refresh failed: s=' + (resp?.s || 0));
       }
     } catch (e) {
-      __webhid.logger.error('token refresh error:', e.message);
+      logger.error('token refresh error:', e.message);
     }
   }
 
@@ -211,14 +211,14 @@
     if (_workers.has(deviceId)) return;
     try {
       const resp = await browser.runtime.sendMessage({ action: 'open', deviceId });
-      if (__webhid.http.isOk(resp.s) && resp.t) {
+      if (http.isOk(resp.s) && resp.t) {
         _sessionTokens.set(deviceId, resp.t);
         _spawnDataPlane(deviceId, resp.t, resp.w || _wsPort);
       } else {
-        __webhid.logger.error('data plane token refresh failed for', deviceId, 's=' + (resp?.s || 0));
+        logger.error('data plane token refresh failed for', deviceId, 's=' + (resp?.s || 0));
       }
     } catch (e) {
-      __webhid.logger.error('data plane token refresh error:', e.message);
+      logger.error('data plane token refresh error:', e.message);
     }
   }
 
@@ -230,7 +230,7 @@
       cspBlocked = !!check?.blocked;
     } catch {}
     if (cspBlocked) {
-      __webhid.logger.warn('worker skipped for', deviceId, ': CSP worker-src blocks blob:');
+      logger.warn('worker skipped for', deviceId, ': CSP worker-src blocks blob:');
       return false;
     }
     let worker;
@@ -238,12 +238,12 @@
       const url = await _getWorkerBlobUrl('worker');
       worker = new Worker(url);
     } catch (e) {
-      __webhid.logger.error('worker fetch/spawn failed:', e);
+      logger.error('worker fetch/spawn failed:', e);
       return false;
     }
 
     if (_spawnGen.get(deviceId) !== gen) {
-      __webhid.logger.info('worker spawn stale, discarding for', deviceId);
+      logger.info('worker spawn stale, discarding for', deviceId);
       worker.terminate();
       return false;
     }
@@ -274,7 +274,7 @@
           }
           _workerQueues.delete(deviceId);
         }
-        __webhid.logger.warn('worker spawn failed for', deviceId, ':', reason);
+        logger.warn('worker spawn failed for', deviceId, ':', reason);
         resolveSpawn(false);
       };
 
@@ -286,7 +286,7 @@
           if (resolved) return;
           resolved = true;
           if (readyTimer) clearTimeout(readyTimer);
-          __webhid.logger.info('worker ready for', deviceId);
+          logger.info('worker ready for', deviceId);
           _workerReady.add(deviceId);
           const queue = _workerQueues.get(deviceId);
           if (queue) {
@@ -299,7 +299,7 @@
           if (port) {
             port.onmessage = null;
             try { worker.postMessage({ type: 'set-port' }, [port]); } catch (e) {
-              __webhid.logger.warn('set-port transfer failed for', deviceId, ':', e.message);
+              logger.warn('set-port transfer failed for', deviceId, ':', e.message);
               port.onmessage = (e2) => _onDataPortMessage(deviceId, e2.data);
             }
           }
@@ -307,7 +307,7 @@
           return;
         }
         if (data.type === 'auth-failed') {
-          __webhid.logger.warn('worker auth-failed for', deviceId, 'code=' + data.code + '; re-opening');
+          logger.warn('worker auth-failed for', deviceId, 'code=' + data.code + '; re-opening');
           _workers.delete(deviceId);
           _workerReady.delete(deviceId);
           _dataPorts.delete(deviceId);
@@ -315,7 +315,7 @@
           return;
         }
         if (data.type === 'closed') {
-          __webhid.logger.warn('worker closed for', deviceId);
+          logger.warn('worker closed for', deviceId);
           _workers.delete(deviceId);
           _workerReady.delete(deviceId);
           _dataPorts.delete(deviceId);
@@ -328,10 +328,10 @@
         if (data.type === 'inputReport') {
           return;
           const view = data.data ? new Uint8Array(data.data) : null;
-          if (view && __webhid.logger._level >= 3 && data.reportId !== 33) {
+          if (view && logger._level >= 3 && data.reportId !== 33) {
             let hex = '';
             for (let i = 0; i < Math.min(8, view.length); i++) hex += view[i].toString(16).padStart(2, '0') + ' ';
-            __webhid.logger.debug('worker→page inputReport device=' + deviceId + ' reportId=' + data.reportId + ' len=' + view.length + ' first8=' + hex);
+            logger.debug('worker→page inputReport device=' + deviceId + ' reportId=' + data.reportId + ' len=' + view.length + ' first8=' + hex);
           }
           _replyToPage({
             __webhid_bridge: 'evt',
@@ -365,7 +365,7 @@
     _spawnGen.set(deviceId, gen);
     const ok = await _spawnWorker(deviceId, sessionToken, wsPort, opts, gen);
     if (!ok && _spawnGen.get(deviceId) === gen) {
-      __webhid.logger.warn('worker spawn failed for', deviceId, '; falling back to NM');
+      logger.warn('worker spawn failed for', deviceId, '; falling back to NM');
       browser.runtime.sendMessage({
         action: 'setdataplane', deviceId: deviceId, mode: 'nm'
       }).catch(() => {});
@@ -375,15 +375,15 @@
   (async () => {
     try {
       const resp = await browser.runtime.sendMessage({ action: 'handshake' });
-      if (__webhid.http.isOk(resp.s) && resp.w) {
+      if (http.isOk(resp.s) && resp.w) {
         _wsPort = resp.w;
-        const global = await browser.storage.local.get(__webhid.GLOBAL_DEFAULTS);
+        const global = await browser.storage.local.get(GLOBAL_DEFAULTS);
         const origin = window.location.origin;
         const siteKey = origin ? `site:${origin}` : null;
         if (siteKey) {
           const siteResult = await browser.storage.local.get(siteKey);
           const ss = siteResult[siteKey] || {};
-          for (const k of Object.keys(__webhid.GLOBAL_DEFAULTS)) {
+          for (const k of Object.keys(GLOBAL_DEFAULTS)) {
             if (ss[k] !== undefined) global[k] = ss[k];
           }
         }
@@ -393,7 +393,7 @@
         }
       }
     } catch (e) {
-      __webhid.logger.warn('handshake failed:', e.message);
+      logger.warn('handshake failed:', e.message);
     }
   })();
 
@@ -410,7 +410,7 @@
     if (!port) return;
     _pagePort = port;
     _pagePort.onmessage = (ev) => { handleRequest(ev.data, ev.ports); };
-    __webhid.logger.debug('[bridge] page port established');
+    logger.debug('[bridge] page port established');
   });
 
   async function handleRequest(data, ports) {
@@ -419,21 +419,21 @@
     const { id, action: reqAction, payload } = data;
     let action = reqAction;
     const isFireAndForget = data.fireAndForget === true;
-    __webhid.logger.debug('req action=' + action + ' id=' + id + (isFireAndForget ? ' (faf)' : ''));
+    logger.debug('req action=' + action + ' id=' + id + (isFireAndForget ? ' (faf)' : ''));
 
     if (action === "data-port") {
       const deviceId = payload.deviceId;
       const port = ports && ports[0];
       if (!deviceId || !port) {
-        __webhid.logger.warn('data-port: missing deviceId or port');
+        logger.warn('data-port: missing deviceId or port');
         return;
       }
       _dataPorts.set(deviceId, port);
-      __webhid.logger.debug('data port received for device', deviceId);
+      logger.debug('data port received for device', deviceId);
       const worker = _workers.get(deviceId);
       if (worker && _workerReady.has(deviceId)) {
         try { worker.postMessage({ type: 'set-port' }, [port]); } catch (e) {
-          __webhid.logger.warn('set-port transfer failed for', deviceId, ':', e.message);
+          logger.warn('set-port transfer failed for', deviceId, ':', e.message);
           port.onmessage = (ev) => _onDataPortMessage(deviceId, ev.data);
         }
       } else {
@@ -444,13 +444,13 @@
 
     if (action === "getSettings") {
       try {
-        const global = await browser.storage.local.get(__webhid.GLOBAL_DEFAULTS);
+        const global = await browser.storage.local.get(GLOBAL_DEFAULTS);
         const origin = window.location.origin;
         const siteKey = origin ? `site:${origin}` : null;
         if (siteKey) {
           const siteResult = await browser.storage.local.get(siteKey);
           const ss = siteResult[siteKey] || {};
-          for (const k of Object.keys(__webhid.GLOBAL_DEFAULTS)) {
+          for (const k of Object.keys(GLOBAL_DEFAULTS)) {
             if (ss[k] !== undefined) global[k] = ss[k];
           }
         }
@@ -524,7 +524,7 @@
         return;
       }
 
-      __webhid.logger.warn('no worker for', deviceId, '; falling back to NM');
+      logger.warn('no worker for', deviceId, '; falling back to NM');
       const fallbackAction =
         action === "worker-send" ? "sendreport" :
         action === "worker-sendFeature" ? "sendfeaturereport" :
@@ -588,12 +588,12 @@
         response = await browser.runtime.sendMessage(msg);
       }
 
-      if (action === "open" && __webhid.http.isOk(response.s) && response.t) {
+      if (action === "open" && http.isOk(response.s) && response.t) {
         const deviceId = response.i;
         _openDevices.add(deviceId);
         _sessionTokens.set(deviceId, response.t);
         browser.runtime.sendMessage({ action: "device-count-changed", count: _openDevices.size }).catch(() => {});
-        __webhid.logger.debug('open ok deviceId=' + deviceId + ' wsPort=' + response.w);
+        logger.debug('open ok deviceId=' + deviceId + ' wsPort=' + response.w);
 
         const dataPlane = settings.dataPlane;
         if (viaControlWs) {
@@ -616,7 +616,7 @@
 
       if (action === "close") {
         const deviceId = payload.deviceId;
-        __webhid.logger.debug('close deviceId=' + deviceId);
+        logger.debug('close deviceId=' + deviceId);
         _openDevices.delete(deviceId);
         _sessionTokens.delete(deviceId);
         browser.runtime.sendMessage({ action: "device-count-changed", count: _openDevices.size }).catch(() => {});
@@ -674,10 +674,10 @@
       const cb = (response) => {
         if (!port) return;
         if (msg.type === 'receiveFeature') {
-          const data = (response && __webhid.http.isOk(response.s) && response.d) ? response.d : null;
+          const data = (response && http.isOk(response.s) && response.d) ? response.d : null;
           try { port.postMessage({ type: 'featureResult', reqId: msg.reqId, data: data || null }); } catch {}
         } else {
-          const err = (response && !__webhid.http.isOk(response.s)) ? 'send failed' : null;
+          const err = (response && !http.isOk(response.s)) ? 'send failed' : null;
           try { port.postMessage({ type: msg.type === 'send' ? 'sendResult' : 'featureResult', reqId: msg.reqId, error: err }); } catch {}
         }
       };
@@ -690,10 +690,10 @@
   // ── Settings observer ─────────────────────────────────────────────
 
   function _applyControlPlane(cp) {
-    __webhid.logger.info('control plane changed:', cp);
+    logger.info('control plane changed:', cp);
     if (cp === 'ws' && _wsPort && !_controlWorker) {
       browser.runtime.sendMessage({ action: 'handshake' }).then((resp) => {
-        if (__webhid.http.isOk(resp.s) && resp.c && resp.w) {
+        if (http.isOk(resp.s) && resp.c && resp.w) {
           _wsPort = resp.w;
           _spawnControlWorker(resp.c, resp.w);
         }
@@ -725,7 +725,7 @@
         mode: dp,
       }).catch(() => {});
     }
-    __webhid.logger.info('data plane changed:', dp, 'open devices:', _openDevices.size);
+    logger.info('data plane changed:', dp, 'open devices:', _openDevices.size);
   }
 
   settings.on('controlPlane', (cp) => _applyControlPlane(cp));
@@ -749,7 +749,7 @@
     const origin = window.location.origin;
     const siteKey = origin ? `site:${origin}` : null;
     const patch = {};
-    for (const k of Object.keys(__webhid.GLOBAL_DEFAULTS)) {
+    for (const k of Object.keys(GLOBAL_DEFAULTS)) {
       if (changes[k]) patch[k] = changes[k].newValue;
     }
     if (siteKey && changes[siteKey]) {
@@ -759,4 +759,3 @@
     if (Object.keys(patch).length === 0) return;
     settings.set(patch);
   });
-})();
