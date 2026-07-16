@@ -139,29 +139,86 @@ fn read_raw_report_descriptor_with_api(api: &HidApi, info: &HidDeviceInfo) -> Ve
 // Blocklist: security keys that must never be exposed to web pages
 // ---------------------------------------------------------------------------
 
-/// Known FIDO/U2F security key vendor IDs.  These devices can be used to
+/// Known FIDO/U2F security key devices.  These devices can be used to
 /// exfiltrate credentials if a malicious page gains raw HID access, so we
-/// block them entirely, matching Chromium's `hid_blocklist.cc`.
-const BLOCKED_VIDS: &[u16] = &[
-    0x1050, // YubiKey
-    0x096E, // Feitian
-    0x0973, // OnlyKey
-    0x413C, // Dell (fido)
-    0x17EF, // Lenovo (fido)
-    0x2CCF, // Nitrokey
-    0x20A0, // Nitrokey (old)
-    0x1EA8, // Google Titan
-    0x32A3, // Somu
-    0xC2BF, // HyperSecu
+/// block them entirely, one-to-one with the per-product entries in
+/// Chromium's `hid_blocklist.cc`.
+const BLOCKED_DEVICES: &[(u16, u16)] = &[
+    // KEY-ID
+    (0x096e, 0x0850),
+    // Feitian
+    (0x096e, 0x0852),
+    (0x096e, 0x0853),
+    (0x096e, 0x0854),
+    (0x096e, 0x0856),
+    (0x096e, 0x0858),
+    (0x096e, 0x085a),
+    (0x096e, 0x085b),
+    // HyperFIDO
+    (0x096e, 0x0880),
+    // HID Global BlueTrust Token
+    (0x09c3, 0x0023),
+    // Yubikey
+    (0x1050, 0x0010),
+    (0x1050, 0x0018),
+    (0x1050, 0x0030),
+    (0x1050, 0x0110),
+    (0x1050, 0x0111),
+    (0x1050, 0x0112),
+    (0x1050, 0x0113),
+    (0x1050, 0x0114),
+    (0x1050, 0x0115),
+    (0x1050, 0x0116),
+    (0x1050, 0x0120),
+    (0x1050, 0x0200),
+    (0x1050, 0x0211),
+    (0x1050, 0x0401),
+    (0x1050, 0x0402),
+    (0x1050, 0x0403),
+    (0x1050, 0x0404),
+    (0x1050, 0x0405),
+    (0x1050, 0x0406),
+    (0x1050, 0x0407),
+    (0x1050, 0x0410),
+    // U2F Zero
+    (0x10c4, 0x8acf),
+    // Mooltipass Mini-BLE
+    (0x1209, 0x4321),
+    // Mooltipass Arduino sketch
+    (0x1209, 0x4322),
+    // Google Titan
+    (0x18d1, 0x5026),
+    // VASCO
+    (0x1a44, 0x00bb),
+    // OnlyKey
+    (0x1d50, 0x60fc),
+    // Keydo AES
+    (0x1e0d, 0xf1ae),
+    // Neowave Keydo
+    (0x1e0d, 0xf1d0),
+    // Thetis
+    (0x1ea8, 0xf025),
+    // Nitrokey
+    (0x20a0, 0x4287),
+    // JaCarta
+    (0x24dc, 0x0101),
+    // Happlink
+    (0x2581, 0xf1d0),
+    // Bluink
+    (0x2abe, 0x1002),
+    // Feitian USB, HyperFIDO
+    (0x2ccf, 0x0880),
 ];
 
-/// FIDO usage page (Alliance Auth).
+/// FIDO usage page (Alliance Auth) — catches any security key not in the
+/// per-product list above.
 const FIDO_USAGE_PAGE: u16 = 0xF1D0;
 
 /// Returns true if a device should be blocked from WebHID access.
 pub fn is_blocked_pub(info: &HidDeviceInfo) -> bool {
     let vid = info.vendor_id();
-    if BLOCKED_VIDS.contains(&vid) {
+    let pid = info.product_id();
+    if BLOCKED_DEVICES.contains(&(vid, pid)) {
         return true;
     }
     if info.usage_page() == FIDO_USAGE_PAGE {
