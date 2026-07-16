@@ -384,6 +384,15 @@
             deviceId,
             "code=" + data.code + "; re-opening",
           );
+          // E1 (consistency): also resolve orphaned callbacks on auth-failed so
+          // in-flight sendReport/receiveFeatureReport do not dangle while the
+          // token refresh is in progress.
+          const orphanCbMap = _workerCallbacks.get(deviceId);
+          if (orphanCbMap) {
+            for (const [, cb] of orphanCbMap)
+              cb({ error: "worker auth-failed" });
+            orphanCbMap.clear();
+          }
           _workers.delete(deviceId);
           _workerReady.delete(deviceId);
           _dataPorts.delete(deviceId);
@@ -392,6 +401,14 @@
         }
         if (data.type === "closed") {
           logger.warn("worker closed for", deviceId);
+          // E1: Resolve any pending worker callbacks so callers' Promises
+          // do not hang forever when the data worker dies unexpectedly.
+          // Mirrors the _controlPending pattern used on the control plane.
+          const orphanCbMap = _workerCallbacks.get(deviceId);
+          if (orphanCbMap) {
+            for (const [, cb] of orphanCbMap) cb({ error: "worker closed" });
+            orphanCbMap.clear();
+          }
           _workers.delete(deviceId);
           _workerReady.delete(deviceId);
           _dataPorts.delete(deviceId);

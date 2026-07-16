@@ -152,7 +152,16 @@ function handleSend(msg, msgType) {
         error: String(e.message || e),
       }),
   });
-  _transport.send(frame);
+  // E2: If the WS dropped between the isOpen() check above and send(),
+  // reject the pending entry immediately so the caller's Promise resolves
+  // instead of hanging until the worker is torn down.
+  if (!_transport.send(frame)) {
+    const p = _pending.get(reqId);
+    if (p) {
+      _pending.delete(reqId);
+      p.reject(new Error("ws closed"));
+    }
+  }
 }
 
 function handleReceiveFeature(msg) {
@@ -183,7 +192,15 @@ function handleReceiveFeature(msg) {
         error: String(e.message || e),
       }),
   });
-  _transport.send(frame);
+  // E2: Same race protection as handleSend — reject immediately if the WS
+  // transport refused the frame, otherwise the feature-read Promise hangs.
+  if (!_transport.send(frame)) {
+    const p = _pending.get(reqId);
+    if (p) {
+      _pending.delete(reqId);
+      p.reject(new Error("ws closed"));
+    }
+  }
 }
 
 function replyData(msg, transfer) {

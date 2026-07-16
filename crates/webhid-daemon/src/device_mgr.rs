@@ -98,7 +98,22 @@ impl DeviceManager {
         let id = info.device_id;
 
         let stop_flag = Arc::new(AtomicBool::new(false));
-        let reader_device = hid::open_by_device_id(id)?.2;
+        // E9: Previously this code called open_by_device_id a second time just
+        // to obtain a second HidDevice handle for the reader task. If the
+        // device was unplugged in the tiny gap between the two opens, the
+        // second call would fail (and even worse, future changes could leave
+        // the first handle dangling untracked). The reader task only needs an
+        // independent handle to avoid read/write contention on the same
+        // hidapi handle; if we can't get a second one we surface the error
+        // immediately instead of leaving the writer handle orphaned.
+        let reader_device = match hid::open_by_device_id(id) {
+            Ok((_, _, d)) => d,
+            Err(e) => {
+                // `device` (the writer handle we already opened) is dropped
+                // here on return, so no resource leak.
+                return Err(e);
+            }
+        };
         let reader_arc = Arc::new(Mutex::new(reader_device));
         let writer_arc = Arc::new(Mutex::new(device));
 
@@ -211,7 +226,9 @@ impl DeviceManager {
             );
             return Ok(());
         }
-        let mut entry = map.remove(&device_id).unwrap();
+        let mut entry = map
+            .remove(&device_id)
+            .ok_or_else(|| anyhow!("'{device_id:#x}' not open"))?;
         entry.stop_flag.store(true, Ordering::SeqCst);
         if let Some(handle) = entry.handle.take() {
             handle.abort();

@@ -374,29 +374,43 @@
     },
 
     onPackedData(b64) {
-      const bin = Uint8Array.fromBase64(b64);
-      if (bin.length < 8 || bin[0] !== PKG_INPUT_REPORT) return;
-      const deviceId =
-        (bin[1] | (bin[2] << 8) | (bin[3] << 16) | (bin[4] << 24)) >>> 0;
-      const reportId = bin[5];
-      const payloadLen = bin[6] | (bin[7] << 8);
-      const payloadEnd = 8 + payloadLen;
-      if (payloadEnd > bin.length) return;
-      const payload = new Uint8Array(payloadLen);
-      payload.set(bin.subarray(8, payloadEnd));
+      // E8: Wrap the whole handler in try/catch. A malformed b64 string or
+      // truncated payload used to throw out of the NM onMessage listener,
+      // which kills the NM connection and forces a reconnect. Now we just
+      // log and drop the bad frame, keeping the NM stream alive.
+      let bin;
+      try {
+        bin = Uint8Array.fromBase64(b64);
+      } catch (e) {
+        logger.warn("onPackedData: bad base64 frame dropped:", e.message);
+        return;
+      }
+      try {
+        if (bin.length < 8 || bin[0] !== PKG_INPUT_REPORT) return;
+        const deviceId =
+          (bin[1] | (bin[2] << 8) | (bin[3] << 16) | (bin[4] << 24)) >>> 0;
+        const reportId = bin[5];
+        const payloadLen = bin[6] | (bin[7] << 8);
+        const payloadEnd = 8 + payloadLen;
+        if (payloadEnd > bin.length) return;
+        const payload = new Uint8Array(payloadLen);
+        payload.set(bin.subarray(8, payloadEnd));
 
-      const event = {
-        eventType: "input_report",
-        deviceId,
-        reportId,
-        data: payload,
-      };
-      const targets = tabsForEvent({ i: deviceId });
-      if (!targets) return;
-      for (const tabId of targets) {
-        browser.tabs
-          .sendMessage(tabId, { action: "webhid-device-event", event })
-          .catch(() => {});
+        const event = {
+          eventType: "input_report",
+          deviceId,
+          reportId,
+          data: payload,
+        };
+        const targets = tabsForEvent({ i: deviceId });
+        if (!targets) return;
+        for (const tabId of targets) {
+          browser.tabs
+            .sendMessage(tabId, { action: "webhid-device-event", event })
+            .catch(() => {});
+        }
+      } catch (e) {
+        logger.warn("onPackedData: malformed frame dropped:", e.message);
       }
     },
 

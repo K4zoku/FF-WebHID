@@ -139,6 +139,11 @@
   const _evtState = new WeakMap();
   const _irState = Symbol("webhid_ir");
   const _deviceRegistry = new Map();
+  // S1: Hold the singleton HID instance so that connect/disconnect events
+  // can be dispatched on `navigator.hid` (spec-compliant) rather than on the
+  // HIDDevice itself. Per the WebHID spec, `navigator.hid.onconnect` and
+  // `navigator.hid.ondisconnect` must fire for device hot-plug events.
+  let _hidInstance = null;
 
   function HIDDevice() {
     throw new TypeError("Illegal constructor");
@@ -249,6 +254,18 @@
           const response = await sendRequest("close", { deviceId: s.deviceId });
           if (_http.isOk(response.s)) {
             s.opened = false;
+            // E3: Reject any still-pending sendReport / sendFeatureReport /
+            // receiveFeatureReport Promises before tearing down the data port
+            // so they do not dangle forever after the device is closed.
+            if (s.dataPending && s.dataPending.size) {
+              const err = new DOMException("Device closed", "NetworkError");
+              for (const [, p] of s.dataPending) {
+                try {
+                  p.reject(err);
+                } catch {}
+              }
+              s.dataPending.clear();
+            }
             if (s.dataPort) {
               s.dataPort.onmessage = null;
               s.dataPort.close();
@@ -382,6 +399,13 @@
         if (!s) return;
         if (s.opened) await this.close();
         await sendRequest("unpairDevice", { deviceId: s.deviceId });
+        // S2: Invalidate both the paired-hash cache and the device-info
+        // cache so subsequent getDevices() calls reflect the unpairing.
+        // Without this the device kept reappearing in getDevices() even
+        // after forget() succeeded.
+        _pairedDevices = null;
+        _deviceInfoCache = null;
+        _deviceRegistry.delete(s.deviceId);
       },
       enumerable: true,
       configurable: true,
@@ -411,9 +435,12 @@
     if (!detail) return;
     if (detail.eventType === "connect" || detail.eventType === "disconnect") {
       const dev = detail.deviceId ? _deviceRegistry.get(detail.deviceId) : null;
-      if (dev) {
+      // S1: Dispatch on the HID instance (navigator.hid) so that page code
+      // using `navigator.hid.addEventListener('connect', ...)` and the
+      // `onconnect` / `ondisconnect` property handlers fires per spec.
+      if (_hidInstance && dev) {
         if (detail.eventType === "disconnect") _deviceInfoCache = null;
-        dev.dispatchEvent(
+        _hidInstance.dispatchEvent(
           new HIDConnectionEvent(detail.eventType, { device: dev }),
         );
       }
@@ -705,8 +732,11 @@
     configurable: true,
     enumerable: false,
   });
+  // S1 (continued): Assign the singleton before publishing it on navigator
+  // so _dispatchDeviceEvent can find it via _hidInstance.
+  _hidInstance = _createHID();
   Object.defineProperty(window.navigator, "hid", {
-    value: _createHID(),
+    value: _hidInstance,
     writable: false,
     configurable: true,
     enumerable: true,
