@@ -1,5 +1,8 @@
 "use strict";
-globalThis.__webhid.logger.initLogger("test-bridge");
+const _logger = globalThis.__webhid.import("logger");
+const _http = globalThis.__webhid.import("http");
+const _GLOBAL_DEFAULTS = globalThis.__webhid.import("GLOBAL_DEFAULTS");
+_logger.initLogger("test-bridge");
 
 let _pagePort = null;
 let _devicePicker = null;
@@ -18,7 +21,7 @@ window.addEventListener("message", (event) => {
   if (!port) return;
   _pagePort = port;
   _pagePort.onmessage = (ev) => { handleRequest(ev.data, ev.ports); };
-  globalThis.__webhid.logger.debug("[test-bridge] page port established");
+  _logger.debug("[test-bridge] page port established");
 });
 
 async function handleRequest(data, ports) {
@@ -30,7 +33,7 @@ async function handleRequest(data, ports) {
     if (action === "requestDevice") {
       const filters = (payload && payload.filters) || [];
       if (!_devicePicker) {
-        _devicePicker = new globalThis.__webhid.WebHidDevicePicker();
+        _devicePicker = new (globalThis.__webhid.import("WebHidDevicePicker"))();
         document.documentElement.appendChild(_devicePicker.host);
       }
       let onSelected, onCancelled;
@@ -82,10 +85,10 @@ async function _onDataPortMessage(deviceId, msg) {
     try {
       const response = await browser.runtime.sendMessage(Object.assign({ action }, payload));
       if (msg.type === "receiveFeature") {
-        const data = (response && globalThis.__webhid.http.isOk(response.s) && response.d) ? response.d : null;
+        const data = (response && _http.isOk(response.s) && response.d) ? response.d : null;
         if (port) port.postMessage({ type: "featureResult", reqId: msg.reqId, data: data || null });
       } else {
-        const err = (response && !globalThis.__webhid.http.isOk(response.s)) ? "send failed" : null;
+        const err = (response && !_http.isOk(response.s)) ? "send failed" : null;
         if (port) port.postMessage({ type: msg.type === "send" ? "sendResult" : "featureResult", reqId: msg.reqId, error: err });
       }
     } catch {
@@ -118,8 +121,8 @@ browser.runtime.onMessage.addListener((message) => {
 (async () => {
   try {
     const resp = await browser.runtime.sendMessage({ action: "handshake" });
-    if (resp && globalThis.__webhid.http.isOk(resp.s)) {
-      const global = await browser.storage.local.get(globalThis.__webhid.GLOBAL_DEFAULTS);
+    if (resp && _http.isOk(resp.s)) {
+      const global = await browser.storage.local.get(_GLOBAL_DEFAULTS);
       _replyToPage({ __webhid_bridge: "settings", settings: global });
     }
   } catch {}

@@ -18,6 +18,8 @@
   "background": {
     "scripts": [
       "js/utils/bootstrap.js",
+      "js/utils/resource.js",
+      "js/utils/http.js",
       "js/utils/logger.js",
       "js/utils/settings.js",
       "js/background.js"
@@ -42,11 +44,13 @@
         "<all_urls>"
       ],
       "js": [
-        "js/utils/bootstrap.js",
-        "js/utils/logger.js",
-        "js/utils/device-utils.js",
-        "js/utils/settings.js",
-        "js/polyfill.js"
+      "js/utils/bootstrap.js",
+      "js/utils/resource.js",
+      "js/utils/http.js",
+      "js/utils/logger.js",
+      "js/utils/device.js",
+      "js/utils/settings.js",
+      "js/polyfill.js"
       ],
       "world": "MAIN",
       "run_at": "document_start"
@@ -56,11 +60,13 @@
         "<all_urls>"
       ],
       "js": [
-        "js/utils/bootstrap.js",
-        "js/utils/logger.js",
-        "js/utils/device-utils.js",
-        "js/utils/settings.js",
-        "js/device-picker.js",
+      "js/utils/bootstrap.js",
+      "js/utils/resource.js",
+      "js/utils/http.js",
+      "js/utils/logger.js",
+      "js/utils/device.js",
+      "js/utils/settings.js",
+      "js/device-picker.js",
         "js/bridge.js"
       ],
       "world": "ISOLATED",

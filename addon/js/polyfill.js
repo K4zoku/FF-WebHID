@@ -1,6 +1,10 @@
 (function () {
   if (window.navigator?.hid) return;
-  globalThis.__webhid.logger.initLogger("polyfill");
+  const _logger = __webhid.import("logger");
+  const _http = __webhid.import("http");
+  const _GLOBAL_DEFAULTS = __webhid.import("GLOBAL_DEFAULTS");
+  const _createSettingsStore = __webhid.import("createSettingsStore");
+  _logger.initLogger("polyfill");
 
   let _reqId = 0;
   const _pending = {};
@@ -31,7 +35,7 @@
     try {
       const response = await sendRequest("enumerate");
       const devices =
-        globalThis.__webhid.http.isOk(response.s) && Array.isArray(response.D)
+        _http.isOk(response.s) && Array.isArray(response.D)
           ? response.D
           : [];
       _deviceInfoCache = new Map();
@@ -57,8 +61,8 @@
     } catch {}
   }
 
-  const _defs = globalThis.__webhid.GLOBAL_DEFAULTS;
-  const settings = globalThis.__webhid.createSettingsStore(_defs);
+  const _defs = _GLOBAL_DEFAULTS;
+  const settings = _createSettingsStore(_defs);
 
   _bridgePort.onmessage = (event) => {
     if (!event.data) return;
@@ -115,20 +119,20 @@
   }
 
   settings.on("dataPlane", (v) =>
-    globalThis.__webhid.logger.info("data plane changed: " + v),
+    _logger.info("data plane changed: " + v),
   );
   settings.on("fireAndForget", (v) =>
-    globalThis.__webhid.logger.info("fire-and-forget: " + v),
+    _logger.info("fire-and-forget: " + v),
   );
   settings.on("logLevel", (v) => {
-    if (globalThis.__webhid.logger.applyLevel)
-      globalThis.__webhid.logger.applyLevel(v);
+    if (_logger.applyLevel)
+      _logger.applyLevel(v);
   });
 
   sendRequest("getSettings", {}).then((s) => {
     if (!s) return;
     settings.set(s);
-    globalThis.__webhid.logger.info(
+    _logger.info(
       "data plane: " +
         settings.dataPlane +
         " (fire-and-forget: " +
@@ -215,7 +219,7 @@
             deviceId: s.deviceId,
             reportSize: s.maxInputReportSize + 3,
           });
-          if (globalThis.__webhid.http.isOk(response.s)) {
+          if (_http.isOk(response.s)) {
             s.opened = true;
             const dataChannel = new MessageChannel();
             s.dataPort = dataChannel.port1;
@@ -229,12 +233,12 @@
               },
               [dataChannel.port2],
             );
-            globalThis.__webhid.logger.info("open deviceId=" + s.deviceId);
+            _logger.info("open deviceId=" + s.deviceId);
             this.dispatchEvent(new Event("open"));
             return true;
           }
           throw new Error(
-            "Open failed: " + globalThis.__webhid.http.name(response.s || 0),
+            "Open failed: " + _http.name(response.s || 0),
           );
         } catch (error) {
           throw new DOMException(error.message, "InvalidStateError");
@@ -249,10 +253,10 @@
         const s = _devState.get(this);
         if (!s) return;
         if (!s.opened) return;
-        globalThis.__webhid.logger.debug("close deviceId=" + s.deviceId);
+        _logger.debug("close deviceId=" + s.deviceId);
         try {
           const response = await sendRequest("close", { deviceId: s.deviceId });
-          if (globalThis.__webhid.http.isOk(response.s)) {
+          if (_http.isOk(response.s)) {
             s.opened = false;
             if (s.dataPort) {
               s.dataPort.onmessage = null;
@@ -283,7 +287,7 @@
             : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
         const buffer = view.slice();
         try {
-          globalThis.__webhid.logger.debug(
+          _logger.debug(
             "sendReport reportId=" + reportId + " len=" + buffer.length,
           );
           if (!s.dataPort) throw new Error("data port not connected");
@@ -353,7 +357,7 @@
             ? new Uint8Array(data)
             : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
         const buffer = view.slice();
-        globalThis.__webhid.logger.debug(
+        _logger.debug(
           "sendFeatureReport reportId=" + reportId + " len=" + buffer.length,
         );
         try {
@@ -572,7 +576,7 @@
   Object.defineProperties(HID.prototype, {
     getDevices: {
       value: async function () {
-        globalThis.__webhid.logger.debug("getDevices");
+        _logger.debug("getDevices");
         try {
           const pairedHashes = await getPairedDevices();
           const deviceCache = await getDeviceCache();
@@ -581,12 +585,12 @@
             const device = deviceCache.get(hash);
             if (device) granted.push(getOrCreateDevice(device));
           }
-          globalThis.__webhid.logger.debug(
+          _logger.debug(
             "getDevices returned " + granted.length + " device(s)",
           );
           return granted;
         } catch (error) {
-          globalThis.__webhid.logger.warn("getDevices error:", error);
+          _logger.warn("getDevices error:", error);
           return [];
         }
       },
@@ -603,7 +607,7 @@
           );
         }
         const filters = Array.isArray(options.filters) ? options.filters : [];
-        globalThis.__webhid.logger.debug(
+        _logger.debug(
           "requestDevice filters=" + JSON.stringify(filters),
         );
         return new Promise((resolve, reject) => {

@@ -1,6 +1,9 @@
 (function () {
   "use strict";
-  const { logger, fetchResource, http, guessDeviceType } = globalThis.__webhid;
+  const logger = globalThis.__webhid.import("logger");
+  const fetchResource = globalThis.__webhid.import("fetchResource");
+  const http = globalThis.__webhid.import("http");
+  const guessDeviceType = globalThis.__webhid.import("guessDeviceType");
   logger.initLogger("picker");
 
   const _svgCache = {};
@@ -307,6 +310,5 @@
     }
   }
 
-  globalThis.__webhid = globalThis.__webhid || {};
-  globalThis.__webhid.WebHidDevicePicker = WebHidDevicePicker;
+  __webhid.export("WebHidDevicePicker", WebHidDevicePicker);
 })();

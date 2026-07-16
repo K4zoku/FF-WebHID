@@ -1,20 +1,19 @@
 (function () {
   // WebHID Standard implementation with injected modal
   "use strict";
-  const {
-    logger,
-    fetchResource,
-    http,
-    guessDeviceType,
-    createSettingsStore,
-    GLOBAL_DEFAULTS,
-  } = globalThis.__webhid;
+  const logger = __webhid.import("logger");
+  const fetchResource = __webhid.import("fetchResource");
+  const http = __webhid.import("http");
+  const guessDeviceType = __webhid.import("guessDeviceType");
+  const createSettingsStore = __webhid.import("createSettingsStore");
+  const GLOBAL_DEFAULTS = __webhid.import("GLOBAL_DEFAULTS");
+  const WebHidDevicePicker = __webhid.import("WebHidDevicePicker");
   logger.initLogger("bridge");
 
   // ---------------------------------------------------------------------------
   // Initialize device picker custom element
   // ---------------------------------------------------------------------------
-  const devicePicker = new globalThis.__webhid.WebHidDevicePicker();
+  const devicePicker = new WebHidDevicePicker();
   document.documentElement.appendChild(devicePicker.host);
 
   // ---------------------------------------------------------------------------
@@ -55,7 +54,7 @@
       "js/utils/bootstrap.js",
       "js/utils/logger.js",
       "js/utils/settings.js",
-      "js/utils/ws-transport.js",
+      "js/utils/websocket.js",
     ];
     const workerUrl = kind === "control" ? "js/control.js" : "js/worker.js";
     const texts = await Promise.all(

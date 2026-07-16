@@ -26,6 +26,5 @@
     return "unknown";
   }
 
-  globalThis.__webhid = globalThis.__webhid || {};
-  globalThis.__webhid.guessDeviceType = guessDeviceType;
+  __webhid.export("guessDeviceType", guessDeviceType);
 })();

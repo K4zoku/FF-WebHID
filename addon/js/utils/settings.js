@@ -2,11 +2,11 @@
 //
 // Loaded by every context (background, content scripts, workers, popup,
 // settings page). Exports:
-//   __webhid.GLOBAL_DEFAULTS      : plain object with default values
-//   __webhid.createSettingsStore(): factory for a Proxy-backed store
+//   __webhid.export('GLOBAL_DEFAULTS', ...)
+//   __webhid.export('createSettingsStore', ...)
 //
 // Store usage:
-//   const settings = __webhid.createSettingsStore(__webhid.GLOBAL_DEFAULTS);
+//   const settings = __webhid.import('createSettingsStore')(__webhid.import('GLOBAL_DEFAULTS'));
 //   settings.dataPlane             // read
 //   settings.dataPlane = 'ws'      // write (fires listeners)
 //   settings.set({ dataPlane: 'ws' })  // bulk write, returns changed keys
@@ -100,7 +100,6 @@
     });
   }
 
-  globalThis.__webhid = globalThis.__webhid || {};
-  globalThis.__webhid.GLOBAL_DEFAULTS = GLOBAL_DEFAULTS;
-  globalThis.__webhid.createSettingsStore = createSettingsStore;
+  __webhid.export("GLOBAL_DEFAULTS", GLOBAL_DEFAULTS);
+  __webhid.export("createSettingsStore", createSettingsStore);
 })();

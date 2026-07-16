@@ -1,6 +1,9 @@
 (async () => {
-  const { logger, http, guessDeviceType, GLOBAL_DEFAULTS, fetchResource } =
-    __webhid;
+  const logger = __webhid.import("logger");
+  const http = __webhid.import("http");
+  const guessDeviceType = __webhid.import("guessDeviceType");
+  const GLOBAL_DEFAULTS = __webhid.import("GLOBAL_DEFAULTS");
+  const fetchResource = __webhid.import("fetchResource");
   logger.initLogger("picker-popup");
 
   const listEl = document.getElementById("picker-list");

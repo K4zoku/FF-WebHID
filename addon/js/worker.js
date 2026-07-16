@@ -1,13 +1,14 @@
 "use strict";
-const { logger } = globalThis.__webhid;
-globalThis.__webhid.logger.initLogger("worker");
+const logger = __webhid.import("logger");
+const _createSettingsStore = __webhid.import("createSettingsStore");
+const _GLOBAL_DEFAULTS = __webhid.import("GLOBAL_DEFAULTS");
+const _createWsTransport = __webhid.import("createWsTransport");
+logger.initLogger("worker");
 const MSG_SEND_REPORT = 0x01;
 const MSG_SEND_FEATURE_REPORT = 0x02;
 const MSG_RECEIVE_FEATURE_REPORT = 0x03;
 const RESP_RECEIVE_FEATURE_REPORT = 0x83;
-const settings = globalThis.__webhid.createSettingsStore(
-  globalThis.__webhid.GLOBAL_DEFAULTS,
-);
+const settings = _createSettingsStore(_GLOBAL_DEFAULTS);
 settings.on("logLevel", (v) => logger.applyLevel(v));
 let _nextReqId = 1;
 const _pending = new Map();
@@ -16,7 +17,7 @@ let _dataPort = null;
 
 self.onmessage = ({ data: msg, ports }) => {
   if (msg.type === "connect") {
-    _transport = globalThis.__webhid.createWsTransport({
+    _transport = _createWsTransport({
       tag: "worker",
       onReady: () => self.postMessage({ type: "ready" }),
       onClosed: () => self.postMessage({ type: "closed" }),

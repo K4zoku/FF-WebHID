@@ -3,7 +3,7 @@
 // workers don't duplicate ~50 lines of boilerplate.
 //
 // Usage:
-//   const transport = __webhid.createWsTransport({
+//   const transport = __webhid.import('createWsTransport')({
 //     tag: 'worker',                  // for log prefix
 //     onReady: () => {...},           // WS connected
 //     onClosed: () => {...},          // WS closed (non-auth, will reconnect)
@@ -19,10 +19,11 @@
 (function () {
   const WS_CLOSE_UNKNOWN_TOKEN = 4401;
   const WS_CLOSE_BAD_TOKEN = 4402;
+  const _log = __webhid.import("logger");
 
   function createWsTransport(opts) {
     const tag = opts.tag || "ws";
-    const log = (level, msg) => __webhid.logger[level](msg);
+    const log = (level, msg) => _log[level](msg);
     let ws = null;
     let connectMsg = null;
     let reconnectTimer = null;
@@ -90,7 +91,7 @@
       connect(msg) {
         connectMsg = msg;
         if (msg.logLevel !== undefined)
-          __webhid.logger.applyLevel(msg.logLevel);
+          _log.applyLevel(msg.logLevel);
         _doConnect();
       },
       send(frame) {
@@ -117,9 +118,6 @@
     };
   }
 
-  
-  globalThis.__webhid = globalThis.__webhid || {};
-  globalThis.__webhid.createWsTransport = createWsTransport;
-  globalThis.__webhid.WS_CLOSE_UNKNOWN_TOKEN = WS_CLOSE_UNKNOWN_TOKEN;
-  globalThis.__webhid.WS_CLOSE_BAD_TOKEN = WS_CLOSE_BAD_TOKEN;
+
+  __webhid.export("createWsTransport", createWsTransport);
 })();
