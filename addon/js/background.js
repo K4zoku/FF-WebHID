@@ -758,7 +758,7 @@
           browser.windows
             .create({
               type: "popup",
-              url: "html/picker-popup.html",
+              url: "html/picker.html",
               width: winW,
               height: winH,
               left,
@@ -772,7 +772,7 @@
           });
           browser.pageAction.setPopup({
             tabId,
-            popup: "html/picker-popup.html",
+            popup: "html/picker.html",
           });
           browser.pageAction.openPopup?.().catch(() => {});
           browser.tabs

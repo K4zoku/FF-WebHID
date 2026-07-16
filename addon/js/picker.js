@@ -31,14 +31,11 @@
     }
 
     async #loadFragment() {
-      const html = await fetchResource("html/device-picker.fragment.html");
+      const html = await fetchResource("html/picker.fragment.html");
       const doc = new DOMParser().parseFromString(html, "text/html");
-
-      const pickerTpl = doc.querySelector("#webhid-picker-template");
-      this.#shadow.appendChild(pickerTpl.content.cloneNode(true));
-
-      const deviceTpl = doc.querySelector("#webhid-device-template");
-      this.#shadow.appendChild(deviceTpl);
+      for (const child of doc.body.children) {
+        this.#shadow.appendChild(child);
+      }
 
       this.#dialog = this.#shadow.querySelector(".webhid-modal");
 

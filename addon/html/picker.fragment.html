@@ -1,0 +1,287 @@
+<style>
+  :host {
+    --bg: Canvas;
+    --text: CanvasText;
+    --text-muted: GrayText;
+    --accent: AccentColor;
+    --accent-text: AccentColorText;
+    --danger: #c00;
+    --overlay: rgba(0, 0, 0, 0.45);
+    --surface-raised: color-mix(in srgb, var(--bg), var(--text) 4%);
+    --surface-hover: color-mix(in srgb, var(--bg), var(--text) 6%);
+    --border-subtle: color-mix(in srgb, var(--text), transparent 88%);
+    --border-light: color-mix(in srgb, var(--text), transparent 85%);
+    --border-default: color-mix(in srgb, var(--text), transparent 80%);
+    --border-strong: color-mix(in srgb, var(--text), transparent 75%);
+    --accent-hover: color-mix(in srgb, var(--accent), black 20%);
+    --accent-surface: color-mix(in srgb, var(--bg), var(--accent) 10%);
+    --accent-selected: color-mix(in srgb, var(--bg), var(--accent) 20%);
+    --accent-paired: color-mix(in srgb, var(--bg), var(--accent) 15%);
+    --danger-bg: color-mix(in srgb, var(--bg), var(--danger) 10%);
+    --danger-border: color-mix(in srgb, var(--bg), var(--danger) 20%);
+    --danger-hover-bg: color-mix(in srgb, var(--bg), var(--danger) 15%);
+    --shadow: color-mix(in srgb, var(--text), transparent 80%);
+    --shadow-drop: drop-shadow(0 6px 20px color-mix(in srgb, var(--text), transparent 65%));
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --radius-lg: 8px;
+    --radius-xl: 12px;
+    --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --font-mono: monospace;
+  }
+
+  .webhid-modal {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    max-width: 100%;
+    max-height: 100%;
+    padding: 0;
+    margin: 0;
+    border: none;
+    background: var(--overlay);
+    display: flex;
+    align-items: flex-start;
+    justify-content: flex-start;
+    padding: 8px 0 0 10px;
+    z-index: calc(infinity);
+    font-family: var(--font-sans);
+    opacity: 0;
+    visibility: hidden;
+    transition-property: opacity, visibility;
+    transition-duration: 0.2s;
+  }
+
+  .webhid-modal[open] {
+    opacity: 1;
+    visibility: visible;
+  }
+
+  .webhid-modal::backdrop {
+    display: none;
+  }
+
+  .webhid-modal-form {
+    background: var(--bg);
+    border-radius: var(--radius-xl);
+    width: min(400px, calc(100vw - 20px));
+    max-width: calc(100vw - 20px);
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    filter: var(--shadow-drop);
+    transform: translateY(-8px);
+    opacity: 0;
+    transition-property: transform, opacity;
+    transition-duration: 0.2s;
+  }
+
+  .webhid-modal[open] .webhid-modal-form {
+    transform: translateY(0);
+    opacity: 1;
+  }
+
+  .webhid-modal-form::before {
+    content: '';
+    position: absolute;
+    top: -9px;
+    left: 16px;
+    border: 9px solid transparent;
+    border-top: none;
+    border-bottom-color: var(--bg);
+  }
+
+  .webhid-modal-header {
+    padding: 24px 24px 16px;
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .webhid-modal-header h2 {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text);
+    margin: 0;
+  }
+
+  .webhid-modal-content {
+    padding: 16px 24px;
+    overflow-y: auto;
+    flex: 1;
+  }
+
+  .webhid-device-list {
+    display: flex;
+    flex-direction: column;
+    max-height: 300px;
+    overflow-y: auto;
+    padding: 6px 8px;
+  }
+
+  .webhid-device-item {
+    padding: 12px 16px;
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-lg);
+    margin-bottom: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+    background: var(--surface-raised);
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .webhid-device-icon {
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+    opacity: 0.55;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .webhid-device-icon svg {
+    width: 24px;
+    height: 24px;
+  }
+
+  .webhid-device-body {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .webhid-device-item:hover {
+    border-color: var(--accent);
+    background: var(--accent-surface);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px var(--shadow);
+  }
+
+  .webhid-device-item.selected {
+    border-color: var(--accent);
+    background: var(--accent-selected);
+  }
+
+  .webhid-device-name {
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--text);
+    margin-bottom: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .webhid-device-vendor {
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  .webhid-device-paired {
+    background: var(--accent-paired);
+    order: -1;
+  }
+
+  .webhid-device-iface {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    margin-top: 2px;
+  }
+
+  .webhid-modal-footer {
+    padding: 16px 24px 24px;
+    border-top: 1px solid var(--border-subtle);
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+  }
+
+  .webhid-cancel-button {
+    padding: 12px 24px;
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    background: var(--bg);
+    color: var(--text-muted);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .webhid-cancel-button:hover {
+    background: var(--surface-hover);
+    border-color: var(--border-strong);
+  }
+
+  .webhid-connect-button {
+    padding: 12px 24px;
+    border: none;
+    border-radius: var(--radius-md);
+    background: var(--accent);
+    color: var(--accent-text);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .webhid-connect-button:hover:not(:disabled) {
+    background: var(--accent-hover);
+  }
+
+  .webhid-connect-button:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+
+  .webhid-device-radio {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+
+  .webhid-no-devices,
+  .webhid-error {
+    padding: 24px 16px;
+    text-align: center;
+    color: var(--text-muted, #888);
+    font-size: 0.9em;
+    line-height: 1.5;
+  }
+
+  .webhid-error {
+    color: var(--danger, #f88);
+  }
+</style>
+<dialog class="webhid-modal">
+  <form method="dialog" class="webhid-modal-form">
+    <div class="webhid-modal-header">
+      <h2>Select a HID Device</h2>
+    </div>
+    <div class="webhid-modal-content">
+      <div class="webhid-device-list" id="webhidDeviceList"></div>
+      <template id="webhid-device-template">
+        <label class="webhid-device-item" tabindex="0">
+          <input type="radio" name="webhid-device" class="webhid-device-radio">
+          <span class="webhid-device-icon"></span>
+          <div class="webhid-device-body">
+            <div class="webhid-device-name"></div>
+            <div class="webhid-device-vendor"></div>
+            <div class="webhid-device-iface"></div>
+          </div>
+        </label>
+      </template>
+    </div>
+    <div class="webhid-modal-footer">
+      <button type="submit" class="webhid-cancel-button" id="webhidCancelBtn" value="cancel">Cancel</button>
+      <button type="submit" class="webhid-connect-button" id="webhidConnectBtn" value="selected" disabled>Connect</button>
+    </div>
+  </form>
+</dialog>
