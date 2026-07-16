@@ -6,9 +6,9 @@
     { "filename": ".version.json", "type": "json" },
     { "filename": "package.json", "type": "json" },
     { "filename": "addon/manifest.json", "type": "json" },
-    { "filename": "crates/webhid/Cargo.toml", "updater": ".versionrc.cargo-updater.js" },
-    { "filename": "crates/webhid-daemon/Cargo.toml", "updater": ".versionrc.cargo-updater.js" },
-    { "filename": "crates/webhid-native-messaging/Cargo.toml", "updater": ".versionrc.cargo-updater.js" }
+    { "filename": "crates/webhid/Cargo.toml", "updater": ".versionrc.cargo-updater.cjs" },
+    { "filename": "crates/webhid-daemon/Cargo.toml", "updater": ".versionrc.cargo-updater.cjs" },
+    { "filename": "crates/webhid-native-messaging/Cargo.toml", "updater": ".versionrc.cargo-updater.cjs" }
   ],
   "types": [
     { "type": "feat", "section": "Features" },
