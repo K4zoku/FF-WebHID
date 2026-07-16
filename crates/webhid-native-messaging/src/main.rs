@@ -353,24 +353,16 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn test_candidate_sockets_uses_env_var() {
+    fn test_candidate_sockets_env_handling() {
         unsafe { std::env::set_var("WEBHID_SOCKET", "/tmp/custom.sock") };
         let candidates = candidate_sockets();
         unsafe { std::env::remove_var("WEBHID_SOCKET") };
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0], "/tmp/custom.sock");
-    }
 
-    #[cfg(unix)]
-    #[test]
-    fn test_candidate_sockets_default_contains_fallback() {
-        unsafe { std::env::remove_var("WEBHID_SOCKET") };
         let candidates = candidate_sockets();
         assert!(!candidates.is_empty());
         #[cfg(target_os = "linux")]
-        assert_eq!(
-            candidates.last().unwrap(),
-            "/run/webhid/webhid.sock"
-        );
+        assert_eq!(candidates.last().unwrap(), "/run/webhid/webhid.sock");
     }
 }
