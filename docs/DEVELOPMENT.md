@@ -151,15 +151,30 @@ FF-WebHID/
 │   │   ├── bridge.js        Isolated world: control/data routing, control worker, data worker spawn, effective-settings handler
 │   │   ├── worker.js        Data Web Worker: binary WS, MessageChannel input reports, fire-and-forget
 │   │   ├── control.js       Control Web Worker: WS text frames, enumerate/close, auto-reconnect
-│   │   ├── settings.js      Settings page logic (global settings UI)
-│   │   ├── popup.js         Popup logic (per-site settings, device list)
+│   │   ├── picker.js        WebHidDevicePicker class (ISOLATED world)
+│   │   ├── pages/
+│   │   │   ├── picker.js    Popup picker window logic
+│   │   │   ├── settings.js  Settings page logic
+│   │   │   ├── popup.js     Popup logic (per-site settings, device list)
+│   │   │   ├── test.js      Test page logic
+│   │   │   └── test-bridge.js  Test bridge helper
 │   │   └── utils/
-│   │       ├── logger.js         Level-based logger (storage-driven)
-│   │       ├── settings.js       GLOBAL_DEFAULTS + SettingsStore Proxy factory
-│   │       ├── http-status.js    HTTP status code helper (isOk, name)
-│   │       └── device-utils.js   Device type guessing for popup icons
-│   ├── html/                Settings + popup HTML
-│   ├── css/                 Styles
+│   │       ├── bootstrap.js Module registry (export/import)
+│   │       ├── resource.js  fetchResource helper
+│   │       ├── http.js      HTTP status helpers (isOk, name)
+│   │       ├── logger.js    Level-based logger (storage-driven)
+│   │       ├── settings.js  GLOBAL_DEFAULTS + SettingsStore Proxy factory
+│   │       ├── device.js    guessDeviceType, applyFilters, groupDevices, fetchDeviceIcon
+│   │       └── websocket.js WS transport for workers
+│   ├── html/
+│   │   ├── picker.html      Popup picker
+│   │   ├── settings.html
+│   │   ├── popup.html
+│   │   └── test.html
+│   ├── css/
+│   │   ├── theme.css
+│   │   ├── shared.css
+│   │   └── picker.css
 │   ├── icons/ res/          Icons + device type icons
 │
 ├── crates/                  Rust workspace
@@ -172,13 +187,12 @@ FF-WebHID/
 │   ├── webhid.daemon_nm_host.json      Daemon-as-NM-host manifest ({{DAEMON_BIN}})
 │   └── ...
 ├── packaging/               Arch/Debian/RPM/Windows/macOS packaging
-├── docs/
-│   ├── ARCHITECTURE.md      System architecture
-│   ├── DATA_PATH.md         Per-path copy/hop/latency analysis
-│   ├── DEVELOPMENT.md       This file
-│   ├── INSTALLATION.md      Install guide + platform recommendations
-│   └── BENCHMARK.md         Benchmark report (cold-start, 5 runs per mode)
-└── test/                    Browser test UI (test_nm.py removed)
+└── docs/
+    ├── ARCHITECTURE.md      System architecture
+    ├── DATA_PATH.md         Per-path copy/hop/latency analysis
+    ├── DEVELOPMENT.md       This file
+    ├── INSTALLATION.md      Install guide + platform recommendations
+    └── BENCHMARK.md         Benchmark report (cold-start, 5 runs per mode)
 ```
 
 ## Packaging (Arch Linux)
