@@ -35,9 +35,7 @@
     try {
       const response = await sendRequest("enumerate");
       const devices =
-        _http.isOk(response.s) && Array.isArray(response.D)
-          ? response.D
-          : [];
+        _http.isOk(response.s) && Array.isArray(response.D) ? response.D : [];
       _deviceInfoCache = new Map();
       for (const d of devices) _deviceInfoCache.set(d.deviceId, d);
       return _deviceInfoCache;
@@ -118,15 +116,10 @@
     _bridgePort.postMessage(msg, xfers.length ? xfers : undefined);
   }
 
-  settings.on("dataPlane", (v) =>
-    _logger.info("data plane changed: " + v),
-  );
-  settings.on("fireAndForget", (v) =>
-    _logger.info("fire-and-forget: " + v),
-  );
+  settings.on("dataPlane", (v) => _logger.info("data plane changed: " + v));
+  settings.on("fireAndForget", (v) => _logger.info("fire-and-forget: " + v));
   settings.on("logLevel", (v) => {
-    if (_logger.applyLevel)
-      _logger.applyLevel(v);
+    if (_logger.applyLevel) _logger.applyLevel(v);
   });
 
   sendRequest("getSettings", {}).then((s) => {
@@ -237,9 +230,7 @@
             this.dispatchEvent(new Event("open"));
             return true;
           }
-          throw new Error(
-            "Open failed: " + _http.name(response.s || 0),
-          );
+          throw new Error("Open failed: " + _http.name(response.s || 0));
         } catch (error) {
           throw new DOMException(error.message, "InvalidStateError");
         }
@@ -585,9 +576,7 @@
             const device = deviceCache.get(hash);
             if (device) granted.push(getOrCreateDevice(device));
           }
-          _logger.debug(
-            "getDevices returned " + granted.length + " device(s)",
-          );
+          _logger.debug("getDevices returned " + granted.length + " device(s)");
           return granted;
         } catch (error) {
           _logger.warn("getDevices error:", error);
@@ -607,9 +596,7 @@
           );
         }
         const filters = Array.isArray(options.filters) ? options.filters : [];
-        _logger.debug(
-          "requestDevice filters=" + JSON.stringify(filters),
-        );
+        _logger.debug("requestDevice filters=" + JSON.stringify(filters));
         return new Promise((resolve, reject) => {
           const id = ++_reqId;
           _pending[id] = (result) => {

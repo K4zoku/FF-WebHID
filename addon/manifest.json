@@ -6,15 +6,8 @@
   "icons": {
     "48": "icons/icon.svg"
   },
-  "permissions": [
-    "nativeMessaging",
-    "storage",
-    "webRequest",
-    "notifications"
-  ],
-  "host_permissions": [
-    "<all_urls>"
-  ],
+  "permissions": ["nativeMessaging", "storage", "webRequest", "notifications"],
+  "host_permissions": ["<all_urls>"],
   "background": {
     "scripts": [
       "js/utils/bootstrap.js",
@@ -40,33 +33,29 @@
   },
   "content_scripts": [
     {
-      "matches": [
-        "<all_urls>"
-      ],
+      "matches": ["<all_urls>"],
       "js": [
-      "js/utils/bootstrap.js",
-      "js/utils/resource.js",
-      "js/utils/http.js",
-      "js/utils/logger.js",
-      "js/utils/device.js",
-      "js/utils/settings.js",
-      "js/polyfill.js"
+        "js/utils/bootstrap.js",
+        "js/utils/resource.js",
+        "js/utils/http.js",
+        "js/utils/logger.js",
+        "js/utils/device.js",
+        "js/utils/settings.js",
+        "js/polyfill.js"
       ],
       "world": "MAIN",
       "run_at": "document_start"
     },
     {
-      "matches": [
-        "<all_urls>"
-      ],
+      "matches": ["<all_urls>"],
       "js": [
-      "js/utils/bootstrap.js",
-      "js/utils/resource.js",
-      "js/utils/http.js",
-      "js/utils/logger.js",
-      "js/utils/device.js",
-      "js/utils/settings.js",
-      "js/device-picker.js",
+        "js/utils/bootstrap.js",
+        "js/utils/resource.js",
+        "js/utils/http.js",
+        "js/utils/logger.js",
+        "js/utils/device.js",
+        "js/utils/settings.js",
+        "js/device-picker.js",
         "js/bridge.js"
       ],
       "world": "ISOLATED",
@@ -79,9 +68,7 @@
       "id": "webhid@k4zoku.dev",
       "strict_min_version": "142.0",
       "data_collection_permissions": {
-        "required": [
-          "websiteContent"
-        ],
+        "required": ["websiteContent"],
         "optional": []
       }
     }
