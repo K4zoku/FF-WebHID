@@ -68,6 +68,16 @@ jobs:
         with:
           workspaces: crates -> target
 
+      - name: Dependency license & duplicate check
+        run: |
+          cargo install cargo-deny --locked
+          cargo deny --manifest-path crates/Cargo.toml check
+
+      - name: Rust dependency audit
+        run: |
+          cargo install cargo-audit --locked
+          cargo audit --manifest-path crates/Cargo.toml
+
       - name: Run tests
         run: cargo test --manifest-path crates/Cargo.toml
         shell: bash

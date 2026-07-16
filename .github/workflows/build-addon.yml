@@ -21,6 +21,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
 
+      - name: Node dependency audit
+        run: npm audit --audit-level=high
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint addon
+        run: npm run lint
+
       - name: Build Addon XPI
         run: make build-addon
 
