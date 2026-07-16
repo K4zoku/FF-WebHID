@@ -52,7 +52,7 @@
   async function _getWorkerBlobUrl(kind) {
     if (_workerBlobUrls[kind]) return _workerBlobUrls[kind];
     const baseUrls = [
-      "js/utils/browser-compat.js",
+      "js/utils/bootstrap.js",
       "js/utils/logger.js",
       "js/utils/settings.js",
       "js/utils/ws-transport.js",

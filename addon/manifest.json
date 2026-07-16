@@ -17,10 +17,9 @@
   ],
   "background": {
     "scripts": [
-      "js/utils/browser-compat.js",
+      "js/utils/bootstrap.js",
       "js/utils/logger.js",
       "js/utils/settings.js",
-      "js/utils/http-status.js",
       "js/background.js"
     ]
   },
@@ -43,11 +42,10 @@
         "<all_urls>"
       ],
       "js": [
-        "js/utils/browser-compat.js",
+        "js/utils/bootstrap.js",
         "js/utils/logger.js",
         "js/utils/device-utils.js",
         "js/utils/settings.js",
-        "js/utils/http-status.js",
         "js/polyfill.js"
       ],
       "world": "MAIN",
@@ -58,11 +56,10 @@
         "<all_urls>"
       ],
       "js": [
-        "js/utils/browser-compat.js",
+        "js/utils/bootstrap.js",
         "js/utils/logger.js",
         "js/utils/device-utils.js",
         "js/utils/settings.js",
-        "js/utils/http-status.js",
         "js/device-picker.js",
         "js/bridge.js"
       ],
