@@ -55,6 +55,26 @@ pub async fn handle(
         let request: NmRequest = match protocol::read_nm_request(&mut reader).await {
             Ok(r) => r,
             Err(e) => {
+                // E7: Be graceful on InvalidData (JSON decode failure or bad
+                // base64 inside a packed TLV). The WS handler already replies
+                // with a JSON error and keeps the connection alive; the NM
+                // path used to bail on any error, killing the whole NM
+                // connection on a single malformed frame and forcing a
+                // reconnect. We now reply with a 400-level response (no id
+                // since we couldn't parse one) and keep reading the next
+                // frame.
+                //
+                // Other error kinds (UnexpectedEof, ConnectionReset, …)
+                // still terminate the loop — we cannot recover from those
+                // because the byte stream is no longer aligned.
+                if e.kind() == std::io::ErrorKind::InvalidData {
+                    log::warn!("[client] malformed NM frame dropped: {e}");
+                    let err_resp = NmMessage::Control(NmResponse::err(400));
+                    if tx.send(err_resp).await.is_err() {
+                        break;
+                    }
+                    continue;
+                }
                 if e.kind() != std::io::ErrorKind::UnexpectedEof {
                     log::warn!("[client] read error: {e}");
                 }
