@@ -1,4 +1,6 @@
 (function () {
+  const _svgCache = {};
+
   function guessDeviceType(device) {
     if (device.usagePage === 0x01) {
       const u = device.usage;
@@ -26,5 +28,45 @@
     return "unknown";
   }
 
+  function applyFilters(devices, filters) {
+    if (!Array.isArray(filters) || filters.length === 0) return devices;
+    return devices.filter((device) =>
+      filters.some((filter) => {
+        if (filter.vendorId && device.vendorId !== filter.vendorId)
+          return false;
+        if (filter.productId && device.productId !== filter.productId)
+          return false;
+        if (filter.usagePage && device.usagePage !== filter.usagePage)
+          return false;
+        if (filter.usage && device.usage !== filter.usage) return false;
+        return true;
+      }),
+    );
+  }
+
+  function groupDevices(devices) {
+    const groups = new Map();
+    for (const device of devices) {
+      const name = device.productName || "Unknown Device";
+      if (!groups.has(name)) groups.set(name, []);
+      groups.get(name).push(device);
+    }
+    return groups;
+  }
+
+  async function fetchDeviceIcon(type) {
+    if (_svgCache[type]) return _svgCache[type];
+    try {
+      const svg = await (__webhid.import("fetchResource"))("res/" + type + ".svg");
+      _svgCache[type] = svg;
+      return svg;
+    } catch {
+      return null;
+    }
+  }
+
   __webhid.export("guessDeviceType", guessDeviceType);
+  __webhid.export("applyFilters", applyFilters);
+  __webhid.export("groupDevices", groupDevices);
+  __webhid.export("fetchDeviceIcon", fetchDeviceIcon);
 })();

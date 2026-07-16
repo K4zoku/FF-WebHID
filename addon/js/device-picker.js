@@ -4,20 +4,10 @@
   const fetchResource = globalThis.__webhid.import("fetchResource");
   const http = globalThis.__webhid.import("http");
   const guessDeviceType = globalThis.__webhid.import("guessDeviceType");
+  const applyFilters = globalThis.__webhid.import("applyFilters");
+  const groupDevices = globalThis.__webhid.import("groupDevices");
+  const fetchDeviceIcon = globalThis.__webhid.import("fetchDeviceIcon");
   logger.initLogger("picker");
-
-  const _svgCache = {};
-
-  async function _getSvg(type) {
-    if (_svgCache[type]) return _svgCache[type];
-    try {
-      const svg = await fetchResource(`res/${type}.svg`);
-      _svgCache[type] = svg;
-      return svg;
-    } catch {
-      return null;
-    }
-  }
 
   class WebHidDevicePicker {
     #shadow = null;
@@ -135,23 +125,6 @@
       }
     }
 
-    #classifyError(errMsg) {
-      const e = (errMsg || "").toLowerCase();
-      if (e.includes("nm disconnected") || e.includes("reconnecting"))
-        return "Native messaging host is not responding. Please ensure the WebHID daemon is installed and running.";
-      if (e.includes("permission denied") || e.includes("access denied"))
-        return "Permission denied. The daemon may lack access to HID devices (check udev rules on Linux, or run daemon as admin on Windows).";
-      if (
-        e.includes("no such file") ||
-        e.includes("not found") ||
-        e.includes("connection refused")
-      )
-        return "Cannot connect to the WebHID daemon. Please install it and ensure the service is running.";
-      if (e.includes("timeout") || e.includes("timed out"))
-        return "Connection to the WebHID daemon timed out. Please check if the daemon is running.";
-      return "Failed to load devices: " + errMsg;
-    }
-
     #showMessage(message, isError = false) {
       if (!this.#dialog) return;
       const deviceList = this.#dialog.querySelector("#webhidDeviceList");
@@ -194,19 +167,14 @@
         return;
       }
 
-      const filteredDevices = this.#applyFilters(this.#devices, this.#filters);
+      const filteredDevices = applyFilters(this.#devices, this.#filters);
       if (filteredDevices.length === 0) {
         deviceList.innerHTML =
           '<div class="webhid-no-devices">No devices match the specified filters</div>';
         return;
       }
 
-      const groups = new Map();
-      for (const device of filteredDevices) {
-        const name = device.productName || "Unknown Device";
-        if (!groups.has(name)) groups.set(name, []);
-        groups.get(name).push(device);
-      }
+      const groups = groupDevices(filteredDevices);
 
       const pairedStatuses = await Promise.all(
         filteredDevices.map((device) => this.#deviceMatchesSaved(device)),
@@ -225,10 +193,7 @@
           deviceIds.push(d.deviceId);
         }
 
-        const groupId =
-          devices.length === 1
-            ? devices[0].deviceId
-            : `group:${devices[0].deviceId}`;
+        const groupId = devices.length === 1 ? devices[0].deviceId : "group:" + devices[0].deviceId;
         this.#deviceGroups[groupId] = devices.slice();
 
         const device = devices[0];
@@ -243,7 +208,7 @@
         item.dataset.deviceId = groupId;
 
         const iconSpan = clone.querySelector(".webhid-device-icon");
-        _getSvg(type).then((svg) => {
+        fetchDeviceIcon(type).then((svg) => {
           if (svg) {
             const svgDoc = new DOMParser().parseFromString(
               svg,
@@ -268,22 +233,6 @@
 
         deviceList.appendChild(clone);
       }
-    }
-
-    #applyFilters(devices, filters) {
-      if (!Array.isArray(filters) || filters.length === 0) return devices;
-      return devices.filter((device) => {
-        return filters.some((filter) => {
-          if (filter.vendorId && device.vendorId !== filter.vendorId)
-            return false;
-          if (filter.productId && device.productId !== filter.productId)
-            return false;
-          if (filter.usagePage && device.usagePage !== filter.usagePage)
-            return false;
-          if (filter.usage && device.usage !== filter.usage) return false;
-          return true;
-        });
-      });
     }
 
     #onDeviceSelected(devices) {

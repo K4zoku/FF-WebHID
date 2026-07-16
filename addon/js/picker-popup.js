@@ -3,7 +3,9 @@
   const http = __webhid.import("http");
   const guessDeviceType = __webhid.import("guessDeviceType");
   const GLOBAL_DEFAULTS = __webhid.import("GLOBAL_DEFAULTS");
-  const fetchResource = __webhid.import("fetchResource");
+  const applyFilters = __webhid.import("applyFilters");
+  const groupDevices = __webhid.import("groupDevices");
+  const fetchDeviceIcon = __webhid.import("fetchDeviceIcon");
   logger.initLogger("picker-popup");
 
   const listEl = document.getElementById("picker-list");
@@ -40,19 +42,13 @@
       return;
     }
 
-    const groups = new Map();
-    for (const device of filtered) {
-      const name = device.productName || "Unknown Device";
-      if (!groups.has(name)) groups.set(name, []);
-      groups.get(name).push(device);
-    }
+    const groups = groupDevices(filtered);
 
     deviceGroups = {};
     listEl.innerHTML = "";
 
     for (const [name, devs] of groups.entries()) {
-      const groupId =
-        devs.length === 1 ? devs[0].deviceId : `group:${devs[0].deviceId}`;
+      const groupId = devs.length === 1 ? devs[0].deviceId : "group:" + devs[0].deviceId;
       deviceGroups[groupId] = devs.slice();
 
       const device = devs[0];
@@ -97,18 +93,16 @@
       item.appendChild(radio);
       item.appendChild(iconSpan);
       item.appendChild(body);
-      fetchResource(`res/${type}.svg`)
-        .then((svg) => {
-          if (svg) {
-            const svgDoc = new DOMParser().parseFromString(
-              svg,
-              "image/svg+xml",
-            );
-            const svgEl = svgDoc.documentElement;
-            if (svgEl) iconSpan.replaceChildren(svgEl.cloneNode(true));
-          }
-        })
-        .catch(() => {});
+      fetchDeviceIcon(type).then((svg) => {
+        if (svg) {
+          const svgDoc = new DOMParser().parseFromString(
+            svg,
+            "image/svg+xml",
+          );
+          const svgEl = svgDoc.documentElement;
+          if (svgEl) iconSpan.replaceChildren(svgEl.cloneNode(true));
+        }
+      });
       radio.addEventListener("change", () => {
         selectedDeviceId = groupId;
         connectBtn.disabled = false;
@@ -120,22 +114,6 @@
 
       listEl.appendChild(item);
     }
-  }
-
-  function applyFilters(devices, filters) {
-    if (!Array.isArray(filters) || filters.length === 0) return devices;
-    return devices.filter((device) =>
-      filters.some((filter) => {
-        if (filter.vendorId && device.vendorId !== filter.vendorId)
-          return false;
-        if (filter.productId && device.productId !== filter.productId)
-          return false;
-        if (filter.usagePage && device.usagePage !== filter.usagePage)
-          return false;
-        if (filter.usage && device.usage !== filter.usage) return false;
-        return true;
-      }),
-    );
   }
 
   connectBtn.addEventListener("click", async () => {
