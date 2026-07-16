@@ -58,7 +58,7 @@ pub struct Report {
     pub items: Vec<Field>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Field {
     #[serde(default)]
@@ -573,6 +573,124 @@ mod bytes_serde {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── hash_device_id is in lib.rs ────────────────────────────────────────
+
+    // ── NmRequest::id ──────────────────────────────────────────────────────
+
+    #[test]
+    fn test_nm_request_id_enumerate() {
+        let req = NmRequest::Enumerate { id: Some(5) };
+        assert_eq!(req.id(), Some(5));
+    }
+
+    #[test]
+    fn test_nm_request_id_open() {
+        let req = NmRequest::Open {
+            id: Some(10),
+            device_id: 0x1234,
+        };
+        assert_eq!(req.id(), Some(10));
+    }
+
+    #[test]
+    fn test_nm_request_id_close() {
+        let req = NmRequest::Close {
+            id: Some(20),
+            device_id: 0x5678,
+        };
+        assert_eq!(req.id(), Some(20));
+    }
+
+    #[test]
+    fn test_nm_request_id_handshake() {
+        let req = NmRequest::Handshake { id: Some(30) };
+        assert_eq!(req.id(), Some(30));
+    }
+
+    #[test]
+    fn test_nm_request_id_send_report() {
+        let req = NmRequest::SendReport {
+            id: Some(40),
+            packed: vec![0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00],
+        };
+        assert_eq!(req.id(), Some(40));
+    }
+
+    // ── parse_packed_send edge cases ──────────────────────────────────────
+
+    #[test]
+    fn test_parse_packed_send_short() {
+        let err = parse_packed_send(&[0x02, 0x00]).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn test_parse_packed_send_truncated_payload() {
+        let mut buf = vec![
+            PKG_SEND_REPORT,
+            0x00, 0x00, 0x00, 0x00, // req_id
+            0x00, 0x00, 0x00, 0x00, // dev_id
+            0x01,                   // report_id
+            0x10, 0x00,             // payload_len = 16
+        ];
+        // Only 5 bytes of payload instead of 16
+        buf.extend_from_slice(&[0; 5]);
+        let err = parse_packed_send(&buf).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn test_parse_packed_send_zero_length_payload() {
+        let buf = vec![
+            PKG_SEND_REPORT,
+            0xEF, 0xBE, 0xAD, 0xDE, // req_id = 0xDEADBEEF
+            0x78, 0x56, 0x34, 0x12, // dev_id = 0x12345678
+            0x00,                   // report_id = 0
+            0x00, 0x00,             // payload_len = 0
+        ];
+        let (req_id, dev_id, report_id, data) = parse_packed_send(&buf).unwrap();
+        assert_eq!(req_id, 0xDEADBEEF);
+        assert_eq!(dev_id, 0x12345678);
+        assert_eq!(report_id, 0);
+        assert!(data.is_empty());
+    }
+
+    // ── NmMessage ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_nm_message_control_json() {
+        let msg = NmMessage::Control(NmResponse::ok());
+        let json = serde_json::to_string(&msg).unwrap();
+        assert_eq!(json, r#"{"s":204}"#);
+    }
+
+    #[test]
+    fn test_nm_message_packed_data_json() {
+        let msg = NmMessage::PackedData(vec![0x01, 0x02, 0x03]);
+        let json = serde_json::to_string(&msg).unwrap();
+        assert_eq!(json, r#"{"d":"AQID"}"#);
+    }
+
+    // ── base64_opt_serde ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_base64_opt_serde_none_in_nm_response() {
+        // NmResponse.data with value None should serialize without "d" field
+        let r = NmResponse::err(404);
+        let json = serde_json::to_string(&r).unwrap();
+        assert_eq!(json, r#"{"s":404}"#);
+    }
+
+    #[test]
+    fn test_base64_opt_serde_some_in_nm_response() {
+        // NmResponse.data with Some value should serialize as base64
+        let r = NmResponse::ok_with_data(vec![0xDE, 0xAD]);
+        let json = serde_json::to_string(&r).unwrap();
+        assert_eq!(json, r#"{"s":200,"d":"3q0="}"#);
+    }
+
+    // ── Existing tests follow ─────────────────────────────────────────────
 
     #[test]
     fn test_nm_response_ok() {

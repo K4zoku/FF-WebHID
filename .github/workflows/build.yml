@@ -68,6 +68,10 @@ jobs:
         with:
           workspaces: crates -> target
 
+      - name: Run tests
+        run: cargo test --manifest-path crates/Cargo.toml
+        shell: bash
+
       - name: Build binaries (Linux)
         if: runner.os == 'Linux'
         run: cargo build --release --manifest-path crates/Cargo.toml

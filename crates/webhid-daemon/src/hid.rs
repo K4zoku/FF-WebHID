@@ -42,16 +42,6 @@ fn resolve_linux_syspath(devnode: &str) -> Option<String> {
     Some(parent.to_string_lossy().into_owned())
 }
 
-pub fn make_device_id_from_devnode(devnode: &str) -> u32 {
-    #[cfg(target_os = "linux")]
-    {
-        if let Some(syspath) = resolve_linux_syspath(devnode) {
-            return webhid::hash_device_id(&syspath);
-        }
-    }
-    webhid::hash_device_id(devnode)
-}
-
 // ---------------------------------------------------------------------------
 // Enumeration
 // ---------------------------------------------------------------------------

@@ -221,3 +221,99 @@ fn ipc_event_to_nm(ev: IpcResponse) -> Option<NmMessage> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use webhid::{DeviceInfo, types::{EVT_CONNECT, EVT_DISCONNECT, PKG_INPUT_REPORT}};
+
+    fn dummy_device(id: u32) -> DeviceInfo {
+        DeviceInfo {
+            vendor_id: 0x1234,
+            product_id: 0x5678,
+            product_name: Some("Test".into()),
+            manufacturer: None,
+            serial_number: None,
+            usage_page: None,
+            usage: None,
+            device_id: id,
+            collections: vec![],
+            max_input_report_size: 64,
+        }
+    }
+
+    #[test]
+    fn test_ipc_event_to_nm_connect() {
+        let dev = dummy_device(42);
+        let ev = IpcResponse::DeviceConnected {
+            id: 0,
+            device: dev.clone(),
+        };
+        let result = ipc_event_to_nm(ev);
+        assert!(result.is_some());
+        match result.unwrap() {
+            NmMessage::Control(r) => {
+                assert_eq!(r.event_type, Some(EVT_CONNECT));
+                assert_eq!(r.device_id, Some(42));
+                assert!(r.device.is_some());
+            }
+            _ => panic!("expected Control"),
+        }
+    }
+
+    #[test]
+    fn test_ipc_event_to_nm_disconnect() {
+        let dev = dummy_device(99);
+        let ev = IpcResponse::DeviceDisconnected {
+            id: 0,
+            device: dev.clone(),
+        };
+        let result = ipc_event_to_nm(ev);
+        assert!(result.is_some());
+        match result.unwrap() {
+            NmMessage::Control(r) => {
+                assert_eq!(r.event_type, Some(EVT_DISCONNECT));
+                assert_eq!(r.device_id, Some(99));
+            }
+            _ => panic!("expected Control"),
+        }
+    }
+
+    #[test]
+    fn test_ipc_event_to_nm_input_report() {
+        let ev = IpcResponse::InputReport {
+            id: 0,
+            device_id: 7,
+            report_id: 1,
+            data: bytes::Bytes::from_static(&[0xAA, 0xBB]),
+        };
+        let result = ipc_event_to_nm(ev);
+        assert!(result.is_some());
+        match result.unwrap() {
+            NmMessage::PackedData(buf) => {
+                assert_eq!(buf[0], PKG_INPUT_REPORT);
+                assert_eq!(&buf[1..5], &7u32.to_le_bytes());
+                assert_eq!(buf[5], 1); // report_id
+                let payload_len = u16::from_le_bytes([buf[6], buf[7]]) as usize;
+                assert_eq!(payload_len, 2);
+                assert_eq!(&buf[8..10], &[0xAA, 0xBB]);
+            }
+            _ => panic!("expected PackedData"),
+        }
+    }
+
+    #[test]
+    fn test_ipc_event_to_nm_ignores_non_event() {
+        let ev = IpcResponse::Ok { id: 42 };
+        assert!(ipc_event_to_nm(ev).is_none());
+    }
+
+    #[test]
+    fn test_ipc_event_to_nm_ignores_error() {
+        let ev = IpcResponse::Error {
+            id: 1,
+            message: "test".into(),
+        };
+        assert!(ipc_event_to_nm(ev).is_none());
+    }
+}

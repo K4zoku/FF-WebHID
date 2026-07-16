@@ -464,3 +464,363 @@ pub fn max_input_report_size(collections: &[Collection]) -> u32 {
     }
     visit(collections)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── pack_usage ────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_pack_usage() {
+        let u = Usage {
+            usage_page: 0x0001.into(),
+            usage_id: 0x0002.into(),
+        };
+        assert_eq!(pack_usage(&u), 0x0001_0002);
+    }
+
+    #[test]
+    fn test_pack_usage_fido() {
+        let u = Usage {
+            usage_page: 0xF1D0.into(),
+            usage_id: 0x0001.into(),
+        };
+        assert_eq!(pack_usage(&u), 0xF1D0_0001);
+    }
+
+    // ── unit_system_string ────────────────────────────────────────────────
+
+    #[test]
+    fn test_unit_system_string_none() {
+        assert_eq!(unit_system_string(UnitSystem::None), "none");
+    }
+
+    #[test]
+    fn test_unit_system_string_si_linear() {
+        assert_eq!(unit_system_string(UnitSystem::SILinear), "si-linear");
+    }
+
+    #[test]
+    fn test_unit_system_string_si_rotation() {
+        assert_eq!(unit_system_string(UnitSystem::SIRotation), "si-rotation");
+    }
+
+    #[test]
+    fn test_unit_system_string_english_linear() {
+        assert_eq!(
+            unit_system_string(UnitSystem::EnglishLinear),
+            "english-linear"
+        );
+    }
+
+    #[test]
+    fn test_unit_system_string_english_rotation() {
+        assert_eq!(
+            unit_system_string(UnitSystem::EnglishRotation),
+            "english-rotation"
+        );
+    }
+
+    // ── units_exponent ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_units_exponent_none() {
+        assert_eq!(units_exponent(&Units::None), 0);
+    }
+
+    #[test]
+    fn test_units_exponent_centimeter() {
+        assert_eq!(units_exponent(&Units::Centimeter { exponent: -2 }), -2);
+    }
+
+    #[test]
+    fn test_units_exponent_gram() {
+        assert_eq!(units_exponent(&Units::Gram { exponent: 3 }), 3);
+    }
+
+    #[test]
+    fn test_units_exponent_seconds() {
+        assert_eq!(units_exponent(&Units::Seconds { exponent: -1 }), -1);
+    }
+
+    // ── decode_unit ───────────────────────────────────────────────────────
+
+    #[test]
+    fn test_decode_unit_none() {
+        let (sys, len, mass, time, temp, cur, lum) = decode_unit(None);
+        assert!(matches!(sys, UnitSystem::None));
+        assert_eq!((len, mass, time, temp, cur, lum), (0, 0, 0, 0, 0, 0));
+    }
+
+    // ── detect_contiguous_range ───────────────────────────────────────────
+
+    #[test]
+    fn test_detect_contiguous_range_single() {
+        let usages = vec![0x0001_0002u32];
+        let (u, is_range, _lo, _hi) = detect_contiguous_range(usages.clone());
+        assert!(!is_range);
+        assert_eq!(u, usages);
+    }
+
+    #[test]
+    fn test_detect_contiguous_range_full() {
+        // Three consecutive usages in page 0x0001: 0xE0, 0xE1, 0xE2
+        let usages = vec![0x0001_00E0, 0x0001_00E1, 0x0001_00E2];
+        let (u, is_range, lo, hi) = detect_contiguous_range(usages);
+        assert!(is_range);
+        assert!(u.is_empty());
+        assert_eq!(lo, Some(0x0001_00E0));
+        assert_eq!(hi, Some(0x0001_00E2));
+    }
+
+    #[test]
+    fn test_detect_contiguous_range_different_pages() {
+        let usages = vec![0x0001_00E0, 0x0002_00E1];
+        let (u, is_range, lo, hi) = detect_contiguous_range(usages.clone());
+        assert!(!is_range);
+        assert_eq!(u, usages);
+        assert_eq!(lo, None);
+        assert_eq!(hi, None);
+    }
+
+    #[test]
+    fn test_detect_contiguous_range_non_sequential() {
+        let usages = vec![0x0001_00E0, 0x0001_00E2];
+        let (u, is_range, lo, hi) = detect_contiguous_range(usages.clone());
+        assert!(!is_range);
+        assert_eq!(u, usages);
+        assert_eq!(lo, None);
+        assert_eq!(hi, None);
+    }
+
+    #[test]
+    fn test_detect_contiguous_range_overflow_safe() {
+        // Usage at 0xFFFF should not panic when adding 1
+        let usages = vec![0x0001_FFFF, 0x0002_0000]; // different pages
+        let (u, is_range, _lo, _hi) = detect_contiguous_range(usages.clone());
+        assert!(!is_range);
+        assert_eq!(u, usages);
+    }
+
+    // ── max_input_report_size ─────────────────────────────────────────────
+
+    #[test]
+    fn test_max_input_report_size_empty() {
+        assert_eq!(max_input_report_size(&[]), 0);
+    }
+
+    #[test]
+    fn test_max_input_report_size_no_input_reports() {
+        let collections = vec![Collection {
+            collection_type: 1,
+            usage_page: None,
+            usage: None,
+            children: vec![],
+            input_reports: vec![],
+            output_reports: vec![],
+            feature_reports: vec![],
+        }];
+        assert_eq!(max_input_report_size(&collections), 0);
+    }
+
+    #[test]
+    fn test_max_input_report_size_single_report() {
+        let collections = vec![Collection {
+            collection_type: 1,
+            usage_page: None,
+            usage: None,
+            children: vec![],
+            input_reports: vec![Report {
+                report_id: 0,
+                items: vec![WebHidField {
+                    report_size: 8,
+                    report_count: 3,
+                    ..Default::default()
+                }],
+            }],
+            output_reports: vec![],
+            feature_reports: vec![],
+        }];
+        // 8 bits * 3 = 24 bits = 3 bytes
+        assert_eq!(max_input_report_size(&collections), 3);
+    }
+
+    #[test]
+    fn test_max_input_report_size_multiple_reports() {
+        let collections = vec![Collection {
+            collection_type: 1,
+            usage_page: None,
+            usage: None,
+            children: vec![],
+            input_reports: vec![
+                Report {
+                    report_id: 1,
+                    items: vec![WebHidField {
+                        report_size: 8,
+                        report_count: 1,
+                        ..Default::default()
+                    }],
+                },
+                Report {
+                    report_id: 2,
+                    items: vec![
+                        WebHidField {
+                            report_size: 8,
+                            report_count: 4,
+                            ..Default::default()
+                        },
+                        WebHidField {
+                            report_size: 16,
+                            report_count: 1,
+                            ..Default::default()
+                        },
+                    ],
+                },
+            ],
+            output_reports: vec![],
+            feature_reports: vec![],
+        }];
+        // Report 1: 8*1 = 8 bits = 1 byte
+        // Report 2: 8*4 + 16*1 = 48 bits = 6 bytes
+        assert_eq!(max_input_report_size(&collections), 6);
+    }
+
+    #[test]
+    fn test_max_input_report_size_nested() {
+        let collections = vec![Collection {
+            collection_type: 1,
+            usage_page: None,
+            usage: None,
+            children: vec![Collection {
+                collection_type: 2,
+                usage_page: None,
+                usage: None,
+                children: vec![],
+                input_reports: vec![Report {
+                    report_id: 0,
+                    items: vec![WebHidField {
+                        report_size: 64,
+                        report_count: 1,
+                        ..Default::default()
+                    }],
+                }],
+                output_reports: vec![],
+                feature_reports: vec![],
+            }],
+            input_reports: vec![],
+            output_reports: vec![],
+            feature_reports: vec![],
+        }];
+        // 64 bits = 8 bytes in nested collection
+        assert_eq!(max_input_report_size(&collections), 8);
+    }
+
+    #[test]
+    fn test_max_input_report_size_overflow_does_not_panic() {
+        let collections = vec![Collection {
+            collection_type: 1,
+            usage_page: None,
+            usage: None,
+            children: vec![],
+            input_reports: vec![Report {
+                report_id: 0,
+                items: vec![WebHidField {
+                    report_size: u32::MAX,
+                    report_count: u32::MAX,
+                    ..Default::default()
+                }],
+            }],
+            output_reports: vec![],
+            feature_reports: vec![],
+        }];
+        // Should not panic; saturating arithmetic means result is some large value
+        let result = max_input_report_size(&collections);
+        assert!(result > 0);
+    }
+
+    // ── parse_report_descriptor ───────────────────────────────────────────
+
+    #[test]
+    fn test_parse_empty_descriptor() {
+        // Empty descriptor → parsing fails → empty vec
+        let collections = parse_report_descriptor(&[]);
+        assert!(collections.is_empty());
+    }
+
+    #[test]
+    fn test_parse_invalid_descriptor() {
+        // Single byte is not a valid HID descriptor → parsing fails → empty vec
+        let collections = parse_report_descriptor(&[0xFF]);
+        assert!(collections.is_empty());
+    }
+
+    #[test]
+    fn test_parse_valid_descriptor_with_no_reports() {
+        // A descriptor with only a collection opening (no reports)
+        // This parses successfully but has no reports, so build()
+        // produces the fallback collection
+        let desc = vec![
+            0x05, 0x01, // Usage Page (Generic Desktop)
+            0x09, 0x02, // Usage (Mouse)
+            0xA1, 0x01, // Collection (Application)
+            0xC0,       // End Collection
+        ];
+        let collections = parse_report_descriptor(&desc);
+        // hidreport should parse this as a valid descriptor, but with 0 reports,
+        // so build() produces the fallback Collection
+        // Note: if hidreport rejects this as invalid, it returns empty vec too
+        assert!(!collections.is_empty() || desc.is_empty());
+    }
+
+    #[test]
+    fn test_parse_mouse_descriptor() {
+        // Simple mouse: no report ID, one application collection, one input report
+        let desc = vec![
+            0x05, 0x01, // Usage Page (Generic Desktop)
+            0x09, 0x02, // Usage (Mouse)
+            0xA1, 0x01, // Collection (Application)
+            0x09, 0x01, // Usage (Pointer)
+            0x75, 0x08, // Report Size (8)
+            0x95, 0x03, // Report Count (3)
+            0x81, 0x02, // Input (Data,Var,Abs)
+            0xC0,       // End Collection
+        ];
+        let collections = parse_report_descriptor(&desc);
+        assert!(!collections.is_empty(), "should produce at least one collection");
+        let app = &collections[0];
+        assert_eq!(app.collection_type, 1);
+        assert_eq!(app.usage_page, Some(1)); // Generic Desktop
+        assert_eq!(app.usage, Some(2)); // Mouse
+        assert!(!app.input_reports.is_empty(), "should have input reports");
+        // Report should have items
+        let report = &app.input_reports[0];
+        assert!(!report.items.is_empty());
+    }
+
+    #[test]
+    fn test_parse_descriptor_max_input_size_derived() {
+        // Joystick with known total bit count
+        let desc = vec![
+            0x05, 0x01, // Usage Page (Generic Desktop)
+            0x09, 0x04, // Usage (Joystick)
+            0xA1, 0x01, // Collection (Application)
+            0x09, 0x01, // Usage (Pointer)
+            0x15, 0x00, // Logical Minimum (0)
+            0x25, 0x01, // Logical Maximum (1)
+            0x75, 0x01, // Report Size (1)
+            0x95, 0x08, // Report Count (8)
+            0x81, 0x02, // Input (Data,Var,Abs)
+            0x09, 0x01, // Usage (Pointer)
+            0x75, 0x08, // Report Size (8)
+            0x95, 0x04, // Report Count (4)
+            0x81, 0x02, // Input (Data,Var,Abs)
+            0xC0,       // End Collection
+        ];
+        let collections = parse_report_descriptor(&desc);
+        // 8*1 + 8*4 = 40 bits = 5 bytes of input
+        // But hidreport may round to nearest byte boundary
+        let max = max_input_report_size(&collections);
+        assert!(max >= 5, "expected at least 5 bytes, got {max}");
+    }
+}

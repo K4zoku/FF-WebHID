@@ -34,7 +34,7 @@ USER_SYSTEMD_DIR  ?= $(HOME)/.config/systemd/user
 		install-daemon-nm-host-system install-daemon-nm-host-user \
 		uninstall uninstall-system uninstall-user \
 		windows-msi \
-		clean help \
+		clean test help \
 		bump bump-patch
 
 all: build build-addon
@@ -178,6 +178,9 @@ uninstall-user:
 	rm -f "$(USER_SYSTEMD_DIR)/webhid-daemon.service"
 
 ## ---- Misc ----
+
+test:
+	cargo test --manifest-path "$(CRATES_DIR)/Cargo.toml"
 
 clean:
 	cargo clean --manifest-path "$(CRATES_DIR)/Cargo.toml"
