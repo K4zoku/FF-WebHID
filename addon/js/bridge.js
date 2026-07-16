@@ -257,6 +257,10 @@
     _workerCallbacks.delete(deviceId);
     _workerReady.delete(deviceId);
     _workerQueues.delete(deviceId);
+    // E5: Drop the spawn-generation counter for this device so the Map
+    // does not grow unbounded across many open/close cycles. A fresh
+    // _spawnDataPlane call will re-seed it with gen=1.
+    _spawnGen.delete(deviceId);
   }
 
   async function _refreshDataPlaneToken(deviceId) {
@@ -875,8 +879,41 @@
     }
   }
 
+  // E4: Drop all bridge-side device state when background signals the NM
+  // host (or daemon) has restarted. Emits a disconnect event for each
+  // previously-open device so the page can recover by calling open() again.
+  function _handleGlobalReset() {
+    logger.warn("global reset: clearing bridge device state");
+    const deviceIds = Array.from(_openDevices);
+    _openDevices.clear();
+    _sessionTokens.clear();
+    for (const deviceId of deviceIds) {
+      try {
+        _despawnDataPlane(deviceId);
+      } catch (e) {
+        logger.warn("global reset: despawn failed for", deviceId, e.message);
+      }
+      // Notify page world that this device is no longer usable as-is.
+      _replyToPage({
+        __webhid_bridge: "evt",
+        event: { eventType: "disconnect", deviceId },
+      });
+    }
+    browser.runtime
+      .sendMessage({ action: "device-count-changed", count: 0 })
+      .catch(() => {});
+  }
+
   // Forward events pushed by background.js into the page world.
   browser.runtime.onMessage.addListener((message) => {
+    // E4: When the NM host dies and respawns, daemon-side per-device state
+    // (session tokens, open handles) is gone. Any cached _sessionTokens /
+    // _openDevices on the bridge side are now stale — clear them and emit
+    // disconnect events to the page so app code can recover (re-open).
+    if (message.action === "global-reset") {
+      _handleGlobalReset();
+      return;
+    }
     if (message.action === "webhid-device-event" && message.event) {
       const ev = message.event;
       if (ev.eventType === "input_report") {

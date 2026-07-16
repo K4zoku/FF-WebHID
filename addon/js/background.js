@@ -165,6 +165,29 @@
     return (result[key] || []).includes(deviceId);
   }
 
+  // E4: Fan out a global-reset message to every content-script bridge
+  // currently loaded in any tab. The bridge clears its _sessionTokens /
+  // _openDevices maps and emits disconnect events to the page. Used when
+  // the NM host / daemon disappears so callers stop using stale tokens.
+  function _broadcastGlobalReset() {
+    browser.tabs
+      .query({})
+      .then((tabs) => {
+        for (const tab of tabs) {
+          if (!tab.url) continue;
+          try {
+            new URL(tab.url);
+          } catch {
+            continue;
+          }
+          browser.tabs
+            .sendMessage(tab.id, { action: "global-reset" })
+            .catch(() => {});
+        }
+      })
+      .catch(() => {});
+  }
+
   const NM_HOST_FORWARDER = "webhid.forwarder_nm_host";
   const NM_HOST_DAEMON = "webhid.daemon_nm_host";
 
@@ -256,6 +279,13 @@
           this.port = null;
           for (const [id, p] of this._pending) p.resolve({ s: 503 });
           this._pending.clear();
+          // E4: Broadcast a global-reset to every content-script bridge so
+          // they drop stale _sessionTokens / _openDevices state. Daemon
+          // restart invalidates every session token; without this, the
+          // bridge would happily keep routing sendReport using tokens the
+          // daemon no longer recognizes, leaving pages in a half-broken
+          // state until they explicitly close + reopen.
+          _broadcastGlobalReset();
           this._scheduleReconnect();
         });
 

@@ -52,11 +52,28 @@
         origin: window.location?.origin || "",
         device: { deviceId: deviceInfo.deviceId },
       });
-      if (result.success) {
+      if (result && result.success) {
         _pairedDevices = result.hashes || [];
         _deviceInfoCache = null;
+      } else {
+        // S5: Surface pairing failures to the log so they aren't silently
+        // swallowed. requestDevice() already resolved with the device, but
+        // the user should be able to see (via the addon's debug log) that
+        // the pairDevice round-trip failed; subsequent getDevices() calls
+        // will not return this device.
+        _logger.warn(
+          "pairDevice returned non-success for deviceId=" +
+            deviceInfo.deviceId +
+            ": " +
+            _http.name(result?.s || 0),
+        );
       }
-    } catch {}
+    } catch (e) {
+      // S5: Log the underlying error too. Previously this was a bare
+      // `catch {}` which made pairing failures invisible to anyone trying
+      // to debug "I picked a device but getDevices() is empty".
+      _logger.warn("pairDevice error:", e?.message || e);
+    }
   }
 
   const _defs = _GLOBAL_DEFAULTS;
@@ -212,13 +229,19 @@
         if (!s) throw new DOMException("Invalid state", "InvalidStateError");
         if (s.opened)
           throw new DOMException("Device is already open", "InvalidStateError");
+        // S4: Reject concurrent open() calls without exposing the opening
+        // flag on the device surface (spec only defines `opened`). This
+        // closes the await-gap race where two calls could both pass the
+        // `s.opened` guard and both flip `opened` to true.
+        if (s.opening)
+          throw new DOMException("Device is already open", "InvalidStateError");
+        s.opening = true;
         try {
           const response = await sendRequest("open", {
             deviceId: s.deviceId,
             reportSize: s.maxInputReportSize + 3,
           });
           if (_http.isOk(response.s)) {
-            s.opened = true;
             const dataChannel = new MessageChannel();
             s.dataPort = dataChannel.port1;
             s.dataPort.onmessage = (ev) => _onDataPortMessage(s, ev.data);
@@ -231,6 +254,11 @@
               },
               [dataChannel.port2],
             );
+            // S3: Flip `opened` only after the data channel is fully wired.
+            // Previously `s.opened = true` was set before the port was set
+            // up, leaving a partial-state window where sendReport would
+            // throw "data port not connected" despite opened === true.
+            s.opened = true;
             _logger.info("open deviceId=" + s.deviceId);
             this.dispatchEvent(new Event("open"));
             return true;
@@ -238,6 +266,8 @@
           throw new Error("Open failed: " + _http.name(response.s || 0));
         } catch (error) {
           throw new DOMException(error.message, "InvalidStateError");
+        } finally {
+          s.opening = false;
         }
       },
       enumerable: true,
@@ -498,6 +528,11 @@
       productName: deviceInfo.productName,
       collections: deviceInfo.collections || [],
       opened: false,
+      // S4: internal "opening" flag — NOT exposed on the HIDDevice surface
+      // (spec only defines `opened`). Used to guard against concurrent
+      // open() calls racing through the `await sendRequest("open", ...)`
+      // gap and both flipping `opened` to true.
+      opening: false,
       dataPort: null,
       dataPending: null,
       maxInputReportSize: deviceInfo.maxInputReportSize || 64,
