@@ -351,11 +351,9 @@ mod tests {
         assert_eq!(json["E"], "");
     }
 
-    // ── candidate_sockets ─────────────────────────────────────────────────
-
+    #[cfg(unix)]
     #[test]
     fn test_candidate_sockets_uses_env_var() {
-        // When WEBHID_SOCKET is set, it should be the only candidate
         unsafe { std::env::set_var("WEBHID_SOCKET", "/tmp/custom.sock") };
         let candidates = candidate_sockets();
         unsafe { std::env::remove_var("WEBHID_SOCKET") };
@@ -363,9 +361,9 @@ mod tests {
         assert_eq!(candidates[0], "/tmp/custom.sock");
     }
 
+    #[cfg(unix)]
     #[test]
     fn test_candidate_sockets_default_contains_fallback() {
-        // Without WEBHID_SOCKET, the fallback DEFAULT_SOCKET should be last
         unsafe { std::env::remove_var("WEBHID_SOCKET") };
         let candidates = candidate_sockets();
         assert!(!candidates.is_empty());
