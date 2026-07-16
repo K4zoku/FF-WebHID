@@ -261,11 +261,11 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: crates -> target
-      - name: Dependency license & duplicate check
-        run: |
-          cargo install cargo-deny --locked
-          cd crates && cargo deny check
-      - name: Rust dependency audit
-        run: |
-          cargo install cargo-audit --locked
-          cd crates && cargo audit
+      - name: Install & run audit tools
+        uses: taiki-e/install-action@v2.83.3
+        with:
+          tool: cargo-deny,cargo-audit
+      - name: Run deny check
+        run: cd crates && cargo deny check
+      - name: Run audit
+        run: cd crates && cargo audit
