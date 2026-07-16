@@ -22,7 +22,7 @@ When reporting, please include as much of the following as you can:
 - The Firefox addon (background/worker/page scripts, daemon-side HID report descriptor parser via hidreport crate)
 - The Rust daemon and native messaging host
 - The WebSocket data plane and its authentication mechanism
-- The HID device blocklist (keyboard/mouse/FIDO-U2F protections)
+- The HID device blocklist (FIDO/U2F security key protections; keyboard/mouse access is gated by OS permissions)
 
 ## Response
 

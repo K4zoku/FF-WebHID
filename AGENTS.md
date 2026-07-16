@@ -61,7 +61,7 @@ Don't add backwards-compatibility shims, migration paths, or defensive fallbacks
 
 Device permission and isolation are layered independently:
 - udev rules (or platform equivalent) gate which devices a non-root process can even open.
-- The HID blocklist (keyboard/mouse standard collections, FIDO/U2F) is enforced in the daemon regardless of OS-level permissions.
+- The HID blocklist (FIDO/U2F security keys) is enforced in the daemon regardless of OS-level permissions, matching Chromium's blocklist. Keyboard and mouse access is gated by the OS layer (udev rules on Linux, HID API on Windows, Input Monitoring/TCC on macOS), not by the daemon.
 - The device picker UI runs in closed-mode Shadow DOM, isolated from page script.
 - WebSocket auth uses a per-session token, checked independently of the above.
 
