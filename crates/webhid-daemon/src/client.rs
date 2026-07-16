@@ -32,6 +32,20 @@ pub async fn handle(
         loop {
             match event_rx.recv().await {
                 Ok(ev) => {
+                    // M2: When the OS hotplug layer reports a device has
+                    // been physically removed, proactively tear down the
+                    // device_mgr entry for it. Without this, the device
+                    // stays in the map with a stale HidDevice handle and
+                    // stale session tokens; subsequent sendReport calls
+                    // would write to a dead handle and the reader task
+                    // (which already errored out) would never clean up.
+                    if let webhid::IpcResponse::DeviceDisconnected {
+                        ref device,
+                        ..
+                    } = ev
+                    {
+                        device_mgr_for_events.force_close(device.device_id);
+                    }
                     if let webhid::IpcResponse::InputReport { ref device_id, .. } = ev {
                         if device_mgr_for_events.dataplane_mode(*device_id) == "ws" {
                             continue;
@@ -135,7 +149,7 @@ async fn dispatch(device_mgr: &DeviceManager, req: NmRequest, ws_port: u16) -> N
                     Ok(dev_arc) => {
                         let data_owned = data.to_vec();
                         let result = tokio::task::spawn_blocking(move || {
-                            let dev = dev_arc.lock().unwrap();
+                            let dev = dev_arc.lock().unwrap_or_else(|e| e.into_inner());
                             hid::write_report(&dev, report_id, &data_owned)
                         })
                         .await;
@@ -161,7 +175,7 @@ async fn dispatch(device_mgr: &DeviceManager, req: NmRequest, ws_port: u16) -> N
             Err(_) => NmResponse::err(404),
             Ok(dev_arc) => {
                 let result = tokio::task::spawn_blocking(move || {
-                    let dev = dev_arc.lock().unwrap();
+                    let dev = dev_arc.lock().unwrap_or_else(|e| e.into_inner());
                     hid::read_feature_report(&dev, report_id)
                 })
                 .await;
@@ -182,7 +196,7 @@ async fn dispatch(device_mgr: &DeviceManager, req: NmRequest, ws_port: u16) -> N
             Err(_) => NmResponse::err(404),
             Ok(dev_arc) => {
                 let result = tokio::task::spawn_blocking(move || {
-                    let dev = dev_arc.lock().unwrap();
+                    let dev = dev_arc.lock().unwrap_or_else(|e| e.into_inner());
                     hid::write_feature_report(&dev, report_id, &data)
                 })
                 .await;

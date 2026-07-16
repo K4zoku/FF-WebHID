@@ -14,7 +14,7 @@ fn refresh_and_diff(event_tx: &broadcast::Sender<IpcResponse>) {
         Ok(devs) => devs.into_iter().map(|d| (d.device_id, d)).collect(),
         Err(_) => return,
     };
-    let mut cache = DEVICE_CACHE.lock().unwrap();
+    let mut cache = DEVICE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
     let cache = cache.get_or_insert_with(HashMap::new);
 
     for (id, info) in &current {
@@ -112,9 +112,9 @@ fn start_udev(event_tx: broadcast::Sender<IpcResponse>) -> anyhow::Result<()> {
             };
 
             if let Ok(api) = hidapi::HidApi::new() {
-                let mut cache = DEVICE_CACHE.lock().unwrap();
+                let mut cache = DEVICE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
                 let cache = cache.get_or_insert_with(HashMap::new);
-                let mut dnmap = DEVNODE_TO_ID.lock().unwrap();
+                let mut dnmap = DEVNODE_TO_ID.lock().unwrap_or_else(|e| e.into_inner());
                 let dnmap = dnmap.get_or_insert_with(HashMap::new);
                 for info in api.device_list() {
                     if crate::hid::is_blocked_pub(info) {
@@ -156,10 +156,10 @@ fn start_udev(event_tx: broadcast::Sender<IpcResponse>) -> anyhow::Result<()> {
                                 info.product_id,
                                 info.device_id
                             );
-                            let mut cache = DEVICE_CACHE.lock().unwrap();
+                            let mut cache = DEVICE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
                             let cache = cache.get_or_insert_with(HashMap::new);
                             cache.insert(info.device_id, info.clone());
-                            let mut dnmap = DEVNODE_TO_ID.lock().unwrap();
+                            let mut dnmap = DEVNODE_TO_ID.lock().unwrap_or_else(|e| e.into_inner());
                             let dnmap = dnmap.get_or_insert_with(HashMap::new);
                             dnmap.insert(devnode, info.device_id);
                             IpcResponse::DeviceConnected {
@@ -169,11 +169,11 @@ fn start_udev(event_tx: broadcast::Sender<IpcResponse>) -> anyhow::Result<()> {
                         }
                         udev::EventType::Remove => {
                             let device_id = {
-                                let mut dnmap = DEVNODE_TO_ID.lock().unwrap();
+                                let mut dnmap = DEVNODE_TO_ID.lock().unwrap_or_else(|e| e.into_inner());
                                 dnmap.get_or_insert_with(HashMap::new).remove(&devnode)
                             };
                             let info = device_id.and_then(|id| {
-                                let mut cache = DEVICE_CACHE.lock().unwrap();
+                                let mut cache = DEVICE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
                                 cache.as_mut().and_then(|c| c.remove(&id))
                             });
                             match info {
@@ -211,7 +211,7 @@ fn start_udev(event_tx: broadcast::Sender<IpcResponse>) -> anyhow::Result<()> {
 fn run_windows(event_tx: broadcast::Sender<IpcResponse>) {
     // Seed cache
     if let Ok(devices) = crate::hid::enumerate() {
-        let mut cache = DEVICE_CACHE.lock().unwrap();
+        let mut cache = DEVICE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
         let cache = cache.get_or_insert_with(HashMap::new);
         for d in devices {
             cache.insert(d.device_id, d);
@@ -432,7 +432,7 @@ fn run_macos(event_tx: broadcast::Sender<IpcResponse>) {
 
     // Seed cache
     if let Ok(devices) = crate::hid::enumerate() {
-        let mut cache = DEVICE_CACHE.lock().unwrap();
+        let mut cache = DEVICE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
         let cache = cache.get_or_insert_with(HashMap::new);
         for d in devices {
             cache.insert(d.device_id, d);
@@ -447,7 +447,7 @@ fn run_macos(event_tx: broadcast::Sender<IpcResponse>) {
 
     static GLOBAL_TX: std::sync::Mutex<Option<broadcast::Sender<IpcResponse>>> =
         std::sync::Mutex::new(None);
-    *GLOBAL_TX.lock().unwrap() = Some(event_tx);
+    *GLOBAL_TX.lock().unwrap_or_else(|e| e.into_inner()) = Some(event_tx);
 
     unsafe {
         IOHIDManagerSetDeviceMatching(manager, std::ptr::null());
@@ -464,7 +464,7 @@ fn run_macos(event_tx: broadcast::Sender<IpcResponse>) {
             _device: *mut std::ffi::c_void,
         ) {
             std::thread::sleep(std::time::Duration::from_millis(100));
-            if let Some(tx) = GLOBAL_TX.lock().unwrap().as_ref() {
+            if let Some(tx) = GLOBAL_TX.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
                 refresh_and_diff(tx);
             }
         }
@@ -475,7 +475,7 @@ fn run_macos(event_tx: broadcast::Sender<IpcResponse>) {
             _sender: *mut std::ffi::c_void,
             _device: *mut std::ffi::c_void,
         ) {
-            if let Some(tx) = GLOBAL_TX.lock().unwrap().as_ref() {
+            if let Some(tx) = GLOBAL_TX.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
                 refresh_and_diff(tx);
             }
         }

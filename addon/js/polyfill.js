@@ -98,10 +98,34 @@
     }
   };
 
-  function sendRequest(action, payload) {
+  function sendRequest(action, payload, opts = {}) {
     return new Promise((resolve) => {
       const id = ++_reqId;
-      _pending[id] = resolve;
+      // S4: Default 30s timeout so a request whose response never comes
+      // back (bridge died, content-script context invalidated, page
+      // navigated) does not leave the caller hanging forever. Callers
+      // can override via opts.timeoutMs; pass 0 to disable. On timeout
+      // we resolve with { s: 504 } so existing status-checking code
+      // (http.isOk) treats it as a failure rather than a crash.
+      const timeoutMs = opts.timeoutMs ?? 30000;
+      let settled = false;
+      let timer = null;
+      if (timeoutMs > 0) {
+        timer = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          delete _pending[id];
+          _logger.warn("sendRequest timeout: " + action + " (id=" + id + ")");
+          resolve({ s: 504 });
+        }, timeoutMs);
+      }
+      _pending[id] = (result) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        delete _pending[id];
+        resolve(result);
+      };
       const msg = {
         __webhid_bridge: "req",
         id,
@@ -177,35 +201,35 @@
       get() {
         return _devState.get(this)?.opened ?? false;
       },
-      enumerable: true,
+      enumerable: false,
       configurable: true,
     },
     vendorId: {
       get() {
         return _devState.get(this)?.vendorId;
       },
-      enumerable: true,
+      enumerable: false,
       configurable: true,
     },
     productId: {
       get() {
         return _devState.get(this)?.productId;
       },
-      enumerable: true,
+      enumerable: false,
       configurable: true,
     },
     productName: {
       get() {
         return _devState.get(this)?.productName;
       },
-      enumerable: true,
+      enumerable: false,
       configurable: true,
     },
     collections: {
       get() {
         return _devState.get(this)?.collections;
       },
-      enumerable: true,
+      enumerable: false,
       configurable: true,
     },
     oninputreport: {
@@ -220,7 +244,7 @@
         s.oninputreport = v;
         if (v) this.addEventListener("inputreport", v);
       },
-      enumerable: true,
+      enumerable: false,
       configurable: true,
     },
     open: {
@@ -270,7 +294,7 @@
           s.opening = false;
         }
       },
-      enumerable: true,
+      enumerable: false,
       configurable: true,
       writable: true,
     },
@@ -309,7 +333,7 @@
           throw new DOMException(error.message, "InvalidStateError");
         }
       },
-      enumerable: true,
+      enumerable: false,
       configurable: true,
       writable: true,
     },
@@ -348,7 +372,7 @@
           throw new DOMException(error.message, "NetworkError");
         }
       },
-      enumerable: true,
+      enumerable: false,
       configurable: true,
       writable: true,
     },
@@ -380,7 +404,7 @@
           throw new DOMException(error.message, "NetworkError");
         }
       },
-      enumerable: true,
+      enumerable: false,
       configurable: true,
       writable: true,
     },
@@ -419,7 +443,7 @@
           throw new DOMException(error.message, "NetworkError");
         }
       },
-      enumerable: true,
+      enumerable: false,
       configurable: true,
       writable: true,
     },
@@ -437,7 +461,7 @@
         _deviceInfoCache = null;
         _deviceRegistry.delete(s.deviceId);
       },
-      enumerable: true,
+      enumerable: false,
       configurable: true,
       writable: true,
     },
@@ -446,7 +470,7 @@
         const s = _devState.get(this);
         if (s) s.et.addEventListener(type, listener);
       },
-      enumerable: true,
+      enumerable: false,
       configurable: true,
       writable: true,
     },
@@ -455,7 +479,7 @@
         const s = _devState.get(this);
         if (s) s.et.removeEventListener(type, listener);
       },
-      enumerable: true,
+      enumerable: false,
       configurable: true,
       writable: true,
     },
@@ -473,6 +497,17 @@
         _hidInstance.dispatchEvent(
           new HIDConnectionEvent(detail.eventType, { device: dev }),
         );
+        // S3: After firing the disconnect event, drop the device from the
+        // registry so subsequent getDevices() / requestDevice() calls
+        // create a fresh HIDDevice instance for this hardware id (matching
+        // native WebHID behavior where a reconnected device is a new
+        // object, not the stale one whose events have already fired).
+        // The page may still hold a reference to the old HIDDevice but
+        // it is now inert — its EventTarget is detached from the
+        // singleton, no further events will be dispatched on it.
+        if (detail.eventType === "disconnect") {
+          _deviceRegistry.delete(detail.deviceId);
+        }
       }
       return;
     }
@@ -574,21 +609,21 @@
       get() {
         return this[_irState]?.device;
       },
-      enumerable: true,
+      enumerable: false,
       configurable: true,
     },
     reportId: {
       get() {
         return this[_irState]?.reportId;
       },
-      enumerable: true,
+      enumerable: false,
       configurable: true,
     },
     data: {
       get() {
         return this[_irState]?.data;
       },
-      enumerable: true,
+      enumerable: false,
       configurable: true,
     },
   });
@@ -612,7 +647,7 @@
     get() {
       return _evtState.get(this)?.device;
     },
-    enumerable: true,
+    enumerable: false,
     configurable: true,
   });
 
@@ -645,7 +680,7 @@
           return [];
         }
       },
-      enumerable: true,
+      enumerable: false,
       configurable: true,
       writable: true,
     },
@@ -661,18 +696,33 @@
         _logger.debug("requestDevice filters=" + JSON.stringify(filters));
         return new Promise((resolve, reject) => {
           const id = ++_reqId;
-          _pending[id] = (result) => {
-            if (result.cancelled) {
-              reject(new DOMException("No device selected", "NotFoundError"));
-              return;
+          // S-spec: previously this handler fired off pairDevice() without
+          // awaiting it, then resolved requestDevice immediately. That meant
+          // requestDevice could resolve before pairDevice's round-trip to the
+          // background completed, so an immediate getDevices() call from the
+          // page might not yet see the just-selected device. Now we await
+          // Promise.all over all pairDevice() calls before resolving.
+          _pending[id] = async (result) => {
+            try {
+              if (result.cancelled) {
+                reject(new DOMException("No device selected", "NotFoundError"));
+                return;
+              }
+              const devices = result.devices;
+              if (!devices || devices.length === 0) {
+                reject(new DOMException("No device selected", "NotFoundError"));
+                return;
+              }
+              await Promise.all(devices.map((d) => pairDevice(d)));
+              resolve(devices.map((d) => getOrCreateDevice(d)));
+            } catch (e) {
+              reject(
+                new DOMException(
+                  e?.message || "requestDevice failed",
+                  "NetworkError",
+                ),
+              );
             }
-            const devices = result.devices;
-            if (!devices || devices.length === 0) {
-              reject(new DOMException("No device selected", "NotFoundError"));
-              return;
-            }
-            for (const d of devices) pairDevice(d);
-            resolve(devices.map((d) => getOrCreateDevice(d)));
           };
           _bridgePort.postMessage({
             __webhid_bridge: "req",
@@ -682,7 +732,7 @@
           });
         });
       },
-      enumerable: true,
+      enumerable: false,
       configurable: true,
       writable: true,
     },
@@ -691,7 +741,7 @@
         const s = _hidState.get(this);
         if (s) s.et.addEventListener(type, listener);
       },
-      enumerable: true,
+      enumerable: false,
       configurable: true,
       writable: true,
     },
@@ -700,7 +750,7 @@
         const s = _hidState.get(this);
         if (s) s.et.removeEventListener(type, listener);
       },
-      enumerable: true,
+      enumerable: false,
       configurable: true,
       writable: true,
     },
@@ -715,7 +765,7 @@
         s.onconnect = v;
         if (v) s.et.addEventListener("connect", v);
       },
-      enumerable: true,
+      enumerable: false,
       configurable: true,
     },
     ondisconnect: {
@@ -730,7 +780,7 @@
         s.ondisconnect = v;
         if (v) s.et.addEventListener("disconnect", v);
       },
-      enumerable: true,
+      enumerable: false,
       configurable: true,
     },
   });
@@ -774,6 +824,6 @@
     value: _hidInstance,
     writable: false,
     configurable: true,
-    enumerable: true,
+    enumerable: false,
   });
 })();

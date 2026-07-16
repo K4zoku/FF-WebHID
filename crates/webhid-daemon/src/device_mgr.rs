@@ -13,6 +13,17 @@ use webhid::{DeviceInfo, IpcResponse};
 
 use crate::hid;
 
+// M1: We use `.lock().unwrap_or_else(|e| e.into_inner())` instead of
+// `.lock().unwrap()` throughout this crate. A Mutex becomes "poisoned" when
+// a thread panics while holding the lock; the default `.unwrap()` would then
+// propagate the poison to every subsequent lock attempt, permanently
+// disabling that mutex for the lifetime of the process. The std-recommended
+// recovery is to extract the inner guard via `PoisonError::into_inner`,
+// which lets the next locker proceed (the data may be in an inconsistent
+// state, but that is generally preferable to a hard failure for a long-
+// running daemon). The panic that caused the poison is still logged via
+// the panic hook, so we don't lose the diagnostic.
+
 struct Entry {
     device: Arc<Mutex<HidDevice>>,
     stop_flag: Arc<AtomicBool>,
@@ -36,8 +47,8 @@ fn generate_session_token() -> Result<String, getrandom::Error> {
 }
 
 pub struct DeviceManager {
-    devices: Mutex<HashMap<u32, Entry>>,
-    tokens: Mutex<HashMap<String, u32>>,
+    devices: Arc<Mutex<HashMap<u32, Entry>>>,
+    tokens: Arc<Mutex<HashMap<String, u32>>>,
     event_tx: broadcast::Sender<IpcResponse>,
     control_token: Mutex<Option<String>>,
 }
@@ -45,15 +56,15 @@ pub struct DeviceManager {
 impl DeviceManager {
     pub fn new(event_tx: broadcast::Sender<IpcResponse>) -> Self {
         Self {
-            devices: Mutex::new(HashMap::new()),
-            tokens: Mutex::new(HashMap::new()),
+            devices: Mutex::new(HashMap::new()).into(),
+            tokens: Mutex::new(HashMap::new()).into(),
             event_tx,
             control_token: Mutex::new(None),
         }
     }
 
     pub fn get_or_create_control_token(&self) -> anyhow::Result<String> {
-        let mut guard = self.control_token.lock().unwrap();
+        let mut guard = self.control_token.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(ref t) = *guard {
             return Ok(t.clone());
         }
@@ -65,7 +76,7 @@ impl DeviceManager {
 
     pub fn validate_control_token(&self, token: &str) -> bool {
         use subtle::ConstantTimeEq;
-        let guard = self.control_token.lock().unwrap();
+        let guard = self.control_token.lock().unwrap_or_else(|e| e.into_inner());
         match guard.as_deref() {
             Some(stored) => stored.as_bytes().ct_eq(token.as_bytes()).into(),
             None => false,
@@ -80,7 +91,7 @@ impl DeviceManager {
         let session_token = generate_session_token()?;
 
         {
-            let mut map = self.devices.lock().unwrap();
+            let mut map = self.devices.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(entry) = map.get_mut(&device_id) {
                 entry.refcount += 1;
                 let rc = entry.refcount;
@@ -117,7 +128,7 @@ impl DeviceManager {
         let reader_arc = Arc::new(Mutex::new(reader_device));
         let writer_arc = Arc::new(Mutex::new(device));
 
-        let mut map = self.devices.lock().unwrap();
+        let mut map = self.devices.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(entry) = map.get_mut(&id) {
             entry.refcount += 1;
             let rc = entry.refcount;
@@ -163,7 +174,7 @@ impl DeviceManager {
                 let read_result = tokio::task::spawn_blocking({
                     let dev = Arc::clone(&dev_for_task);
                     move || {
-                        let d = dev.lock().unwrap();
+                        let d = dev.lock().unwrap_or_else(|e| e.into_inner());
                         hid::read_with_timeout(&d, 500, read_buf_size)
                     }
                 })
@@ -214,7 +225,7 @@ impl DeviceManager {
     }
 
     pub fn close(&self, device_id: u32) -> anyhow::Result<()> {
-        let mut map = self.devices.lock().unwrap();
+        let mut map = self.devices.lock().unwrap_or_else(|e| e.into_inner());
         let entry = map
             .get_mut(&device_id)
             .ok_or_else(|| anyhow!("'{device_id:#x}' not open"))?;
@@ -235,14 +246,14 @@ impl DeviceManager {
         }
         drop(map);
 
-        let mut tokens = self.tokens.lock().unwrap();
+        let mut tokens = self.tokens.lock().unwrap_or_else(|e| e.into_inner());
         tokens.retain(|_, &mut v| v != device_id);
         log::info!("[device_mgr] {device_id:#x} closed (refcount → 0)");
         Ok(())
     }
 
     pub fn get_file(&self, device_id: u32) -> anyhow::Result<Arc<Mutex<HidDevice>>> {
-        let map = self.devices.lock().unwrap();
+        let map = self.devices.lock().unwrap_or_else(|e| e.into_inner());
         let entry = map
             .get(&device_id)
             .ok_or_else(|| anyhow!("'{device_id:#x}' not open"))?;
@@ -250,18 +261,18 @@ impl DeviceManager {
     }
 
     pub fn set_dataplane_mode(&self, device_id: u32, mode: &str) {
-        let map = self.devices.lock().unwrap();
+        let map = self.devices.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(entry) = map.get(&device_id) {
-            *entry.dataplane_mode.lock().unwrap() = mode.to_string();
+            *entry.dataplane_mode.lock().unwrap_or_else(|e| e.into_inner()) = mode.to_string();
             log::info!("[device_mgr] {device_id:#x} dataplane mode → {mode}");
         }
     }
 
     pub fn ws_connect(&self, device_id: u32) -> u64 {
-        let map = self.devices.lock().unwrap();
+        let map = self.devices.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(entry) = map.get(&device_id) {
             let g = entry.ws_generation.fetch_add(1, Ordering::SeqCst) + 1;
-            *entry.dataplane_mode.lock().unwrap() = "ws".to_string();
+            *entry.dataplane_mode.lock().unwrap_or_else(|e| e.into_inner()) = "ws".to_string();
             log::info!("[device_mgr] {device_id:#x} WS connect gen={g}");
             g
         } else {
@@ -270,11 +281,11 @@ impl DeviceManager {
     }
 
     pub fn ws_disconnect(&self, device_id: u32, generation: u64) {
-        let map = self.devices.lock().unwrap();
+        let map = self.devices.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(entry) = map.get(&device_id) {
             let current = entry.ws_generation.load(Ordering::SeqCst);
             if current == generation {
-                *entry.dataplane_mode.lock().unwrap() = "nm".to_string();
+                *entry.dataplane_mode.lock().unwrap_or_else(|e| e.into_inner()) = "nm".to_string();
                 log::info!("[device_mgr] {device_id:#x} WS disconnect gen={generation} → nm");
             } else {
                 log::info!(
@@ -285,14 +296,19 @@ impl DeviceManager {
     }
 
     pub fn dataplane_mode(&self, device_id: u32) -> String {
-        let map = self.devices.lock().unwrap();
+        let map = self.devices.lock().unwrap_or_else(|e| e.into_inner());
         map.get(&device_id)
-            .map(|e| e.dataplane_mode.lock().unwrap().clone())
+            .map(|e| {
+                e.dataplane_mode
+                    .lock()
+                    .unwrap_or_else(|pe| pe.into_inner())
+                    .clone()
+            })
             .unwrap_or_else(|| "nm".to_string())
     }
 
     pub fn close_all_devices(&self) {
-        let mut map = self.devices.lock().unwrap();
+        let mut map = self.devices.lock().unwrap_or_else(|e| e.into_inner());
         let keys: Vec<u32> = map.keys().copied().collect();
         for k in keys {
             if let Some(mut entry) = map.remove(&k) {
@@ -303,12 +319,37 @@ impl DeviceManager {
             }
         }
         drop(map);
-        self.tokens.lock().unwrap().clear();
+        self.tokens.lock().unwrap_or_else(|e| e.into_inner()).clear();
+    }
+
+    /// Forcefully close a device regardless of its refcount.
+    ///
+    /// M2: Used by the hotplug path when the OS reports a device has been
+    /// physically removed. The normal `close()` decrements refcount and
+    /// only tears down the device when refcount hits 0 — that is the right
+    /// behavior for an explicit per-session close from a tab, but it is the
+    /// wrong behavior when the hardware is gone: every open session is now
+    /// invalid and the device entry must be removed so subsequent
+    /// sendReport / receiveFeatureReport calls fail cleanly with 404
+    /// instead of writing to a stale handle.
+    pub fn force_close(&self, device_id: u32) {
+        let mut map = self.devices.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(mut entry) = map.remove(&device_id) else {
+            return;
+        };
+        entry.stop_flag.store(true, Ordering::SeqCst);
+        if let Some(handle) = entry.handle.take() {
+            handle.abort();
+        }
+        drop(map);
+        let mut tokens = self.tokens.lock().unwrap_or_else(|e| e.into_inner());
+        tokens.retain(|_, &mut v| v != device_id);
+        log::info!("[device_mgr] {device_id:#x} force-closed (hotplug removal)");
     }
 
     pub fn get_device_by_token(&self, token: &str) -> Option<u32> {
         use subtle::ConstantTimeEq;
-        let tokens = self.tokens.lock().unwrap();
+        let tokens = self.tokens.lock().unwrap_or_else(|e| e.into_inner());
         for (stored, device_id) in tokens.iter() {
             if stored.as_bytes().ct_eq(token.as_bytes()).into() {
                 return Some(*device_id);

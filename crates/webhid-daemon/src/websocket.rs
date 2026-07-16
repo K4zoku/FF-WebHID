@@ -139,7 +139,7 @@ async fn handle_websocket(
                 .and_then(|v| v.to_str().ok())
                 .and_then(|s| s.strip_prefix("webhid."))
                 .map(String::from);
-            let mut holder = token_ref.lock().unwrap();
+            let mut holder = token_ref.lock().unwrap_or_else(|e| e.into_inner());
             *holder = token;
             let mut res = res;
             if let Some(proto) = req.headers().get("sec-websocket-protocol") {
@@ -158,7 +158,7 @@ async fn handle_websocket(
         }
     };
 
-    let token = token_holder.lock().unwrap().take();
+    let token = token_holder.lock().unwrap_or_else(|e| e.into_inner()).take();
     let (token, ws_stream) = match token {
         Some(t) if t.len() == 32 && t.chars().all(|c| c.is_ascii_hexdigit()) => (t, ws_stream),
         Some(_) => {
@@ -540,7 +540,7 @@ async fn handle_client_binary(
             };
 
             let result = tokio::task::spawn_blocking(move || {
-                let dev = dev_arc.lock().unwrap();
+                let dev = dev_arc.lock().unwrap_or_else(|e| e.into_inner());
                 if msg_type == MSG_SEND_REPORT {
                     hid::write_report(&dev, report_id, &payload)
                 } else {
@@ -579,7 +579,7 @@ async fn handle_client_binary(
             };
 
             let result = tokio::task::spawn_blocking(move || {
-                let dev = dev_arc.lock().unwrap();
+                let dev = dev_arc.lock().unwrap_or_else(|e| e.into_inner());
                 hid::read_feature_report(&dev, report_id)
             })
             .await;
