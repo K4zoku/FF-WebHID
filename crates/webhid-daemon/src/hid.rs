@@ -89,7 +89,16 @@ pub fn enumerate() -> anyhow::Result<Vec<DeviceInfo>> {
     Ok(devices)
 }
 
-/// Build a `DeviceInfo` from a hidapi `DeviceInfo`.
+/// Build a `DeviceInfo` from a hidapi `DeviceInfo`, fetching its report
+/// descriptor via a fresh `HidApi` instance.
+///
+/// Linux-only: the only callers are `info_by_raw_path` (used by the udev
+/// hot-plug monitor, which receives a raw devnode path and needs to look
+/// up the matching `DeviceInfo`) and the udev monitor's initial cache-seed
+/// loop in `hotplug.rs::start_udev`. Windows and macOS use `refresh_and_diff`
+/// which calls `enumerate()` (which goes through `info_from_hidapi_pub_with_desc`
+/// directly), so they never reach this wrapper.
+#[cfg(target_os = "linux")]
 pub fn info_from_hidapi_pub(info: &HidDeviceInfo) -> Option<DeviceInfo> {
     info_from_hidapi_pub_with_desc(info, read_raw_report_descriptor(info))
 }
@@ -116,6 +125,14 @@ fn info_from_hidapi_pub_with_desc(info: &HidDeviceInfo, desc: Vec<u8>) -> Option
     })
 }
 
+/// Fetch a device's raw HID report descriptor by opening a fresh `HidApi`
+/// instance. Used by the Linux udev hot-plug path where we receive a raw
+/// device path (no `HidApi` borrow available).
+///
+/// Linux-only for the same reason as `info_from_hidapi_pub`. Windows/macOS
+/// go through `enumerate()` which already has a `&HidApi` and calls
+/// `read_raw_report_descriptor_with_api` directly.
+#[cfg(target_os = "linux")]
 fn read_raw_report_descriptor(info: &HidDeviceInfo) -> Vec<u8> {
     let Ok(api) = HidApi::new() else {
         return Vec::new();
