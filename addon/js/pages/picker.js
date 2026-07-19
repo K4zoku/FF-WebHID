@@ -37,10 +37,36 @@
 
     const filtered = applyFilters(devices, pendingRequest.filters || []);
     if (filtered.length === 0) {
+      logger.warn(
+        "picker: 0/" +
+          devices.length +
+          " devices matched filters=" +
+          JSON.stringify(pendingRequest.filters || []),
+      );
+      for (const d of devices) {
+        const vidHex = "0x" + (d.vendorId || 0).toString(16).padStart(4, "0");
+        const pidHex = "0x" + (d.productId || 0).toString(16).padStart(4, "0");
+        const upHex = "0x" + (d.usagePage || 0).toString(16).padStart(4, "0");
+        logger.warn(
+          "  excluded: " +
+            (d.productName || "(unnamed)") +
+            " VID=" +
+            vidHex +
+            " PID=" +
+            pidHex +
+            " usagePage=" +
+            upHex +
+            " usage=" +
+            (d.usage || 0),
+        );
+      }
       listEl.innerHTML =
         '<div class="webhid-no-devices">No devices match the specified filters</div>';
       return;
     }
+    logger.debug(
+      "picker: " + filtered.length + "/" + devices.length + " devices matched",
+    );
 
     const groups = groupDevices(filtered);
 
@@ -48,7 +74,8 @@
     listEl.innerHTML = "";
 
     for (const [name, devs] of groups.entries()) {
-      const groupId = devs.length === 1 ? devs[0].deviceId : "group:" + devs[0].deviceId;
+      const groupId =
+        devs.length === 1 ? devs[0].deviceId : "group:" + devs[0].deviceId;
       deviceGroups[groupId] = devs.slice();
 
       const device = devs[0];
@@ -95,10 +122,7 @@
       item.appendChild(body);
       fetchDeviceIcon(type).then((svg) => {
         if (svg) {
-          const svgDoc = new DOMParser().parseFromString(
-            svg,
-            "image/svg+xml",
-          );
+          const svgDoc = new DOMParser().parseFromString(svg, "image/svg+xml");
           const svgEl = svgDoc.documentElement;
           if (svgEl) iconSpan.replaceChildren(svgEl.cloneNode(true));
         }

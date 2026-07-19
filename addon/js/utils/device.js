@@ -32,13 +32,39 @@
     if (!Array.isArray(filters) || filters.length === 0) return devices;
     return devices.filter((device) =>
       filters.some((filter) => {
-        if (filter.vendorId && device.vendorId !== filter.vendorId)
+        if (
+          filter.vendorId !== undefined &&
+          device.vendorId !== filter.vendorId
+        )
           return false;
-        if (filter.productId && device.productId !== filter.productId)
+        if (
+          filter.productId !== undefined &&
+          device.productId !== filter.productId
+        )
           return false;
-        if (filter.usagePage && device.usagePage !== filter.usagePage)
-          return false;
-        if (filter.usage && device.usage !== filter.usage) return false;
+
+        if (filter.usagePage !== undefined) {
+          let pageMatch = false;
+          const collections = device.collections || [];
+          for (const collection of collections) {
+            if (collection.usagePage !== filter.usagePage) continue;
+            if (filter.usage !== undefined && collection.usage !== filter.usage)
+              continue;
+            pageMatch = true;
+            break;
+          }
+          if (!pageMatch) return false;
+        } else if (filter.usage !== undefined) {
+          let usageMatch = false;
+          const collections = device.collections || [];
+          for (const collection of collections) {
+            if (collection.usage === filter.usage) {
+              usageMatch = true;
+              break;
+            }
+          }
+          if (!usageMatch) return false;
+        }
         return true;
       }),
     );
@@ -57,7 +83,9 @@
   async function fetchDeviceIcon(type) {
     if (_svgCache[type]) return _svgCache[type];
     try {
-      const svg = await (__webhid.import("fetchResource"))("res/" + type + ".svg");
+      const svg = await __webhid.import("fetchResource")(
+        "res/" + type + ".svg",
+      );
       _svgCache[type] = svg;
       return svg;
     } catch {

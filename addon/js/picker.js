@@ -166,10 +166,41 @@
 
       const filteredDevices = applyFilters(this.#devices, this.#filters);
       if (filteredDevices.length === 0) {
+        logger.warn(
+          "picker: 0/" +
+            this.#devices.length +
+            " devices matched filters=" +
+            JSON.stringify(this.#filters || []),
+        );
+        for (const d of this.#devices) {
+          const vidHex = "0x" + (d.vendorId || 0).toString(16).padStart(4, "0");
+          const pidHex =
+            "0x" + (d.productId || 0).toString(16).padStart(4, "0");
+          const upHex = "0x" + (d.usagePage || 0).toString(16).padStart(4, "0");
+          logger.warn(
+            "  excluded: " +
+              (d.productName || "(unnamed)") +
+              " VID=" +
+              vidHex +
+              " PID=" +
+              pidHex +
+              " usagePage=" +
+              upHex +
+              " usage=" +
+              (d.usage || 0),
+          );
+        }
         deviceList.innerHTML =
           '<div class="webhid-no-devices">No devices match the specified filters</div>';
         return;
       }
+      logger.debug(
+        "picker: " +
+          filteredDevices.length +
+          "/" +
+          this.#devices.length +
+          " devices matched filters",
+      );
 
       const groups = groupDevices(filteredDevices);
 
@@ -190,7 +221,10 @@
           deviceIds.push(d.deviceId);
         }
 
-        const groupId = devices.length === 1 ? devices[0].deviceId : "group:" + devices[0].deviceId;
+        const groupId =
+          devices.length === 1
+            ? devices[0].deviceId
+            : "group:" + devices[0].deviceId;
         this.#deviceGroups[groupId] = devices.slice();
 
         const device = devices[0];
