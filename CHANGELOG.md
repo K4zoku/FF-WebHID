@@ -2,6 +2,99 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [2.1.0](https://github.com/K4zoku/FF-WebHID/compare/v2.0.0...v2.1.0) (2026-07-19)
+
+
+### Features
+
+* background fetch resource ([6b9005e](https://github.com/K4zoku/FF-WebHID/commit/6b9005e0f2ff46114d43b8f2d6bda734115b8e5e))
+* browser action ([5836f33](https://github.com/K4zoku/FF-WebHID/commit/5836f33d2592a40bf491f6709bd109ec578434b4))
+* chromium support ([3f7f152](https://github.com/K4zoku/FF-WebHID/commit/3f7f152938ee5ef34fede0f2d95b1535efa1ce30))
+* control permission check ([e0230b5](https://github.com/K4zoku/FF-WebHID/commit/e0230b51312bc6a787a4c36e92e62692d3a4a890))
+* hotplug handler for popup and device picker ([c0bfbd0](https://github.com/K4zoku/FF-WebHID/commit/c0bfbd035f281762772b286e85f67a14aceffa32))
+* match Chromium's HID blocklist exactly ([da13dc9](https://github.com/K4zoku/FF-WebHID/commit/da13dc90a34aa73a646ae6446797850dd62f00b4))
+* notifications ([dcfcc48](https://github.com/K4zoku/FF-WebHID/commit/dcfcc48d73f98e763eaea6bee90e8f9d8a7137ae))
+* page action device picker ([7ace840](https://github.com/K4zoku/FF-WebHID/commit/7ace840ec7864b350c17e75faa04be3b8e0074fa))
+* test bridge ([65c59b7](https://github.com/K4zoku/FF-WebHID/commit/65c59b75770b12ff99ac1aa6e23ae8218eb2c3c9))
+* test no war ([6a74114](https://github.com/K4zoku/FF-WebHID/commit/6a74114442e9ef54a106302eda3305012a45b2df))
+* user activation ([db28087](https://github.com/K4zoku/FF-WebHID/commit/db2808783fb85aaf7b7947ebdcf663ef910b3692))
+* visibility transition ([e3e176e](https://github.com/K4zoku/FF-WebHID/commit/e3e176ec0b4377ff34c4af5f0c0f526fbb2218d5))
+* window picker ([a6fd6a2](https://github.com/K4zoku/FF-WebHID/commit/a6fd6a21ed447bb8ab37e7c8425ce152b8edffe1))
+
+
+### Bug Fixes
+
+* add defense layer to ws ([055ca88](https://github.com/K4zoku/FF-WebHID/commit/055ca88505bd48ed44f011800f3110463a850a07))
+* cache ([9c63c6c](https://github.com/K4zoku/FF-WebHID/commit/9c63c6c4e667f0255fb5b43cbfead373a5ff9566))
+* critical promise leaks, panics, and spec event target ([9e23f9b](https://github.com/K4zoku/FF-WebHID/commit/9e23f9b0e7c8a7fd515cb32e3e539d4b3c472045))
+* custom element didnt work, back to plain class ([e47558c](https://github.com/K4zoku/FF-WebHID/commit/e47558c314726d859b3bf068c38c4bca5531e217))
+* debug ce ([226eac8](https://github.com/K4zoku/FF-WebHID/commit/226eac84aea2bdb59fcebeb413af1c4310d95ce5))
+* device picker custom element ([c4c61c0](https://github.com/K4zoku/FF-WebHID/commit/c4c61c09448340207ed95461550bc0b822031dcd))
+* device picker live update ([29eb053](https://github.com/K4zoku/FF-WebHID/commit/29eb053eaf49ae236453f46e418add282bf1f8cc))
+* device picker now show immediately ([fb8310c](https://github.com/K4zoku/FF-WebHID/commit/fb8310ccd62e57bb5f606910a3ed590bb9f6b823))
+* device template got deleted ([94ff944](https://github.com/K4zoku/FF-WebHID/commit/94ff944496a08a71295cb2af0149813c1da3ef12))
+* EventTarget on HID object ([d8c7fd1](https://github.com/K4zoku/FF-WebHID/commit/d8c7fd1bdee7c95a0b2561b045ea302d4936837a))
+* global context for chromium ([87f882f](https://github.com/K4zoku/FF-WebHID/commit/87f882f491921c5933e20d5d2d759971c095cf2b))
+* keep NM connection alive on malformed JSON frame ([31db13c](https://github.com/K4zoku/FF-WebHID/commit/31db13c7c8837d4600dcdcd1a02b16bf4a6c7811))
+* lint warnings ([ef19f54](https://github.com/K4zoku/FF-WebHID/commit/ef19f543893b5178069e866dfeae7ee942915231))
+* maybe fix [#2](https://github.com/K4zoku/FF-WebHID/issues/2), added some more diagnostics log ([b3b871b](https://github.com/K4zoku/FF-WebHID/commit/b3b871b4de8b06559dec1d719a141b1758842d08))
+* order ([3308296](https://github.com/K4zoku/FF-WebHID/commit/3308296c8c3238c545e0a849c544deaf7516f407))
+* page port auth ([e59223a](https://github.com/K4zoku/FF-WebHID/commit/e59223aa8ef06a813a963f142cfccf0e288423d3))
+* picker icons ([ab58929](https://github.com/K4zoku/FF-WebHID/commit/ab589296a13c2d695499ea540c167f57c9c661b4))
+* picker popup ([b92c32d](https://github.com/K4zoku/FF-WebHID/commit/b92c32d2732627413ab019ce3a8fa773f14b805b))
+* poison-recovery, hotplug cleanup, spec ([5b988a1](https://github.com/K4zoku/FF-WebHID/commit/5b988a160091afd526f43f796e986f9931efb06e))
+* render duplicated ([07cd68a](https://github.com/K4zoku/FF-WebHID/commit/07cd68ac9cf6c09687a59752a4f2ac60e67916d1))
+* render empty list instead ([6805d3c](https://github.com/K4zoku/FF-WebHID/commit/6805d3c19b01e4ec47eff0b12bec77468c41f7ff))
+* responsive ([05dc326](https://github.com/K4zoku/FF-WebHID/commit/05dc32662247c2ded9a73afb0e2392b6381c9bdd))
+* stable deviceId ([86c46ec](https://github.com/K4zoku/FF-WebHID/commit/86c46ecc4af40fc192ad5e6b83a5639bedf0b3e8))
+* state leaks and concurrent-open races ([5ad7cec](https://github.com/K4zoku/FF-WebHID/commit/5ad7cec7bdc055ff9a84a65c2ec1e3ae139b836b))
+* test page ([9a67961](https://github.com/K4zoku/FF-WebHID/commit/9a67961642c5adb894e369fef2077e55d50383ca))
+* transitionend ([14c7573](https://github.com/K4zoku/FF-WebHID/commit/14c7573b1c11f447d30687f62781cb41cb2de861))
+* wait for next frame to trigger transition ([18ed436](https://github.com/K4zoku/FF-WebHID/commit/18ed436c4b24c1ba01d0f7fd827ed10a560acc17))
+* ws control can open device now - intended behavior ([9adf5bf](https://github.com/K4zoku/FF-WebHID/commit/9adf5bfb1ffca93a671fe5a849c32e7d4c2b223c))
+
+
+### Performance
+
+* cut 1 hop for ws ([378929f](https://github.com/K4zoku/FF-WebHID/commit/378929f368824613dd52ab49b40b4e477c0f169d))
+* latency optimization ([da559dd](https://github.com/K4zoku/FF-WebHID/commit/da559dd4593623bda48993b088db283b8b8458ca))
+
+
+### Code Refactoring
+
+* cleanup ([0b4e669](https://github.com/K4zoku/FF-WebHID/commit/0b4e66975207c6eb1c97086b302440f916007a8d))
+* cleanup chromium artifact, reformat code ([1bf098c](https://github.com/K4zoku/FF-WebHID/commit/1bf098c1ca6d53c73f910ce631f6f9bcffa3edeb))
+* cleanup chromium artifacts 2 ([788e7c7](https://github.com/K4zoku/FF-WebHID/commit/788e7c79b844168b7ce24985a52fa018cbd0dce1))
+* cleanup left over prop ([dd4331f](https://github.com/K4zoku/FF-WebHID/commit/dd4331fa1221afe452d334a768b932126d46899f))
+* custom element ([171f097](https://github.com/K4zoku/FF-WebHID/commit/171f09772a72bb9e7142c88f340a60bd59ff6413))
+* deduplicate logic, remove dead code ([a1eb6ab](https://github.com/K4zoku/FF-WebHID/commit/a1eb6abad1be933ecee574155cb3e9968a725139))
+* IIFE ([cb39cfc](https://github.com/K4zoku/FF-WebHID/commit/cb39cfcd6548039fec984036a97e22b545ac0894))
+* IIFE 2 ([b84cb01](https://github.com/K4zoku/FF-WebHID/commit/b84cb01cdc9ceb2af798420469e6982ca83bde5f))
+* reformat ([d78654a](https://github.com/K4zoku/FF-WebHID/commit/d78654a5e41446b6d313e19637af48066c7fc626))
+* reformat code ([3c904c3](https://github.com/K4zoku/FF-WebHID/commit/3c904c34c052d02e13c83e99fddd019b043df0e8))
+* reformat rs code ([22c3f26](https://github.com/K4zoku/FF-WebHID/commit/22c3f2660179571fa51097e3404c87fdab7d1eaa))
+* rename ([52509c8](https://github.com/K4zoku/FF-WebHID/commit/52509c80710a0be4cf879488b8323615598f0eaa))
+* rename, merge, cleanup ([179225a](https://github.com/K4zoku/FF-WebHID/commit/179225ab958d525e096cd8d5199825846e1c2619))
+* rename, module import export ([eea040c](https://github.com/K4zoku/FF-WebHID/commit/eea040c19371d9f509879aa7b609e61ef3f2a1d9))
+
+
+### Documentation
+
+* update DEVELOPMENT.md ([1151a65](https://github.com/K4zoku/FF-WebHID/commit/1151a65c233ede3e4cc93aa367a131c78c1bcaeb))
+* update stale info ([b961fd9](https://github.com/K4zoku/FF-WebHID/commit/b961fd979acc26d4f7e3ad2c338ade178fcd6dba))
+
+
+### CI/CD
+
+* move audit to separate job ([7b84a8a](https://github.com/K4zoku/FF-WebHID/commit/7b84a8ab68cffc2588933a5c0cdaa92377f31791))
+* use taiki-e/install-action for audit tools ([939c697](https://github.com/K4zoku/FF-WebHID/commit/939c6972169f4655dec464a8746aa47283141dc9))
+
+
+### Chores
+
+* add gate to linux only function ([6964862](https://github.com/K4zoku/FF-WebHID/commit/6964862daac165de134d9afd3f8a8df1709b6a6b))
+* add supply-chain hardening (cargo-audit, cargo-deny, npm-audit, license fields) ([cc1ba8d](https://github.com/K4zoku/FF-WebHID/commit/cc1ba8d5c66a025cf3690c8731f92ad37caeb774))
+
 ## [2.0.0](https://github.com/K4zoku/FF-WebHID/compare/v1.6.6...v2.0.0) (2026-07-11)
 
 

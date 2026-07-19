@@ -1,13 +1,20 @@
 {
   "manifest_version": 3,
   "name": "WebHID",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "WebHID API implementation for Firefox",
   "icons": {
     "48": "icons/icon.svg"
   },
-  "permissions": ["nativeMessaging", "storage", "webRequest", "notifications"],
-  "host_permissions": ["<all_urls>"],
+  "permissions": [
+    "nativeMessaging",
+    "storage",
+    "webRequest",
+    "notifications"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
   "background": {
     "scripts": [
       "js/utils/bootstrap.js",
@@ -21,7 +28,10 @@
   "page_action": {
     "default_popup": "html/popup.html",
     "default_icon": "icons/gamepad.svg",
-    "show_matches": ["http://*/*", "https://*/*"]
+    "show_matches": [
+      "http://*/*",
+      "https://*/*"
+    ]
   },
   "action": {
     "default_icon": "icons/icon.svg",
@@ -33,7 +43,9 @@
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
+      "matches": [
+        "<all_urls>"
+      ],
       "js": [
         "js/utils/bootstrap.js",
         "js/utils/resource.js",
@@ -47,7 +59,9 @@
       "run_at": "document_start"
     },
     {
-      "matches": ["<all_urls>"],
+      "matches": [
+        "<all_urls>"
+      ],
       "js": [
         "js/utils/bootstrap.js",
         "js/utils/resource.js",
@@ -68,7 +82,9 @@
       "id": "webhid@k4zoku.dev",
       "strict_min_version": "142.0",
       "data_collection_permissions": {
-        "required": ["websiteContent"],
+        "required": [
+          "websiteContent"
+        ],
         "optional": []
       }
     }
