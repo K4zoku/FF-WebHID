@@ -47,8 +47,8 @@
 
     <!-- =====================  Finish page: "Open AMO page" checkbox  ===================== -->
 
-    <WixVariable Id='WixUIExitDialogOptionalCheckBoxText'
-                 Value='Open WebHID AMO page'/>
+    <Property Id='WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT'
+              Value='Open the WebHID add-on page'/>
     <Property Id='WIXUI_EXITDIALOGOPTIONALCHECKBOX' Value='1'/>
     <CustomAction Id='LaunchAmoPage'
                   Directory='TARGETDIR'
