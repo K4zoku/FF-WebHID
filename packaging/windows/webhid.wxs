@@ -2,20 +2,21 @@
 <!--
   WebHID Windows Installer (MSI)
   Built with WiX Toolset v6.
-
   Layout:
     [ProgramFiles64Folder]WebHID\
       webhid-daemon.exe
       webhid-native-messaging.exe
       webhid.forwarder_nm_host.json   (forwarder NM manifest)
-      webhid.daemon_nm_host.json          (daemon-as-NM-host manifest)
-
+      webhid.daemon_nm_host.json      (daemon-as-NM-host manifest)
   Registry:
     HKLM\SOFTWARE\Mozilla\NativeMessagingHosts\webhid.forwarder_nm_host  = [INSTALLDIR]webhid.forwarder_nm_host.json
-    HKLM\SOFTWARE\Mozilla\NativeMessagingHosts\webhid.daemon_nm_host        = [INSTALLDIR]webhid.daemon_nm_host.json
+    HKLM\SOFTWARE\Mozilla\NativeMessagingHosts\webhid.daemon_nm_host     = [INSTALLDIR]webhid.daemon_nm_host.json
 
+  Build:
+    wix build -ext WixToolset.UI.wixext -d Version=1.0.0 -d BuildDir=<path> main.wxs -o webhid.msi
 -->
-<Wix xmlns='http://wixtoolset.org/schemas/v4/wxs'>
+<Wix xmlns='http://wixtoolset.org/schemas/v4/wxs'
+     xmlns:ui='http://wixtoolset.org/schemas/v4/wxs/ui'>
   <Package Name='WebHID'
            Manufacturer='K4zoku'
            Language='1033'
@@ -24,44 +25,66 @@
 
     <SummaryInformation Description='WebHID daemon + native messaging host'
                         Manufacturer='K4zoku'/>
-
     <Media Id='1' Cabinet='webhid.cab' EmbedCab='yes'/>
-
     <MajorUpgrade DowngradeErrorMessage='A newer version of WebHID is already installed.'/>
-
     <Feature Id='Complete' Title='WebHID' Level='1'>
       <ComponentGroupRef Id='Binaries'/>
       <ComponentGroupRef Id='Registry'/>
     </Feature>
-
     <Launch Condition='Privileged' Message='This installer requires administrator privileges.'/>
 
-  </Package>
+    <!-- Standard wizard UI: Welcome -> License -> Choose folder -> Progress -> Finish -->
+    <ui:WixUI Id='WixUI_InstallDir'/>
+    <WixVariable Id='WixUILicenseRtf' Value='$(var.BuildDir)\License.rtf'/>
 
+    <!-- WixUI_InstallDir writes the user's chosen path into this property,
+         which MUST match the directory Id you want to be user-selectable. -->
+    <Property Id='WIXUI_INSTALLDIR' Value='INSTALLDIR'/>
+
+    <!-- Optional: custom banner/dialog bitmaps (must be 493x58 / 493x312 BMP) -->
+    <!-- <WixVariable Id='WixUIBannerBmp' Value='$(var.BuildDir)\banner.bmp'/> -->
+    <!-- <WixVariable Id='WixUIDialogBmp' Value='$(var.BuildDir)\dialog.bmp'/> -->
+
+    <!-- =====================  Finish page: "Open AMO page" checkbox  ===================== -->
+
+    <WixVariable Id='WixUIExitDialogOptionalCheckBoxText'
+                 Value='Open WebHID AMO page'/>
+    <Property Id='WIXUI_EXITDIALOGOPTIONALCHECKBOX' Value='1'/>
+    <CustomAction Id='LaunchAmoPage'
+                  Directory='TARGETDIR'
+                  ExeCommand='"[SystemFolder]rundll32.exe" url.dll,FileProtocolHandler https://addons.mozilla.org/firefox/addon/webhid/'
+                  Return='asyncNoWait'/>
+
+    <UI>
+      <Publish Dialog='ExitDialog' Control='Finish' Event='DoAction' Value='LaunchAmoPage' Order='9'>
+        WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 AND NOT Installed
+      </Publish>
+    </UI>
+  </Package>
   <Fragment>
     <StandardDirectory Id='ProgramFiles64Folder'>
       <Directory Id='INSTALLDIR' Name='WebHID'>
-        <Component Id='DaemonBin' Guid='a1b2c3d4-1111-2222-3333-444455556666'>
+        <Component Id='DaemonBin' Guid='7055b0d4-8ca1-46af-892a-e129301fabc2'>
           <File Id='DaemonExe' Source='$(var.BuildDir)\webhid-daemon.exe' KeyPath='yes'/>
         </Component>
-        <Component Id='NMBin' Guid='a1b2c3d4-1111-2222-3333-444455557777'>
+        <Component Id='NMBin' Guid='88a3c4d1-2fb6-4460-bc60-17f0b26a579f'>
           <File Id='NMExe' Source='$(var.BuildDir)\webhid-native-messaging.exe' KeyPath='yes'/>
         </Component>
-        <Component Id='NMManifest' Guid='a1b2c3d4-1111-2222-3333-444455558888'>
+        <Component Id='NMManifest' Guid='f2960d9b-82e7-47e0-8513-95ad7280dd76'>
           <File Id='NMJson' Name='webhid.forwarder_nm_host.json'
                 Source='$(var.BuildDir)\webhid.forwarder_nm_host.json' KeyPath='yes'/>
         </Component>
-        <Component Id='DaemonNmManifest' Guid='a1b2c3d4-1111-2222-3333-44445555888a'>
+        <Component Id='DaemonNmManifest' Guid='8bcdf12f-0a10-4734-8e5a-2d6ce79b605e'>
           <File Id='DaemonNmJson' Name='webhid.daemon_nm_host.json'
                 Source='$(var.BuildDir)\webhid.daemon_nm_host.json' KeyPath='yes'/>
         </Component>
-        <Component Id='NMRegistry' Guid='a1b2c3d4-1111-2222-3333-444455559999'>
+        <Component Id='NMRegistry' Guid='c0055723-3175-4dc2-a344-e8ab85e31edc'>
           <RegistryKey Root='HKLM'
                        Key='SOFTWARE\Mozilla\NativeMessagingHosts\webhid.forwarder_nm_host'>
             <RegistryValue Type='string' Value='[INSTALLDIR]webhid.forwarder_nm_host.json' KeyPath='yes'/>
           </RegistryKey>
         </Component>
-        <Component Id='DaemonNmRegistry' Guid='a1b2c3d4-1111-2222-3333-44445555999a'>
+        <Component Id='DaemonNmRegistry' Guid='e581e1f1-a26a-4281-a518-b47f8f60bc9a'>
           <RegistryKey Root='HKLM'
                        Key='SOFTWARE\Mozilla\NativeMessagingHosts\webhid.daemon_nm_host'>
             <RegistryValue Type='string' Value='[INSTALLDIR]webhid.daemon_nm_host.json' KeyPath='yes'/>
@@ -70,7 +93,6 @@
       </Directory>
     </StandardDirectory>
   </Fragment>
-
   <Fragment>
     <ComponentGroup Id='Binaries'>
       <ComponentRef Id='DaemonBin'/>

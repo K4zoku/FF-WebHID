@@ -83,6 +83,7 @@ $msiPath = Join-Path $OutputDir $msiName
 $wixArch = if ($Arch -eq "aarch64") { "arm64" } else { "x64" }
 Write-Host "==> wix build -> $msiPath"
 & $wix build `
+  -ext WixToolset.UI.wixext `
   -arch $wixArch `
   -d "Version=$Version" `
   -d "BuildDir=$Stage" `
