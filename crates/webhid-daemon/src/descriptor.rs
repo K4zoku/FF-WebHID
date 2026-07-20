@@ -823,4 +823,144 @@ mod tests {
         let max = max_input_report_size(&collections);
         assert!(max >= 5, "expected at least 5 bytes, got {max}");
     }
+
+    // ── Edge-case / malformed descriptors ──────────────────────────────────
+
+    fn fixture_path(name: &str) -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(std::path::Path::parent)
+            .unwrap()
+            .join("tests/fixtures/descriptors")
+            .join(name)
+    }
+
+    fn read_edge_fixture(name: &str) -> Vec<u8> {
+        let path = fixture_path("edge").join(name);
+        std::fs::read(&path).unwrap_or_else(|e| panic!("failed to read {path:?}: {e}"))
+    }
+
+    fn parse_edge(name: &str) -> Vec<Collection> {
+        parse_report_descriptor(&read_edge_fixture(name))
+    }
+
+    #[test]
+    fn test_edge_empty() {
+        let c = parse_edge("empty.bin");
+        assert!(c.is_empty());
+        assert_eq!(max_input_report_size(&c), 0);
+    }
+
+    #[test]
+    fn test_edge_single_byte() {
+        let c = parse_edge("single-byte.bin");
+        // Invalid descriptor → empty collections
+        let _ = max_input_report_size(&c);
+    }
+
+    #[test]
+    fn test_edge_truncated_input() {
+        let c = parse_edge("truncated-input.bin");
+        let _ = max_input_report_size(&c);
+    }
+
+    #[test]
+    fn test_edge_truncated_long_item() {
+        let c = parse_edge("truncated-long-item.bin");
+        let _ = max_input_report_size(&c);
+    }
+
+    #[test]
+    fn test_edge_unclosed_collection() {
+        let c = parse_edge("unclosed-collection.bin");
+        let _ = max_input_report_size(&c);
+    }
+
+    #[test]
+    fn test_edge_extra_end_collection() {
+        let c = parse_edge("extra-end-collection.bin");
+        let _ = max_input_report_size(&c);
+    }
+
+    #[test]
+    fn test_edge_deep_nesting() {
+        // 32 levels of nested collections must not cause stack overflow
+        // in either parse_report_descriptor or max_input_report_size
+        let c = parse_edge("deep-nesting.bin");
+        let m = max_input_report_size(&c);
+        // Should have found the innermost 1-byte report
+        assert_eq!(m, 1);
+    }
+
+    #[test]
+    fn test_edge_report_size_zero() {
+        let c = parse_edge("report-size-zero.bin");
+        // 0 bits → 0 bytes
+        assert_eq!(max_input_report_size(&c), 0);
+    }
+
+    #[test]
+    fn test_edge_report_count_zero() {
+        let c = parse_edge("report-count-zero.bin");
+        assert_eq!(max_input_report_size(&c), 0);
+    }
+
+    #[test]
+    fn test_edge_logical_max_ffffffff() {
+        let c = parse_edge("logical-max-ffffffff.bin");
+        let _ = max_input_report_size(&c);
+    }
+
+    #[test]
+    fn test_edge_multiple_report_ids() {
+        let c = parse_edge("multiple-report-ids.bin");
+        // Should parse into multiple reports (3 report IDs)
+        let m = max_input_report_size(&c);
+        assert!(m > 0);
+    }
+
+    #[test]
+    fn test_edge_usage_page_ffff() {
+        let c = parse_edge("usage-page-ffff.bin");
+        let _ = max_input_report_size(&c);
+    }
+
+    #[test]
+    fn test_edge_report_size_max() {
+        let c = parse_edge("report-size-max.bin");
+        // saturating math must not overflow
+        let _ = max_input_report_size(&c);
+    }
+
+    #[test]
+    fn test_edge_collection_only() {
+        let c = parse_edge("collection-only.bin");
+        let _ = max_input_report_size(&c);
+    }
+
+    #[test]
+    fn test_edge_unit_exponent_overflow() {
+        let c = parse_edge("unit-exponent-overflow.bin");
+        let _ = max_input_report_size(&c);
+    }
+
+    #[test]
+    fn test_edge_vendor_extended_usage() {
+        let c = parse_edge("vendor-extended-usage.bin");
+        let _ = max_input_report_size(&c);
+    }
+
+    #[test]
+    fn test_edge_valid_no_input_reports() {
+        let c = parse_edge("valid-no-input-reports.bin");
+        // Valid descriptor but only output reports → 0 input size
+        assert_eq!(max_input_report_size(&c), 0);
+    }
+
+    #[test]
+    fn test_edge_variable_after_array() {
+        let c = parse_edge("variable-after-array.bin");
+        // Must not panic; array + variable in same report is valid HID
+        let _ = max_input_report_size(&c);
+    }
 }

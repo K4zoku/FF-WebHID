@@ -625,6 +625,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "uhid-mock"
+version = "2.1.1"
+dependencies = [
+ "anyhow",
+ "libc",
+ "log",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "unicode-ident"
 version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
