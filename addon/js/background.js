@@ -198,6 +198,14 @@
 
   async function loadNmHostSetting() {
     const global = await browser.storage.local.get(GLOBAL_DEFAULTS);
+    const stored = await browser.storage.local.get("daemonAsNmHost");
+    if (stored.daemonAsNmHost === undefined) {
+      const platformInfo = await browser.runtime.getPlatformInfo();
+      if (platformInfo.os === "win") {
+        global.daemonAsNmHost = true;
+        await browser.storage.local.set({ daemonAsNmHost: true });
+      }
+    }
     settings.set(global);
     logger.info("NM host:", _nmHostName());
   }
