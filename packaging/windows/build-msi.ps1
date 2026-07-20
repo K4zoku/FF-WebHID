@@ -56,6 +56,7 @@ New-Item -ItemType Directory -Force -Path $Stage | Out-Null
 
 Copy-Item (Join-Path $BinDir 'webhid-daemon.exe')           $Stage
 Copy-Item (Join-Path $BinDir 'webhid-native-messaging.exe') $Stage
+Copy-Item (Join-Path $PSScriptRoot 'License.rtf')           $Stage
 
 $installExe = 'C:\\Program Files\\WebHID\\webhid-native-messaging.exe'
 $daemonExe  = 'C:\\Program Files\\WebHID\\webhid-daemon.exe'
