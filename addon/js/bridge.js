@@ -423,7 +423,6 @@
           return;
         }
         if (data.type === "inputReport") {
-          return;
           const view = data.data ? new Uint8Array(data.data) : null;
           if (view && logger._level >= 3 && data.reportId !== 33) {
             let hex = "";
@@ -471,6 +470,7 @@
         wsPort,
         token: sessionToken,
         reportSize: opts.reportSize || 64,
+        logLevel: logger._level,
       });
     });
   }
@@ -832,14 +832,6 @@
             })
             .catch(() => {});
         }
-
-        browser.runtime
-          .sendMessage({
-            action: "setdataplane",
-            deviceId: deviceId,
-            mode: dataPlane,
-          })
-          .catch(() => {});
 
         if (dataPlane === "ws") {
           _spawnDataPlane(deviceId, response.t, response.w || _wsPort);

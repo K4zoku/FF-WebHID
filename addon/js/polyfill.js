@@ -489,25 +489,30 @@
     if (!detail) return;
     if (detail.eventType === "connect" || detail.eventType === "disconnect") {
       const dev = detail.deviceId ? _deviceRegistry.get(detail.deviceId) : null;
-      // S1: Dispatch on the HID instance (navigator.hid) so that page code
-      // using `navigator.hid.addEventListener('connect', ...)` and the
-      // `onconnect` / `ondisconnect` property handlers fires per spec.
       if (_hidInstance && dev) {
         if (detail.eventType === "disconnect") _deviceInfoCache = null;
         _hidInstance.dispatchEvent(
           new HIDConnectionEvent(detail.eventType, { device: dev }),
         );
-        // S3: After firing the disconnect event, drop the device from the
-        // registry so subsequent getDevices() / requestDevice() calls
-        // create a fresh HIDDevice instance for this hardware id (matching
-        // native WebHID behavior where a reconnected device is a new
-        // object, not the stale one whose events have already fired).
-        // The page may still hold a reference to the old HIDDevice but
-        // it is now inert — its EventTarget is detached from the
-        // singleton, no further events will be dispatched on it.
         if (detail.eventType === "disconnect") {
           _deviceRegistry.delete(detail.deviceId);
         }
+      }
+      return;
+    }
+    if (detail.eventType === "input_report") {
+      const dev = detail.deviceId ? _deviceRegistry.get(detail.deviceId) : null;
+      if (dev) {
+        const dataView = detail.data
+          ? new DataView(detail.data)
+          : new DataView(new ArrayBuffer(0));
+        dev.dispatchEvent(
+          new HIDInputReportEvent("inputreport", {
+            device: dev,
+            reportId: detail.reportId,
+            data: dataView,
+          }),
+        );
       }
       return;
     }

@@ -410,6 +410,12 @@ fn handle_event(
             ..
         }) => {
             if evt_device_id == device_id {
+                log::trace!(
+                    "[ws] InputReport device={:#x} report_id={} len={}",
+                    device_id,
+                    report_id,
+                    data.len(),
+                );
                 batch.push((report_id, data));
             }
         }

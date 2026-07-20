@@ -4,9 +4,9 @@ version = 4
 
 [[package]]
 name = "anyhow"
-version = "2.1.1"
+version = "1.0.104"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3"
+checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "base64"
@@ -708,7 +708,7 @@ dependencies = [
 
 [[package]]
 name = "webhid"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "base64",
  "bytes",
@@ -720,7 +720,7 @@ dependencies = [
 
 [[package]]
 name = "webhid-daemon"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "anyhow",
  "bytes",
@@ -741,7 +741,7 @@ dependencies = [
 
 [[package]]
 name = "webhid-native-messaging"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "anyhow",
  "libc",

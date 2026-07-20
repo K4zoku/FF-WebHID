@@ -23,7 +23,7 @@ self.onmessage = ({ data: msg, ports }) => {
       onClosed: () => self.postMessage({ type: "closed" }),
       onAuthFailed: (code) => self.postMessage({ type: "auth-failed", code }),
       onBinary: (batch) => {
-        if (batch.length > 0 && batch[0] >= 0x80)
+        if (batch.length > 0 && batch[0] >= 0x81)
           return handleControlResponse(batch);
         pushInputBatch(batch);
       },
@@ -101,7 +101,8 @@ function pushInputBatch(batch) {
     offset += len;
     count++;
   }
-  if (count > 0) logger.debug("forwarded " + count + " reports via data port");
+  if (count > 0 && _dataPort)
+    logger.debug("forwarded " + count + " reports via data port");
 }
 
 function handleSend(msg, msgType) {
