@@ -33,9 +33,8 @@
     async #loadFragment() {
       const html = await fetchResource("html/picker.fragment.html");
       const doc = new DOMParser().parseFromString(html, "text/html");
-      for (const child of doc.body.children) {
-        this.#shadow.appendChild(child);
-      }
+      const tpl = doc.querySelector("#webhid-picker-template");
+      this.#shadow.appendChild(tpl.content.cloneNode(true));
 
       this.#dialog = this.#shadow.querySelector(".webhid-modal");
 
