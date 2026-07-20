@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [2.1.1](https://github.com/K4zoku/FF-WebHID/compare/v2.1.0...v2.1.1) (2026-07-20)
+
+
+### Bug Fixes
+
+* missing styling in dom picker ([8409adf](https://github.com/K4zoku/FF-WebHID/commit/8409adf43912546b32728c3f845411dbcacad2bf))
+
+
+### Chores
+
+* add missing bump file ([d6f3687](https://github.com/K4zoku/FF-WebHID/commit/d6f368732cb97b1eb05ad82500d50f8b3c43289b))
+
 ## [2.1.0](https://github.com/K4zoku/FF-WebHID/compare/v2.0.0...v2.1.0) (2026-07-19)
 
 
