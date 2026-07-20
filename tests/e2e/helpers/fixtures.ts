@@ -40,6 +40,8 @@ function createTestApi(page: Page): WebHidTestAPI {
       ),
     onInputReport: (index: number) =>
       page.evaluate((i: number) => (window as any).__webhidTest.onInputReport(i), index),
+    resetDeviceState: () =>
+      page.evaluate(() => (window as any).__webhidTest.resetDeviceState()),
   };
 }
 
@@ -74,7 +76,7 @@ export const test = base.extend<{
     await installNmManifest(DEFAULT_SOCKET);
     const profileDir = mkdtempSync(join(os.tmpdir(), 'webhid-e2e-'));
     const browserType = withExtension(firefox, ADDON_PATH);
-    const ctx = await browserType.launchPersistentContext(profileDir, { headless: false });
+    const ctx = await browserType.launchPersistentContext(profileDir, { headless: true });
     await use(ctx);
     await ctx.close();
     try { await rm(profileDir, { recursive: true, force: true }); } catch {}
@@ -90,12 +92,15 @@ export const test = base.extend<{
       { timeout: 15000 },
     );
     await use(page);
-    await page.close();
-  }, { scope: 'test' }],
+  }, { scope: 'worker' }],
 
   testApi: [async ({ sharedPage }, use) => {
     await use(createTestApi(sharedPage));
-  }, { scope: 'test' }],
+  }, { scope: 'worker' }],
+
+  beforeEach: [async ({ testApi }, use) => {
+    await use();
+  }, { scope: 'worker', auto: true }],
 });
 
 export { expect };

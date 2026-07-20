@@ -19,7 +19,6 @@ function findProjectRoot(dir: string): string {
 
 const PROJECT_ROOT = findProjectRoot(__dirname);
 export const DEFAULT_SOCKET = '/tmp/webhid-e2e.sock';
-const DEFAULT_WS_PORT = 31337;
 const TEST_TOKEN = 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6';
 const NM_MANIFEST_ID = 'webhid.forwarder_nm_host.json';
 const NM_USER_DIR = join(homedir(), '.mozilla', 'native-messaging-hosts');
@@ -70,7 +69,7 @@ export async function startDaemon(socketPath = DEFAULT_SOCKET): Promise<DaemonPr
   // Clean up stale socket from previous runs
   try { unlinkSync(socketPath); } catch {}
   const bin = resolveBin('webhid-daemon');
-  const proc = spawn('sudo', ['-E', bin], {
+  const proc = spawn(bin, {
     env: {
       ...process.env,
       WEBHID_SOCKET: socketPath,

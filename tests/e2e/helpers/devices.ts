@@ -14,7 +14,6 @@ export async function grantDevicePermission(
 
   await page.waitForTimeout(500);
 
-  // Match what the daemon returns for the simple-mouse.bin descriptor
   const collections = [{
     usagePage: 1,
     usage: 2,
@@ -35,4 +34,13 @@ export async function grantDevicePermission(
   }, { deviceId, VID, PID, collections });
 
   return requestDevicesPromise;
+}
+
+export async function ensureDevicePaired(
+  page: Page,
+  testApi: { getDevices: () => Promise<any[]> },
+): Promise<any[]> {
+  const devices = await testApi.getDevices();
+  if (devices.length > 0) return devices;
+  return grantDevicePermission(page);
 }
