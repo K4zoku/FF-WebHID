@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>WebHID E2E Test</title></head>
+<body>
+<button id="request-device-btn" style="display:none">Request Device</button>
+<script>
+(function () {
+  'use strict';
+
+  let _requestDeviceResolver = null;
+
+  document.getElementById('request-device-btn').addEventListener('click', async () => {
+    if (!_requestDeviceResolver) return;
+    const { filters } = _requestDeviceResolver;
+    try {
+      const devices = await navigator.hid.requestDevice({ filters });
+      _requestDeviceResolver.resolve(devices);
+    } catch (e) {
+      _requestDeviceResolver.reject(e);
+    }
+    _requestDeviceResolver = null;
+  });
+
+  function deviceInfo(device, index) {
+    return {
+      index,
+      deviceId: device.deviceId,
+      vendorId: device.vendorId,
+      productId: device.productId,
+      productName: device.productName,
+      collections: (device.collections || []).map(c => ({
+        usagePage: c.usagePage,
+        usage: c.usage,
+        type: c.type,
+      })),
+    };
+  }
+
+  let _deviceCache = [];
+
+  window.__webhidTest = {
+    isPolyfillLoaded: () => {
+      return typeof navigator.hid !== 'undefined' && navigator.hid !== null;
+    },
+
+    getDevices: async () => {
+      const devices = await navigator.hid.getDevices();
+      _deviceCache = devices;
+      return devices.map((d, i) => deviceInfo(d, i));
+    },
+
+    requestDevice: async (filters) => {
+      return new Promise((resolve, reject) => {
+        _requestDeviceResolver = {
+          filters: filters || [],
+          resolve: (devices) => {
+            _deviceCache = devices;
+            resolve(devices.map((d, i) => deviceInfo(d, i)));
+          },
+          reject,
+        };
+        document.getElementById('request-device-btn').click();
+      });
+    },
+
+    deviceInfo: (index) => {
+      const device = _deviceCache[index];
+      if (!device) throw new Error('Device not found at index ' + index);
+      return deviceInfo(device, index);
+    },
+
+    open: async (index) => {
+      const device = _deviceCache[index];
+      if (!device) throw new Error('Device not found at index ' + index);
+      await device.open();
+    },
+
+    close: async (index) => {
+      const device = _deviceCache[index];
+      if (!device) throw new Error('Device not found at index ' + index);
+      await device.close();
+    },
+
+    sendReport: async (index, reportId, data) => {
+      const device = _deviceCache[index];
+      if (!device) throw new Error('Device not found at index ' + index);
+      await device.sendReport(reportId, new Uint8Array(data));
+    },
+
+    onInputReport: (index) => new Promise((resolve) => {
+      const device = _deviceCache[index];
+      if (!device) throw new Error('Device not found at index ' + index);
+      device.oninputreport = (event) => {
+        resolve({
+          reportId: event.reportId,
+          data: Array.from(new Uint8Array(event.data.buffer || event.data)),
+          device: {
+            vendorId: event.device.vendorId,
+            productId: event.device.productId,
+          },
+        });
+      };
+    }),
+
+    waitForCondition: (condition, timeout = 5000) => {
+      const start = Date.now();
+      return new Promise((resolve, reject) => {
+        const check = () => {
+          try {
+            if (condition()) resolve(true);
+            else if (Date.now() - start > timeout) reject(new Error('Timeout'));
+            else setTimeout(check, 50);
+          } catch (e) {
+            reject(e);
+          }
+        };
+        check();
+      });
+    },
+
+    waitForDevices: async (count, timeout = 5000) => {
+      const start = Date.now();
+      while (true) {
+        const devices = await navigator.hid.getDevices();
+        _deviceCache = devices;
+        if (devices.length >= count) {
+          return devices.map((d, i) => deviceInfo(d, i));
+        }
+        if (Date.now() - start > timeout) {
+          throw new Error('Timeout waiting for devices');
+        }
+        await new Promise(r => setTimeout(r, 100));
+      }
+    },
+  };
+})();
+</script>
+</body>
+</html>

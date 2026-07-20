@@ -31,3 +31,6 @@ addon/wasm-parser.wasm
 *.secret
 *.old
 *.backup
+
+# Playwright test results
+**/test-results
