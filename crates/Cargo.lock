@@ -708,7 +708,7 @@ dependencies = [
 
 [[package]]
 name = "webhid"
-version = "0.1.0"
+version = "2.1.0"
 dependencies = [
  "base64",
  "bytes",
@@ -720,7 +720,7 @@ dependencies = [
 
 [[package]]
 name = "webhid-daemon"
-version = "0.1.0"
+version = "2.1.0"
 dependencies = [
  "anyhow",
  "bytes",
@@ -741,7 +741,7 @@ dependencies = [
 
 [[package]]
 name = "webhid-native-messaging"
-version = "0.1.0"
+version = "2.1.0"
 dependencies = [
  "anyhow",
  "libc",
