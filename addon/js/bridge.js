@@ -68,6 +68,12 @@
     return url;
   }
 
+  function _getWorkerRedirectUrl() {
+    const u = new URL(location.href);
+    u.searchParams.set("__webhid_wkr", "1");
+    return u.href;
+  }
+
   async function _spawnControlWorker(token, wsPort) {
     if (_controlWorker) return;
     let cspBlocked = false;
@@ -287,28 +293,36 @@
 
   async function _spawnWorker(deviceId, sessionToken, wsPort, opts = {}, gen) {
     if (_workers.has(deviceId)) return true;
-    let cspBlocked = false;
-    try {
-      const check = await browser.runtime.sendMessage({
-        action: "checkWorkerCsp",
-      });
-      cspBlocked = !!check?.blocked;
-    } catch {}
-    if (cspBlocked) {
-      logger.warn(
-        "worker skipped for",
-        deviceId,
-        ": CSP worker-src blocks blob:",
-      );
-      return false;
-    }
     let worker;
     try {
-      const url = await _getWorkerBlobUrl("worker");
+      const url = _getWorkerRedirectUrl();
       worker = new Worker(url);
     } catch (e) {
-      logger.error("worker fetch/spawn failed:", e);
-      return false;
+      logger.warn("redirect worker failed for", deviceId, ":", e.message);
+    }
+    if (!worker) {
+      let cspBlocked = false;
+      try {
+        const check = await browser.runtime.sendMessage({
+          action: "checkWorkerCsp",
+        });
+        cspBlocked = !!check?.blocked;
+      } catch {}
+      if (cspBlocked) {
+        logger.warn(
+          "worker skipped for",
+          deviceId,
+          ": CSP worker-src blocks blob:",
+        );
+        return false;
+      }
+      try {
+        const url = await _getWorkerBlobUrl("worker");
+        worker = new Worker(url);
+      } catch (e) {
+        logger.error("worker fetch/spawn failed:", e);
+        return false;
+      }
     }
 
     if (_spawnGen.get(deviceId) !== gen) {

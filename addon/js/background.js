@@ -94,6 +94,69 @@
     );
   }
 
+  let _workerBundle = null;
+  let _workerBundlePromise = null;
+
+  async function _ensureWorkerBundle() {
+    if (_workerBundle) return _workerBundle;
+    if (_workerBundlePromise) return _workerBundlePromise;
+    const files = [
+      "js/utils/bootstrap.js",
+      "js/utils/logger.js",
+      "js/utils/settings.js",
+      "js/utils/websocket.js",
+      "js/worker.js",
+    ];
+    _workerBundlePromise = (async () => {
+      const texts = await Promise.all(files.map((f) =>
+        fetch(browser.runtime.getURL(f)).then((r) => {
+          if (!r.ok) throw new Error("fetch " + f + " failed: " + r.status);
+          return r.text();
+        }),
+      ));
+      _workerBundle = texts.join("\n");
+      return _workerBundle;
+    })();
+    return _workerBundlePromise;
+  }
+  _ensureWorkerBundle();
+
+  browser.webRequest.onBeforeRequest.addListener(
+    (details) => {
+      if (!details.url.includes("__webhid_wkr=1")) return;
+      logger.info("StreamFilter: replacing body for", details.url);
+      const filter = browser.webRequest.filterResponseData(details.requestId);
+      const enc = new TextEncoder();
+      filter.onstart = () => {
+        if (_workerBundle) {
+          filter.write(enc.encode(_workerBundle));
+        } else {
+          filter.write(enc.encode(
+            "self.postMessage({ type: 'error', error: 'worker bundle not ready' });"
+          ));
+        }
+        filter.close();
+      };
+      return {};
+    },
+    { urls: ["<all_urls>"], types: ["script", "other", "xmlhttprequest"] },
+    ["blocking"],
+  );
+
+  browser.webRequest.onHeadersReceived.addListener(
+    (details) => {
+      if (!details.url.includes("__webhid_wkr=1")) return;
+      logger.info("StreamFilter: fixing headers for", details.url);
+      const headers = details.responseHeaders.filter(
+        (h) => !/^(content-security-policy|content-type|content-length|content-disposition|x-content-type-options)$/i.test(h.name),
+      );
+      headers.push({ name: "Content-Type", value: "application/javascript" });
+      return { responseHeaders: headers };
+    },
+    { urls: ["<all_urls>"], types: ["script", "other", "xmlhttprequest"] },
+    ["blocking", "responseHeaders"],
+  );
+
   function registerDeviceTab(deviceId, tabId) {
     if (!deviceId || tabId == null) return;
     let tabs = _deviceTabMap.get(deviceId);

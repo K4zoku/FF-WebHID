@@ -504,7 +504,7 @@
       const dev = detail.deviceId ? _deviceRegistry.get(detail.deviceId) : null;
       if (dev) {
         const dataView = detail.data
-          ? new DataView(detail.data)
+          ? new DataView(detail.data.buffer || detail.data, detail.data.byteOffset || 0, detail.data.byteLength)
           : new DataView(new ArrayBuffer(0));
         dev.dispatchEvent(
           new HIDInputReportEvent("inputreport", {
@@ -531,7 +531,7 @@
     }
     if (d.type === "inputReport") {
       const dataView = d.data
-        ? new DataView(d.data)
+        ? new DataView(d.data.buffer || d.data, d.data.byteOffset || 0, d.data.byteLength)
         : new DataView(new ArrayBuffer(0));
       const dev = s.self;
       if (dev)

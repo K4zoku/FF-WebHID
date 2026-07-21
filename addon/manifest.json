@@ -10,6 +10,8 @@
     "nativeMessaging",
     "storage",
     "webRequest",
+    "webRequestBlocking",
+    "webRequestFilterResponse",
     "notifications"
   ],
   "host_permissions": [
