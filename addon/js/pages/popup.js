@@ -39,9 +39,6 @@
 
   const dataPlaneSelect = document.getElementById("dataPlane");
   dataPlaneSelect.value = settings.dataPlane;
-  const controlPlaneSelect = document.getElementById("controlPlane");
-  controlPlaneSelect.value = settings.controlPlane;
-
   document.getElementById("fireAndForget").checked = settings.fireAndForget;
 
   const logLevelSelect = document.getElementById("logLevel");
@@ -49,9 +46,6 @@
 
   dataPlaneSelect.addEventListener("change", (e) => {
     saveSetting("dataPlane", e.target.value);
-  });
-  controlPlaneSelect.addEventListener("change", (e) => {
-    saveSetting("controlPlane", e.target.value);
   });
   document.getElementById("fireAndForget").addEventListener("change", (e) => {
     saveSetting("fireAndForget", e.target.checked);

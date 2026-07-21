@@ -215,14 +215,10 @@ async fn dispatch(device_mgr: &DeviceManager, req: NmRequest, ws_port: u16) -> N
             NmResponse::ok()
         }
 
-        NmRequest::Handshake { .. } => match device_mgr.get_or_create_control_token() {
-            Ok(control_token) => NmResponse {
-                status: Some(200),
-                control_token: Some(control_token),
-                ws_port: Some(ws_port),
-                ..Default::default()
-            },
-            Err(_) => NmResponse::err(500),
+        NmRequest::Handshake { .. } => NmResponse {
+            status: Some(200),
+            ws_port: Some(ws_port),
+            ..Default::default()
         },
     };
     let mut resp = resp;

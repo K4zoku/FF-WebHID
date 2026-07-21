@@ -21,16 +21,6 @@
 </div>
 <div class="setting">
   <div class="setting-info">
-    <h3>Control Plane</h3>
-    <p><strong>Native Messaging</strong>: enumerate/open/close via NM host (default).<br><strong>WebSocket</strong>: after NM handshake (control token), route enumerate/close via WS text frames. Lower latency for repeated control operations.</p>
-  </div>
-  <select id="controlPlane">
-    <option value="nm">Native Messaging</option>
-    <option value="ws">WebSocket</option>
-  </select>
-</div>
-<div class="setting">
-  <div class="setting-info">
     <h3>Data Plane</h3>
     <p><strong>WebSocket</strong>: spawn a Web Worker that owns the WS connection to the daemon. Input reports are forwarded to the page via <code>postMessage</code> with ArrayBuffer transfer (off-main-thread, zero-copy). No SAB, no COOP/COEP.<br><strong>Native Messaging</strong>: route all data (sendReport, input reports, feature reports) through the NM host via the content-script bridge. No WS. Fallback when WS is blocked.</p>
   </div>

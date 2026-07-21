@@ -50,7 +50,6 @@ pub struct DeviceManager {
     devices: Arc<Mutex<HashMap<u32, Entry>>>,
     tokens: Arc<Mutex<HashMap<String, u32>>>,
     event_tx: broadcast::Sender<IpcResponse>,
-    control_token: Mutex<Option<String>>,
 }
 
 impl DeviceManager {
@@ -59,27 +58,6 @@ impl DeviceManager {
             devices: Mutex::new(HashMap::new()).into(),
             tokens: Mutex::new(HashMap::new()).into(),
             event_tx,
-            control_token: Mutex::new(None),
-        }
-    }
-
-    pub fn get_or_create_control_token(&self) -> anyhow::Result<String> {
-        let mut guard = self.control_token.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(ref t) = *guard {
-            return Ok(t.clone());
-        }
-        let token = generate_session_token()
-            .map_err(|e| anyhow::anyhow!("failed to generate control token: {e}"))?;
-        *guard = Some(token.clone());
-        Ok(token)
-    }
-
-    pub fn validate_control_token(&self, token: &str) -> bool {
-        use subtle::ConstantTimeEq;
-        let guard = self.control_token.lock().unwrap_or_else(|e| e.into_inner());
-        match guard.as_deref() {
-            Some(stored) => stored.as_bytes().ct_eq(token.as_bytes()).into(),
-            None => false,
         }
     }
 

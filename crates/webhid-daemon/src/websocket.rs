@@ -113,7 +113,7 @@ async fn handle_websocket(
     stream: tokio::net::TcpStream,
     event_tx: broadcast::Sender<webhid::IpcResponse>,
     device_mgr: Arc<DeviceManager>,
-    ws_port: u16,
+    _ws_port: u16,
 ) -> anyhow::Result<()> {
     // Capture the session token from the HTTP upgrade request.
     let token_holder: Arc<std::sync::Mutex<Option<String>>> = Arc::new(std::sync::Mutex::new(None));
@@ -173,13 +173,7 @@ async fn handle_websocket(
         }
     };
 
-    // Check if this is a control-only token first.
-    if device_mgr.validate_control_token(&token) {
-        log::info!("[ws] control-only connection accepted");
-        return handle_control_ws(ws_stream, device_mgr, ws_port).await;
-    }
-
-    // Otherwise: device session token.
+    // Device session token.
     let device_id = match device_mgr.get_device_by_token(&token) {
         Some(id) => id,
         None => {
@@ -226,14 +220,6 @@ async fn handle_websocket(
                     let dev_id = device_id_for_receiver;
                     tokio::spawn(async move {
                         handle_client_binary(&frame, &mgr, dev_id, tx_clone).await;
-                    });
-                }
-                Ok(Message::Text(text)) => {
-                    let tx_clone = tx_for_receiver.clone();
-                    let mgr = Arc::clone(&device_mgr_for_receiver);
-                    let dev_id = device_id_for_receiver;
-                    tokio::spawn(async move {
-                        handle_client_text(&text, &mgr, dev_id, tx_clone, ws_port).await;
                     });
                 }
                 Err(e) => {
@@ -342,55 +328,6 @@ async fn handle_websocket(
 
     log::info!("[ws] connection for {device_id:#x} closed");
     device_mgr.ws_disconnect(device_id, ws_gen);
-    Ok(())
-}
-
-/// Handle a control-only WS connection (enumerate/close, no device data).
-/// Text frames are JSON control messages; binary frames are rejected.
-async fn handle_control_ws(
-    ws_stream: tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
-    device_mgr: Arc<DeviceManager>,
-    ws_port: u16,
-) -> anyhow::Result<()> {
-    use futures_util::StreamExt;
-    let (mut ws_sender, mut ws_receiver) = ws_stream.split();
-
-    let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
-
-    let outgoing = tokio::spawn(async move {
-        while let Some(msg) = rx.recv().await {
-            if ws_sender.send(msg).await.is_err() {
-                break;
-            }
-        }
-    });
-
-    while let Some(msg) = ws_receiver.next().await {
-        match msg {
-            Ok(Message::Text(text)) => {
-                let tx_clone = tx.clone();
-                let mgr = Arc::clone(&device_mgr);
-                tokio::spawn(async move {
-                    handle_client_text(&text, &mgr, 0, tx_clone, ws_port).await;
-                });
-            }
-            Ok(Message::Ping(data)) => {
-                let _ = tx.send(Message::Pong(data));
-            }
-            Ok(Message::Close(_)) => break,
-            Ok(Message::Binary(_)) => {
-                log::warn!("[ws-control] binary frames not allowed on control connection");
-            }
-            Err(e) => {
-                log::warn!("[ws-control] read error: {e}");
-                break;
-            }
-            _ => {}
-        }
-    }
-
-    outgoing.abort();
-    log::info!("[ws-control] connection closed");
     Ok(())
 }
 
@@ -605,72 +542,6 @@ async fn handle_client_binary(
             let _ = tx.send(make_status_resp(0xFF, req_id, 1));
         }
     }
-}
-
-/// Handle a JSON text frame (control plane over WS).
-async fn handle_client_text(
-    text: &str,
-    device_mgr: &Arc<DeviceManager>,
-    device_id: u32,
-    tx: mpsc::UnboundedSender<Message>,
-    ws_port: u16,
-) {
-    let req: serde_json::Value = match serde_json::from_str(text) {
-        Ok(v) => v,
-        Err(e) => {
-            let _ = tx.send(Message::Text(
-                serde_json::json!({ "err": format!("JSON parse: {e}") })
-                    .to_string()
-                    .into(),
-            ));
-            return;
-        }
-    };
-
-    let id = req.get("n").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-    let action = req.get("action").and_then(|v| v.as_str()).unwrap_or("");
-
-    let result = match action {
-        "enumerate" => match device_mgr.enumerate() {
-            Ok(devices) => serde_json::json!({ "n": id, "s": 200, "D": devices }),
-            Err(_) => serde_json::json!({ "n": id, "s": 500 }),
-        },
-        "close" => {
-            let req_dev_id = req
-                .get("deviceId")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(device_id as u64) as u32;
-            match device_mgr.close(req_dev_id) {
-                Ok(()) => serde_json::json!({ "n": id, "s": 204 }),
-                Err(_) => serde_json::json!({ "n": id, "s": 404 }),
-            }
-        }
-        "open" => {
-            let req_dev_id = req.get("deviceId").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-            match device_mgr.open(req_dev_id) {
-                Ok((dev_id, session_token)) => serde_json::json!({
-                    "n": id, "s": 201, "i": dev_id,
-                    "t": session_token, "w": ws_port
-                }),
-                Err(e) => {
-                    let msg = e.to_string();
-                    let code = if msg.contains("open by") {
-                        403
-                    } else if msg.contains("not found") || msg.contains("No such") {
-                        404
-                    } else {
-                        500
-                    };
-                    serde_json::json!({ "n": id, "s": code })
-                }
-            }
-        }
-        _ => {
-            serde_json::json!({ "n": id, "s": 400 })
-        }
-    };
-
-    let _ = tx.send(Message::Text(result.to_string().into()));
 }
 
 /// Build a `[resp_type][req_id_u32 LE][status_u8]` response frame.

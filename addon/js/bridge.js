@@ -39,11 +39,7 @@
   const _dataPorts = new Map();
   let _wsPort = null;
   const settings = createSettingsStore(GLOBAL_DEFAULTS);
-  let _controlWorker = null;
-  let _controlPort = null;
   let _pagePort = null;
-  const _controlPending = new Map();
-  let _controlReqId = 1;
   const _spawnGen = new Map();
 
   const _workerBlobUrls = { worker: null, control: null };
@@ -74,135 +70,11 @@
     return url;
   }
 
-  async function _spawnControlWorker(token, wsPort) {
-    if (_controlWorker) return;
-    let cspBlocked = false;
-    try {
-      const check = await browser.runtime.sendMessage({
-        action: "checkWorkerCsp",
-      });
-      cspBlocked = !!check?.blocked;
-    } catch {}
-    if (cspBlocked) {
-      logger.warn(
-        "control worker skipped: CSP worker-src blocks blob:; control plane uses NM",
-      );
-      return;
-    }
-    let worker;
-    try {
-      const url = await _getWorkerBlobUrl("control");
-      worker = new Worker(url);
-    } catch (e) {
-      logger.error("control worker spawn failed:", e);
-      return;
-    }
-
-    const { port1, port2 } = new MessageChannel();
-    _controlPort = port1;
-    _controlWorker = worker;
-
-    let resolved = false;
-    let readyTimer = null;
-
-    const fail = (reason) => {
-      if (resolved) return;
-      resolved = true;
-      if (readyTimer) clearTimeout(readyTimer);
-      _terminateControlWorker();
-      logger.warn(
-        "control worker failed:",
-        reason,
-        "; control plane falls back to NM",
-      );
-    };
-
-    worker.onerror = (e) => fail("onerror: " + (e.message || "unknown"));
-    readyTimer = setTimeout(() => fail("ready timeout"), 3000);
-
-    _controlPort.onmessage = ({ data }) => {
-      if (data.type === "ready") {
-        if (resolved) return;
-        resolved = true;
-        if (readyTimer) clearTimeout(readyTimer);
-        logger.info("control worker ready");
-      } else if (data.type === "closed") {
-        logger.warn("control worker WS closed; will auto-reconnect");
-        for (const [, { resolve }] of _controlPending) resolve({ s: 503 });
-        _controlPending.clear();
-      } else if (data.type === "auth-failed") {
-        logger.warn(
-          "control worker auth-failed code=" + data.code + "; re-handshaking",
-        );
-        for (const [, { resolve }] of _controlPending) resolve({ s: 503 });
-        _controlPending.clear();
-        _terminateControlWorker();
-        _refreshControlToken();
-      } else if (
-        data.type === "response" &&
-        data.id &&
-        _controlPending.has(data.id)
-      ) {
-        const { resolve } = _controlPending.get(data.id);
-        _controlPending.delete(data.id);
-        resolve(data.result);
-      }
-    };
-
-    _controlWorker.postMessage(
-      { type: "connect", token, wsPort, logLevel: logger._level },
-      [port2],
-    );
-    logger.info("control worker spawned");
-  }
-
-  function _terminateControlWorker() {
-    if (_controlPort) {
-      _controlPort.onmessage = null;
-      _controlPort.close();
-      _controlPort = null;
-    }
-    if (_controlWorker) {
-      _controlWorker.postMessage({ type: "disconnect" });
-      _controlWorker.terminate();
-      _controlWorker = null;
-    }
-    for (const [, { resolve }] of _controlPending) resolve({ s: 503 });
-    _controlPending.clear();
-  }
-
-  async function _refreshControlToken() {
-    if (_controlWorker) return;
-    try {
-      const resp = await browser.runtime.sendMessage({ action: "handshake" });
-      if (http.isOk(resp.s) && resp.c && resp.w) {
-        _wsPort = resp.w;
-        _spawnControlWorker(resp.c, resp.w);
-      } else {
-        logger.error("token refresh failed: s=" + (resp?.s || 0));
-      }
-    } catch (e) {
-      logger.error("token refresh error:", e.message);
-    }
-  }
-
   async function _isDeviceAllowedForOrigin(origin, deviceId) {
     if (!origin || !deviceId) return false;
     const key = encodeURIComponent(origin);
     const result = await browser.storage.local.get(key);
     return (result[key] || []).includes(deviceId);
-  }
-
-  function _sendControlCommand(action, payload) {
-    return new Promise((resolve) => {
-      if (!_controlPort) {
-        resolve({ s: 503 });
-        return;
-      }
-      const id = _controlReqId++;
-      _controlPending.set(id, { resolve });
-      _controlPort.postMessage({ type: "command", id, action, payload });
-    });
   }
 
   async function _despawnDataPlane(deviceId, { keepPort = false } = {}) {
@@ -522,9 +394,6 @@
           }
         }
         settings.set(global);
-        if (settings.controlPlane === "ws" && resp.c) {
-          _spawnControlWorker(resp.c, resp.w);
-        }
       }
     } catch (e) {
       logger.warn("handshake failed:", e.message);
@@ -802,7 +671,6 @@
 
     try {
       let response;
-      let viaControlWs = false;
       if (action === "open") {
         const origin = window.location.origin;
         const allowed = await _isDeviceAllowedForOrigin(
@@ -814,17 +682,8 @@
           return;
         }
       }
-      if (
-        settings.controlPlane === "ws" &&
-        _controlPort &&
-        (action === "enumerate" || action === "close" || action === "open")
-      ) {
-        response = await _sendControlCommand(action, payload || {});
-        viaControlWs = true;
-      } else {
-        const msg = Object.assign({ action }, payload || {});
-        response = await browser.runtime.sendMessage(msg);
-      }
+      const msg = Object.assign({ action }, payload || {});
+      response = await browser.runtime.sendMessage(msg);
 
       if (action === "open" && http.isOk(response.s) && response.t) {
         const deviceId = response.i;
@@ -839,15 +698,6 @@
         logger.debug("open ok deviceId=" + deviceId + " wsPort=" + response.w);
 
         const dataPlane = settings.dataPlane;
-        if (viaControlWs) {
-          browser.runtime
-            .sendMessage({
-              action: "registerDevice",
-              deviceId: deviceId,
-            })
-            .catch(() => {});
-        }
-
         if (dataPlane === "ws") {
           _spawnDataPlane(deviceId, response.t, response.w || _wsPort);
         }
@@ -864,14 +714,6 @@
             count: _openDevices.size,
           })
           .catch(() => {});
-        if (viaControlWs) {
-          browser.runtime
-            .sendMessage({
-              action: "unregisterDevice",
-              deviceId: deviceId,
-            })
-            .catch(() => {});
-        }
         _despawnDataPlane(deviceId);
       }
 
@@ -1007,23 +849,6 @@
 
   // ── Settings observer ─────────────────────────────────────────────
 
-  function _applyControlPlane(cp) {
-    logger.info("control plane changed:", cp);
-    if (cp === "ws" && _wsPort && !_controlWorker) {
-      browser.runtime
-        .sendMessage({ action: "handshake" })
-        .then((resp) => {
-          if (http.isOk(resp.s) && resp.c && resp.w) {
-            _wsPort = resp.w;
-            _spawnControlWorker(resp.c, resp.w);
-          }
-        })
-        .catch(() => {});
-    } else if (cp === "nm" && _controlWorker) {
-      _terminateControlWorker();
-    }
-  }
-
   async function _applyDataPlane(dp) {
     for (const id of _openDevices) {
       await _despawnDataPlane(id, { keepPort: true });
@@ -1053,18 +878,16 @@
     logger.info("data plane changed:", dp, "open devices:", _openDevices.size);
   }
 
-  settings.on("controlPlane", (cp) => _applyControlPlane(cp));
   settings.on("dataPlane", (dp) => _applyDataPlane(dp));
 
   // Push any settings change to page + workers.
   settings.on(
-    ["dataPlane", "controlPlane", "fireAndForget", "logLevel"],
+    ["dataPlane", "fireAndForget", "logLevel"],
     () => {
       const all = settings.getAll();
       const patch = {};
       for (const k of [
         "dataPlane",
-        "controlPlane",
         "fireAndForget",
         "logLevel",
       ]) {
@@ -1073,7 +896,6 @@
       _replyToPage({ __webhid_bridge: "settings", settings: patch });
       const workerMsg = { type: "settings", ...patch };
       for (const worker of _workers.values()) worker.postMessage(workerMsg);
-      if (_controlWorker) _controlWorker.postMessage(workerMsg);
     },
   );
 

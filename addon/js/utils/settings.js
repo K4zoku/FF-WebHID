@@ -20,7 +20,6 @@
   const GLOBAL_DEFAULTS = {
     fireAndForget: true,
     dataPlane: "nm",
-    controlPlane: "nm",
     logLevel: 1,
     daemonAsNmHost: false,
     devicePickerMode: "modal",
