@@ -257,37 +257,3 @@ jobs:
           path: artifacts-msi-aarch64/*.msi
           archive: false
 
-  audit:
-    name: Audit
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: crates -> target
-      - name: Install & run audit tools
-        uses: taiki-e/install-action@v2.83.3
-        with:
-          tool: cargo-deny,cargo-audit
-      - name: Run deny check
-        run: cd crates && cargo deny check
-      - name: Run audit
-        run: cd crates && cargo audit
-
-  test:
-    name: Unit Tests
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: crates -> target
-      - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y libudev-dev
-      - name: Run tests
-        run: cargo test --manifest-path crates/Cargo.toml

@@ -1,0 +1,52 @@
+name: Check
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tests/e2e/package.json'
+      - 'tests/e2e/package-lock.json'
+      - '.github/workflows/check.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tests/e2e/package.json'
+      - 'tests/e2e/package-lock.json'
+      - '.github/workflows/check.yml'
+  workflow_dispatch:
+
+jobs:
+  cargo-audit:
+    name: Cargo Audit
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates -> target
+      - uses: taiki-e/install-action@v2.83.3
+        with:
+          tool: cargo-deny,cargo-audit
+      - name: Run deny check
+        run: cd crates && cargo deny check
+      - name: Run audit
+        run: cd crates && cargo audit
+
+  npm-audit:
+    name: npm Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install dependencies
+        run: npm ci
+      - name: Run audit
+        run: npm audit --audit-level=high
