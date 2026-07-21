@@ -282,7 +282,14 @@ fn convert_fields_aggregate(fields: &[Field]) -> Vec<WebHidField> {
                 out.push(make_array_field(a));
                 i += 1;
             }
-            Field::Constant(_) => {
+            Field::Constant(c) => {
+                let total_bits = (c.bits.end - c.bits.start) as u32;
+                out.push(WebHidField {
+                    report_size: total_bits,
+                    report_count: 1,
+                    is_constant: true,
+                    ..Default::default()
+                });
                 i += 1;
             }
         }
@@ -982,8 +989,7 @@ mod tests {
         assert_eq!(report.report_id, 0x30);
         assert!(!report.items.is_empty(), "should have report items");
 
-        // max_input_report_size counts only non-constant fields (11 bytes).
-        // The physical report is 63 bytes including constant padding.
-        assert_eq!(max_input_report_size(&collections), 11);
+        // max_input_report_size now includes constant padding (63 bytes total).
+        assert_eq!(max_input_report_size(&collections), 63);
     }
 }

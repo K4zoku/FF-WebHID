@@ -29,11 +29,13 @@ test.describe.serial("Switch Pro Gamepad E2E", () => {
     expect(await testApi.isPolyfillLoaded()).toBe(true);
   });
 
-  test("grant permission and verify VID/PID", async ({ sharedPage }) => {
+  test("grant permission and verify VID/PID, collections", async ({ sharedPage }) => {
     const devices = await grantDevicePermission(sharedPage);
     expect(devices.length).toBe(1);
-    expect(devices[0].vendorId).toBe(VID);
-    expect(devices[0].productId).toBe(PID);
+    const device = devices[0];
+    expect(device.vendorId).toBe(VID);
+    expect(device.productId).toBe(PID);
+    expect(device.collections.length).toBe(1);
   });
 
   test("sendReport fails before open", async ({ testApi }) => {
@@ -46,6 +48,21 @@ test.describe.serial("Switch Pro Gamepad E2E", () => {
     expect(failed).toBe(true);
   });
 
+  test("open and close device", async ({ testApi }) => {
+    const devices = await testApi.getDevices();
+    expect(devices.length).toBe(1);
+    await testApi.open(devices[0].index);
+    await testApi.close(devices[0].index);
+  });
+
+  test("open and close multiple times", async ({ testApi }) => {
+    const devices = await testApi.getDevices();
+    for (let i = 0; i < 3; i++) {
+      await testApi.open(0);
+      await testApi.close(0);
+    }
+  });
+
   test("receive 64-byte input packet", async ({
     sharedPage,
     uhidMock,
@@ -54,12 +71,13 @@ test.describe.serial("Switch Pro Gamepad E2E", () => {
     const devices = await ensureDevicePaired(sharedPage, testApi);
     await testApi.open(devices[0].index);
 
-    const reportPromise = testApi.onInputReport(0);
+    const reportPromise = testApi.onInputReport(devices[0].index);
+    await new Promise(resolve => setTimeout(resolve, 200));
     // Send raw packet: 0x30 (report ID) + 63 zero bytes
-    sendInput(uhidMock, undefined, new Array(PACKET_SIZE).fill(0));
+    sendInput(uhidMock, 0x30, new Array(PACKET_SIZE).fill(0));
 
     const event = await reportPromise;
-    expect(event.reportId).toBe(0);
+    expect(event.reportId).toBe(0x30);
     expect(event.data.length).toBe(PACKET_SIZE);
   });
 
@@ -69,18 +87,19 @@ test.describe.serial("Switch Pro Gamepad E2E", () => {
     testApi,
   }) => {
     const devices = await ensureDevicePaired(sharedPage, testApi);
-    await testApi.open(0);
+    await testApi.open(devices[0].index);
 
     // Raw packet: byte 0 = report ID (0x30), byte 1 = buttons 1-8
     const packet = new Array(PACKET_SIZE).fill(0);
     packet[0] = 0x30;  // report ID (treated as data by daemon)
     packet[1] = 0xff;  // buttons 1-8 pressed
 
-    const reportPromise = testApi.onInputReport(0);
-    sendInput(uhidMock, undefined, packet);
+    const reportPromise = testApi.onInputReport(devices[0].index);
+    await new Promise(resolve => setTimeout(resolve, 200));
+    sendInput(uhidMock, 0x30, packet);
 
     const event = await reportPromise;
-    expect(event.reportId).toBe(0);
+    expect(event.reportId).toBe(0x30);
     expect(event.data.length).toBe(PACKET_SIZE);
     expect(event.data[0]).toBe(0x30);
     expect(event.data[1]).toBe(0xff);
@@ -92,29 +111,15 @@ test.describe.serial("Switch Pro Gamepad E2E", () => {
     testApi,
   }) => {
     const devices = await ensureDevicePaired(sharedPage, testApi);
-    await testApi.open(0);
+    await testApi.open(devices[0].index);
 
     // Switch Pro descriptor has vendor-defined output report ID 0x01 (63 bytes)
     const reportData = new Array(63).fill(0x42);
     const outputPromise = waitForOutputReport(uhidMock);
+    await new Promise(resolve => setTimeout(resolve, 200));
     await testApi.sendReport(0, 0x01, reportData);
     const output = await outputPromise;
     // Daemon prepends report ID (0x01) to payload when writing
     expect(output.data[0]).toBe(0x01);
-  });
-
-  test("open and close device", async ({ testApi }) => {
-    const devices = await testApi.getDevices();
-    expect(devices.length).toBe(1);
-    await testApi.open(0);
-    await testApi.close(0);
-  });
-
-  test("open and close multiple times", async ({ testApi }) => {
-    const devices = await testApi.getDevices();
-    for (let i = 0; i < 3; i++) {
-      await testApi.open(0);
-      await testApi.close(0);
-    }
   });
 });
