@@ -64,12 +64,6 @@
     return url;
   }
 
-  async function _getWorkerRedirectUrl() {
-    const url = location.origin + location.pathname + location.search;
-    await browser.runtime.sendMessage({ action: "armWorkerFilter", url });
-    return url;
-  }
-
   async function _isDeviceAllowedForOrigin(origin, deviceId) {
     if (!origin || !deviceId) return false;
     const key = encodeURIComponent(origin);
@@ -167,11 +161,9 @@
     if (_workers.has(deviceId)) return true;
     let worker;
     try {
-      const url = await _getWorkerRedirectUrl();
-      worker = new Worker(url);
+      worker = new Worker(location.href);
     } catch (e) {
       logger.warn("redirect worker failed for", deviceId, ":", e.message);
-      browser.runtime.sendMessage({ action: "disarmWorkerFilter" }).catch(() => {});
     }
     if (!worker) {
       let cspBlocked = false;
