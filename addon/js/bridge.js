@@ -2,7 +2,6 @@
   // WebHID Standard implementation with injected modal
   "use strict";
   const logger = __webhid.import("logger");
-  const fetchResource = __webhid.import("fetchResource");
   const http = __webhid.import("http");
   const guessDeviceType = __webhid.import("guessDeviceType");
   const createSettingsStore = __webhid.import("createSettingsStore");
@@ -41,28 +40,6 @@
   const settings = createSettingsStore(GLOBAL_DEFAULTS);
   let _pagePort = null;
   const _spawnGen = new Map();
-
-  const _workerBlobUrls = { worker: null, control: null };
-
-  async function _getWorkerBlobUrl(kind) {
-    if (_workerBlobUrls[kind]) return _workerBlobUrls[kind];
-    const baseUrls = [
-      "js/utils/bootstrap.js",
-      "js/utils/logger.js",
-      "js/utils/settings.js",
-      "js/utils/websocket.js",
-    ];
-    const workerUrl = kind === "control" ? "js/control.js" : "js/worker.js";
-    const texts = await Promise.all(
-      [...baseUrls, workerUrl].map((u) => fetchResource(u)),
-    );
-    const blob = new Blob([texts.join("\n")], {
-      type: "application/javascript",
-    });
-    const url = URL.createObjectURL(blob);
-    _workerBlobUrls[kind] = url;
-    return url;
-  }
 
   async function _isDeviceAllowedForOrigin(origin, deviceId) {
     if (!origin || !deviceId) return false;
@@ -165,30 +142,7 @@
     } catch (e) {
       logger.warn("redirect worker failed for", deviceId, ":", e.message);
     }
-    if (!worker) {
-      let cspBlocked = false;
-      try {
-        const check = await browser.runtime.sendMessage({
-          action: "checkWorkerCsp",
-        });
-        cspBlocked = !!check?.blocked;
-      } catch {}
-      if (cspBlocked) {
-        logger.warn(
-          "worker skipped for",
-          deviceId,
-          ": CSP worker-src blocks blob:",
-        );
-        return false;
-      }
-      try {
-        const url = await _getWorkerBlobUrl("worker");
-        worker = new Worker(url);
-      } catch (e) {
-        logger.error("worker fetch/spawn failed:", e);
-        return false;
-      }
-    }
+    if (!worker) return false;
 
     if (_spawnGen.get(deviceId) !== gen) {
       logger.info("worker spawn stale, discarding for", deviceId);
