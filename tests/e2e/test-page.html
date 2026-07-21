@@ -133,12 +133,20 @@
       }
     },
 
-    resetDeviceState: () => {
-      const devices = _deviceCache;
+    resetDeviceState: async () => {
+      // Snapshot the cache before clearing so close() calls below don't
+      // race with a concurrent getDevices() repopulating it.
+      const devices = _deviceCache.slice();
       _deviceCache = [];
-      for (const d of devices) {
-        if (d && d.close) d.close().catch(() => {});
-      }
+      // Await all close() promises so the next test doesn't see a device
+      // that's still mid-close (which would cause open() to throw
+      // "already open"). Fire-and-forget close was the previous behavior
+      // and caused inter-test state leaks.
+      await Promise.all(
+        devices.map((d) =>
+          d && d.close ? d.close().catch(() => {}) : Promise.resolve(),
+        ),
+      );
     },
   };
 })();
