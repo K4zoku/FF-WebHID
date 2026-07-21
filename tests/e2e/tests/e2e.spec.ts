@@ -65,7 +65,6 @@ test.describe.serial('FF-WebHID E2E', () => {
 
   test('close a device succeeds', async ({ testApi }) => {
     const devices = await testApi.getDevices();
-    await testApi.open(devices[0].index);
     await testApi.close(devices[0].index);
   });
 

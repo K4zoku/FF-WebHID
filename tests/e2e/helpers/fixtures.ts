@@ -76,7 +76,7 @@ export const test = base.extend<{
     await installNmManifest(DEFAULT_SOCKET);
     const profileDir = mkdtempSync(join(os.tmpdir(), 'webhid-e2e-'));
     const browserType = withExtension(firefox, ADDON_PATH);
-    const ctx = await browserType.launchPersistentContext(profileDir, { headless: true });
+    const ctx = await browserType.launchPersistentContext(profileDir, { headless: false });
     await use(ctx);
     await ctx.close();
     try { await rm(profileDir, { recursive: true, force: true }); } catch {}

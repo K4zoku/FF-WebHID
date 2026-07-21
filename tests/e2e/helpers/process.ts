@@ -19,7 +19,6 @@ function findProjectRoot(dir: string): string {
 
 const PROJECT_ROOT = findProjectRoot(__dirname);
 export const DEFAULT_SOCKET = '/tmp/webhid-e2e.sock';
-const TEST_TOKEN = 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6';
 const NM_MANIFEST_ID = 'webhid.forwarder_nm_host.json';
 const NM_USER_DIR = join(homedir(), '.mozilla', 'native-messaging-hosts');
 
@@ -69,12 +68,11 @@ export async function startDaemon(socketPath = DEFAULT_SOCKET): Promise<DaemonPr
   // Clean up stale socket from previous runs
   try { unlinkSync(socketPath); } catch {}
   const bin = resolveBin('webhid-daemon');
-  const proc = spawn(bin, {
+  const proc = spawn(bin, [], {
     env: {
       ...process.env,
       WEBHID_SOCKET: socketPath,
-      WEBHID_CONTROL_TOKEN: TEST_TOKEN,
-      RUST_LOG: 'info',
+      RUST_LOG: 'debug',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -87,16 +85,6 @@ export async function startDaemon(socketPath = DEFAULT_SOCKET): Promise<DaemonPr
   });
 
   await waitForSocket(socketPath);
-
-  // Make socket accessible by non-root user (NM forwarder connects as user)
-  try {
-    await new Promise<void>((resolve, reject) => {
-      spawn('sudo', ['chmod', 'o+rw', socketPath])
-        .on('close', (code) => code === 0 ? resolve() : reject(new Error(`chmod exit ${code}`)));
-    });
-  } catch (e) {
-    console.warn('Could not chmod socket:', e);
-  }
 
   const dp: DaemonProcess = { process: proc, socketPath, pid: proc.pid! };
   _running.daemon = proc;
@@ -115,7 +103,7 @@ export async function startUhidMock(
 ): Promise<UhidMockProcess> {
   const bin = resolveBin('uhid-mock');
   const descPath = resolveFixture(descriptorName);
-  const proc = spawn('sudo', ['-E', bin, 'spawn', '--vid', String(vid), '--pid', String(pid), '--descriptor', descPath], {
+  const proc = spawn(bin, ['spawn', '--vid', String(vid), '--pid', String(pid), '--descriptor', descPath], {
     stdio: ['pipe', 'pipe', 'inherit'],
   });
 
