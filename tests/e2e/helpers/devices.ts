@@ -1,7 +1,7 @@
 import { type Page } from "@playwright/test";
 
-const VID = 0x1234;
-const PID = 0x5678;
+const VID = 0x16c0;
+const PID = 0x0001;
 
 /**
  * Grant device permission by driving the real picker UI via keyboard.

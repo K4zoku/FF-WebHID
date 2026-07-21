@@ -31,4 +31,5 @@ export interface WebHidTestAPI {
   close: (index: number) => Promise<void>;
   sendReport: (index: number, reportId: number, data: number[]) => Promise<void>;
   onInputReport: (index: number) => Promise<InputReportEvent>;
+  resetDeviceState: () => Promise<void>;
 }

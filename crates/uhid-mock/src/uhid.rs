@@ -109,6 +109,62 @@ pub struct UhidOutputReq {
     pub rtype: u8,
 }
 
+/// `struct uhid_get_report_req` — received when the host requests a
+/// feature report.  We need to read `id` so the reply can match it.
+#[derive(Copy, Clone)]
+#[repr(C, packed)]
+pub struct UhidGetReportReq {
+    /// Request id — must be echoed in the reply.
+    pub id: u32,
+    /// Report number (HID report ID, or 0 for non-numbered).
+    pub rnum: u8,
+    /// Report type (0=input, 1=output, 2=feature).
+    pub rtype: u8,
+}
+
+/// `struct uhid_get_report_reply_req` — sent in reply to a
+/// UHID_GET_REPORT.  We reply with err=0 and empty data since
+/// our virtual device has no meaningful feature reports to return.
+#[derive(Copy, Clone)]
+#[repr(C, packed)]
+pub struct UhidGetReportReplyReq {
+    /// Echo of the request id.
+    pub id: u32,
+    /// 0 = success, non-zero = error (e.g. ENOENT).
+    pub err: u16,
+    /// Number of valid bytes in `data`.
+    pub size: u16,
+    /// Report data (empty in our case).
+    pub data: [u8; UHID_DATA_MAX],
+}
+
+/// `struct uhid_set_report_req` — received when the host sends a
+/// feature report to the device.
+#[derive(Copy, Clone)]
+#[repr(C, packed)]
+pub struct UhidSetReportReq {
+    /// Request id — must be echoed in the reply.
+    pub id: u32,
+    /// Report number (HID report ID, or 0 for non-numbered).
+    pub rnum: u8,
+    /// Report type (0=input, 1=output, 2=feature).
+    pub rtype: u8,
+    /// Number of valid bytes in `data`.
+    pub size: u16,
+    /// Report data.
+    pub data: [u8; UHID_DATA_MAX],
+}
+
+/// `struct uhid_set_report_reply_req` — sent in reply to a UHID_SET_REPORT.
+#[derive(Copy, Clone)]
+#[repr(C, packed)]
+pub struct UhidSetReportReplyReq {
+    /// Echo of the request id.
+    pub id: u32,
+    /// 0 = success, non-zero = error.
+    pub err: u16,
+}
+
 /// `union uhid_event.u` — the variable-size arm of `struct uhid_event`.
 ///
 /// Modelled as a Rust union; only one arm is active at a time. The kernel
@@ -119,6 +175,10 @@ pub union UhidEventUnion {
     pub create2: UhidCreate2Req,
     pub input2: UhidInput2Req,
     pub output: UhidOutputReq,
+    pub get_report: UhidGetReportReq,
+    pub get_report_reply: UhidGetReportReplyReq,
+    pub set_report: UhidSetReportReq,
+    pub set_report_reply: UhidSetReportReplyReq,
 }
 
 /// `struct uhid_event` — the top-level envelope written to / read from
@@ -156,34 +216,47 @@ pub fn open_uhid() -> std::io::Result<RawFd> {
 }
 
 /// Write a `uhid_event` to the fd. Returns the number of bytes written
-/// (always `UHID_EVENT_SIZE` on success).
+/// (always `UHID_EVENT_SIZE` on success).  Retries on EINTR.
 pub fn write_event(fd: RawFd, event: &UhidEvent) -> std::io::Result<usize> {
-    let written = unsafe {
-        libc::write(
-            fd,
-            event as *const UhidEvent as *const std::ffi::c_void,
-            UHID_EVENT_SIZE,
-        )
-    };
-    if written < 0 {
-        return Err(std::io::Error::last_os_error());
+    loop {
+        let written = unsafe {
+            libc::write(
+                fd,
+                event as *const UhidEvent as *const std::ffi::c_void,
+                UHID_EVENT_SIZE,
+            )
+        };
+        if written < 0 {
+            let err = std::io::Error::last_os_error();
+            if err.kind() == std::io::ErrorKind::Interrupted {
+                continue;
+            }
+            return Err(err);
+        }
+        return Ok(written as usize);
     }
-    Ok(written as usize)
 }
 
 /// Read a `uhid_event` from the fd. Blocks until an event is available.
+/// Retries on EINTR.
 pub fn read_event(fd: RawFd, event: &mut UhidEvent) -> std::io::Result<usize> {
-    let n = unsafe {
-        libc::read(
-            fd,
-            event as *mut UhidEvent as *mut std::ffi::c_void,
-            UHID_EVENT_SIZE,
-        )
-    };
-    if n < 0 {
-        return Err(std::io::Error::last_os_error());
+    loop {
+        let n = unsafe {
+            libc::read(
+                fd,
+                event as *mut UhidEvent as *mut std::ffi::c_void,
+                UHID_EVENT_SIZE,
+            )
+        };
+        if n < 0 {
+            let err = std::io::Error::last_os_error();
+            if err.kind() == std::io::ErrorKind::Interrupted {
+                continue;
+            }
+            return Err(err);
+        }
+        return Ok(n as usize);
     }
-    Ok(n as usize)
 }
 
 // ── Event constructors ───────────────────────────────────────────────────
@@ -284,6 +357,43 @@ pub fn build_destroy_event() -> UhidEvent {
         type_: UHID_DESTROY,
         u,
     }
+}
+
+/// Build a `UHID_GET_REPORT_REPLY` acknowledging a GET_REPORT request.
+///
+/// We reply with `err = 0` and an empty payload since no feature report
+/// data is expected for our test devices.
+pub fn build_get_report_reply_event(id: u32) -> UhidEvent {
+    UhidEvent {
+        type_: UHID_GET_REPORT_REPLY,
+        u: UhidEventUnion {
+            get_report_reply: UhidGetReportReplyReq {
+                id,
+                err: 0,
+                size: 0,
+                data: [0u8; UHID_DATA_MAX],
+            },
+        },
+    }
+}
+
+/// Build a `UHID_SET_REPORT_REPLY` acknowledging a SET_REPORT request.
+pub fn build_set_report_reply_event(id: u32) -> UhidEvent {
+    UhidEvent {
+        type_: UHID_SET_REPORT_REPLY,
+        u: UhidEventUnion {
+            set_report_reply: UhidSetReportReplyReq { id, err: 0 },
+        },
+    }
+}
+
+/// Extract the request `id` from a UHID_GET_REPORT or UHID_SET_REPORT event.
+///
+/// SAFETY: the caller must have already verified `event.type_` matches the
+/// expected type so the correct union arm is active.
+pub fn get_report_request_id(event: &UhidEvent) -> u32 {
+    // SAFETY: caller checked type_ == UHID_GET_REPORT or UHID_SET_REPORT.
+    unsafe { event.u.get_report.id }
 }
 
 // ── Reader helpers ───────────────────────────────────────────────────────

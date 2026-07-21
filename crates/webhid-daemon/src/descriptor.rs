@@ -963,4 +963,27 @@ mod tests {
         // Must not panic; array + variable in same report is valid HID
         let _ = max_input_report_size(&c);
     }
+
+    #[test]
+    fn test_switchpro_descriptor() {
+        let path = fixture_path("switchpro-gamepad.bin");
+        let bytes = std::fs::read(&path).unwrap();
+        let collections = parse_report_descriptor(&bytes);
+        assert!(!collections.is_empty(), "should parse into at least one collection");
+
+        let app = &collections[0];
+        assert_eq!(app.collection_type, 1); // Application
+        assert_eq!(app.usage_page, Some(0x01)); // Generic Desktop
+        assert_eq!(app.usage, Some(0x04)); // Joystick
+
+        // Should have input reports (report ID 0x30)
+        assert!(!app.input_reports.is_empty(), "should have input reports");
+        let report = &app.input_reports[0];
+        assert_eq!(report.report_id, 0x30);
+        assert!(!report.items.is_empty(), "should have report items");
+
+        // max_input_report_size counts only non-constant fields (11 bytes).
+        // The physical report is 63 bytes including constant padding.
+        assert_eq!(max_input_report_size(&collections), 11);
+    }
 }

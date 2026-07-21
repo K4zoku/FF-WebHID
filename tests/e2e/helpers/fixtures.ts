@@ -60,7 +60,7 @@ export const test = base.extend<{
   }, { scope: 'worker', auto: true }],
 
   uhidMock: [async ({}, use) => {
-    const m = await startUhidMock('simple-mouse.bin', 0x1234, 0x5678);
+    const m = await startUhidMock('switchpro-gamepad.bin', 0x16c0, 0x0001);
     await m.ready;
     await use(m);
     stopUhidMock(m);
@@ -84,7 +84,8 @@ export const test = base.extend<{
   }, { scope: 'worker' }],
 
   sharedPage: [async ({ browserCtx, httpPort }, use) => {
-    const page = await browserCtx.newPage();
+    const pages = browserCtx.pages();
+    const page = (pages.length == 0) ? await browserCtx.newPage() : pages[0];
     const url = `http://localhost:${httpPort}/tests/e2e/test-page.html`;
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
     await page.waitForFunction(

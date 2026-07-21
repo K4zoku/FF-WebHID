@@ -274,6 +274,7 @@ fn run_spawn(opts: SpawnOpts) -> anyhow::Result<()> {
 
     let mut stdin_buf = Vec::new();
     let mut done = false;
+    let mut uhid_error_count = 0;
 
     while !done {
         let mut pfds = [
@@ -298,18 +299,54 @@ fn run_spawn(opts: SpawnOpts) -> anyhow::Result<()> {
             anyhow::bail!("poll failed: {err}");
         }
 
-        if pfds[0].revents & libc::POLLIN != 0 {
+        let uhid_revents = pfds[0].revents;
+
+        // ── uhid fd error (POLLERR/POLLHUP/POLLNVAL) ──────────────────────
+        // The kernel sets these when the virtual device has been destroyed
+        // internally (a kernel bug on some Zen kernels after repeated
+        // open/close cycles).  Exit cleanly so the test runner knows the
+        // device is dead and can restart us.
+        if uhid_revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0 {
+            uhid_error_count += 1;
+            emit_stdout(&serde_json::json!({
+                "event": "uhid_error",
+                "revents": uhid_revents,
+                "count": uhid_error_count,
+            }));
+            if uhid_error_count >= 3 {
+                log::error!(
+                    "uhid fd entered error state (revents={}) after {}/3 checks; exiting",
+                    uhid_revents,
+                    uhid_error_count,
+                );
+                break;
+            }
+            log::warn!(
+                "uhid fd error (revents={}) check {}/3 — will pause before retry",
+                uhid_revents,
+                uhid_error_count,
+            );
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            continue;
+        }
+
+        if uhid_revents & libc::POLLIN != 0 {
             if let Err(e) = poll_read_uhid_event(fd) {
-                // If the read fails (e.g. fd closed), exit.
                 log::warn!("uhid read error: {e:#}");
                 break;
             }
         }
 
-        if pfds[1].revents & libc::POLLIN != 0 {
+        let stdin_revents = pfds[1].revents;
+
+        // stdin EOF or error
+        if stdin_revents & (libc::POLLIN | libc::POLLHUP) != 0 {
+            if stdin_revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0 {
+                log::info!("stdin closed, destroying device");
+                break;
+            }
             let n = poll_read_stdin(&mut stdin_buf)?;
             if n == 0 {
-                // stdin EOF
                 log::info!("stdin EOF, destroying device");
                 break;
             }
@@ -362,10 +399,26 @@ fn poll_read_uhid_event(fd: std::os::unix::io::RawFd) -> anyhow::Result<()> {
             }
         }
         UHID_GET_REPORT => {
-            emit_stdout(&serde_json::json!({"event": "get_report"}));
+            let rid = get_report_request_id(&event);
+            emit_stdout(&serde_json::json!({
+                "event": "get_report",
+                "id": rid,
+            }));
+            let reply = build_get_report_reply_event(rid);
+            if let Err(e) = write_event(fd, &reply) {
+                log::warn!("get_report reply write failed: {e:#}");
+            }
         }
         UHID_SET_REPORT => {
-            emit_stdout(&serde_json::json!({"event": "set_report"}));
+            let rid = get_report_request_id(&event);
+            emit_stdout(&serde_json::json!({
+                "event": "set_report",
+                "id": rid,
+            }));
+            let reply = build_set_report_reply_event(rid);
+            if let Err(e) = write_event(fd, &reply) {
+                log::warn!("set_report reply write failed: {e:#}");
+            }
         }
         other => {
             emit_stdout(&serde_json::json!({
@@ -382,16 +435,22 @@ fn poll_read_uhid_event(fd: std::os::unix::io::RawFd) -> anyhow::Result<()> {
 #[cfg(target_os = "linux")]
 fn poll_read_stdin(buf: &mut Vec<u8>) -> anyhow::Result<usize> {
     let mut tmp = [0u8; 4096];
-    let n = unsafe {
-        libc::read(libc::STDIN_FILENO, tmp.as_mut_ptr() as *mut std::ffi::c_void, tmp.len())
-    };
-    if n < 0 {
-        let err = std::io::Error::last_os_error();
-        if err.kind() == std::io::ErrorKind::WouldBlock {
-            return Ok(0);
+    let n = loop {
+        let r = unsafe {
+            libc::read(libc::STDIN_FILENO, tmp.as_mut_ptr() as *mut std::ffi::c_void, tmp.len())
+        };
+        if r < 0 {
+            let err = std::io::Error::last_os_error();
+            if err.kind() == std::io::ErrorKind::Interrupted {
+                continue;
+            }
+            if err.kind() == std::io::ErrorKind::WouldBlock {
+                return Ok(0);
+            }
+            return Err(err.into());
         }
-        return Err(err.into());
-    }
+        break r;
+    };
     if n == 0 {
         return Ok(0);
     }
