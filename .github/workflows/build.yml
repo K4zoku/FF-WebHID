@@ -52,6 +52,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
 
+      - name: Define variables
+        id: variables
+        shell: bash
+        run: |
+          git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+          echo "VERSION=$(git describe --tags | sed 's/^v//;s/_/./;s/\([^-]*-g\)/r\1/;s/-/./g')" >> "$GITHUB_OUTPUT"
+
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -180,13 +187,14 @@ jobs:
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.artifact_name }}
+          name: ${{ matrix.artifact_name }}-${{ steps.variables.outputs.VERSION }}
           path: artifacts/
 
       - name: Upload .deb (Linux)
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v7
         with:
+          name: ${{ matrix.artifact_name }}-deb-${{ steps.variables.outputs.VERSION }}
           path: dist/*.deb
           archive: false
 
@@ -194,6 +202,7 @@ jobs:
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v7
         with:
+          name: ${{ matrix.artifact_name }}-rpm-${{ steps.variables.outputs.VERSION }}
           path: dist/*.rpm
           archive: false
 
@@ -201,34 +210,35 @@ jobs:
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v7
         with:
-          name: webhid-macos-x86_64
+          name: webhid-macos-x86_64-${{ steps.variables.outputs.VERSION }}
           path: artifacts-x86_64/
 
       - name: Upload macOS aarch64
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v7
         with:
-          name: webhid-macos-aarch64
+          name: webhid-macos-aarch64-${{ steps.variables.outputs.VERSION }}
           path: artifacts-aarch64/
 
       - name: Upload macOS universal
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v7
         with:
-          name: webhid-macos-universal
+          name: webhid-macos-universal-${{ steps.variables.outputs.VERSION }}
           path: artifacts-universal/
 
       - name: Upload Windows x86_64 portable
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v7
         with:
-          name: webhid-windows-x86_64
+          name: webhid-windows-x86_64-${{ steps.variables.outputs.VERSION }}
           path: artifacts-portable-x86_64/
 
       - name: Upload Windows x86_64 MSI
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v7
         with:
+          name: webhid-windows-x86_64-msi-${{ steps.variables.outputs.VERSION }}
           path: artifacts-msi-x86_64/*.msi
           archive: false
 
@@ -236,13 +246,14 @@ jobs:
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v7
         with:
-          name: webhid-windows-aarch64
+          name: webhid-windows-aarch64-${{ steps.variables.outputs.VERSION }}
           path: artifacts-portable-aarch64/
 
       - name: Upload Windows aarch64 MSI
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v7
         with:
+          name: webhid-windows-aarch64-msi-${{ steps.variables.outputs.VERSION }}
           path: artifacts-msi-aarch64/*.msi
           archive: false
 

@@ -18,14 +18,22 @@ jobs:
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
 
+      - name: Define variables
+        id: variables
+        shell: bash
+        run: |
+          git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+          echo "VERSION=$(git describe --tags | sed 's/^v//;s/_/./;s/\([^-]*-g\)/r\1/;s/-/./g')" >> "$GITHUB_OUTPUT"
+
       - name: Build Addon XPI
         run: make build-addon
 
       - name: Upload XPI artifact
         uses: actions/upload-artifact@v7
         with:
-          name: webhid-addon
+          name: webhid-addon-${{ steps.variables.outputs.VERSION }}
           path: dist/webhid-addon.xpi
+          archive: false
 
   build:
     name: Build (${{ matrix.os }} ${{ matrix.arch }})
@@ -59,6 +67,13 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Define variables
+        id: variables
+        shell: bash
+        run: |
+          git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+          echo "VERSION=$(git describe --tags | sed 's/^v//;s/_/./;s/\([^-]*-g\)/r\1/;s/-/./g')" >> "$GITHUB_OUTPUT"
 
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
@@ -181,70 +196,74 @@ jobs:
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v7
         with:
-          name: webhid-windows-x86_64
+          name: webhid-windows-x86_64-${{ steps.variables.outputs.VERSION }}
           path: artifacts-portable-x86_64/
 
       - name: Upload Windows x86_64 MSI
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v7
         with:
-          name: webhid-windows-x86_64-msi
-          path: artifacts-msi-x86_64/
+          name: webhid-windows-x86_64-msi-${{ steps.variables.outputs.VERSION }}
+          path: artifacts-msi-x86_64/*.msi
+          archive: false
 
       - name: Upload Windows aarch64 portable
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v7
         with:
-          name: webhid-windows-aarch64
+          name: webhid-windows-aarch64-${{ steps.variables.outputs.VERSION }}
           path: artifacts-portable-aarch64/
 
       - name: Upload Windows aarch64 MSI
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v7
         with:
-          name: webhid-windows-aarch64-msi
-          path: artifacts-msi-aarch64/
+          name: webhid-windows-aarch64-msi-${{ steps.variables.outputs.VERSION }}
+          path: artifacts-msi-aarch64/*.msi
+          archive: false
 
       - name: Upload Artifacts (Linux)
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.artifact_name }}
+          name: ${{ matrix.artifact_name }}-${{ steps.variables.outputs.VERSION }}
           path: artifacts/
 
       - name: Upload .deb (Linux)
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.artifact_name }}-deb
+          name: ${{ matrix.artifact_name }}-deb-${{ steps.variables.outputs.VERSION }}
           path: dist/*.deb
+          archive: false
 
       - name: Upload .rpm (Linux)
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.artifact_name }}-rpm
+          name: ${{ matrix.artifact_name }}-rpm-${{ steps.variables.outputs.VERSION }}
           path: dist/*.rpm
+          archive: false
 
       - name: Upload macOS x86_64
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v7
         with:
-          name: webhid-macos-x86_64
+          name: webhid-macos-x86_64-${{ steps.variables.outputs.VERSION }}
           path: artifacts-x86_64/
 
       - name: Upload macOS aarch64
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v7
         with:
-          name: webhid-macos-aarch64
+          name: webhid-macos-aarch64-${{ steps.variables.outputs.VERSION }}
           path: artifacts-aarch64/
 
       - name: Upload macOS universal
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v7
         with:
-          name: webhid-macos-universal
+          name: webhid-macos-universal-${{ steps.variables.outputs.VERSION }}
           path: artifacts-universal/
 
   release:
@@ -258,101 +277,100 @@ jobs:
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
 
+      - name: Define variables
+        id: variables
+        shell: bash
+        run: |
+          git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+          echo "VERSION=$(git describe --tags | sed 's/^v//;s/_/./;s/\([^-]*-g\)/r\1/;s/-/./g')" >> "$GITHUB_OUTPUT"
+
       - name: Download XPI
         uses: actions/download-artifact@v8
         with:
-          name: webhid-addon
+          name: webhid-addon-${{ steps.variables.outputs.VERSION }}
           path: dist/
 
       - name: Download Linux x86_64
         uses: actions/download-artifact@v8
         with:
-          name: webhid-linux-x86_64
+          name: webhid-linux-x86_64-${{ steps.variables.outputs.VERSION }}
           path: artifacts-linux-x86_64/
 
       - name: Download Linux aarch64
         uses: actions/download-artifact@v8
         with:
-          name: webhid-linux-aarch64
+          name: webhid-linux-aarch64-${{ steps.variables.outputs.VERSION }}
           path: artifacts-linux-aarch64/
 
       - name: Download Windows x86_64 portable
         uses: actions/download-artifact@v8
         with:
-          name: webhid-windows-x86_64
+          name: webhid-windows-x86_64-${{ steps.variables.outputs.VERSION }}
           path: artifacts-windows-x86_64/
 
       - name: Download Windows x86_64 MSI
         uses: actions/download-artifact@v8
         with:
-          name: webhid-windows-x86_64-msi
+          name: webhid-windows-x86_64-msi-${{ steps.variables.outputs.VERSION }}
           path: artifacts-windows-x86_64-msi/
 
       - name: Download Windows aarch64 portable
         uses: actions/download-artifact@v8
         with:
-          name: webhid-windows-aarch64
+          name: webhid-windows-aarch64-${{ steps.variables.outputs.VERSION }}
           path: artifacts-windows-aarch64/
 
       - name: Download Windows aarch64 MSI
         uses: actions/download-artifact@v8
         with:
-          name: webhid-windows-aarch64-msi
+          name: webhid-windows-aarch64-msi-${{ steps.variables.outputs.VERSION }}
           path: artifacts-windows-aarch64-msi/
 
       - name: Download macOS x86_64
         uses: actions/download-artifact@v8
         with:
-          name: webhid-macos-x86_64
+          name: webhid-macos-x86_64-${{ steps.variables.outputs.VERSION }}
           path: artifacts-macos-x86_64/
 
       - name: Download macOS aarch64
         uses: actions/download-artifact@v8
         with:
-          name: webhid-macos-aarch64
+          name: webhid-macos-aarch64-${{ steps.variables.outputs.VERSION }}
           path: artifacts-macos-aarch64/
 
       - name: Download macOS universal
         uses: actions/download-artifact@v8
         with:
-          name: webhid-macos-universal
+          name: webhid-macos-universal-${{ steps.variables.outputs.VERSION }}
           path: artifacts-macos-universal/
 
       - name: Download Linux x86_64 .deb
         uses: actions/download-artifact@v8
         with:
-          name: webhid-linux-x86_64-deb
+          name: webhid-linux-x86_64-deb-${{ steps.variables.outputs.VERSION }}
           path: debs-x86_64/
 
       - name: Download Linux aarch64 .deb
         uses: actions/download-artifact@v8
         with:
-          name: webhid-linux-aarch64-deb
+          name: webhid-linux-aarch64-deb-${{ steps.variables.outputs.VERSION }}
           path: debs-aarch64/
 
       - name: Download Linux x86_64 .rpm
         uses: actions/download-artifact@v8
         with:
-          name: webhid-linux-x86_64-rpm
+          name: webhid-linux-x86_64-rpm-${{ steps.variables.outputs.VERSION }}
           path: rpms-x86_64/
 
       - name: Download Linux aarch64 .rpm
         uses: actions/download-artifact@v8
         with:
-          name: webhid-linux-aarch64-rpm
+          name: webhid-linux-aarch64-rpm-${{ steps.variables.outputs.VERSION }}
           path: rpms-aarch64/
 
-      - name: Resolve tag name
-        id: tag
-        run: echo "name=${{ github.event.inputs.tag || github.ref_name }}" >> $GITHUB_OUTPUT
-
       - name: Package artifacts per platform
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          VER=${{ steps.tag.outputs.name }}
-          cp dist/webhid-addon.xpi "dist/webhid-addon-${VER}.xpi"
-          # Zip portable artifacts
+          VER=${{ steps.variables.outputs.VERSION }}
           cd artifacts-linux-x86_64   && zip -r "../webhid-linux-x86_64-${VER}.zip"   . && cd ..
           cd artifacts-linux-aarch64  && zip -r "../webhid-linux-aarch64-${VER}.zip"  . && cd ..
           cd artifacts-windows-x86_64 && zip -r "../webhid-windows-x86_64-${VER}.zip" . && cd ..
@@ -360,31 +378,26 @@ jobs:
           cd artifacts-macos-x86_64    && zip -r "../webhid-macos-x86_64-${VER}.zip"    . && cd ..
           cd artifacts-macos-aarch64   && zip -r "../webhid-macos-aarch64-${VER}.zip"   . && cd ..
           cd artifacts-macos-universal && zip -r "../webhid-macos-universal-${VER}.zip" . && cd ..
-          # MSI files
-          cp artifacts-windows-x86_64-msi/*.msi . 2>/dev/null || true
-          cp artifacts-windows-aarch64-msi/*.msi . 2>/dev/null || true
-          # .deb and .rpm files
-          cp debs-x86_64/*.deb . 2>/dev/null || true
-          cp debs-aarch64/*.deb . 2>/dev/null || true
-          cp rpms-x86_64/*.rpm . 2>/dev/null || true
-          cp rpms-aarch64/*.rpm . 2>/dev/null || true
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           files: |
-            dist/webhid-addon-*.xpi
+            dist/*.xpi
             webhid-*.zip
-            webhid-*.msi
-            webhid-*.deb
-            webhid-*.rpm
+            artifacts-windows-x86_64-msi/*.msi
+            artifacts-windows-aarch64-msi/*.msi
+            debs-x86_64/*.deb
+            debs-aarch64/*.deb
+            rpms-x86_64/*.rpm
+            rpms-aarch64/*.rpm
 
       # - name: Upload to AMO
       #   uses: kewisch/action-web-ext@v2
       #   with:
       #     cmd: sign
-      #     source: dist/webhid-addon-${{ steps.tag.outputs.name }}.xpi
+      #       source: dist/webhid-addon-${{ steps.variables.outputs.VERSION }}.xpi
       #     channel: listed
       #     apiKey: ${{ secrets.AMO_JWT_ISSUER }}
       #     apiSecret: ${{ secrets.AMO_JWT_SECRET }}

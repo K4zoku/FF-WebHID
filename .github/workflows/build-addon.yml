@@ -21,6 +21,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
 
+      - name: Define variables
+        id: variables
+        shell: bash
+        run: |
+          git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+          echo "VERSION=$(git describe --tags | sed 's/^v//;s/_/./;s/\([^-]*-g\)/r\1/;s/-/./g')" >> "$GITHUB_OUTPUT"
+
       - name: Node dependency audit
         run: npm audit --audit-level=high
 
@@ -36,6 +43,6 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: webhid-addon
+          name: webhid-addon-${{ steps.variables.outputs.VERSION }}
           path: dist/webhid-addon.xpi
           archive: false
