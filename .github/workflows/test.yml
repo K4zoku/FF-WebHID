@@ -18,31 +18,30 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
-    name: Build (debug)
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: crates -> target
-      - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y libudev-dev
-      - name: Build binaries
-        run: cargo build --manifest-path crates/Cargo.toml
-      - name: Upload binaries
-        uses: actions/upload-artifact@v7
-        with:
-          name: debug-binaries
-          path: |
-            crates/target/debug/webhid-daemon
-            crates/target/debug/webhid-native-messaging
-            crates/target/debug/uhid-mock
+  # build:
+  #   name: Build (debug)
+  #   runs-on: ubuntu-24.04
+  #   steps:
+  #     - uses: actions/checkout@v7
+  #     - uses: dtolnay/rust-toolchain@stable
+  #     - uses: Swatinem/rust-cache@v2
+  #       with:
+  #         workspaces: crates -> target
+  #     - name: Install dependencies
+  #       run: sudo apt-get update && sudo apt-get install -y libudev-dev
+  #     - name: Build binaries
+  #       run: cargo build --manifest-path crates/Cargo.toml
+  #     - name: Upload binaries
+  #       uses: actions/upload-artifact@v7
+  #       with:
+  #         name: debug-binaries
+  #         path: |
+  #           crates/target/debug/webhid-daemon
+  #           crates/target/debug/webhid-native-messaging
+  #           crates/target/debug/uhid-mock
 
   unit:
     name: Unit Tests
-    needs: build
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
