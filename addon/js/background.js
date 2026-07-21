@@ -96,6 +96,9 @@
 
   let _workerBundle = null;
   let _workerBundlePromise = null;
+  let _armedFilter = null;
+  let _armedFilterTimer = null;
+  let _filteredRequestId = null;
 
   async function _ensureWorkerBundle() {
     if (_workerBundle) return _workerBundle;
@@ -123,7 +126,15 @@
 
   browser.webRequest.onBeforeRequest.addListener(
     (details) => {
-      if (!details.url.includes("__webhid_wkr=1")) return;
+      if (!_armedFilter ||
+          details.url !== _armedFilter.url ||
+          details.tabId !== _armedFilter.tabId) return;
+      _filteredRequestId = details.requestId;
+      _armedFilter = null;
+      if (_armedFilterTimer) {
+        clearTimeout(_armedFilterTimer);
+        _armedFilterTimer = null;
+      }
       logger.info("StreamFilter: replacing body for", details.url);
       const filter = browser.webRequest.filterResponseData(details.requestId);
       const enc = new TextEncoder();
@@ -145,7 +156,8 @@
 
   browser.webRequest.onHeadersReceived.addListener(
     (details) => {
-      if (!details.url.includes("__webhid_wkr=1")) return;
+      if (details.requestId !== _filteredRequestId) return;
+      _filteredRequestId = null;
       logger.info("StreamFilter: fixing headers for", details.url);
       const headers = details.responseHeaders.filter(
         (h) => !/^(content-security-policy|content-type|content-length|content-disposition|x-content-type-options)$/i.test(h.name),
@@ -833,6 +845,22 @@
 
       case "checkWorkerCsp":
         sendResponse({ blocked: !!_cspWorkerBlocked.get(sender.tab?.id) });
+        return false;
+
+      case "armWorkerFilter":
+        if (_armedFilterTimer) clearTimeout(_armedFilterTimer);
+        _armedFilter = { url: request.url, tabId: sender.tab?.id };
+        _armedFilterTimer = setTimeout(() => { _armedFilter = null; }, 5000);
+        sendResponse({ ok: true });
+        return false;
+
+      case "disarmWorkerFilter":
+        _armedFilter = null;
+        if (_armedFilterTimer) {
+          clearTimeout(_armedFilterTimer);
+          _armedFilterTimer = null;
+        }
+        sendResponse({ ok: true });
         return false;
 
       case "fetchResource": {

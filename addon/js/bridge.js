@@ -68,10 +68,10 @@
     return url;
   }
 
-  function _getWorkerRedirectUrl() {
-    const u = new URL(location.href);
-    u.searchParams.set("__webhid_wkr", "1");
-    return u.href;
+  async function _getWorkerRedirectUrl() {
+    const url = location.origin + location.pathname + location.search;
+    await browser.runtime.sendMessage({ action: "armWorkerFilter", url });
+    return url;
   }
 
   async function _spawnControlWorker(token, wsPort) {
@@ -295,10 +295,11 @@
     if (_workers.has(deviceId)) return true;
     let worker;
     try {
-      const url = _getWorkerRedirectUrl();
+      const url = await _getWorkerRedirectUrl();
       worker = new Worker(url);
     } catch (e) {
       logger.warn("redirect worker failed for", deviceId, ":", e.message);
+      browser.runtime.sendMessage({ action: "disarmWorkerFilter" }).catch(() => {});
     }
     if (!worker) {
       let cspBlocked = false;
