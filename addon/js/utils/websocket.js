@@ -20,17 +20,17 @@
   const webhid = globalThis.webhid;
   const WS_CLOSE_UNKNOWN_TOKEN = 4401;
   const WS_CLOSE_BAD_TOKEN = 4402;
-  const _log = webhid.import("logger");
+  const logger = webhid.import("logger");
 
   function createWsTransport(opts) {
     const tag = opts.tag || "ws";
-    const log = (level, msg) => _log[level](msg);
+    const log = (level, msg) => logger[level](msg);
     let ws = null;
     let connectMsg = null;
     let reconnectTimer = null;
     let reconnectDelay = 500;
 
-    function _doConnect() {
+    function doConnect() {
       if (!connectMsg) return;
       log("debug", "WS connecting to ws://127.0.0.1:" + connectMsg.wsPort);
       try {
@@ -39,7 +39,7 @@
         ]);
       } catch (e) {
         log("error", "WS constructor threw: " + (e.message || e));
-        _scheduleReconnect();
+        scheduleReconnect();
         return;
       }
       if (opts.onBinary) ws.binaryType = "arraybuffer";
@@ -67,7 +67,7 @@
           return;
         }
         opts.onClosed && opts.onClosed();
-        _scheduleReconnect();
+        scheduleReconnect();
       };
       ws.onmessage = ({ data }) => {
         if (typeof data === "string") {
@@ -78,12 +78,12 @@
       };
     }
 
-    function _scheduleReconnect() {
+    function scheduleReconnect() {
       if (!connectMsg || reconnectTimer) return;
       log("debug", "scheduling reconnect in " + reconnectDelay + "ms");
       reconnectTimer = setTimeout(() => {
         reconnectTimer = null;
-        _doConnect();
+        doConnect();
       }, reconnectDelay);
       reconnectDelay = Math.min(reconnectDelay * 2, 5000);
     }
@@ -92,8 +92,8 @@
       connect(msg) {
         connectMsg = msg;
         if (msg.logLevel !== undefined)
-          _log.applyLevel(msg.logLevel);
-        _doConnect();
+          logger.applyLevel(msg.logLevel);
+        doConnect();
       },
       send(frame) {
         if (!ws || ws.readyState !== WebSocket.OPEN) return false;

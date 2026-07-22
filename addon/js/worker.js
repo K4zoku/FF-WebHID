@@ -1,23 +1,23 @@
 "use strict";
 const logger = webhid.import("logger");
-const _createSettingsStore = webhid.import("createSettingsStore");
-const _GLOBAL_DEFAULTS = webhid.import("GLOBAL_DEFAULTS");
-const _createWsTransport = webhid.import("createWsTransport");
+const createSettingsStore = webhid.import("createSettingsStore");
+const GLOBAL_DEFAULTS = webhid.import("GLOBAL_DEFAULTS");
+const createWsTransport = webhid.import("createWsTransport");
 logger.initLogger("worker");
 const MSG_SEND_REPORT = 0x01;
 const MSG_SEND_FEATURE_REPORT = 0x02;
 const MSG_RECEIVE_FEATURE_REPORT = 0x03;
 const RESP_RECEIVE_FEATURE_REPORT = 0x83;
-const settings = _createSettingsStore(_GLOBAL_DEFAULTS);
+const settings = createSettingsStore(GLOBAL_DEFAULTS);
 settings.on("logLevel", (v) => logger.applyLevel(v));
-let _nextReqId = 1;
-const _pending = new Map();
-let _transport = null;
-let _dataPort = null;
+let nextReqId = 1;
+const pending = new Map();
+let transport = null;
+let dataPort = null;
 
 self.onmessage = ({ data: msg, ports }) => {
   if (msg.type === "connect") {
-    _transport = _createWsTransport({
+    transport = createWsTransport({
       tag: "worker",
       onReady: () => self.postMessage({ type: "ready" }),
       onClosed: () => self.postMessage({ type: "closed" }),
@@ -28,20 +28,20 @@ self.onmessage = ({ data: msg, ports }) => {
         pushInputBatch(batch);
       },
     });
-    _transport.connect(msg);
+    transport.connect(msg);
     return;
   }
   if (msg.type === "set-port") {
-    _dataPort = ports[0];
-    _dataPort.onmessage = (ev) => handleDataPortMessage(ev.data);
+    dataPort = ports[0];
+    dataPort.onmessage = (ev) => handleDataPortMessage(ev.data);
     logger.debug("data port received from bridge");
     return;
   }
   if (msg.type === "unset-port") {
-    if (_dataPort) {
-      const port = _dataPort;
-      _dataPort.onmessage = null;
-      _dataPort = null;
+    if (dataPort) {
+      const port = dataPort;
+      dataPort.onmessage = null;
+      dataPort = null;
       self.postMessage({ type: "return-port" }, [port]);
     } else {
       self.postMessage({ type: "return-port" });
@@ -75,7 +75,7 @@ function pushInputBatch(batch) {
       const buf = new ArrayBuffer(payloadLen);
       const view = new Uint8Array(buf);
       view.set(batch.subarray(offset + 1, offset + len));
-      if (logger._level >= 3) {
+      if (logger.level >= 3) {
         let hex = "";
         for (let i = 0; i < Math.min(8, view.length); i++)
           hex += view[i].toString(16).padStart(2, "0") + " ";
@@ -88,25 +88,25 @@ function pushInputBatch(batch) {
             hex,
         );
       }
-      if (_dataPort) {
-        _dataPort.postMessage({ type: "inputReport", reportId, data: buf }, [
+      if (dataPort) {
+        dataPort.postMessage({ type: "inputReport", reportId, data: buf }, [
           buf,
         ]);
       }
     } else {
-      if (_dataPort) {
-        _dataPort.postMessage({ type: "inputReport", reportId, data: null });
+      if (dataPort) {
+        dataPort.postMessage({ type: "inputReport", reportId, data: null });
       }
     }
     offset += len;
     count++;
   }
-  if (count > 0 && _dataPort)
+  if (count > 0 && dataPort)
     logger.debug("forwarded " + count + " reports via data port");
 }
 
 function handleSend(msg, msgType) {
-  if (!_transport || !_transport.isOpen()) {
+  if (!transport || !transport.isOpen()) {
     logger.warn("send: WS not open");
     replyData({
       type: msgType === MSG_SEND_REPORT ? "sendResult" : "featureResult",
@@ -124,7 +124,7 @@ function handleSend(msg, msgType) {
     });
     return;
   }
-  const reqId = _nextReqId++;
+  const reqId = nextReqId++;
   const frame = new Uint8Array(6 + payload.length);
   const dv = new DataView(frame.buffer);
   frame[0] = msgType;
@@ -133,14 +133,14 @@ function handleSend(msg, msgType) {
   frame.set(payload, 6);
   const isFeature = msgType !== MSG_SEND_REPORT;
   if (settings.fireAndForget) {
-    _transport.send(frame);
+    transport.send(frame);
     replyData({
       type: isFeature ? "featureResult" : "sendResult",
       reqId: msg.reqId,
     });
     return;
   }
-  _pending.set(reqId, {
+  pending.set(reqId, {
     resolve: () =>
       replyData({
         type: isFeature ? "featureResult" : "sendResult",
@@ -156,17 +156,17 @@ function handleSend(msg, msgType) {
   // E2: If the WS dropped between the isOpen() check above and send(),
   // reject the pending entry immediately so the caller's Promise resolves
   // instead of hanging until the worker is torn down.
-  if (!_transport.send(frame)) {
-    const p = _pending.get(reqId);
+  if (!transport.send(frame)) {
+    const p = pending.get(reqId);
     if (p) {
-      _pending.delete(reqId);
+      pending.delete(reqId);
       p.reject(new Error("ws closed"));
     }
   }
 }
 
 function handleReceiveFeature(msg) {
-  if (!_transport || !_transport.isOpen()) {
+  if (!transport || !transport.isOpen()) {
     replyData({
       type: "featureResult",
       reqId: msg.reqId,
@@ -174,13 +174,13 @@ function handleReceiveFeature(msg) {
     });
     return;
   }
-  const reqId = _nextReqId++;
+  const reqId = nextReqId++;
   const frame = new Uint8Array(6);
   const dv = new DataView(frame.buffer);
   frame[0] = MSG_RECEIVE_FEATURE_REPORT;
   dv.setUint32(1, reqId, true);
   frame[5] = msg.reportId;
-  _pending.set(reqId, {
+  pending.set(reqId, {
     resolve: (data) => {
       const transfer =
         data instanceof Uint8Array && data.buffer ? [data.buffer] : [];
@@ -195,17 +195,17 @@ function handleReceiveFeature(msg) {
   });
   // E2: Same race protection as handleSend — reject immediately if the WS
   // transport refused the frame, otherwise the feature-read Promise hangs.
-  if (!_transport.send(frame)) {
-    const p = _pending.get(reqId);
+  if (!transport.send(frame)) {
+    const p = pending.get(reqId);
     if (p) {
-      _pending.delete(reqId);
+      pending.delete(reqId);
       p.reject(new Error("ws closed"));
     }
   }
 }
 
 function replyData(msg, transfer) {
-  if (_dataPort) _dataPort.postMessage(msg, transfer || []);
+  if (dataPort) dataPort.postMessage(msg, transfer || []);
 }
 
 function handleControlResponse(batch) {
@@ -214,9 +214,9 @@ function handleControlResponse(batch) {
   const dv = new DataView(batch.buffer, batch.byteOffset, batch.byteLength);
   const reqId = dv.getUint32(1, true);
   const status = batch[5];
-  const p = _pending.get(reqId);
+  const p = pending.get(reqId);
   if (!p) return;
-  _pending.delete(reqId);
+  pending.delete(reqId);
   if (respType === RESP_RECEIVE_FEATURE_REPORT) {
     if (status !== 0) return p.reject(new Error("feature read failed"));
     if (batch.length < 8) return p.reject(new Error("short feature resp"));

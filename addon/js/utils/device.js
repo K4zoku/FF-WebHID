@@ -1,6 +1,6 @@
 (function () {
   const webhid = globalThis.webhid;
-  const _svgCache = {};
+  const svgCache = {};
 
   function guessDeviceType(device) {
     if (device.usagePage === 0x01) {
@@ -82,12 +82,12 @@
   }
 
   async function fetchDeviceIcon(type) {
-    if (_svgCache[type]) return _svgCache[type];
+    if (svgCache[type]) return svgCache[type];
     try {
       const svg = await webhid.import("fetchResource")(
         "res/" + type + ".svg",
       );
-      _svgCache[type] = svg;
+      svgCache[type] = svg;
       return svg;
     } catch {
       return null;

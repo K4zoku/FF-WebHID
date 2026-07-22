@@ -6,10 +6,10 @@
   const fetchResource = webhid.import("fetchResource");
   logger.initLogger("bg");
 
-  let _deviceCache = [];
-  const _pendingPicker = new Map();
+  let deviceCache = [];
+  const pendingPicker = new Map();
 
-  async function _saveDeviceInfo(device) {
+  async function saveDeviceInfo(device) {
     if (!device || !device.deviceId) return;
     try {
       await browser.storage.local.set({
@@ -18,7 +18,7 @@
     } catch {}
   }
 
-  async function _saveDeviceInfoBatch(devices) {
+  async function saveDeviceInfoBatch(devices) {
     if (!devices || !devices.length) return;
     const entries = {};
     for (const d of devices) {
@@ -29,9 +29,9 @@
     } catch {}
   }
 
-  async function _getDeviceInfo(deviceId) {
+  async function getDeviceInfo(deviceId) {
     if (!deviceId) return null;
-    const live = _deviceCache.find((d) => d.deviceId === deviceId);
+    const live = deviceCache.find((d) => d.deviceId === deviceId);
     if (live) return live;
     try {
       const result = await browser.storage.local.get(`deviceInfo:${deviceId}`);
@@ -41,21 +41,21 @@
     }
   }
 
-  async function _removeDeviceInfo(deviceId) {
+  async function removeDeviceInfo(deviceId) {
     if (!deviceId) return;
     try {
       await browser.storage.local.remove(`deviceInfo:${deviceId}`);
     } catch {}
   }
 
-  const _deviceTabMap = new Map();
+  const deviceTabMap = new Map();
 
-  let _workerBundle = null;
-  let _workerBundlePromise = null;
+  let workerBundle = null;
+  let workerBundlePromise = null;
 
-  async function _ensureWorkerBundle() {
-    if (_workerBundle) return _workerBundle;
-    if (_workerBundlePromise) return _workerBundlePromise;
+  async function ensureWorkerBundle() {
+    if (workerBundle) return workerBundle;
+    if (workerBundlePromise) return workerBundlePromise;
     const files = [
       "js/utils/bootstrap.js",
       "js/utils/logger.js",
@@ -63,19 +63,19 @@
       "js/utils/websocket.js",
       "js/worker.js",
     ];
-    _workerBundlePromise = (async () => {
+    workerBundlePromise = (async () => {
       const texts = await Promise.all(files.map((f) =>
         fetch(browser.runtime.getURL(f)).then((r) => {
           if (!r.ok) throw new Error("fetch " + f + " failed: " + r.status);
           return r.text();
         }),
       ));
-      _workerBundle = texts.join("\n");
-      return _workerBundle;
+      workerBundle = texts.join("\n");
+      return workerBundle;
     })();
-    return _workerBundlePromise;
+    return workerBundlePromise;
   }
-  _ensureWorkerBundle();
+  ensureWorkerBundle();
 
   browser.webRequest.onBeforeRequest.addListener(
     (details) => {
@@ -84,8 +84,8 @@
       const filter = browser.webRequest.filterResponseData(details.requestId);
       const enc = new TextEncoder();
       filter.onstart = () => {
-        if (_workerBundle) {
-          filter.write(enc.encode(_workerBundle));
+        if (workerBundle) {
+          filter.write(enc.encode(workerBundle));
         } else {
           filter.write(enc.encode(
             "self.postMessage({ type: 'error', error: 'worker bundle not ready' });"
@@ -115,10 +115,10 @@
 
   function registerDeviceTab(deviceId, tabId) {
     if (!deviceId || tabId == null) return;
-    let tabs = _deviceTabMap.get(deviceId);
+    let tabs = deviceTabMap.get(deviceId);
     if (!tabs) {
       tabs = new Set();
-      _deviceTabMap.set(deviceId, tabs);
+      deviceTabMap.set(deviceId, tabs);
     }
     tabs.add(tabId);
     logger.debug("register device " + deviceId + " tab " + tabId);
@@ -126,22 +126,22 @@
 
   function unregisterDeviceTab(deviceId, tabId) {
     if (!deviceId || tabId == null) return;
-    const tabs = _deviceTabMap.get(deviceId);
+    const tabs = deviceTabMap.get(deviceId);
     if (!tabs) return;
     tabs.delete(tabId);
-    if (tabs.size === 0) _deviceTabMap.delete(deviceId);
+    if (tabs.size === 0) deviceTabMap.delete(deviceId);
   }
 
   function isTabAuthorizedForDevice(tabId, deviceId) {
-    const tabs = _deviceTabMap.get(deviceId);
+    const tabs = deviceTabMap.get(deviceId);
     return !!tabs && tabs.has(tabId);
   }
 
   function purgeTab(tabId) {
     if (tabId == null) return;
-    for (const [deviceId, tabs] of _deviceTabMap) {
+    for (const [deviceId, tabs] of deviceTabMap) {
       if (tabs.delete(tabId) && tabs.size === 0) {
-        _deviceTabMap.delete(deviceId);
+        deviceTabMap.delete(deviceId);
         NativeMessaging.closeDevice(deviceId).catch(() => {});
       }
     }
@@ -172,7 +172,7 @@
   function tabsForEvent(message) {
     const eventType = message.e;
     if (eventType === EVT_HANDSHAKE || !message.i) return null;
-    const tabs = _deviceTabMap.get(message.i);
+    const tabs = deviceTabMap.get(message.i);
     return tabs && tabs.size > 0 ? [...tabs] : null;
   }
 
@@ -187,7 +187,7 @@
   // currently loaded in any tab. The bridge clears its _sessionTokens /
   // _openDevices maps and emits disconnect events to the page. Used when
   // the NM host / daemon disappears so callers stop using stale tokens.
-  function _broadcastGlobalReset() {
+  function broadcastGlobalReset() {
     browser.tabs
       .query({})
       .then((tabs) => {
@@ -210,7 +210,7 @@
   const NM_HOST_DAEMON = "webhid.daemon_nm_host";
 
   const settings = createSettingsStore(GLOBAL_DEFAULTS);
-  function _nmHostName() {
+  function nmHostName() {
     return settings.daemonAsNmHost ? NM_HOST_DAEMON : NM_HOST_FORWARDER;
   }
 
@@ -225,11 +225,11 @@
       }
     }
     settings.set(global);
-    logger.info("NM host:", _nmHostName());
+    logger.info("NM host:", nmHostName());
   }
 
   settings.on("daemonAsNmHost", () => {
-    logger.info("NM host changed:", _nmHostName());
+    logger.info("NM host changed:", nmHostName());
     NativeMessaging.reconnectWithNewHost();
   });
 
@@ -247,17 +247,17 @@
 
   const NativeMessaging = {
     port: null,
-    _nextId: 1,
-    _pending: new Map(),
-    _reconnectTimer: null,
-    _reconnectDelay: 1000,
+    nextId: 1,
+    pending: new Map(),
+    reconnectTimer: null,
+    reconnectDelay: 1000,
 
     connect() {
       if (this.port) return Promise.resolve();
-      logger.debug("connecting to " + _nmHostName() + "...");
+      logger.debug("connecting to " + nmHostName() + "...");
       try {
-        this.port = browser.runtime.connectNative(_nmHostName());
-        this._reconnectDelay = 1000;
+        this.port = browser.runtime.connectNative(nmHostName());
+        this.reconnectDelay = 1000;
         logger.debug("connected");
 
         this.port.onMessage.addListener((message) => {
@@ -267,8 +267,8 @@
             message.n === undefined
           ) {
             logger.error("host error: " + message.E);
-            for (const [, p] of this._pending) p.resolve(message);
-            this._pending.clear();
+            for (const [, p] of this.pending) p.resolve(message);
+            this.pending.clear();
             return;
           }
           if (
@@ -284,9 +284,9 @@
             return;
           }
           if (message.n !== undefined) {
-            const p = this._pending.get(message.n);
+            const p = this.pending.get(message.n);
             if (p) {
-              this._pending.delete(message.n);
+              this.pending.delete(message.n);
               p.resolve(message);
               return;
             }
@@ -297,28 +297,28 @@
         this.port.onDisconnect.addListener(() => {
           logger.warn(
             "disconnected; will retry in " +
-              this._reconnectDelay +
+              this.reconnectDelay +
               "ms. " +
               "If persistent: check daemon status (systemctl status webhid-daemon), " +
               "group membership (groups), and NM host manifest.",
           );
           this.port = null;
-          for (const [id, p] of this._pending) p.resolve({ s: 503 });
-          this._pending.clear();
+          for (const [id, p] of this.pending) p.resolve({ s: 503 });
+          this.pending.clear();
           // E4: Broadcast a global-reset to every content-script bridge so
           // they drop stale _sessionTokens / _openDevices state. Daemon
           // restart invalidates every session token; without this, the
           // bridge would happily keep routing sendReport using tokens the
           // daemon no longer recognizes, leaving pages in a half-broken
           // state until they explicitly close + reopen.
-          _broadcastGlobalReset();
-          this._scheduleReconnect();
+          broadcastGlobalReset();
+          this.scheduleReconnect();
         });
 
         return Promise.resolve();
       } catch (error) {
         logger.error("connect failed:", error);
-        this._scheduleReconnect();
+        this.scheduleReconnect();
         return Promise.reject(error);
       }
     },
@@ -330,22 +330,22 @@
         } catch {}
         this.port = null;
       }
-      if (this._reconnectTimer) {
-        clearTimeout(this._reconnectTimer);
-        this._reconnectTimer = null;
+      if (this.reconnectTimer) {
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
       }
-      this._reconnectDelay = 1000;
+      this.reconnectDelay = 1000;
       this.connect().catch(() => {});
     },
 
-    _scheduleReconnect() {
-      if (this._reconnectTimer) return;
-      this._reconnectTimer = setTimeout(() => {
-        this._reconnectTimer = null;
+    scheduleReconnect() {
+      if (this.reconnectTimer) return;
+      this.reconnectTimer = setTimeout(() => {
+        this.reconnectTimer = null;
         logger.debug("reconnecting...");
         this.connect().catch(() => {});
-      }, this._reconnectDelay);
-      this._reconnectDelay = Math.min(this._reconnectDelay * 2, 10000);
+      }, this.reconnectDelay);
+      this.reconnectDelay = Math.min(this.reconnectDelay * 2, 10000);
     },
 
     sendRequest(request) {
@@ -355,13 +355,13 @@
           reject(new Error("NM disconnected, reconnecting; please retry"));
           return;
         }
-        const id = this._nextId++;
-        this._pending.set(id, { resolve, reject });
+        const id = this.nextId++;
+        this.pending.set(id, { resolve, reject });
         logger.debug("sendRequest a=" + (request.a || "packed") + " n=" + id);
         try {
           this.port.postMessage({ ...request, n: id });
         } catch (e) {
-          this._pending.delete(id);
+          this.pending.delete(id);
           reject(e);
         }
       });
@@ -374,8 +374,8 @@
           reject(new Error("NM disconnected, reconnecting; please retry"));
           return;
         }
-        const id = this._nextId++;
-        this._pending.set(id, { resolve, reject });
+        const id = this.nextId++;
+        this.pending.set(id, { resolve, reject });
         const packedBuf = buildPackedFn(id);
         logger.debug(
           "sendPacked msgType=0x" + packedBuf[0].toString(16) + " n=" + id,
@@ -383,7 +383,7 @@
         try {
           this.port.postMessage({ d: packedBuf.toBase64() });
         } catch (e) {
-          this._pending.delete(id);
+          this.pending.delete(id);
           reject(e);
         }
       });
@@ -475,16 +475,16 @@
       if (message.e === EVT_CONNECT || message.e === EVT_DISCONNECT) {
         if (message.v) {
           if (message.e === EVT_CONNECT) {
-            if (!_deviceCache.some((d) => d.deviceId === message.v.deviceId))
-              _deviceCache.push(message.v);
-            _saveDeviceInfo(message.v);
+            if (!deviceCache.some((d) => d.deviceId === message.v.deviceId))
+              deviceCache.push(message.v);
+            saveDeviceInfo(message.v);
           } else {
-            _deviceCache = _deviceCache.filter((d) => d.deviceId !== message.i);
+            deviceCache = deviceCache.filter((d) => d.deviceId !== message.i);
           }
         } else {
           NativeMessaging.enumerateDevices()
             .then((resp) => {
-              if (http.isOk(resp.s) && resp.D) _deviceCache = resp.D;
+              if (http.isOk(resp.s) && resp.D) deviceCache = resp.D;
             })
             .catch(() => {});
         }
@@ -548,8 +548,8 @@
 
   if (browser.notifications?.onClicked) {
     browser.notifications.onClicked.addListener(() => {
-      if (_pendingPicker.size > 0) {
-        const [tabId, req] = [..._pendingPicker.entries()][0];
+      if (pendingPicker.size > 0) {
+        const [tabId, req] = [...pendingPicker.entries()][0];
         browser.tabs.update(tabId, { active: true }).catch(() => {});
         browser.pageAction.openPopup?.().catch(() => {});
         browser.notifications.clear("webhid-picker").catch(() => {});
@@ -573,8 +573,8 @@
         NativeMessaging.enumerateDevices()
           .then((response) => {
             if (http.isOk(response.s) && response.D) {
-              _deviceCache = response.D;
-              _saveDeviceInfoBatch(response.D);
+              deviceCache = response.D;
+              saveDeviceInfoBatch(response.D);
             }
             sendResponse(response);
           })
@@ -726,7 +726,7 @@
             if (request.deviceId) {
               hashes = hashes.filter((h) => h !== request.deviceId);
               await browser.storage.local.set({ [storageKey]: hashes });
-              _removeDeviceInfo(request.deviceId);
+              removeDeviceInfo(request.deviceId);
             }
             sendResponse({ success: true, hashes });
           } catch (e) {
@@ -764,24 +764,24 @@
         return false;
 
       case "getDeviceCache":
-        if (_deviceCache.length === 0) {
+        if (deviceCache.length === 0) {
           NativeMessaging.enumerateDevices()
             .then((response) => {
               if (http.isOk(response.s) && response.D) {
-                _deviceCache = response.D;
+                deviceCache = response.D;
               }
-              _saveDeviceInfoBatch(_deviceCache);
-              sendResponse({ devices: _deviceCache });
+              saveDeviceInfoBatch(deviceCache);
+              sendResponse({ devices: deviceCache });
             })
-            .catch(() => sendResponse({ devices: _deviceCache }));
+            .catch(() => sendResponse({ devices: deviceCache }));
           return true;
         }
-        _saveDeviceInfoBatch(_deviceCache);
-        sendResponse({ devices: _deviceCache });
+        saveDeviceInfoBatch(deviceCache);
+        sendResponse({ devices: deviceCache });
         return false;
 
       case "getDeviceInfo":
-        _getDeviceInfo(request.deviceId).then((device) => {
+        getDeviceInfo(request.deviceId).then((device) => {
           sendResponse({ device });
         });
         return true;
@@ -812,7 +812,7 @@
           origin: request.origin,
           mode: request.mode || "pageAction",
         };
-        _pendingPicker.set(tabId, req);
+        pendingPicker.set(tabId, req);
 
         if (req.mode === "window") {
           const screenW = globalThis.screen?.availWidth || 1280;
@@ -862,7 +862,7 @@
 
       case "getPendingPicker": {
         sendResponse(
-          _pendingPicker.size > 0 ? [..._pendingPicker.values()][0] : null,
+          pendingPicker.size > 0 ? [...pendingPicker.values()][0] : null,
         );
         return false;
       }
@@ -870,11 +870,11 @@
       case "picker-result": {
         const { requestId, selected, devices } = request;
         let tabId = request.tabId;
-        if (tabId == null && _pendingPicker.size > 0) {
-          tabId = [..._pendingPicker.keys()][0];
+        if (tabId == null && pendingPicker.size > 0) {
+          tabId = [...pendingPicker.keys()][0];
         }
-        const req = tabId != null ? _pendingPicker.get(tabId) : null;
-        if (tabId != null) _pendingPicker.delete(tabId);
+        const req = tabId != null ? pendingPicker.get(tabId) : null;
+        if (tabId != null) pendingPicker.delete(tabId);
         if (req?.mode === "pageAction") {
           browser.pageAction.setIcon({ tabId, path: "icons/gamepad.svg" });
           browser.pageAction.setPopup({ tabId, popup: "html/popup.html" });

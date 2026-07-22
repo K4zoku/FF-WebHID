@@ -1,93 +1,93 @@
 (function () {
   if (window.navigator?.hid) return;
   const webhid = globalThis.webhid;
-  const _logger = webhid.import("logger");
-  const _http = webhid.import("http");
-  const _GLOBAL_DEFAULTS = webhid.import("GLOBAL_DEFAULTS");
-  const _createSettingsStore = webhid.import("createSettingsStore");
+  const logger = webhid.import("logger");
+  const http = webhid.import("http");
+  const GLOBAL_DEFAULTS = webhid.import("GLOBAL_DEFAULTS");
+  const createSettingsStore = webhid.import("createSettingsStore");
   delete globalThis.webhid;
-  _logger.initLogger("polyfill");
+  logger.initLogger("polyfill");
 
-  let _reqId = 0;
-  const _pending = {};
+  let nextReqId = 0;
+  const pending = {};
 
-  const _channel = new MessageChannel();
-  const _bridgePort = _channel.port1;
-  const _target = window === window.top ? window : window.top;
-  _target.postMessage({ __webhid_bridge: "init" }, "*", [_channel.port2]);
+  const channel = new MessageChannel();
+  const bridgePort = channel.port1;
+  const target = window === window.top ? window : window.top;
+  target.postMessage({ __webhid_bridge: "init" }, "*", [channel.port2]);
 
-  let _pairedDevices = null;
-  let _deviceInfoCache = null;
+  let pairedDevices = null;
+  let deviceInfoCache = null;
 
   async function getPairedDevices() {
-    if (_pairedDevices !== null) return _pairedDevices;
+    if (pairedDevices !== null) return pairedDevices;
     try {
       const result = await sendRequest("getPairedDevices", {
         origin: window.location?.origin || "",
       });
-      _pairedDevices = result.hashes || [];
-      _deviceInfoCache = null;
-      return _pairedDevices;
+      pairedDevices = result.hashes || [];
+      deviceInfoCache = null;
+      return pairedDevices;
     } catch {
       return [];
     }
   }
 
   async function getDeviceCache() {
-    if (_deviceInfoCache !== null) return _deviceInfoCache;
+    if (deviceInfoCache !== null) return deviceInfoCache;
     try {
       const response = await sendRequest("enumerate");
       const devices =
-        _http.isOk(response.s) && Array.isArray(response.D) ? response.D : [];
-      _deviceInfoCache = new Map();
-      for (const d of devices) _deviceInfoCache.set(d.deviceId, d);
-      return _deviceInfoCache;
+        http.isOk(response.s) && Array.isArray(response.D) ? response.D : [];
+      deviceInfoCache = new Map();
+      for (const d of devices) deviceInfoCache.set(d.deviceId, d);
+      return deviceInfoCache;
     } catch {
-      _deviceInfoCache = new Map();
-      return _deviceInfoCache;
+      deviceInfoCache = new Map();
+      return deviceInfoCache;
     }
   }
 
   async function pairDevice(deviceInfo) {
     try {
-      _pairedDevices = null;
+      pairedDevices = null;
       const result = await sendRequest("pairDevice", {
         origin: window.location?.origin || "",
         device: { deviceId: deviceInfo.deviceId },
       });
       if (result && result.success) {
-        _pairedDevices = result.hashes || [];
-        _deviceInfoCache = null;
+        pairedDevices = result.hashes || [];
+        deviceInfoCache = null;
       } else {
         // S5: Surface pairing failures to the log so they aren't silently
         // swallowed. requestDevice() already resolved with the device, but
         // the user should be able to see (via the addon's debug log) that
         // the pairDevice round-trip failed; subsequent getDevices() calls
         // will not return this device.
-        _logger.warn(
+        logger.warn(
           "pairDevice returned non-success for deviceId=" +
             deviceInfo.deviceId +
             ": " +
-            _http.name(result?.s || 0),
+            http.name(result?.s || 0),
         );
       }
     } catch (e) {
       // S5: Log the underlying error too. Previously this was a bare
       // `catch {}` which made pairing failures invisible to anyone trying
       // to debug "I picked a device but getDevices() is empty".
-      _logger.warn("pairDevice error:", e?.message || e);
+      logger.warn("pairDevice error:", e?.message || e);
     }
   }
 
-  const _defs = _GLOBAL_DEFAULTS;
-  const settings = _createSettingsStore(_defs);
+  const defs = GLOBAL_DEFAULTS;
+  const settings = createSettingsStore(defs);
 
-  _bridgePort.onmessage = (event) => {
+  bridgePort.onmessage = (event) => {
     if (!event.data) return;
     if (event.data.__webhid_bridge === "res") {
-      const handler = _pending[event.data.id];
+      const handler = pending[event.data.id];
       if (handler) {
-        delete _pending[event.data.id];
+        delete pending[event.data.id];
         handler(event.data.result);
       }
       return;
@@ -97,13 +97,13 @@
       return;
     }
     if (event.data.__webhid_bridge === "evt") {
-      _dispatchDeviceEvent(event.data.event);
+      dispatchDeviceEvent(event.data.event);
     }
   };
 
   function sendRequest(action, payload, opts = {}) {
     return new Promise((resolve) => {
-      const id = ++_reqId;
+      const id = ++nextReqId;
       // S4: Default 30s timeout so a request whose response never comes
       // back (bridge died, content-script context invalidated, page
       // navigated) does not leave the caller hanging forever. Callers
@@ -117,16 +117,16 @@
         timer = setTimeout(() => {
           if (settled) return;
           settled = true;
-          delete _pending[id];
-          _logger.warn("sendRequest timeout: " + action + " (id=" + id + ")");
+          delete pending[id];
+          logger.warn("sendRequest timeout: " + action + " (id=" + id + ")");
           resolve({ s: 504 });
         }, timeoutMs);
       }
-      _pending[id] = (result) => {
+      pending[id] = (result) => {
         if (settled) return;
         settled = true;
         if (timer) clearTimeout(timer);
-        delete _pending[id];
+        delete pending[id];
         resolve(result);
       };
       const msg = {
@@ -140,7 +140,7 @@
         msg.__transfer = true;
         xfers.push(payload.data.buffer);
       }
-      _bridgePort.postMessage(msg, xfers.length ? xfers : undefined);
+      bridgePort.postMessage(msg, xfers.length ? xfers : undefined);
     });
   }
 
@@ -157,19 +157,19 @@
       msg.__transfer = true;
       xfers.push(payload.data.buffer);
     }
-    _bridgePort.postMessage(msg, xfers.length ? xfers : undefined);
+    bridgePort.postMessage(msg, xfers.length ? xfers : undefined);
   }
 
-  settings.on("dataPlane", (v) => _logger.info("data plane changed: " + v));
-  settings.on("fireAndForget", (v) => _logger.info("fire-and-forget: " + v));
+  settings.on("dataPlane", (v) => logger.info("data plane changed: " + v));
+  settings.on("fireAndForget", (v) => logger.info("fire-and-forget: " + v));
   settings.on("logLevel", (v) => {
-    if (_logger.applyLevel) _logger.applyLevel(v);
+    if (logger.applyLevel) logger.applyLevel(v);
   });
 
   sendRequest("getSettings", {}).then((s) => {
     if (!s) return;
     settings.set(s);
-    _logger.info(
+    logger.info(
       "data plane: " +
         settings.dataPlane +
         " (fire-and-forget: " +
@@ -178,16 +178,16 @@
     );
   });
 
-  const _devState = new WeakMap();
-  const _hidState = new WeakMap();
-  const _evtState = new WeakMap();
-  const _irState = Symbol("webhid_ir");
-  const _deviceRegistry = new Map();
+  const devState = new WeakMap();
+  const hidState = new WeakMap();
+  const evtState = new WeakMap();
+  const irState = Symbol("webhid_ir");
+  const deviceRegistry = new Map();
   // S1: Hold the singleton HID instance so that connect/disconnect events
   // can be dispatched on `navigator.hid` (spec-compliant) rather than on the
   // HIDDevice itself. Per the WebHID spec, `navigator.hid.onconnect` and
   // `navigator.hid.ondisconnect` must fire for device hot-plug events.
-  let _hidInstance = null;
+  let hidInstance = null;
 
   function HIDDevice() {
     throw new TypeError("Illegal constructor");
@@ -202,45 +202,45 @@
   Object.defineProperties(HIDDevice.prototype, {
     opened: {
       get() {
-        return _devState.get(this)?.opened ?? false;
+        return devState.get(this)?.opened ?? false;
       },
       enumerable: false,
       configurable: true,
     },
     vendorId: {
       get() {
-        return _devState.get(this)?.vendorId;
+        return devState.get(this)?.vendorId;
       },
       enumerable: false,
       configurable: true,
     },
     productId: {
       get() {
-        return _devState.get(this)?.productId;
+        return devState.get(this)?.productId;
       },
       enumerable: false,
       configurable: true,
     },
     productName: {
       get() {
-        return _devState.get(this)?.productName;
+        return devState.get(this)?.productName;
       },
       enumerable: false,
       configurable: true,
     },
     collections: {
       get() {
-        return _devState.get(this)?.collections;
+        return devState.get(this)?.collections;
       },
       enumerable: false,
       configurable: true,
     },
     oninputreport: {
       get() {
-        return _devState.get(this)?.oninputreport ?? null;
+        return devState.get(this)?.oninputreport ?? null;
       },
       set(v) {
-        const s = _devState.get(this);
+        const s = devState.get(this);
         if (!s) return;
         if (s.oninputreport)
           s.et.removeEventListener("inputreport", s.oninputreport);
@@ -252,7 +252,7 @@
     },
     open: {
       value: async function () {
-        const s = _devState.get(this);
+        const s = devState.get(this);
         if (!s) throw new DOMException("Invalid state", "InvalidStateError");
         if (s.opened)
           throw new DOMException("Device is already open", "InvalidStateError");
@@ -268,11 +268,11 @@
             deviceId: s.deviceId,
             reportSize: s.maxInputReportSize + 3,
           });
-          if (_http.isOk(response.s)) {
+          if (http.isOk(response.s)) {
             const dataChannel = new MessageChannel();
             s.dataPort = dataChannel.port1;
-            s.dataPort.onmessage = (ev) => _onDataPortMessage(s, ev.data);
-            _bridgePort.postMessage(
+            s.dataPort.onmessage = (ev) => onDataPortMessage(s, ev.data);
+            bridgePort.postMessage(
               {
                 __webhid_bridge: "req",
                 id: 0,
@@ -286,11 +286,11 @@
             // up, leaving a partial-state window where sendReport would
             // throw "data port not connected" despite opened === true.
             s.opened = true;
-            _logger.info("open deviceId=" + s.deviceId);
+            logger.info("open deviceId=" + s.deviceId);
             this.dispatchEvent(new Event("open"));
             return true;
           }
-          throw new Error("Open failed: " + _http.name(response.s || 0));
+          throw new Error("Open failed: " + http.name(response.s || 0));
         } catch (error) {
           throw new DOMException(error.message, "InvalidStateError");
         } finally {
@@ -303,13 +303,13 @@
     },
     close: {
       value: async function () {
-        const s = _devState.get(this);
+        const s = devState.get(this);
         if (!s) return;
         if (!s.opened) return;
-        _logger.debug("close deviceId=" + s.deviceId);
+        logger.debug("close deviceId=" + s.deviceId);
         try {
           const response = await sendRequest("close", { deviceId: s.deviceId });
-          if (_http.isOk(response.s)) {
+          if (http.isOk(response.s)) {
             s.opened = false;
             // E3: Reject any still-pending sendReport / sendFeatureReport /
             // receiveFeatureReport Promises before tearing down the data port
@@ -342,7 +342,7 @@
     },
     sendReport: {
       value: async function (reportId, data) {
-        const s = _devState.get(this);
+        const s = devState.get(this);
         if (!s) throw new DOMException("Invalid state", "InvalidStateError");
         if (!s.opened)
           throw new DOMException("Device is not open", "InvalidStateError");
@@ -352,11 +352,11 @@
             : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
         const buffer = view.slice();
         try {
-          _logger.debug(
+          logger.debug(
             "sendReport reportId=" + reportId + " len=" + buffer.length,
           );
           if (!s.dataPort) throw new Error("data port not connected");
-          const reqId = ++_reqId;
+          const reqId = ++nextReqId;
           const msg = { type: "send", reqId, reportId, data: buffer };
           if (settings.fireAndForget) {
             s.dataPort.postMessage(msg, [buffer.buffer]);
@@ -381,13 +381,13 @@
     },
     receiveFeatureReport: {
       value: async function (reportId) {
-        const s = _devState.get(this);
+        const s = devState.get(this);
         if (!s) throw new DOMException("Invalid state", "InvalidStateError");
         if (!s.opened)
           throw new DOMException("Device is not open", "InvalidStateError");
         try {
           if (!s.dataPort) throw new Error("data port not connected");
-          const reqId = ++_reqId;
+          const reqId = ++nextReqId;
           return new Promise((resolve, reject) => {
             s.dataPending = s.dataPending || new Map();
             s.dataPending.set(reqId, {
@@ -413,7 +413,7 @@
     },
     sendFeatureReport: {
       value: async function (reportId, data) {
-        const s = _devState.get(this);
+        const s = devState.get(this);
         if (!s) throw new DOMException("Invalid state", "InvalidStateError");
         if (!s.opened)
           throw new DOMException("Device is not open", "InvalidStateError");
@@ -422,12 +422,12 @@
             ? new Uint8Array(data)
             : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
         const buffer = view.slice();
-        _logger.debug(
+        logger.debug(
           "sendFeatureReport reportId=" + reportId + " len=" + buffer.length,
         );
         try {
           if (!s.dataPort) throw new Error("data port not connected");
-          const reqId = ++_reqId;
+          const reqId = ++nextReqId;
           const msg = { type: "sendFeature", reqId, reportId, data: buffer };
           if (settings.fireAndForget) {
             s.dataPort.postMessage(msg, [buffer.buffer]);
@@ -452,7 +452,7 @@
     },
     forget: {
       value: async function () {
-        const s = _devState.get(this);
+        const s = devState.get(this);
         if (!s) return;
         if (s.opened) await this.close();
         await sendRequest("unpairDevice", { deviceId: s.deviceId });
@@ -460,9 +460,9 @@
         // cache so subsequent getDevices() calls reflect the unpairing.
         // Without this the device kept reappearing in getDevices() even
         // after forget() succeeded.
-        _pairedDevices = null;
-        _deviceInfoCache = null;
-        _deviceRegistry.delete(s.deviceId);
+        pairedDevices = null;
+        deviceInfoCache = null;
+        deviceRegistry.delete(s.deviceId);
       },
       enumerable: false,
       configurable: true,
@@ -470,7 +470,7 @@
     },
     addEventListener: {
       value: function (type, listener) {
-        const s = _devState.get(this);
+        const s = devState.get(this);
         if (s) s.et.addEventListener(type, listener);
       },
       enumerable: false,
@@ -479,7 +479,7 @@
     },
     removeEventListener: {
       value: function (type, listener) {
-        const s = _devState.get(this);
+        const s = devState.get(this);
         if (s) s.et.removeEventListener(type, listener);
       },
       enumerable: false,
@@ -488,23 +488,23 @@
     },
   });
 
-  function _dispatchDeviceEvent(detail) {
+  function dispatchDeviceEvent(detail) {
     if (!detail) return;
     if (detail.eventType === "connect" || detail.eventType === "disconnect") {
-      const dev = detail.deviceId ? _deviceRegistry.get(detail.deviceId) : null;
-      if (_hidInstance && dev) {
-        if (detail.eventType === "disconnect") _deviceInfoCache = null;
-        _hidInstance.dispatchEvent(
+      const dev = detail.deviceId ? deviceRegistry.get(detail.deviceId) : null;
+      if (hidInstance && dev) {
+        if (detail.eventType === "disconnect") deviceInfoCache = null;
+        hidInstance.dispatchEvent(
           new HIDConnectionEvent(detail.eventType, { device: dev }),
         );
         if (detail.eventType === "disconnect") {
-          _deviceRegistry.delete(detail.deviceId);
+          deviceRegistry.delete(detail.deviceId);
         }
       }
       return;
     }
     if (detail.eventType === "input_report") {
-      const dev = detail.deviceId ? _deviceRegistry.get(detail.deviceId) : null;
+      const dev = detail.deviceId ? deviceRegistry.get(detail.deviceId) : null;
       if (dev) {
         const dataView = detail.data
           ? new DataView(detail.data.buffer || detail.data, detail.data.byteOffset || 0, detail.data.byteLength)
@@ -521,7 +521,7 @@
     }
   }
 
-  function _onDataPortMessage(s, d) {
+  function onDataPortMessage(s, d) {
     if (!d) return;
     if (d.type === "sendResult" || d.type === "featureResult") {
       const p = s.dataPending?.get(d.reqId);
@@ -548,7 +548,7 @@
       return;
     }
     if (d.type === "disconnect") {
-      _deviceInfoCache = null;
+      deviceInfoCache = null;
       const dev = s.self;
       if (dev)
         dev.dispatchEvent(
@@ -558,12 +558,12 @@
     }
   }
 
-  function _createHIDDevice(deviceInfo) {
+  function createHIDDevice(deviceInfo) {
     const obj = Object.create(HIDDevice.prototype);
-    const _et = new EventTarget();
-    obj.dispatchEvent = _et.dispatchEvent.bind(_et);
+    const et = new EventTarget();
+    obj.dispatchEvent = et.dispatchEvent.bind(et);
     const state = {
-      et: _et,
+      et: et,
       self: obj,
       deviceId: deviceInfo.deviceId,
       vendorId: deviceInfo.vendorId,
@@ -581,15 +581,15 @@
       maxInputReportSize: deviceInfo.maxInputReportSize || 64,
       oninputreport: null,
     };
-    _devState.set(obj, state);
+    devState.set(obj, state);
     return obj;
   }
 
   function getOrCreateDevice(deviceInfo) {
     const id = deviceInfo.deviceId;
-    if (id && _deviceRegistry.has(id)) return _deviceRegistry.get(id);
-    const dev = _createHIDDevice(deviceInfo);
-    if (id) _deviceRegistry.set(id, dev);
+    if (id && deviceRegistry.has(id)) return deviceRegistry.get(id);
+    const dev = createHIDDevice(deviceInfo);
+    if (id) deviceRegistry.set(id, dev);
     return dev;
   }
 
@@ -599,7 +599,7 @@
       [type, init],
       new.target || HIDInputReportEvent,
     );
-    obj[_irState] = {
+    obj[irState] = {
       device: init?.device,
       reportId: init?.reportId,
       data: init?.data,
@@ -615,21 +615,21 @@
   Object.defineProperties(HIDInputReportEvent.prototype, {
     device: {
       get() {
-        return this[_irState]?.device;
+        return this[irState]?.device;
       },
       enumerable: false,
       configurable: true,
     },
     reportId: {
       get() {
-        return this[_irState]?.reportId;
+        return this[irState]?.reportId;
       },
       enumerable: false,
       configurable: true,
     },
     data: {
       get() {
-        return this[_irState]?.data;
+        return this[irState]?.data;
       },
       enumerable: false,
       configurable: true,
@@ -642,7 +642,7 @@
       [type],
       new.target || HIDConnectionEvent,
     );
-    _evtState.set(obj, { device: init?.device ?? init });
+    evtState.set(obj, { device: init?.device ?? init });
     return obj;
   }
   HIDConnectionEvent.prototype = Object.create(Event.prototype);
@@ -653,7 +653,7 @@
   });
   Object.defineProperty(HIDConnectionEvent.prototype, "device", {
     get() {
-      return _evtState.get(this)?.device;
+      return evtState.get(this)?.device;
     },
     enumerable: false,
     configurable: true,
@@ -672,7 +672,7 @@
   Object.defineProperties(HID.prototype, {
     getDevices: {
       value: async function () {
-        _logger.debug("getDevices");
+        logger.debug("getDevices");
         try {
           const pairedHashes = await getPairedDevices();
           const deviceCache = await getDeviceCache();
@@ -681,10 +681,10 @@
             const device = deviceCache.get(hash);
             if (device) granted.push(getOrCreateDevice(device));
           }
-          _logger.debug("getDevices returned " + granted.length + " device(s)");
+          logger.debug("getDevices returned " + granted.length + " device(s)");
           return granted;
         } catch (error) {
-          _logger.warn("getDevices error:", error);
+          logger.warn("getDevices error:", error);
           return [];
         }
       },
@@ -701,16 +701,16 @@
           );
         }
         const filters = Array.isArray(options.filters) ? options.filters : [];
-        _logger.debug("requestDevice filters=" + JSON.stringify(filters));
+        logger.debug("requestDevice filters=" + JSON.stringify(filters));
         return new Promise((resolve, reject) => {
-          const id = ++_reqId;
+          const id = ++nextReqId;
           // S-spec: previously this handler fired off pairDevice() without
           // awaiting it, then resolved requestDevice immediately. That meant
           // requestDevice could resolve before pairDevice's round-trip to the
           // background completed, so an immediate getDevices() call from the
           // page might not yet see the just-selected device. Now we await
           // Promise.all over all pairDevice() calls before resolving.
-          _pending[id] = async (result) => {
+          pending[id] = async (result) => {
             try {
               if (result.cancelled) {
                 reject(new DOMException("No device selected", "NotFoundError"));
@@ -732,7 +732,7 @@
               );
             }
           };
-          _bridgePort.postMessage({
+          bridgePort.postMessage({
             __webhid_bridge: "req",
             id,
             action: "requestDevice",
@@ -746,7 +746,7 @@
     },
     addEventListener: {
       value: function (type, listener) {
-        const s = _hidState.get(this);
+        const s = hidState.get(this);
         if (s) s.et.addEventListener(type, listener);
       },
       enumerable: false,
@@ -755,7 +755,7 @@
     },
     removeEventListener: {
       value: function (type, listener) {
-        const s = _hidState.get(this);
+        const s = hidState.get(this);
         if (s) s.et.removeEventListener(type, listener);
       },
       enumerable: false,
@@ -764,10 +764,10 @@
     },
     onconnect: {
       get() {
-        return _hidState.get(this)?.onconnect ?? null;
+        return hidState.get(this)?.onconnect ?? null;
       },
       set(v) {
-        const s = _hidState.get(this);
+        const s = hidState.get(this);
         if (!s) return;
         if (s.onconnect) s.et.removeEventListener("connect", s.onconnect);
         s.onconnect = v;
@@ -778,10 +778,10 @@
     },
     ondisconnect: {
       get() {
-        return _hidState.get(this)?.ondisconnect ?? null;
+        return hidState.get(this)?.ondisconnect ?? null;
       },
       set(v) {
-        const s = _hidState.get(this);
+        const s = hidState.get(this);
         if (!s) return;
         if (s.ondisconnect)
           s.et.removeEventListener("disconnect", s.ondisconnect);
@@ -793,11 +793,11 @@
     },
   });
 
-  function _createHID() {
+  function createHID() {
     const obj = Object.create(HID.prototype);
-    const _et = new EventTarget();
-    obj.dispatchEvent = _et.dispatchEvent.bind(_et);
-    _hidState.set(obj, { et: _et, onconnect: null, ondisconnect: null });
+    const et = new EventTarget();
+    obj.dispatchEvent = et.dispatchEvent.bind(et);
+    hidState.set(obj, { et: et, onconnect: null, ondisconnect: null });
     return obj;
   }
 
@@ -825,9 +825,9 @@
     configurable: true,
     enumerable: false,
   });
-  _hidInstance = _createHID();
+  hidInstance = createHID();
   Object.defineProperty(Navigator.prototype, "hid", {
-    get() { return _hidInstance; },
+    get() { return hidInstance; },
     configurable: true,
     enumerable: true,
   });

@@ -1,29 +1,29 @@
 "use strict";
-const _logger = globalThis.webhid.import("logger");
-const _http = globalThis.webhid.import("http");
-const _GLOBAL_DEFAULTS = globalThis.webhid.import("GLOBAL_DEFAULTS");
-_logger.initLogger("test-bridge");
+const logger = globalThis.webhid.import("logger");
+const http = globalThis.webhid.import("http");
+const GLOBAL_DEFAULTS = globalThis.webhid.import("GLOBAL_DEFAULTS");
+logger.initLogger("test-bridge");
 
-let _pagePort = null;
-let _devicePicker = null;
-const _dataPorts = new Map();
+let pagePort = null;
+let devicePicker = null;
+const dataPorts = new Map();
 
-function _replyToPage(msg, transfer) {
-  if (!_pagePort) return;
-  _pagePort.postMessage(msg, transfer);
+function replyToPage(msg, transfer) {
+  if (!pagePort) return;
+  pagePort.postMessage(msg, transfer);
 }
 
 window.addEventListener("message", (event) => {
   if (event.source !== window) return;
   if (!event.data || event.data.__webhid_bridge !== "init") return;
-  if (_pagePort) return;
+  if (pagePort) return;
   const port = event.ports && event.ports[0];
   if (!port) return;
-  _pagePort = port;
-  _pagePort.onmessage = (ev) => {
+  pagePort = port;
+  pagePort.onmessage = (ev) => {
     handleRequest(ev.data, ev.ports);
   };
-  _logger.debug("[test-bridge] page port established");
+  logger.debug("[test-bridge] page port established");
 });
 
 async function handleRequest(data, ports) {
@@ -34,17 +34,17 @@ async function handleRequest(data, ports) {
   try {
     if (action === "requestDevice") {
       const filters = (payload && payload.filters) || [];
-      if (!_devicePicker) {
-        _devicePicker = new (globalThis.webhid.import(
+      if (!devicePicker) {
+        devicePicker = new (globalThis.webhid.import(
           "WebHidDevicePicker",
         ))();
-        document.documentElement.appendChild(_devicePicker.host);
+        document.documentElement.appendChild(devicePicker.host);
       }
       let onSelected, onCancelled;
       onSelected = (e) => {
         window.removeEventListener("webhid-device-selected", onSelected);
         window.removeEventListener("webhid-device-cancelled", onCancelled);
-        _replyToPage({
+        replyToPage({
           __webhid_bridge: "res",
           id,
           result: { devices: e.detail.devices },
@@ -53,7 +53,7 @@ async function handleRequest(data, ports) {
       onCancelled = () => {
         window.removeEventListener("webhid-device-selected", onSelected);
         window.removeEventListener("webhid-device-cancelled", onCancelled);
-        _replyToPage({
+        replyToPage({
           __webhid_bridge: "res",
           id,
           result: { cancelled: true },
@@ -61,7 +61,7 @@ async function handleRequest(data, ports) {
       };
       window.addEventListener("webhid-device-selected", onSelected);
       window.addEventListener("webhid-device-cancelled", onCancelled);
-      _devicePicker.show(filters);
+      devicePicker.show(filters);
       return;
     }
 
@@ -69,12 +69,12 @@ async function handleRequest(data, ports) {
       const deviceId = payload && payload.deviceId;
       const port = ports && ports[0];
       if (port && deviceId) {
-        _dataPorts.set(deviceId, port);
+        dataPorts.set(deviceId, port);
         port.onmessage = (ev) => {
-          _onDataPortMessage(deviceId, ev.data);
+          onDataPortMessage(deviceId, ev.data);
         };
       }
-      _replyToPage({ __webhid_bridge: "res", id, result: { s: 204 } });
+      replyToPage({ __webhid_bridge: "res", id, result: { s: 204 } });
       return;
     }
 
@@ -82,13 +82,13 @@ async function handleRequest(data, ports) {
     const response = await browser.runtime.sendMessage(msg);
     const xfers =
       response && response.d instanceof Uint8Array ? [response.d.buffer] : [];
-    _replyToPage({ __webhid_bridge: "res", id, result: response }, xfers);
+    replyToPage({ __webhid_bridge: "res", id, result: response }, xfers);
   } catch (error) {
-    _replyToPage({ __webhid_bridge: "res", id, result: { s: 500 } });
+    replyToPage({ __webhid_bridge: "res", id, result: { s: 500 } });
   }
 }
 
-async function _onDataPortMessage(deviceId, msg) {
+async function onDataPortMessage(deviceId, msg) {
   if (!msg) return;
   if (
     msg.type === "send" ||
@@ -104,14 +104,14 @@ async function _onDataPortMessage(deviceId, msg) {
     const payload = { deviceId, reportId: msg.reportId };
     if (msg.type === "send" || msg.type === "sendFeature")
       payload.data = msg.data;
-    const port = _dataPorts.get(deviceId);
+    const port = dataPorts.get(deviceId);
     try {
       const response = await browser.runtime.sendMessage(
         Object.assign({ action }, payload),
       );
       if (msg.type === "receiveFeature") {
         const data =
-          response && _http.isOk(response.s) && response.d ? response.d : null;
+          response && http.isOk(response.s) && response.d ? response.d : null;
         if (port)
           port.postMessage({
             type: "featureResult",
@@ -119,7 +119,7 @@ async function _onDataPortMessage(deviceId, msg) {
             data: data || null,
           });
       } else {
-        const err = response && !_http.isOk(response.s) ? "send failed" : null;
+        const err = response && !http.isOk(response.s) ? "send failed" : null;
         if (port)
           port.postMessage({
             type: msg.type === "send" ? "sendResult" : "featureResult",
@@ -143,7 +143,7 @@ browser.runtime.onMessage.addListener((message) => {
   if (message.action === "webhid-device-event" && message.event) {
     const ev = message.event;
     if (ev.eventType === "input_report") {
-      const port = _dataPorts.get(ev.deviceId);
+      const port = dataPorts.get(ev.deviceId);
       if (port) {
         const view = ev.data;
         const buf = view ? view.buffer || view : null;
@@ -157,23 +157,23 @@ browser.runtime.onMessage.addListener((message) => {
       }
     }
     if (ev.eventType === "disconnect") {
-      const port = _dataPorts.get(ev.deviceId);
+      const port = dataPorts.get(ev.deviceId);
       if (port) {
         try {
           port.postMessage({ type: "disconnect" });
         } catch {}
       }
     }
-    _replyToPage({ __webhid_bridge: "evt", event: ev });
+    replyToPage({ __webhid_bridge: "evt", event: ev });
   }
 });
 
 (async () => {
   try {
     const resp = await browser.runtime.sendMessage({ action: "handshake" });
-    if (resp && _http.isOk(resp.s)) {
-      const global = await browser.storage.local.get(_GLOBAL_DEFAULTS);
-      _replyToPage({ __webhid_bridge: "settings", settings: global });
+    if (resp && http.isOk(resp.s)) {
+      const global = await browser.storage.local.get(GLOBAL_DEFAULTS);
+      replyToPage({ __webhid_bridge: "settings", settings: global });
     }
   } catch {}
 })();

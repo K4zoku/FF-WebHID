@@ -27,71 +27,71 @@
   };
 
   function createSettingsStore(defaults) {
-    const _values = { ...defaults };
-    const _listeners = new Map();
+    const values = { ...defaults };
+    const listeners = new Map();
 
-    function _emit(key, value) {
-      const cbs = _listeners.get(key);
-      if (cbs) for (const cb of cbs) cb(value, _values);
+    function emit(key, value) {
+      const cbs = listeners.get(key);
+      if (cbs) for (const cb of cbs) cb(value, values);
     }
 
     const api = {
       on(keys, callback) {
         if (!Array.isArray(keys)) keys = [keys];
         for (const k of keys) {
-          if (!_listeners.has(k)) _listeners.set(k, new Set());
-          _listeners.get(k).add(callback);
+          if (!listeners.has(k)) listeners.set(k, new Set());
+          listeners.get(k).add(callback);
         }
         return () => {
-          for (const k of keys) _listeners.get(k)?.delete(callback);
+          for (const k of keys) listeners.get(k)?.delete(callback);
         };
       },
-      set(values) {
+      set(patch) {
         const changed = {};
-        for (const [k, v] of Object.entries(values)) {
+        for (const [k, v] of Object.entries(patch)) {
           if (k in api || k === "on" || k === "set" || k === "getAll") continue;
-          if (_values[k] !== v) {
-            _values[k] = v;
+          if (values[k] !== v) {
+            values[k] = v;
             changed[k] = v;
-            _emit(k, v);
+            emit(k, v);
           }
         }
         return changed;
       },
       getAll() {
-        return { ..._values };
+        return { ...values };
       },
     };
 
     return new Proxy(api, {
       get(target, prop, receiver) {
         if (prop in target) return target[prop];
-        return _values[prop];
+        return values[prop];
       },
       set(target, prop, value, receiver) {
         if (prop in target) {
           target[prop] = value;
           return true;
         }
-        if (_values[prop] === value) return true;
-        _values[prop] = value;
-        _emit(prop, value);
+        if (values[prop] === value) return true;
+        values[prop] = value;
+        emit(prop, value);
         return true;
       },
       has(target, prop) {
-        return prop in target || prop in _values;
+        return prop in target || prop in values;
       },
       ownKeys(target) {
-        return [...new Set([...Object.keys(target), ...Object.keys(_values)])];
+        return [...new Set([...Object.keys(target), ...Object.keys(values)])];
       },
       getOwnPropertyDescriptor(target, prop) {
         if (prop in target)
           return Object.getOwnPropertyDescriptor(target, prop);
-        if (prop in _values) {
+        if (prop in values) {
           return {
             configurable: true,
             enumerable: true,
-            value: _values[prop],
+            value: values[prop],
             writable: true,
           };
         }

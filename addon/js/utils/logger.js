@@ -5,14 +5,14 @@
   const LEVEL_INFO = 2;
   const LEVEL_DEBUG = 3;
 
-  const _nop = () => {};
-  let _module = "";
+  const nop = () => {};
+  let mod = "";
 
-  function initLogger(mod) {
-    _module = mod || "";
+  function initLogger(m) {
+    mod = m || "";
   }
 
-  function _prefix(levelName) {
+  function prefix(levelName) {
     const t = new Date();
     const time =
       String(t.getHours()).padStart(2, "0") +
@@ -26,7 +26,7 @@
       "[" +
       time +
       " webhid" +
-      (_module ? "::" + _module : "") +
+      (mod ? "::" + mod : "") +
       " " +
       levelName +
       "]"
@@ -34,37 +34,37 @@
   }
 
   const logger = {
-    error: _nop,
-    warn: _nop,
-    info: _nop,
-    debug: _nop,
-    _level: LEVEL_WARN,
-    _loaded: false,
-    applyLevel: _applyLevel,
+    error: nop,
+    warn: nop,
+    info: nop,
+    debug: nop,
+    level: LEVEL_WARN,
+    loaded: false,
+    applyLevel: applyLevel,
     initLogger: initLogger,
   };
 
-  function _applyLevel(level) {
-    logger._level = level;
+  function applyLevel(level) {
+    logger.level = level;
     logger.error =
       level >= LEVEL_ERROR
-        ? (...args) => console.error(_prefix("ERROR"), ...args)
-        : _nop;
+        ? (...args) => console.error(prefix("ERROR"), ...args)
+        : nop;
     logger.warn =
       level >= LEVEL_WARN
-        ? (...args) => console.warn(_prefix("WARN"), ...args)
-        : _nop;
+        ? (...args) => console.warn(prefix("WARN"), ...args)
+        : nop;
     logger.info =
       level >= LEVEL_INFO
-        ? (...args) => console.info(_prefix("INFO"), ...args)
-        : _nop;
+        ? (...args) => console.info(prefix("INFO"), ...args)
+        : nop;
     logger.debug =
       level >= LEVEL_DEBUG
-        ? (...args) => console.debug(_prefix("DEBUG"), ...args)
-        : _nop;
+        ? (...args) => console.debug(prefix("DEBUG"), ...args)
+        : nop;
   }
 
-  function _parseLevel(v) {
+  function parseLevel(v) {
     if (typeof v === "number") return v;
     if (typeof v === "string") {
       const n = parseInt(v, 10);
@@ -75,23 +75,23 @@
     return LEVEL_WARN;
   }
 
-  async function _load() {
-    if (logger._loaded) return;
-    logger._loaded = true;
+  async function load() {
+    if (logger.loaded) return;
+    logger.loaded = true;
     try {
       if (!browser?.storage?.local) return;
       const result = await browser.storage.local.get({ logLevel: LEVEL_WARN });
-      _applyLevel(_parseLevel(result.logLevel));
+      applyLevel(parseLevel(result.logLevel));
       browser.storage.onChanged.addListener((changes, area) => {
         if (area === "local" && changes.logLevel) {
-          _applyLevel(_parseLevel(changes.logLevel.newValue));
+          applyLevel(parseLevel(changes.logLevel.newValue));
         }
       });
     } catch {}
   }
 
-  _applyLevel(LEVEL_WARN);
-  _load();
+  applyLevel(LEVEL_WARN);
+  load();
 
   webhid.export("logger", logger);
 })();
