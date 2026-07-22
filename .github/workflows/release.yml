@@ -272,6 +272,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v7
         with:
@@ -378,6 +380,19 @@ jobs:
           cd artifacts-macos-x86_64    && zip -r "../webhid-macos-x86_64-${VER}.zip"    . && cd ..
           cd artifacts-macos-aarch64   && zip -r "../webhid-macos-aarch64-${VER}.zip"   . && cd ..
           cd artifacts-macos-universal && zip -r "../webhid-macos-universal-${VER}.zip" . && cd ..
+
+      - name: Generate artifact attestations
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            dist/*.xpi
+            webhid-*.zip
+            artifacts-windows-x86_64-msi/*.msi
+            artifacts-windows-aarch64-msi/*.msi
+            debs-x86_64/*.deb
+            debs-aarch64/*.deb
+            rpms-x86_64/*.rpm
+            rpms-aarch64/*.rpm
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3

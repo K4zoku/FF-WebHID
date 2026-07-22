@@ -1,0 +1,38 @@
+name: Attach signed XPI
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g: v1.5.1)'
+        required: true
+      download_xpi_url:
+        description: 'URL to download the signed XPI (default: AMO latest)'
+        required: false
+        default: 'https://addons.mozilla.org/firefox/downloads/latest/webhid/latest.xpi'
+
+jobs:
+  attach-signed:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download signed XPI from AMO
+        run: |
+          mkdir -p signed
+          curl -fL -o signed/webhid-addon.xpi \
+            "${{ github.event.inputs.download_xpi_url }}"
+          file signed/webhid-addon.xpi
+
+      - name: Generate attestation for signed XPI
+        uses: actions/attest@v4
+        with:
+          subject-path: signed/webhid-addon.xpi
+
+      - name: Replace asset on release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ inputs.tag }}" signed/webhid-addon.xpi --clobber --repo ${{ github.repository }}
