@@ -368,15 +368,7 @@
     }
   }
 
-  function _isChildFrame(source) {
-    for (let i = 0; i < window.frames.length; i++) {
-      if (window.frames[i] === source) return true;
-    }
-    return false;
-  }
-
   window.addEventListener("message", (event) => {
-    if (event.source !== window && !_isChildFrame(event.source)) return;
     if (!event.data || event.data.__webhid_bridge !== "init") return;
     if (_pagePorts.has(event.source)) return;
     const port = event.ports && event.ports[0];
