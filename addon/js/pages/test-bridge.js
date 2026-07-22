@@ -1,7 +1,7 @@
 "use strict";
-const _logger = globalThis.__webhid.import("logger");
-const _http = globalThis.__webhid.import("http");
-const _GLOBAL_DEFAULTS = globalThis.__webhid.import("GLOBAL_DEFAULTS");
+const _logger = globalThis.webhid.import("logger");
+const _http = globalThis.webhid.import("http");
+const _GLOBAL_DEFAULTS = globalThis.webhid.import("GLOBAL_DEFAULTS");
 _logger.initLogger("test-bridge");
 
 let _pagePort = null;
@@ -35,7 +35,7 @@ async function handleRequest(data, ports) {
     if (action === "requestDevice") {
       const filters = (payload && payload.filters) || [];
       if (!_devicePicker) {
-        _devicePicker = new (globalThis.__webhid.import(
+        _devicePicker = new (globalThis.webhid.import(
           "WebHidDevicePicker",
         ))();
         document.documentElement.appendChild(_devicePicker.host);

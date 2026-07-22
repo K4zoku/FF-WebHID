@@ -1,12 +1,12 @@
 (function () {
   "use strict";
-  const logger = globalThis.__webhid.import("logger");
-  const fetchResource = globalThis.__webhid.import("fetchResource");
-  const http = globalThis.__webhid.import("http");
-  const guessDeviceType = globalThis.__webhid.import("guessDeviceType");
-  const applyFilters = globalThis.__webhid.import("applyFilters");
-  const groupDevices = globalThis.__webhid.import("groupDevices");
-  const fetchDeviceIcon = globalThis.__webhid.import("fetchDeviceIcon");
+  const logger = globalThis.webhid.import("logger");
+  const fetchResource = globalThis.webhid.import("fetchResource");
+  const http = globalThis.webhid.import("http");
+  const guessDeviceType = globalThis.webhid.import("guessDeviceType");
+  const applyFilters = globalThis.webhid.import("applyFilters");
+  const groupDevices = globalThis.webhid.import("groupDevices");
+  const fetchDeviceIcon = globalThis.webhid.import("fetchDeviceIcon");
   logger.initLogger("picker");
 
   class WebHidDevicePicker {
@@ -300,5 +300,5 @@
     }
   }
 
-  __webhid.export("WebHidDevicePicker", WebHidDevicePicker);
+  webhid.export("WebHidDevicePicker", WebHidDevicePicker);
 })();

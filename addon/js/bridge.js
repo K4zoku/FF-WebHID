@@ -1,12 +1,11 @@
 (function () {
   // WebHID Standard implementation with injected modal
   "use strict";
-  const logger = __webhid.import("logger");
-  const http = __webhid.import("http");
-  const guessDeviceType = __webhid.import("guessDeviceType");
-  const createSettingsStore = __webhid.import("createSettingsStore");
-  const GLOBAL_DEFAULTS = __webhid.import("GLOBAL_DEFAULTS");
-  const WebHidDevicePicker = __webhid.import("WebHidDevicePicker");
+  const logger = webhid.import("logger");
+  const http = webhid.import("http");
+  const createSettingsStore = webhid.import("createSettingsStore");
+  const GLOBAL_DEFAULTS = webhid.import("GLOBAL_DEFAULTS");
+  const WebHidDevicePicker = webhid.import("WebHidDevicePicker");
   logger.initLogger("bridge");
 
   // ---------------------------------------------------------------------------

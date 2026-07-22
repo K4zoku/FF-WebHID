@@ -1,9 +1,9 @@
 (function () {
-  const logger = __webhid.import("logger");
-  const http = __webhid.import("http");
-  const createSettingsStore = __webhid.import("createSettingsStore");
-  const GLOBAL_DEFAULTS = __webhid.import("GLOBAL_DEFAULTS");
-  const fetchResource = __webhid.import("fetchResource");
+  const logger = webhid.import("logger");
+  const http = webhid.import("http");
+  const createSettingsStore = webhid.import("createSettingsStore");
+  const GLOBAL_DEFAULTS = webhid.import("GLOBAL_DEFAULTS");
+  const fetchResource = webhid.import("fetchResource");
   logger.initLogger("bg");
 
   let _deviceCache = [];

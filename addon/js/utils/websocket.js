@@ -17,9 +17,10 @@
 //   transport.disconnect();           // halt + close
 
 (function () {
+  const webhid = globalThis.webhid;
   const WS_CLOSE_UNKNOWN_TOKEN = 4401;
   const WS_CLOSE_BAD_TOKEN = 4402;
-  const _log = __webhid.import("logger");
+  const _log = webhid.import("logger");
 
   function createWsTransport(opts) {
     const tag = opts.tag || "ws";
@@ -119,5 +120,5 @@
   }
 
 
-  __webhid.export("createWsTransport", createWsTransport);
+  webhid.export("createWsTransport", createWsTransport);
 })();

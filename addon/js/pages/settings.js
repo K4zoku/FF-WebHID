@@ -1,5 +1,5 @@
 (async () => {
-  const { logger, GLOBAL_DEFAULTS, createSettingsStore } = __webhid;
+  const { logger, GLOBAL_DEFAULTS } = webhid;
   logger.initLogger("settings");
   const current = await browser.storage.local.get(GLOBAL_DEFAULTS);
 

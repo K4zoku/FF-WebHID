@@ -1,11 +1,11 @@
 (async () => {
-  const logger = __webhid.import("logger");
-  const http = __webhid.import("http");
-  const guessDeviceType = __webhid.import("guessDeviceType");
-  const GLOBAL_DEFAULTS = __webhid.import("GLOBAL_DEFAULTS");
-  const applyFilters = __webhid.import("applyFilters");
-  const groupDevices = __webhid.import("groupDevices");
-  const fetchDeviceIcon = __webhid.import("fetchDeviceIcon");
+  const logger = webhid.import("logger");
+  const http = webhid.import("http");
+  const guessDeviceType = webhid.import("guessDeviceType");
+  const GLOBAL_DEFAULTS = webhid.import("GLOBAL_DEFAULTS");
+  const applyFilters = webhid.import("applyFilters");
+  const groupDevices = webhid.import("groupDevices");
+  const fetchDeviceIcon = webhid.import("fetchDeviceIcon");
   logger.initLogger("picker-popup");
 
   const listEl = document.getElementById("picker-list");

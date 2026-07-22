@@ -12,5 +12,5 @@
       return v;
     },
   };
-  globalThis.__webhid = api;
+  Object.defineProperty(globalThis, 'webhid', { value: api, writable: false, enumerable: false, configurable: true });
 })();

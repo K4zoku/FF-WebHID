@@ -17,9 +17,10 @@
 // Listeners fire ONLY when a value actually changes (=== comparison).
 
 (function () {
+  const webhid = globalThis.webhid;
   const GLOBAL_DEFAULTS = {
     fireAndForget: true,
-    dataPlane: "nm",
+    dataPlane: "ws",
     logLevel: 1,
     daemonAsNmHost: false,
     devicePickerMode: "modal",
@@ -99,6 +100,6 @@
     });
   }
 
-  __webhid.export("GLOBAL_DEFAULTS", GLOBAL_DEFAULTS);
-  __webhid.export("createSettingsStore", createSettingsStore);
+  webhid.export("GLOBAL_DEFAULTS", GLOBAL_DEFAULTS);
+  webhid.export("createSettingsStore", createSettingsStore);
 })();

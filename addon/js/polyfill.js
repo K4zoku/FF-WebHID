@@ -1,9 +1,11 @@
 (function () {
   if (window.navigator?.hid) return;
-  const _logger = __webhid.import("logger");
-  const _http = __webhid.import("http");
-  const _GLOBAL_DEFAULTS = __webhid.import("GLOBAL_DEFAULTS");
-  const _createSettingsStore = __webhid.import("createSettingsStore");
+  const webhid = globalThis.webhid;
+  const _logger = webhid.import("logger");
+  const _http = webhid.import("http");
+  const _GLOBAL_DEFAULTS = webhid.import("GLOBAL_DEFAULTS");
+  const _createSettingsStore = webhid.import("createSettingsStore");
+  delete globalThis.webhid;
   _logger.initLogger("polyfill");
 
   let _reqId = 0;

@@ -1,4 +1,5 @@
 (function () {
+  const webhid = globalThis.webhid;
   const isOk = (s) => typeof s === "number" && s >= 200 && s < 300;
   const NAME = {
     200: "OK",
@@ -13,5 +14,5 @@
     500: "Internal Server Error",
     503: "Service Unavailable",
   };
-  __webhid.export("http", { isOk, name: (s) => NAME[s] || "HTTP " + s });
+  webhid.export("http", { isOk, name: (s) => NAME[s] || "HTTP " + s });
 })();

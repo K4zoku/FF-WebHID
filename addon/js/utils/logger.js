@@ -1,4 +1,5 @@
 (function () {
+  const webhid = globalThis.webhid;
   const LEVEL_ERROR = 0;
   const LEVEL_WARN = 1;
   const LEVEL_INFO = 2;
@@ -92,5 +93,5 @@
   _applyLevel(LEVEL_WARN);
   _load();
 
-  __webhid.export("logger", logger);
+  webhid.export("logger", logger);
 })();

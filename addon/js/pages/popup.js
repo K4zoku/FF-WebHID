@@ -1,7 +1,7 @@
 (async () => {
-  const logger = __webhid.import("logger");
-  const guessDeviceType = __webhid.import("guessDeviceType");
-  const GLOBAL_DEFAULTS = __webhid.import("GLOBAL_DEFAULTS");
+  const logger = webhid.import("logger");
+  const guessDeviceType = webhid.import("guessDeviceType");
+  const GLOBAL_DEFAULTS = webhid.import("GLOBAL_DEFAULTS");
   logger.initLogger("popup");
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
   let origin = "";

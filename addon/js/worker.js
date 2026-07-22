@@ -1,8 +1,8 @@
 "use strict";
-const logger = __webhid.import("logger");
-const _createSettingsStore = __webhid.import("createSettingsStore");
-const _GLOBAL_DEFAULTS = __webhid.import("GLOBAL_DEFAULTS");
-const _createWsTransport = __webhid.import("createWsTransport");
+const logger = webhid.import("logger");
+const _createSettingsStore = webhid.import("createSettingsStore");
+const _GLOBAL_DEFAULTS = webhid.import("GLOBAL_DEFAULTS");
+const _createWsTransport = webhid.import("createWsTransport");
 logger.initLogger("worker");
 const MSG_SEND_REPORT = 0x01;
 const MSG_SEND_FEATURE_REPORT = 0x02;

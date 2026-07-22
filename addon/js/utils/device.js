@@ -1,4 +1,5 @@
 (function () {
+  const webhid = globalThis.webhid;
   const _svgCache = {};
 
   function guessDeviceType(device) {
@@ -83,7 +84,7 @@
   async function fetchDeviceIcon(type) {
     if (_svgCache[type]) return _svgCache[type];
     try {
-      const svg = await __webhid.import("fetchResource")(
+      const svg = await webhid.import("fetchResource")(
         "res/" + type + ".svg",
       );
       _svgCache[type] = svg;
@@ -93,8 +94,8 @@
     }
   }
 
-  __webhid.export("guessDeviceType", guessDeviceType);
-  __webhid.export("applyFilters", applyFilters);
-  __webhid.export("groupDevices", groupDevices);
-  __webhid.export("fetchDeviceIcon", fetchDeviceIcon);
+  webhid.export("guessDeviceType", guessDeviceType);
+  webhid.export("applyFilters", applyFilters);
+  webhid.export("groupDevices", groupDevices);
+  webhid.export("fetchDeviceIcon", fetchDeviceIcon);
 })();
