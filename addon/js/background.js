@@ -64,12 +64,14 @@
       "js/worker.js",
     ];
     workerBundlePromise = (async () => {
-      const texts = await Promise.all(files.map((f) =>
-        fetch(browser.runtime.getURL(f)).then((r) => {
-          if (!r.ok) throw new Error("fetch " + f + " failed: " + r.status);
-          return r.text();
-        }),
-      ));
+      const texts = await Promise.all(
+        files.map((f) =>
+          fetch(browser.runtime.getURL(f)).then((r) => {
+            if (!r.ok) throw new Error("fetch " + f + " failed: " + r.status);
+            return r.text();
+          }),
+        ),
+      );
       workerBundle = texts.join("\n");
       return workerBundle;
     })();
@@ -79,7 +81,8 @@
 
   browser.webRequest.onBeforeRequest.addListener(
     (details) => {
-      if (details.type !== "script" || details.url !== details.documentUrl) return;
+      if (details.type !== "script" || details.url !== details.documentUrl)
+        return;
       logger.info("StreamFilter: replacing body for", details.url);
       const filter = browser.webRequest.filterResponseData(details.requestId);
       const enc = new TextEncoder();
@@ -87,9 +90,11 @@
         if (workerBundle) {
           filter.write(enc.encode(workerBundle));
         } else {
-          filter.write(enc.encode(
-            "self.postMessage({ type: 'error', error: 'worker bundle not ready' });"
-          ));
+          filter.write(
+            enc.encode(
+              "self.postMessage({ type: 'error', error: 'worker bundle not ready' });",
+            ),
+          );
         }
         filter.close();
       };
@@ -101,10 +106,14 @@
 
   browser.webRequest.onHeadersReceived.addListener(
     (details) => {
-      if (details.type !== "script" || details.url !== details.documentUrl) return;
+      if (details.type !== "script" || details.url !== details.documentUrl)
+        return;
 
       const headers = details.responseHeaders.filter(
-        (h) => !/^(content-security-policy|content-type|content-length|content-disposition|x-content-type-options)$/i.test(h.name),
+        (h) =>
+          !/^(content-security-policy|content-type|content-length|content-disposition|x-content-type-options)$/i.test(
+            h.name,
+          ),
       );
       headers.push({ name: "Content-Type", value: "application/javascript" });
       return { responseHeaders: headers };
@@ -199,7 +208,7 @@
             continue;
           }
           browser.tabs
-            .sendMessage(tab.id, { action: "global-reset" })
+            .sendMessage(tab.id, { action: "globalReset" })
             .catch(() => {});
         }
       })
@@ -462,7 +471,7 @@
         if (!targets) return;
         for (const tabId of targets) {
           browser.tabs
-            .sendMessage(tabId, { action: "webhid-device-event", event })
+            .sendMessage(tabId, { action: "webhidDeviceEvent", event })
             .catch(() => {});
         }
       } catch (e) {
@@ -494,7 +503,7 @@
           device: message.v || null,
         };
         browser.runtime
-          .sendMessage({ action: "webhid-device-event", event: normalized })
+          .sendMessage({ action: "webhidDeviceEvent", event: normalized })
           .catch(() => {});
         browser.tabs
           .query({})
@@ -508,7 +517,7 @@
               }
               browser.tabs
                 .sendMessage(tab.id, {
-                  action: "webhid-device-event",
+                  action: "webhidDeviceEvent",
                   event: normalized,
                 })
                 .catch(() => {});
@@ -522,7 +531,7 @@
         for (const tabId of targets) {
           browser.tabs
             .sendMessage(tabId, {
-              action: "webhid-device-event",
+              action: "webhidDeviceEvent",
               event: message,
             })
             .catch(() => {});
@@ -618,7 +627,7 @@
         return true;
       }
 
-      case "setdataplane":
+      case "setDataPlane":
         if (!isTabAuthorizedForDevice(sender.tab?.id, request.deviceId)) {
           sendResponse({ s: 403 });
           return true;
@@ -632,7 +641,7 @@
           .catch((e) => sendResponse({ s: 500 }));
         return true;
 
-      case "sendreport":
+      case "sendReport":
         if (!isTabAuthorizedForDevice(sender.tab?.id, request.deviceId)) {
           sendResponse({ s: 403 });
           return true;
@@ -662,7 +671,7 @@
           });
         return true;
 
-      case "receivefeaturereport":
+      case "receiveFeatureReport":
         if (!isTabAuthorizedForDevice(sender.tab?.id, request.deviceId)) {
           sendResponse({ s: 403 });
           return true;
@@ -672,7 +681,7 @@
           .catch((e) => sendResponse({ s: 500 }));
         return true;
 
-      case "sendfeaturereport":
+      case "sendFeatureReport":
         if (!isTabAuthorizedForDevice(sender.tab?.id, request.deviceId)) {
           sendResponse({ s: 403 });
           return true;
@@ -751,7 +760,7 @@
         return false;
       }
 
-      case "device-count-changed":
+      case "deviceCountChanged":
         if (browser.action) {
           const tabId = sender.tab?.id;
           if (tabId != null) {
@@ -799,7 +808,7 @@
         return true;
       }
 
-      case "show-picker": {
+      case "showPicker": {
         const tabId = sender.tab?.id;
         if (tabId == null) {
           sendResponse({ error: "no tab" });
@@ -867,7 +876,7 @@
         return false;
       }
 
-      case "picker-result": {
+      case "pickerResult": {
         const { requestId, selected, devices } = request;
         let tabId = request.tabId;
         if (tabId == null && pendingPicker.size > 0) {
@@ -886,7 +895,7 @@
         if (tabId != null) {
           browser.tabs
             .sendMessage(tabId, {
-              action: "picker-result",
+              action: "pickerResult",
               requestId,
               selected,
               devices: selected ? devices : null,

@@ -14,7 +14,7 @@
   const channel = new MessageChannel();
   const bridgePort = channel.port1;
   const target = window === window.top ? window : window.top;
-  target.postMessage({ __webhid_bridge: "init" }, "*", [channel.port2]);
+  target.postMessage(null, "*", [channel.port2]);
 
   let pairedDevices = null;
   let deviceInfoCache = null;
@@ -84,7 +84,7 @@
 
   bridgePort.onmessage = (event) => {
     if (!event.data) return;
-    if (event.data.__webhid_bridge === "res") {
+    if (event.data.type === "res") {
       const handler = pending[event.data.id];
       if (handler) {
         delete pending[event.data.id];
@@ -92,11 +92,11 @@
       }
       return;
     }
-    if (event.data.__webhid_bridge === "settings") {
+    if (event.data.type === "settings") {
       settings.set(event.data.settings || {});
       return;
     }
-    if (event.data.__webhid_bridge === "evt") {
+    if (event.data.type === "evt") {
       dispatchDeviceEvent(event.data.event);
     }
   };
@@ -130,14 +130,13 @@
         resolve(result);
       };
       const msg = {
-        __webhid_bridge: "req",
+        type: "req",
         id,
         action,
         payload: payload || {},
       };
       const xfers = [];
       if (payload && payload.data instanceof Uint8Array) {
-        msg.__transfer = true;
         xfers.push(payload.data.buffer);
       }
       bridgePort.postMessage(msg, xfers.length ? xfers : undefined);
@@ -146,7 +145,7 @@
 
   function sendFireAndForget(action, payload) {
     const msg = {
-      __webhid_bridge: "req",
+      type: "req",
       id: 0,
       action,
       payload: payload || {},
@@ -154,7 +153,6 @@
     };
     const xfers = [];
     if (payload && payload.data instanceof Uint8Array) {
-      msg.__transfer = true;
       xfers.push(payload.data.buffer);
     }
     bridgePort.postMessage(msg, xfers.length ? xfers : undefined);
@@ -274,9 +272,9 @@
             s.dataPort.onmessage = (ev) => onDataPortMessage(s, ev.data);
             bridgePort.postMessage(
               {
-                __webhid_bridge: "req",
+                type: "req",
                 id: 0,
-                action: "data-port",
+                action: "dataPort",
                 payload: { deviceId: s.deviceId },
               },
               [dataChannel.port2],
@@ -507,7 +505,11 @@
       const dev = detail.deviceId ? deviceRegistry.get(detail.deviceId) : null;
       if (dev) {
         const dataView = detail.data
-          ? new DataView(detail.data.buffer || detail.data, detail.data.byteOffset || 0, detail.data.byteLength)
+          ? new DataView(
+              detail.data.buffer || detail.data,
+              detail.data.byteOffset || 0,
+              detail.data.byteLength,
+            )
           : new DataView(new ArrayBuffer(0));
         dev.dispatchEvent(
           new HIDInputReportEvent("inputreport", {
@@ -534,7 +536,11 @@
     }
     if (d.type === "inputReport") {
       const dataView = d.data
-        ? new DataView(d.data.buffer || d.data, d.data.byteOffset || 0, d.data.byteLength)
+        ? new DataView(
+            d.data.buffer || d.data,
+            d.data.byteOffset || 0,
+            d.data.byteLength,
+          )
         : new DataView(new ArrayBuffer(0));
       const dev = s.self;
       if (dev)
@@ -733,7 +739,7 @@
             }
           };
           bridgePort.postMessage({
-            __webhid_bridge: "req",
+            type: "req",
             id,
             action: "requestDevice",
             payload: { filters },
@@ -827,7 +833,9 @@
   });
   hidInstance = createHID();
   Object.defineProperty(Navigator.prototype, "hid", {
-    get() { return hidInstance; },
+    get() {
+      return hidInstance;
+    },
     configurable: true,
     enumerable: true,
   });

@@ -31,20 +31,20 @@ self.onmessage = ({ data: msg, ports }) => {
     transport.connect(msg);
     return;
   }
-  if (msg.type === "set-port") {
+  if (msg.type === "setPort") {
     dataPort = ports[0];
     dataPort.onmessage = (ev) => handleDataPortMessage(ev.data);
     logger.debug("data port received from bridge");
     return;
   }
-  if (msg.type === "unset-port") {
+  if (msg.type === "unsetPort") {
     if (dataPort) {
       const port = dataPort;
       dataPort.onmessage = null;
       dataPort = null;
-      self.postMessage({ type: "return-port" }, [port]);
+      self.postMessage({ type: "returnPort" }, [port]);
     } else {
-      self.postMessage({ type: "return-port" });
+      self.postMessage({ type: "returnPort" });
     }
     return;
   }

@@ -144,7 +144,7 @@
     if (!selectedDeviceId || !pendingRequest) return;
     const devices = deviceGroups[selectedDeviceId] || [];
     await browser.runtime.sendMessage({
-      action: "picker-result",
+      action: "pickerResult",
       requestId: pendingRequest.requestId,
       tabId: pendingRequest.tabId,
       windowId: browser.windows?.getCurrent
@@ -160,7 +160,7 @@
   cancelBtn.addEventListener("click", async () => {
     if (pendingRequest) {
       await browser.runtime.sendMessage({
-        action: "picker-result",
+        action: "pickerResult",
         requestId: pendingRequest.requestId,
         tabId: pendingRequest.tabId,
         windowId: browser.windows?.getCurrent
@@ -176,7 +176,7 @@
   window.addEventListener("unload", () => {
     if (pendingRequest) {
       browser.runtime.sendMessage({
-        action: "picker-result",
+        action: "pickerResult",
         requestId: pendingRequest.requestId,
         tabId: pendingRequest.tabId,
         windowId: browser.windows?.getCurrent ? undefined : undefined,

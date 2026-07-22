@@ -70,13 +70,16 @@
         if (e.target === this.#dialog) this.#dialog.close();
       });
 
-      this.#dialog.addEventListener('keydown', (e) => {
-        if (e.target.matches('.webhid-device-item') && (e.key === 'Enter' || e.key === ' ')) {
+      this.#dialog.addEventListener("keydown", (e) => {
+        if (
+          e.target.matches(".webhid-device-item") &&
+          (e.key === "Enter" || e.key === " ")
+        ) {
           e.preventDefault();
-          const radio = e.target.querySelector('.webhid-device-radio');
+          const radio = e.target.querySelector(".webhid-device-radio");
           if (radio && !radio.disabled) {
             radio.checked = true;
-            radio.dispatchEvent(new Event('change', { bubbles: true }));
+            radio.dispatchEvent(new Event("change", { bubbles: true }));
           }
         }
       });

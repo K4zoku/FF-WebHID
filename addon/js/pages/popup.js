@@ -175,7 +175,7 @@
   await renderDevices();
 
   browser.runtime.onMessage.addListener((message) => {
-    if (message.action === "webhid-device-event" && message.event) {
+    if (message.action === "webhidDeviceEvent" && message.event) {
       const ev = message.event;
       if (ev.eventType === "connect" || ev.eventType === "disconnect") {
         renderDevices();

@@ -17,9 +17,9 @@
   // ---------------------------------------------------------------------------
   // Content script ↔ Page bridge
   //
-  // Page  →  content script:  port.postMessage({ __webhid_bridge: 'req', id, action, payload })
-  // Content script  →  page:  port.postMessage({ __webhid_bridge: 'res', id, result })
-  //                           port.postMessage({ __webhid_bridge: 'evt', event })
+  // Page  →  content script:  port.postMessage({ type: 'req', id, action, payload })
+  // Content script  →  page:  port.postMessage({ type: 'res', id, result })
+  //                           port.postMessage({ type: 'evt', event })
   // ---------------------------------------------------------------------------
   const openDevices = new Set();
   const sessionTokens = new Map();
@@ -57,13 +57,13 @@
       const port = dataPorts.get(deviceId);
       if (port && keepPort) {
         try {
-          worker.postMessage({ type: "unset-port" });
+          worker.postMessage({ type: "unsetPort" });
         } catch {}
         const returned = await new Promise((resolve) => {
           let done = false;
           const onMsg = (ev) => {
             if (done) return;
-            if (ev.data && ev.data.type === "return-port") {
+            if (ev.data && ev.data.type === "returnPort") {
               done = true;
               worker.onmessage = null;
               resolve((ev.ports && ev.ports[0]) || null);
@@ -85,7 +85,7 @@
       } else if (port) {
         dataPorts.delete(deviceId);
         try {
-          worker.postMessage({ type: "unset-port" });
+          worker.postMessage({ type: "unsetPort" });
         } catch {}
         try {
           port.onmessage = null;
@@ -202,7 +202,7 @@
           if (port) {
             port.onmessage = null;
             try {
-              worker.postMessage({ type: "set-port" }, [port]);
+              worker.postMessage({ type: "setPort" }, [port]);
             } catch (e) {
               logger.warn(
                 "set-port transfer failed for",
@@ -257,7 +257,7 @@
           workerReady.delete(deviceId);
           dataPorts.delete(deviceId);
           replyToPage({
-            __webhid_bridge: "evt",
+            type: "evt",
             event: { eventType: "disconnect", deviceId: deviceId },
           });
           return;
@@ -281,7 +281,7 @@
           }
           replyToPage(
             {
-              __webhid_bridge: "evt",
+              type: "evt",
               event: {
                 eventType: "input_report",
                 deviceId: deviceId,
@@ -323,7 +323,7 @@
       logger.warn("worker spawn failed for", deviceId, "; falling back to NM");
       browser.runtime
         .sendMessage({
-          action: "setdataplane",
+          action: "setDataPlane",
           deviceId: deviceId,
           mode: "nm",
         })
@@ -362,26 +362,28 @@
         return;
       }
     }
-    if (msg?.__webhid_bridge === "evt" || msg?.__webhid_bridge === "settings") {
+    if (msg?.type === "evt" || msg?.type === "settings") {
       for (const port of pagePorts.values()) port.postMessage(msg, transfer);
     }
   }
 
   window.addEventListener("message", (event) => {
-    if (!event.data || event.data.__webhid_bridge !== "init") return;
-    if (pagePorts.has(event.source)) return;
-    const port = event.ports && event.ports[0];
+    const port = event.ports?.[0];
     if (!port) return;
+    if (pagePorts.has(event.source)) return;
     pagePorts.set(event.source, port);
     port.onmessage = (ev) => {
       if (ev.data?.id != null) requestPortMap.set(ev.data.id, port);
       handleRequest(ev.data, ev.ports);
     };
-    logger.debug("[bridge] page port established for", event.source === window ? "window" : "child");
+    logger.debug(
+      "[bridge] page port established for",
+      event.source === window ? "window" : "child",
+    );
   });
 
   async function handleRequest(data, ports) {
-    if (!data || data.__webhid_bridge !== "req") return;
+    if (!data || data.type !== "req") return;
 
     const { id, action: reqAction, payload } = data;
     let action = reqAction;
@@ -390,7 +392,7 @@
       "req action=" + action + " id=" + id + (isFireAndForget ? " (faf)" : ""),
     );
 
-    if (action === "data-port") {
+    if (action === "dataPort") {
       const deviceId = payload.deviceId;
       const port = ports && ports[0];
       if (!deviceId || !port) {
@@ -402,7 +404,7 @@
       const worker = workers.get(deviceId);
       if (worker && workerReady.has(deviceId)) {
         try {
-          worker.postMessage({ type: "set-port" }, [port]);
+          worker.postMessage({ type: "setPort" }, [port]);
         } catch (e) {
           logger.warn("set-port transfer failed for", deviceId, ":", e.message);
           port.onmessage = (ev) => onDataPortMessage(deviceId, ev.data);
@@ -426,34 +428,34 @@
           }
         }
         settings.set(global);
-        replyToPage({ __webhid_bridge: "res", id, result: global });
+        replyToPage({ type: "res", id, result: global });
       } catch (e) {
-        replyToPage({ __webhid_bridge: "res", id, result: {} });
+        replyToPage({ type: "res", id, result: {} });
       }
       return;
     }
 
     if (
-      (action === "sendreport" ||
-        action === "sendfeaturereport" ||
-        action === "receivefeaturereport") &&
+      (action === "sendReport" ||
+        action === "sendFeatureReport" ||
+        action === "receiveFeatureReport") &&
       payload &&
       payload.deviceId &&
       workers.has(payload.deviceId)
     ) {
       action =
-        action === "sendreport"
-          ? "worker-send"
-          : action === "sendfeaturereport"
-            ? "worker-sendFeature"
-            : "worker-receiveFeature";
+        action === "sendReport"
+          ? "workerSend"
+          : action === "sendFeatureReport"
+            ? "workerSendFeature"
+            : "workerReceiveFeature";
     }
 
     // Hot-path actions: use worker WS → NM (priority order).
     if (
-      action === "worker-send" ||
-      action === "worker-sendFeature" ||
-      action === "worker-receiveFeature"
+      action === "workerSend" ||
+      action === "workerSendFeature" ||
+      action === "workerReceiveFeature"
     ) {
       const deviceId = payload.deviceId;
 
@@ -461,16 +463,16 @@
       const worker = workers.get(deviceId);
       if (worker && workerReady.has(deviceId)) {
         const wType =
-          action === "worker-send"
+          action === "workerSend"
             ? "send"
-            : action === "worker-sendFeature"
+            : action === "workerSendFeature"
               ? "sendFeature"
               : "receiveFeature";
         const wMsg = { type: wType, reqId: id, reportId: payload.reportId };
-        if (action === "worker-send" || action === "worker-sendFeature")
+        if (action === "workerSend" || action === "workerSendFeature")
           wMsg.data = payload.data;
 
-        if (!isFireAndForget || action === "worker-receiveFeature") {
+        if (!isFireAndForget || action === "workerReceiveFeature") {
           let cbMap = workerCallbacks.get(deviceId);
           if (!cbMap) {
             cbMap = new Map();
@@ -485,7 +487,7 @@
             const xfers =
               result.d instanceof Uint8Array ? [result.d.buffer] : [];
             replyToPage(
-              { __webhid_bridge: "res", id, result },
+              { type: "res", id, result },
               xfers.length ? xfers : undefined,
             );
           });
@@ -496,16 +498,16 @@
 
       if (worker) {
         const wType =
-          action === "worker-send"
+          action === "workerSend"
             ? "send"
-            : action === "worker-sendFeature"
+            : action === "workerSendFeature"
               ? "sendFeature"
               : "receiveFeature";
         const wMsg = { type: wType, reqId: id, reportId: payload.reportId };
-        if (action === "worker-send" || action === "worker-sendFeature")
+        if (action === "workerSend" || action === "workerSendFeature")
           wMsg.data = payload.data;
 
-        if (!isFireAndForget || action === "worker-receiveFeature") {
+        if (!isFireAndForget || action === "workerReceiveFeature") {
           let cbMap = workerCallbacks.get(deviceId);
           if (!cbMap) {
             cbMap = new Map();
@@ -520,7 +522,7 @@
             const xfers =
               result.d instanceof Uint8Array ? [result.d.buffer] : [];
             replyToPage(
-              { __webhid_bridge: "res", id, result },
+              { type: "res", id, result },
               xfers.length ? xfers : undefined,
             );
           });
@@ -533,14 +535,14 @@
 
       logger.warn("no worker for", deviceId, "; falling back to NM");
       const fallbackAction =
-        action === "worker-send"
-          ? "sendreport"
-          : action === "worker-sendFeature"
-            ? "sendfeaturereport"
-            : "receivefeaturereport";
+        action === "workerSend"
+          ? "sendReport"
+          : action === "workerSendFeature"
+            ? "sendFeatureReport"
+            : "receiveFeatureReport";
       try {
         const msg = Object.assign({ action: fallbackAction }, payload || {});
-        if (isFireAndForget && action !== "worker-receiveFeature") {
+        if (isFireAndForget && action !== "workerReceiveFeature") {
           browser.runtime.sendMessage(msg).catch(() => {});
           return;
         }
@@ -550,11 +552,11 @@
             ? [response.d.buffer]
             : [];
         replyToPage(
-          { __webhid_bridge: "res", id, result: response },
+          { type: "res", id, result: response },
           xfers.length ? xfers : undefined,
         );
       } catch (error) {
-        replyToPage({ __webhid_bridge: "res", id, result: { s: 500 } });
+        replyToPage({ type: "res", id, result: { s: 500 } });
       }
       return;
     }
@@ -568,7 +570,7 @@
       ) {
         browser.runtime
           .sendMessage({
-            action: "show-picker",
+            action: "showPicker",
             requestId: id,
             filters,
             origin: window.location.origin,
@@ -577,24 +579,24 @@
           .catch(() => {});
         const pickerTimeout = setTimeout(() => {
           replyToPage({
-            __webhid_bridge: "res",
+            type: "res",
             id,
             result: { cancelled: true },
           });
         }, 30000);
         const onPickerResult = (msg) => {
-          if (msg.action !== "picker-result" || msg.requestId !== id) return;
+          if (msg.action !== "pickerResult" || msg.requestId !== id) return;
           clearTimeout(pickerTimeout);
           browser.runtime.onMessage.removeListener(onPickerResult);
           if (msg.selected && msg.devices) {
             replyToPage({
-              __webhid_bridge: "res",
+              type: "res",
               id,
               result: { devices: msg.devices },
             });
           } else {
             replyToPage({
-              __webhid_bridge: "res",
+              type: "res",
               id,
               result: { cancelled: true },
             });
@@ -612,7 +614,7 @@
       onSelected = (e) => {
         cleanup();
         replyToPage({
-          __webhid_bridge: "res",
+          type: "res",
           id,
           result: { devices: e.detail.devices },
         });
@@ -620,7 +622,7 @@
       onCancelled = () => {
         cleanup();
         replyToPage({
-          __webhid_bridge: "res",
+          type: "res",
           id,
           result: { cancelled: true },
         });
@@ -640,7 +642,7 @@
           payload.deviceId,
         );
         if (!allowed) {
-          replyToPage({ __webhid_bridge: "res", id, result: { s: 403 } });
+          replyToPage({ type: "res", id, result: { s: 403 } });
           return;
         }
       }
@@ -653,7 +655,7 @@
         sessionTokens.set(deviceId, response.t);
         browser.runtime
           .sendMessage({
-            action: "device-count-changed",
+            action: "deviceCountChanged",
             count: openDevices.size,
           })
           .catch(() => {});
@@ -672,7 +674,7 @@
         sessionTokens.delete(deviceId);
         browser.runtime
           .sendMessage({
-            action: "device-count-changed",
+            action: "deviceCountChanged",
             count: openDevices.size,
           })
           .catch(() => {});
@@ -682,11 +684,11 @@
       const xfers =
         response && response.d instanceof Uint8Array ? [response.d.buffer] : [];
       replyToPage(
-        { __webhid_bridge: "res", id, result: response },
+        { type: "res", id, result: response },
         xfers.length ? xfers : undefined,
       );
     } catch (error) {
-      replyToPage({ __webhid_bridge: "res", id, result: { s: 500 } });
+      replyToPage({ type: "res", id, result: { s: 500 } });
     }
   }
 
@@ -706,12 +708,12 @@
       }
       // Notify page world that this device is no longer usable as-is.
       replyToPage({
-        __webhid_bridge: "evt",
+        type: "evt",
         event: { eventType: "disconnect", deviceId },
       });
     }
     browser.runtime
-      .sendMessage({ action: "device-count-changed", count: 0 })
+      .sendMessage({ action: "deviceCountChanged", count: 0 })
       .catch(() => {});
   }
 
@@ -721,11 +723,11 @@
     // (session tokens, open handles) is gone. Any cached sessionTokens /
     // openDevices on the bridge side are now stale — clear them and emit
     // disconnect events to the page so app code can recover (re-open).
-    if (message.action === "global-reset") {
+    if (message.action === "globalReset") {
       handleGlobalReset();
       return;
     }
-    if (message.action === "webhid-device-event" && message.event) {
+    if (message.action === "webhidDeviceEvent" && message.event) {
       const ev = message.event;
       if (ev.eventType === "input_report") {
         const port = dataPorts.get(ev.deviceId);
@@ -756,7 +758,7 @@
       ) {
         devicePicker.refreshDevices();
       }
-      replyToPage({ __webhid_bridge: "evt", event: ev });
+      replyToPage({ type: "evt", event: ev });
     }
   });
 
@@ -769,10 +771,10 @@
     ) {
       const action =
         msg.type === "send"
-          ? "sendreport"
+          ? "sendReport"
           : msg.type === "sendFeature"
-            ? "sendfeaturereport"
-            : "receivefeaturereport";
+            ? "sendFeatureReport"
+            : "receiveFeatureReport";
       const payload = { deviceId, reportId: msg.reportId };
       if (msg.type === "send" || msg.type === "sendFeature")
         payload.data = msg.data;
@@ -831,7 +833,7 @@
     for (const id of openDevices) {
       browser.runtime
         .sendMessage({
-          action: "setdataplane",
+          action: "setDataPlane",
           deviceId: id,
           mode: dp,
         })
@@ -843,23 +845,16 @@
   settings.on("dataPlane", (dp) => applyDataPlane(dp));
 
   // Push any settings change to page + workers.
-  settings.on(
-    ["dataPlane", "fireAndForget", "logLevel"],
-    () => {
-      const all = settings.getAll();
-      const patch = {};
-      for (const k of [
-        "dataPlane",
-        "fireAndForget",
-        "logLevel",
-      ]) {
-        patch[k] = all[k];
-      }
-      replyToPage({ __webhid_bridge: "settings", settings: patch });
-      const workerMsg = { type: "settings", ...patch };
-      for (const worker of workers.values()) worker.postMessage(workerMsg);
-    },
-  );
+  settings.on(["dataPlane", "fireAndForget", "logLevel"], () => {
+    const all = settings.getAll();
+    const patch = {};
+    for (const k of ["dataPlane", "fireAndForget", "logLevel"]) {
+      patch[k] = all[k];
+    }
+    replyToPage({ type: "settings", settings: patch });
+    const workerMsg = { type: "settings", ...patch };
+    for (const worker of workers.values()) worker.postMessage(workerMsg);
+  });
 
   browser.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return;
