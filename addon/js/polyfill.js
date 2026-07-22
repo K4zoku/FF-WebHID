@@ -11,7 +11,8 @@
 
   const _channel = new MessageChannel();
   const _bridgePort = _channel.port1;
-  window.postMessage({ __webhid_bridge: "init" }, "*", [_channel.port2]);
+  const _target = window === window.top ? window : window.top;
+  _target.postMessage({ __webhid_bridge: "init" }, "*", [_channel.port2]);
 
   let _pairedDevices = null;
   let _deviceInfoCache = null;
@@ -822,13 +823,10 @@
     configurable: true,
     enumerable: false,
   });
-  // S1 (continued): Assign the singleton before publishing it on navigator
-  // so _dispatchDeviceEvent can find it via _hidInstance.
   _hidInstance = _createHID();
-  Object.defineProperty(window.navigator, "hid", {
-    value: _hidInstance,
-    writable: false,
+  Object.defineProperty(Navigator.prototype, "hid", {
+    get() { return _hidInstance; },
     configurable: true,
-    enumerable: false,
+    enumerable: true,
   });
 })();

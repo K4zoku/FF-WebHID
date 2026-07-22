@@ -38,7 +38,9 @@
   const _dataPorts = new Map();
   let _wsPort = null;
   const settings = createSettingsStore(GLOBAL_DEFAULTS);
-  let _pagePort = null;
+  settings.on("logLevel", (v) => logger.applyLevel(v));
+  const _pagePorts = new Map();
+  const _requestPortMap = new Map();
   const _spawnGen = new Map();
 
   async function _isDeviceAllowedForOrigin(origin, deviceId) {
@@ -212,6 +214,12 @@
               port.onmessage = (e2) => _onDataPortMessage(deviceId, e2.data);
             }
           }
+          worker.postMessage({
+            type: "settings",
+            dataPlane: settings.dataPlane,
+            fireAndForget: settings.fireAndForget,
+            logLevel: settings.logLevel,
+          });
           resolveSpawn(true);
           return;
         }
@@ -347,21 +355,38 @@
   })();
 
   function _replyToPage(msg, transfer) {
-    if (!_pagePort) return;
-    _pagePort.postMessage(msg, transfer);
+    if (msg?.id != null) {
+      const port = _requestPortMap.get(msg.id);
+      if (port) {
+        _requestPortMap.delete(msg.id);
+        port.postMessage(msg, transfer);
+        return;
+      }
+    }
+    if (msg?.__webhid_bridge === "evt" || msg?.__webhid_bridge === "settings") {
+      for (const port of _pagePorts.values()) port.postMessage(msg, transfer);
+    }
+  }
+
+  function _isChildFrame(source) {
+    for (let i = 0; i < window.frames.length; i++) {
+      if (window.frames[i] === source) return true;
+    }
+    return false;
   }
 
   window.addEventListener("message", (event) => {
-    if (event.source !== window) return;
+    if (event.source !== window && !_isChildFrame(event.source)) return;
     if (!event.data || event.data.__webhid_bridge !== "init") return;
-    if (_pagePort) return;
+    if (_pagePorts.has(event.source)) return;
     const port = event.ports && event.ports[0];
     if (!port) return;
-    _pagePort = port;
-    _pagePort.onmessage = (ev) => {
+    _pagePorts.set(event.source, port);
+    port.onmessage = (ev) => {
+      if (ev.data?.id != null) _requestPortMap.set(ev.data.id, port);
       handleRequest(ev.data, ev.ports);
     };
-    logger.debug("[bridge] page port established");
+    logger.debug("[bridge] page port established for", event.source === window ? "window" : "child");
   });
 
   async function handleRequest(data, ports) {
