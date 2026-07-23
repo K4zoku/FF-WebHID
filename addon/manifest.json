@@ -24,6 +24,7 @@
       "js/utils/http.js",
       "js/utils/logger.js",
       "js/utils/settings.js",
+      "js/utils/base64.js",
       "js/background.js"
     ]
   },
@@ -83,7 +84,6 @@
   "browser_specific_settings": {
     "gecko": {
       "id": "webhid@k4zoku.dev",
-      "strict_min_version": "133.0",
       "data_collection_permissions": {
         "required": [
           "websiteContent"
