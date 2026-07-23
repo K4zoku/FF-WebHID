@@ -42,6 +42,9 @@ all: build build-addon
 bump:
 	npx commit-and-tag-version
 
+bump-minor:
+	npx commit-and-tag-version --release-as minor
+
 bump-patch:
 	npx commit-and-tag-version --release-as patch
 
