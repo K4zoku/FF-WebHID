@@ -39,7 +39,8 @@
       const devices =
         http.isOk(response.s) && Array.isArray(response.D) ? response.D : [];
       deviceInfoCache = new Map();
-      for (const device of devices) deviceInfoCache.set(device.deviceId, device);
+      for (const device of devices)
+        deviceInfoCache.set(device.deviceId, device);
       return deviceInfoCache;
     } catch {
       deviceInfoCache = new Map();
@@ -233,7 +234,10 @@
         const state = devState.get(this);
         if (!state) return;
         if (state.oninputreport)
-          state.eventTarget.removeEventListener("inputreport", state.oninputreport);
+          state.eventTarget.removeEventListener(
+            "inputreport",
+            state.oninputreport,
+          );
         state.oninputreport = v;
         if (v) this.addEventListener("inputreport", v);
       },
@@ -243,7 +247,8 @@
     open: {
       value: async function () {
         const state = devState.get(this);
-        if (!state) throw new DOMException("Invalid state", "InvalidStateError");
+        if (!state)
+          throw new DOMException("Invalid state", "InvalidStateError");
         if (state.forgotten)
           throw new DOMException(
             "Device has been forgotten",
@@ -266,7 +271,8 @@
           if (http.isOk(response.s)) {
             const dataChannel = new MessageChannel();
             state.dataPort = dataChannel.port1;
-            state.dataPort.onmessage = (event) => onDataPortMessage(state, event.data);
+            state.dataPort.onmessage = (event) =>
+              onDataPortMessage(state, event.data);
             bridgePort.postMessage(
               {
                 id: 0,
@@ -307,7 +313,9 @@
         if (!state.opened) return;
         logger.debug("close deviceId=" + state.deviceId);
         try {
-          const response = await sendRequest("close", { deviceId: state.deviceId });
+          const response = await sendRequest("close", {
+            deviceId: state.deviceId,
+          });
           if (http.isOk(response.s)) {
             state.opened = false;
             rejectPendingReports(
@@ -334,7 +342,8 @@
     sendReport: {
       value: async function (reportId, data) {
         const state = devState.get(this);
-        if (!state) throw new DOMException("Invalid state", "InvalidStateError");
+        if (!state)
+          throw new DOMException("Invalid state", "InvalidStateError");
         if (!state.opened)
           throw new DOMException("Device is not open", "InvalidStateError");
         validateReportId(reportId, state.collections);
@@ -374,7 +383,8 @@
     receiveFeatureReport: {
       value: async function (reportId) {
         const state = devState.get(this);
-        if (!state) throw new DOMException("Invalid state", "InvalidStateError");
+        if (!state)
+          throw new DOMException("Invalid state", "InvalidStateError");
         if (!state.opened)
           throw new DOMException("Device is not open", "InvalidStateError");
         validateReportId(reportId, state.collections);
@@ -386,15 +396,24 @@
             state.dataPending.set(reqId, {
               resolve: (data) => {
                 if (!data) return resolve(new DataView(new ArrayBuffer(0)));
-                const buffer = data instanceof Uint8Array ? data : new Uint8Array(data);
+                const buffer =
+                  data instanceof Uint8Array ? data : new Uint8Array(data);
                 resolve(
-                  new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength),
+                  new DataView(
+                    buffer.buffer,
+                    buffer.byteOffset,
+                    buffer.byteLength,
+                  ),
                 );
               },
               reject: (e) =>
                 reject(new DOMException(e.message || e, "NetworkError")),
             });
-            state.dataPort.postMessage({ type: "receiveFeature", reqId, reportId });
+            state.dataPort.postMessage({
+              type: "receiveFeature",
+              reqId,
+              reportId,
+            });
           });
         } catch (error) {
           throw new DOMException(error.message, "NetworkError");
@@ -407,7 +426,8 @@
     sendFeatureReport: {
       value: async function (reportId, data) {
         const state = devState.get(this);
-        if (!state) throw new DOMException("Invalid state", "InvalidStateError");
+        if (!state)
+          throw new DOMException("Invalid state", "InvalidStateError");
         if (!state.opened)
           throw new DOMException("Device is not open", "InvalidStateError");
         validateReportId(reportId, state.collections);
@@ -519,7 +539,9 @@
       return;
     }
     if (detail.eventType === "input_report") {
-      const device = detail.deviceId ? deviceRegistry.get(detail.deviceId) : null;
+      const device = detail.deviceId
+        ? deviceRegistry.get(detail.deviceId)
+        : null;
       if (device) {
         const dataView = detail.data
           ? new DataView(
@@ -596,7 +618,10 @@
 
   async function teardownForgottenDevice(device, state) {
     state.forgotten = true;
-    rejectPendingReports(state, new DOMException("Device forgotten", "AbortError"));
+    rejectPendingReports(
+      state,
+      new DOMException("Device forgotten", "AbortError"),
+    );
     if (state.opened) {
       state.opened = false;
       try {
@@ -923,7 +948,8 @@
       set(v) {
         const state = hidState.get(this);
         if (!state) return;
-        if (state.onconnect) state.eventTarget.removeEventListener("connect", state.onconnect);
+        if (state.onconnect)
+          state.eventTarget.removeEventListener("connect", state.onconnect);
         state.onconnect = v;
         if (v) state.eventTarget.addEventListener("connect", v);
       },
@@ -938,7 +964,10 @@
         const state = hidState.get(this);
         if (!state) return;
         if (state.ondisconnect)
-          state.eventTarget.removeEventListener("disconnect", state.ondisconnect);
+          state.eventTarget.removeEventListener(
+            "disconnect",
+            state.ondisconnect,
+          );
         state.ondisconnect = v;
         if (v) state.eventTarget.addEventListener("disconnect", v);
       },
@@ -951,7 +980,11 @@
     const obj = Object.create(HID.prototype);
     const eventTarget = new EventTarget();
     obj.dispatchEvent = eventTarget.dispatchEvent.bind(eventTarget);
-    hidState.set(obj, { eventTarget: eventTarget, onconnect: null, ondisconnect: null });
+    hidState.set(obj, {
+      eventTarget: eventTarget,
+      onconnect: null,
+      ondisconnect: null,
+    });
     return obj;
   }
 

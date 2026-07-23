@@ -172,7 +172,9 @@
           const callbackMap = workerCallbacks.get(deviceId);
           for (const workerMsg of queue) {
             if (callbackMap && callbackMap.has(workerMsg.reqId)) {
-              callbackMap.get(workerMsg.reqId)({ error: "worker spawn failed" });
+              callbackMap.get(workerMsg.reqId)({
+                error: "worker spawn failed",
+              });
               callbackMap.delete(workerMsg.reqId);
             }
           }
@@ -195,7 +197,10 @@
           const queue = workerQueues.get(deviceId);
           if (queue) {
             for (const workerMsg of queue) {
-              worker.postMessage(workerMsg, workerMsg.data ? [workerMsg.data.buffer] : []);
+              worker.postMessage(
+                workerMsg,
+                workerMsg.data ? [workerMsg.data.buffer] : [],
+              );
             }
             workerQueues.delete(deviceId);
           }
@@ -251,7 +256,8 @@
           // Mirrors the _controlPending pattern used on the control plane.
           const orphanCallbackMap = workerCallbacks.get(deviceId);
           if (orphanCallbackMap) {
-            for (const [, callback] of orphanCallbackMap) callback({ error: "worker closed" });
+            for (const [, callback] of orphanCallbackMap)
+              callback({ error: "worker closed" });
             orphanCallbackMap.clear();
           }
           workers.delete(deviceId);
@@ -475,7 +481,11 @@
             : action === "workerSendFeature"
               ? "sendFeature"
               : "receiveFeature";
-        const workerMsg = { type: workerType, reqId: id, reportId: payload.reportId };
+        const workerMsg = {
+          type: workerType,
+          reqId: id,
+          reportId: payload.reportId,
+        };
         if (action === "workerSend" || action === "workerSendFeature")
           workerMsg.data = payload.data;
 
@@ -510,7 +520,11 @@
             : action === "workerSendFeature"
               ? "sendFeature"
               : "receiveFeature";
-        const workerMsg = { type: workerType, reqId: id, reportId: payload.reportId };
+        const workerMsg = {
+          type: workerType,
+          reqId: id,
+          reportId: payload.reportId,
+        };
         if (action === "workerSend" || action === "workerSendFeature")
           workerMsg.data = payload.data;
 
@@ -748,7 +762,11 @@
           const buffer = view ? view.buffer || view : null;
           try {
             port.postMessage(
-              { type: "inputReport", reportId: messageEvent.reportId, data: buffer },
+              {
+                type: "inputReport",
+                reportId: messageEvent.reportId,
+                data: buffer,
+              },
               buffer ? [buffer] : [],
             );
           } catch {}
@@ -766,7 +784,8 @@
       if (
         devicePicker &&
         devicePicker.isOpen &&
-        (messageEvent.eventType === "connect" || messageEvent.eventType === "disconnect")
+        (messageEvent.eventType === "connect" ||
+          messageEvent.eventType === "disconnect")
       ) {
         devicePicker.refreshDevices();
       }
@@ -804,7 +823,8 @@
             });
           } catch {}
         } else {
-          const error = response && !http.isOk(response.s) ? "send failed" : null;
+          const error =
+            response && !http.isOk(response.s) ? "send failed" : null;
           try {
             port.postMessage({
               type: msg.type === "send" ? "sendResult" : "featureResult",

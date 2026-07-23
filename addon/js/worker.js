@@ -211,7 +211,11 @@ function replyData(msg, transfer) {
 function handleControlResponse(batch) {
   if (batch.length < 6) return;
   const respType = batch[0];
-  const dataView = new DataView(batch.buffer, batch.byteOffset, batch.byteLength);
+  const dataView = new DataView(
+    batch.buffer,
+    batch.byteOffset,
+    batch.byteLength,
+  );
   const reqId = dataView.getUint32(1, true);
   const status = batch[5];
   const entry = pending.get(reqId);

@@ -192,10 +192,12 @@
             JSON.stringify(this.#filters || []),
         );
         for (const device of this.#devices) {
-          const vidHex = "0x" + (device.vendorId || 0).toString(16).padStart(4, "0");
+          const vidHex =
+            "0x" + (device.vendorId || 0).toString(16).padStart(4, "0");
           const pidHex =
             "0x" + (device.productId || 0).toString(16).padStart(4, "0");
-          const upHex = "0x" + (device.usagePage || 0).toString(16).padStart(4, "0");
+          const upHex =
+            "0x" + (device.usagePage || 0).toString(16).padStart(4, "0");
           logger.warn(
             "  excluded: " +
               (device.productName || "(unnamed)") +
