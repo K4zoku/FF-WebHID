@@ -2,6 +2,56 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [2.2.0](https://github.com/K4zoku/FF-WebHID/compare/v2.1.1...v2.2.0) (2026-07-23)
+
+
+### ⚠ BREAKING CHANGES
+
+* remove ws control plane
+
+### Features
+
+* bypass CSP ([5f3e437](https://github.com/K4zoku/FF-WebHID/commit/5f3e4373ecbf7b5869fb99f35ad6b4cb4c2b39f0))
+* cheaper way for shadow url to work ([78e489c](https://github.com/K4zoku/FF-WebHID/commit/78e489c6a34edf7b32dd1d5c6635c185514ecbf7))
+* exclusionFilter ([5a6a7b2](https://github.com/K4zoku/FF-WebHID/commit/5a6a7b2b7ad9d89d716ab8f54685f6be8a55c7a1))
+* keyboard interaction for shadow dom device picker ([35c2b49](https://github.com/K4zoku/FF-WebHID/commit/35c2b49ab440f8deb3eb0ba5509f03f95f0152c7))
+* oneshot filter ([06520c9](https://github.com/K4zoku/FF-WebHID/commit/06520c941599e8c94f22dc346177c8919944f893))
+* remove ws control plane ([c964326](https://github.com/K4zoku/FF-WebHID/commit/c964326f966589772c958f491a9858256ac5ec02))
+* revoke will close device in polyfill layer ([1fe65e0](https://github.com/K4zoku/FF-WebHID/commit/1fe65e058ebe59c59cd2a4d5e34a43165aef740c))
+* set default daemonAsNmHost to true on Windows ([d842975](https://github.com/K4zoku/FF-WebHID/commit/d8429758b4e174f7ecdc3dbe1a80eb1ff3ef0819))
+* support for firefox 133 ([ac24424](https://github.com/K4zoku/FF-WebHID/commit/ac24424c7e2d881d394bb16f7743f670a1059e5c))
+* throw when invalid spec ([353e0ab](https://github.com/K4zoku/FF-WebHID/commit/353e0ab8c941fd70507446cf1e5ed488551d6a49))
+
+
+### Bug Fixes
+
+* iframe now have polyfill, setting sync fix ([eca879c](https://github.com/K4zoku/FF-WebHID/commit/eca879c6da59f24277c7a520806b0f3062964db5))
+* iframe origin ([699ef30](https://github.com/K4zoku/FF-WebHID/commit/699ef30a774fd3e149a660e0b5314ee49dd7e69e))
+* now webhid api in iframe is working ([47aa712](https://github.com/K4zoku/FF-WebHID/commit/47aa7128d495e1e83195d3a1a4e7b19c61394048))
+* ws data plane not working ([da9f92c](https://github.com/K4zoku/FF-WebHID/commit/da9f92c1509bfdac71cbaa140bd4466d4304ee5f))
+
+
+### Code Refactoring
+
+* nomalize names ([9f11fc7](https://github.com/K4zoku/FF-WebHID/commit/9f11fc76c4adbacae6d0f0b6b02a47fd65e54a07))
+* polyfill base64 (from corejs) to support firefox 128+ ([df5fe45](https://github.com/K4zoku/FF-WebHID/commit/df5fe452500c33879c49d12890a356b54016d425))
+* reformat ([b2b647f](https://github.com/K4zoku/FF-WebHID/commit/b2b647f461ff81b47e5e8fd1a97919d11a361ab3))
+* remove deadcode ([71a9a4d](https://github.com/K4zoku/FF-WebHID/commit/71a9a4df6f9b9cdc2dd7204fda1a01ba96659df9))
+* rename identifers ([811c42f](https://github.com/K4zoku/FF-WebHID/commit/811c42f83972d482be82e0b3e61e9f92c82d5c68))
+* rename things ([5068e3c](https://github.com/K4zoku/FF-WebHID/commit/5068e3cf63a8381cbb9df3e4d4103ed10b041634))
+* rename, cleanup dead code, remove webhid global after import ([3beeaf3](https://github.com/K4zoku/FF-WebHID/commit/3beeaf3ccede34a6ebc19050d9f1f2103e832641))
+
+
+### CI/CD
+
+* add attest & addon download ([86b213b](https://github.com/K4zoku/FF-WebHID/commit/86b213b40391bd630796f52760b65e85e41c8074))
+* keep only unit test ([41b9b6a](https://github.com/K4zoku/FF-WebHID/commit/41b9b6a47a98aa58780c5eb4f4ab9f3bf6887d4e))
+* organize workflow ([3c7b89a](https://github.com/K4zoku/FF-WebHID/commit/3c7b89a3d74bd82b321f02486ad744b72e552461))
+* pin wix ui ext version ([133c844](https://github.com/K4zoku/FF-WebHID/commit/133c844dd967bc9d8f64b4a54a00625f6e27e176))
+* remove addon out of test CI ([ae36f4d](https://github.com/K4zoku/FF-WebHID/commit/ae36f4d12da4e3aabeea3b0af8987df7fce53bba))
+* rename artifacts ([efa7606](https://github.com/K4zoku/FF-WebHID/commit/efa7606b6f28d2387115bcfa3fe52dbeac53e4e1))
+* temporary disable e2e test ([b945936](https://github.com/K4zoku/FF-WebHID/commit/b94593637be9ca7d80b0745d62f3e10c2ec723b2))
+
 ## [2.1.1](https://github.com/K4zoku/FF-WebHID/compare/v2.1.0...v2.1.1) (2026-07-20)
 
 
