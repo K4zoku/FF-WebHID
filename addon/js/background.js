@@ -598,20 +598,21 @@
 
       case "open": {
         const tabId = sender.tab?.id;
-        const origin = sender.tab?.url ? new URL(sender.tab.url).origin : null;
-        isDeviceAllowedForOrigin(origin, request.deviceId).then((allowed) => {
-          if (!allowed) {
-            sendResponse({ s: 403 });
-            return;
-          }
-          NativeMessaging.openDevice(request.deviceId)
-            .then((response) => {
-              if (http.isOk(response.s) && response.i)
-                registerDeviceTab(response.i, tabId);
-              sendResponse(response);
-            })
-            .catch((e) => sendResponse({ s: 500 }));
-        });
+        isDeviceAllowedForOrigin(request.origin, request.deviceId).then(
+          (allowed) => {
+            if (!allowed) {
+              sendResponse({ s: 403 });
+              return;
+            }
+            NativeMessaging.openDevice(request.deviceId)
+              .then((response) => {
+                if (http.isOk(response.s) && response.i)
+                  registerDeviceTab(response.i, tabId);
+                sendResponse(response);
+              })
+              .catch((e) => sendResponse({ s: 500 }));
+          },
+        );
         return true;
       }
 
@@ -641,9 +642,7 @@
             hashes = hashes.filter((h) => h !== request.deviceId);
             await browser.storage.local.set({ [storageKey]: hashes });
             removeDeviceInfo(request.deviceId);
-            await NativeMessaging.closeDevice(request.deviceId).catch(
-              () => {},
-            );
+            await NativeMessaging.closeDevice(request.deviceId).catch(() => {});
             const tabs = await browser.tabs.query({});
             for (const tab of tabs) {
               if (!tab.url) continue;
@@ -770,8 +769,7 @@
       case "unpairDevice":
         (async () => {
           try {
-            const origin = new URL(sender.tab?.url || "http://localhost")
-              .origin;
+            const origin = request.origin;
             const storageKey = encodeURIComponent(origin);
             const result = await browser.storage.local.get(storageKey);
             let hashes = result[storageKey] || [];

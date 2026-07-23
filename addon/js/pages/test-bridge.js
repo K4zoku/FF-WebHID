@@ -26,7 +26,7 @@ window.addEventListener("message", (event) => {
 });
 
 async function handleRequest(data, ports) {
-  if (!data || data.type !== "req") return;
+  if (!data || data.id === undefined) return;
 
   const { id, action, payload } = data;
 

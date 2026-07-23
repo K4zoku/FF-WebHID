@@ -23,9 +23,7 @@
   async function getPairedDevices() {
     if (pairedDevices !== null) return pairedDevices;
     try {
-      const result = await sendRequest("getPairedDevices", {
-        origin: window.location?.origin || "",
-      });
+      const result = await sendRequest("getPairedDevices");
       pairedDevices = result.hashes || [];
       deviceInfoCache = null;
       return pairedDevices;
@@ -53,7 +51,6 @@
     try {
       pairedDevices = null;
       const result = await sendRequest("pairDevice", {
-        origin: window.location?.origin || "",
         device: { deviceId: deviceInfo.deviceId },
       });
       if (result && result.success) {
@@ -130,12 +127,7 @@
         delete pending[id];
         resolve(result);
       };
-      const msg = {
-        type: "req",
-        id,
-        action,
-        payload: payload || {},
-      };
+      const msg = { id, action, payload: payload || {} };
       const xfers = [];
       if (payload && payload.data instanceof Uint8Array) {
         xfers.push(payload.data.buffer);
@@ -146,7 +138,6 @@
 
   function sendFireAndForget(action, payload) {
     const msg = {
-      type: "req",
       id: 0,
       action,
       payload: payload || {},
@@ -278,7 +269,6 @@
             s.dataPort.onmessage = (ev) => onDataPortMessage(s, ev.data);
             bridgePort.postMessage(
               {
-                type: "req",
                 id: 0,
                 action: "dataPort",
                 payload: { deviceId: s.deviceId },
@@ -606,10 +596,7 @@
 
   async function teardownForgottenDevice(dev, s) {
     s.forgotten = true;
-    rejectPendingReports(
-      s,
-      new DOMException("Device forgotten", "AbortError"),
-    );
+    rejectPendingReports(s, new DOMException("Device forgotten", "AbortError"));
     if (s.opened) {
       s.opened = false;
       try {
@@ -901,7 +888,6 @@
             }
           };
           bridgePort.postMessage({
-            type: "req",
             id,
             action: "requestDevice",
             payload: { filters, exclusionFilters },

@@ -17,7 +17,7 @@
   // ---------------------------------------------------------------------------
   // Content script ↔ Page bridge
   //
-  // Page  →  content script:  port.postMessage({ type: 'req', id, action, payload })
+  // Page  →  content script:  port.postMessage({ id, action, payload })
   // Content script  →  page:  port.postMessage({ type: 'res', id, result })
   //                           port.postMessage({ type: 'evt', event })
   // ---------------------------------------------------------------------------
@@ -40,6 +40,7 @@
   settings.on("logLevel", (v) => logger.applyLevel(v));
   const pagePorts = new Map();
   const requestPortMap = new Map();
+  const portOrigin = new Map();
   const spawnGen = new Map();
 
   async function isDeviceAllowedForOrigin(origin, deviceId) {
@@ -372,6 +373,7 @@
     if (!port) return;
     if (pagePorts.has(event.source)) return;
     pagePorts.set(event.source, port);
+    portOrigin.set(port, event.origin);
     port.onmessage = (ev) => {
       if (ev.data?.id != null) requestPortMap.set(ev.data.id, port);
       handleRequest(ev.data, ev.ports);
@@ -382,8 +384,13 @@
     );
   });
 
+  function getRequestOrigin(data) {
+    const port = requestPortMap.get(data.id);
+    return port ? portOrigin.get(port) : window.location.origin;
+  }
+
   async function handleRequest(data, ports) {
-    if (!data || data.type !== "req") return;
+    if (!data || data.id === undefined) return;
 
     const { id, action: reqAction, payload } = data;
     let action = reqAction;
@@ -575,7 +582,7 @@
             requestId: id,
             filters,
             exclusionFilters,
-            origin: window.location.origin,
+            origin: getRequestOrigin(data),
             mode: settings.devicePickerMode,
           })
           .catch(() => {});
@@ -638,7 +645,7 @@
     try {
       let response;
       if (action === "open") {
-        const origin = window.location.origin;
+        const origin = getRequestOrigin(data);
         const allowed = await isDeviceAllowedForOrigin(
           origin,
           payload.deviceId,
@@ -648,7 +655,10 @@
           return;
         }
       }
-      const msg = Object.assign({ action }, payload || {});
+      const msg = Object.assign(
+        { action, origin: getRequestOrigin(data) },
+        payload || {},
+      );
       response = await browser.runtime.sendMessage(msg);
 
       if (action === "open" && http.isOk(response.s) && response.t) {
