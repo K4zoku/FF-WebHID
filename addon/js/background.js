@@ -818,6 +818,7 @@
           requestId: request.requestId,
           tabId,
           filters: request.filters || [],
+          exclusionFilters: request.exclusionFilters || [],
           origin: request.origin,
           mode: request.mode || "pageAction",
         };

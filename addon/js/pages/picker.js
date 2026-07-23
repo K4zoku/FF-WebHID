@@ -35,7 +35,11 @@
     const devices =
       http.isOk(response.s) && Array.isArray(response.D) ? response.D : [];
 
-    const filtered = applyFilters(devices, pendingRequest.filters || []);
+    const filtered = applyFilters(
+      devices,
+      pendingRequest.filters || [],
+      pendingRequest.exclusionFilters || [],
+    );
     if (filtered.length === 0) {
       logger.warn(
         "picker: 0/" +

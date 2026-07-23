@@ -15,6 +15,7 @@
     #dialog = null;
     #devices = [];
     #filters = [];
+    #exclusionFilters = [];
     #deviceGroups = {};
     #pairedDevices = null;
     #fragmentReady = null;
@@ -85,9 +86,10 @@
       });
     }
 
-    async show(filters = []) {
+    async show(filters = [], exclusionFilters = []) {
       await this.#fragmentReady;
       this.#filters = filters;
+      this.#exclusionFilters = exclusionFilters;
 
       if (typeof this.#dialog.showModal === "function") {
         if (this.#dialog.open) this.#dialog.close();
@@ -177,7 +179,11 @@
         return;
       }
 
-      const filteredDevices = applyFilters(this.#devices, this.#filters);
+      const filteredDevices = applyFilters(
+        this.#devices,
+        this.#filters,
+        this.#exclusionFilters,
+      );
       if (filteredDevices.length === 0) {
         logger.warn(
           "picker: 0/" +

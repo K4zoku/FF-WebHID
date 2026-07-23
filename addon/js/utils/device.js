@@ -29,46 +29,57 @@
     return "unknown";
   }
 
-  function applyFilters(devices, filters) {
-    if (!Array.isArray(filters) || filters.length === 0) return devices;
-    return devices.filter((device) =>
-      filters.some((filter) => {
-        if (
-          filter.vendorId !== undefined &&
-          device.vendorId !== filter.vendorId
-        )
-          return false;
-        if (
-          filter.productId !== undefined &&
-          device.productId !== filter.productId
-        )
-          return false;
+  function deviceMatchesFilter(device, filter) {
+    if (
+      filter.vendorId !== undefined &&
+      device.vendorId !== filter.vendorId
+    )
+      return false;
+    if (
+      filter.productId !== undefined &&
+      device.productId !== filter.productId
+    )
+      return false;
 
-        if (filter.usagePage !== undefined) {
-          let pageMatch = false;
-          const collections = device.collections || [];
-          for (const collection of collections) {
-            if (collection.usagePage !== filter.usagePage) continue;
-            if (filter.usage !== undefined && collection.usage !== filter.usage)
-              continue;
-            pageMatch = true;
-            break;
-          }
-          if (!pageMatch) return false;
-        } else if (filter.usage !== undefined) {
-          let usageMatch = false;
-          const collections = device.collections || [];
-          for (const collection of collections) {
-            if (collection.usage === filter.usage) {
-              usageMatch = true;
-              break;
-            }
-          }
-          if (!usageMatch) return false;
+    if (filter.usagePage !== undefined) {
+      let pageMatch = false;
+      const collections = device.collections || [];
+      for (const collection of collections) {
+        if (collection.usagePage !== filter.usagePage) continue;
+        if (filter.usage !== undefined && collection.usage !== filter.usage)
+          continue;
+        pageMatch = true;
+        break;
+      }
+      if (!pageMatch) return false;
+    } else if (filter.usage !== undefined) {
+      let usageMatch = false;
+      const collections = device.collections || [];
+      for (const collection of collections) {
+        if (collection.usage === filter.usage) {
+          usageMatch = true;
+          break;
         }
-        return true;
-      }),
-    );
+      }
+      if (!usageMatch) return false;
+    }
+    return true;
+  }
+
+  function applyFilters(devices, filters, exclusionFilters) {
+    let result = devices;
+    if (Array.isArray(filters) && filters.length > 0) {
+      result = result.filter((device) =>
+        filters.some((filter) => deviceMatchesFilter(device, filter)),
+      );
+    }
+    if (Array.isArray(exclusionFilters) && exclusionFilters.length > 0) {
+      result = result.filter(
+        (device) =>
+          !exclusionFilters.some((filter) => deviceMatchesFilter(device, filter)),
+      );
+    }
+    return result;
   }
 
   function groupDevices(devices) {
@@ -94,8 +105,21 @@
     }
   }
 
+  /**
+   * Returns whether a HIDDeviceFilter is well-formed per the WebHID spec:
+   * non-empty, productId requires vendorId, usage requires usagePage.
+   */
+  function isValidFilter(filter) {
+    if (!filter || typeof filter !== "object") return false;
+    if (Object.keys(filter).length === 0) return false;
+    if ("productId" in filter && !("vendorId" in filter)) return false;
+    if ("usage" in filter && !("usagePage" in filter)) return false;
+    return true;
+  }
+
   webhid.export("guessDeviceType", guessDeviceType);
   webhid.export("applyFilters", applyFilters);
   webhid.export("groupDevices", groupDevices);
   webhid.export("fetchDeviceIcon", fetchDeviceIcon);
+  webhid.export("isValidFilter", isValidFilter);
 })();

@@ -563,6 +563,7 @@
 
     if (action === "requestDevice") {
       const filters = (payload && payload.filters) || [];
+      const exclusionFilters = (payload && payload.exclusionFilters) || [];
 
       if (
         settings.devicePickerMode === "pageAction" ||
@@ -573,6 +574,7 @@
             action: "showPicker",
             requestId: id,
             filters,
+            exclusionFilters,
             origin: window.location.origin,
             mode: settings.devicePickerMode,
           })
@@ -629,7 +631,7 @@
       };
       window.addEventListener("webhid-device-selected", onSelected);
       window.addEventListener("webhid-device-cancelled", onCancelled);
-      devicePicker.show(filters);
+      devicePicker.show(filters, exclusionFilters);
       return;
     }
 

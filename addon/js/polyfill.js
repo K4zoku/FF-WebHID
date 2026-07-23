@@ -5,6 +5,7 @@
   const http = webhid.import("http");
   const GLOBAL_DEFAULTS = webhid.import("GLOBAL_DEFAULTS");
   const createSettingsStore = webhid.import("createSettingsStore");
+  const isValidFilter = webhid.import("isValidFilter");
   delete globalThis.webhid;
   logger.initLogger("polyfill");
 
@@ -486,10 +487,33 @@
     },
   });
 
-  function dispatchDeviceEvent(detail) {
+  /**
+   * Resolves a HIDDevice for a paired deviceId this page has not yet
+   * materialized (e.g. first connect event of the session, before any
+   * getDevices()/requestDevice() call).
+   */
+  async function resolvePairedDevice(deviceId) {
+    deviceInfoCache = null;
+    const [hashes, cache] = await Promise.all([
+      getPairedDevices(),
+      getDeviceCache(),
+    ]);
+    if (!hashes.includes(deviceId)) return null;
+    const info = cache.get(deviceId);
+    return info ? getOrCreateDevice(info) : null;
+  }
+
+  async function dispatchDeviceEvent(detail) {
     if (!detail) return;
     if (detail.eventType === "connect" || detail.eventType === "disconnect") {
-      const dev = detail.deviceId ? deviceRegistry.get(detail.deviceId) : null;
+      let dev = detail.deviceId ? deviceRegistry.get(detail.deviceId) : null;
+      if (!dev && detail.eventType === "connect" && detail.deviceId) {
+        try {
+          dev = await resolvePairedDevice(detail.deviceId);
+        } catch (e) {
+          logger.warn("connect event lookup failed:", e?.message || e);
+        }
+      }
       if (hidInstance && dev) {
         if (detail.eventType === "disconnect") deviceInfoCache = null;
         hidInstance.dispatchEvent(
@@ -564,6 +588,21 @@
     }
   }
 
+  /** Recursively freezes an object and all of its own properties in place. */
+  function deepFreeze(object) {
+    const propNames = Reflect.ownKeys(object);
+
+    for (const name of propNames) {
+      const value = object[name];
+
+      if ((value && typeof value === "object") || typeof value === "function") {
+        deepFreeze(value);
+      }
+    }
+
+    return Object.freeze(object);
+  }
+
   function createHIDDevice(deviceInfo) {
     const obj = Object.create(HIDDevice.prototype);
     const et = new EventTarget();
@@ -575,7 +614,7 @@
       vendorId: deviceInfo.vendorId,
       productId: deviceInfo.productId,
       productName: deviceInfo.productName,
-      collections: deviceInfo.collections || [],
+      collections: deepFreeze(deviceInfo.collections || []),
       opened: false,
       // S4: internal "opening" flag — NOT exposed on the HIDDevice surface
       // (spec only defines `opened`). Used to guard against concurrent
@@ -707,15 +746,41 @@
           );
         }
         const filters = Array.isArray(options.filters) ? options.filters : [];
-        logger.debug("requestDevice filters=" + JSON.stringify(filters));
+        for (const filter of filters) {
+          if (!isValidFilter(filter)) {
+            throw new TypeError(
+              "Invalid filter in HIDDeviceRequestOptions.filters",
+            );
+          }
+        }
+
+        let exclusionFilters = [];
+        if (options.exclusionFilters !== undefined) {
+          exclusionFilters = Array.isArray(options.exclusionFilters)
+            ? options.exclusionFilters
+            : [];
+          if (exclusionFilters.length === 0) {
+            throw new TypeError(
+              "HIDDeviceRequestOptions.exclusionFilters must not be empty when present",
+            );
+          }
+          for (const filter of exclusionFilters) {
+            if (!isValidFilter(filter)) {
+              throw new TypeError(
+                "Invalid filter in HIDDeviceRequestOptions.exclusionFilters",
+              );
+            }
+          }
+        }
+
+        logger.debug(
+          "requestDevice filters=" +
+            JSON.stringify(filters) +
+            " exclusionFilters=" +
+            JSON.stringify(exclusionFilters),
+        );
         return new Promise((resolve, reject) => {
           const id = ++nextReqId;
-          // S-spec: previously this handler fired off pairDevice() without
-          // awaiting it, then resolved requestDevice immediately. That meant
-          // requestDevice could resolve before pairDevice's round-trip to the
-          // background completed, so an immediate getDevices() call from the
-          // page might not yet see the just-selected device. Now we await
-          // Promise.all over all pairDevice() calls before resolving.
           pending[id] = async (result) => {
             try {
               if (result.cancelled) {
@@ -742,7 +807,7 @@
             type: "req",
             id,
             action: "requestDevice",
-            payload: { filters },
+            payload: { filters, exclusionFilters },
           });
         });
       },
