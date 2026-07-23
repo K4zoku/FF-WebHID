@@ -10,68 +10,68 @@
   logger.initLogger("picker");
 
   class WebHidDevicePicker {
-    #shadow = null;
-    #host = null;
-    #dialog = null;
-    #devices = [];
-    #filters = [];
-    #exclusionFilters = [];
-    #deviceGroups = {};
-    #pairedDevices = null;
-    #fragmentReady = null;
+    shadow = null;
+    host = null;
+    dialog = null;
+    devices = [];
+    filters = [];
+    exclusionFilters = [];
+    deviceGroups = {};
+    pairedDevices = null;
+    fragmentReady = null;
 
     constructor() {
-      this.#host = document.createElement("div");
-      this.#host.id = "webhid-shadow-host";
-      this.#shadow = this.#host.attachShadow({ mode: "closed" });
-      this.#fragmentReady = this.#loadFragment();
+      this.host = document.createElement("div");
+      this.host.id = "webhid-shadow-host";
+      this.shadow = this.host.attachShadow({ mode: "closed" });
+      this.fragmentReady = this.loadFragment();
     }
 
     get host() {
-      return this.#host;
+      return this.host;
     }
 
-    async #loadFragment() {
+    async loadFragment() {
       const html = await fetchResource("html/picker.fragment.html");
       const templateDoc = new DOMParser().parseFromString(html, "text/html");
       const template = templateDoc.querySelector("#webhid-picker-template");
-      this.#shadow.appendChild(template.content.cloneNode(true));
+      this.shadow.appendChild(template.content.cloneNode(true));
 
-      this.#dialog = this.#shadow.querySelector(".webhid-modal");
+      this.dialog = this.shadow.querySelector(".webhid-modal");
 
-      this.#dialog.addEventListener("close", () => {
-        const returnValue = this.#dialog.returnValue;
-        const checked = this.#dialog.querySelector(
+      this.dialog.addEventListener("close", () => {
+        const returnValue = this.dialog.returnValue;
+        const checked = this.dialog.querySelector(
           ".webhid-device-radio:checked",
         );
-        const deviceId = checked?.value;
+        const deviceId = checked != null ? checked.value : undefined;
         if (returnValue === "selected" && deviceId) {
-          this.#onDeviceSelected(this.#deviceGroups[deviceId] || []);
+          this.onDeviceSelected(this.deviceGroups[deviceId] || []);
         } else {
-          this.#onDeviceCancelled();
+          this.onDeviceCancelled();
         }
 
         const hide = () => {
-          this.#dialog.style.display = "none";
+          this.dialog.style.display = "none";
         };
-        this.#dialog.addEventListener("transitionend", hide, { once: true });
+        this.dialog.addEventListener("transitionend", hide, { once: true });
         setTimeout(hide, 300);
       });
 
-      this.#dialog.addEventListener("change", (e) => {
+      this.dialog.addEventListener("change", (e) => {
         if (!e.target.matches(".webhid-device-radio")) return;
-        this.#dialog
+        this.dialog
           .querySelectorAll(".webhid-device-item")
           .forEach((el) => el.classList.remove("selected"));
         e.target.closest(".webhid-device-item").classList.add("selected");
-        this.#dialog.querySelector("#webhidConnectBtn").disabled = false;
+        this.dialog.querySelector("#webhidConnectBtn").disabled = false;
       });
 
-      this.#dialog.addEventListener("click", (e) => {
-        if (e.target === this.#dialog) this.#dialog.close();
+      this.dialog.addEventListener("click", (e) => {
+        if (e.target === this.dialog) this.dialog.close();
       });
 
-      this.#dialog.addEventListener("keydown", (e) => {
+      this.dialog.addEventListener("keydown", (e) => {
         if (
           e.target.matches(".webhid-device-item") &&
           (e.key === "Enter" || e.key === " ")
@@ -87,59 +87,60 @@
     }
 
     async show(filters = [], exclusionFilters = []) {
-      await this.#fragmentReady;
-      this.#filters = filters;
-      this.#exclusionFilters = exclusionFilters;
+      await this.fragmentReady;
+      this.filters = filters;
+      this.exclusionFilters = exclusionFilters;
 
-      if (typeof this.#dialog.showModal === "function") {
-        if (this.#dialog.open) this.#dialog.close();
-        this.#dialog.style.display = "";
+      if (typeof this.dialog.showModal === "function") {
+        if (this.dialog.open) this.dialog.close();
+        this.dialog.style.display = "";
         await new Promise((r) => requestAnimationFrame(r));
-        this.#dialog.showModal();
+        this.dialog.showModal();
       } else {
-        this.#dialog.setAttribute("open", "");
+        this.dialog.setAttribute("open", "");
       }
 
-      this.#loadDevices();
+      this.loadDevices();
     }
 
     async refreshDevices() {
-      if (!this.#dialog || !this.#dialog.open) return;
-      this.#pairedDevices = null;
-      await this.#loadDevices();
+      if (!this.dialog || !this.dialog.open) return;
+      this.pairedDevices = null;
+      await this.loadDevices();
     }
 
     get isOpen() {
-      return this.#dialog?.open ?? false;
+      return this.dialog == null ? void 0 : this.dialog.open != null ? this.dialog.open : false;
     }
 
-    async #loadDevices() {
+    async loadDevices() {
       try {
         const response = await browser.runtime.sendMessage({
           action: "enumerate",
         });
         if (response && http.isOk(response.s)) {
-          this.#devices = response.D || [];
+          this.devices = response.D || [];
         } else {
-          this.#devices = [];
-          const code = response?.s || 0;
+          this.devices = [];
+          const code = response != null ? response.s : undefined;
+          code = code != null ? code : 0;
           if (code === 500) {
             logger.warn("enumerate returned 500, treating as empty list");
           } else {
             logger.warn("enumerate returned status", code);
           }
         }
-        this.#renderDevices();
+        this.renderDevices();
       } catch (error) {
-        this.#devices = [];
-        logger.warn("enumerate exception:", error?.message || error);
-        this.#renderDevices();
+        this.devices = [];
+        logger.warn("enumerate exception:", error != null ? (error.message != null ? error.message : error) : error);
+        this.renderDevices();
       }
     }
 
-    #showMessage(message, isError = false) {
-      if (!this.#dialog) return;
-      const deviceList = this.#dialog.querySelector("#webhidDeviceList");
+    showMessage(message, isError = false) {
+      if (!this.dialog) return;
+      const deviceList = this.dialog.querySelector("#webhidDeviceList");
       if (!deviceList) return;
       deviceList.innerHTML = "";
       const div = document.createElement("div");
@@ -148,50 +149,50 @@
       deviceList.appendChild(div);
     }
 
-    async #getPairedDevices() {
-      if (this.#pairedDevices !== null) return this.#pairedDevices;
+    async getPairedDevices() {
+      if (this.pairedDevices !== null) return this.pairedDevices;
       try {
         const result = await browser.runtime.sendMessage({
           action: "getPairedDevices",
           origin: window.location.origin,
         });
-        this.#pairedDevices = result.hashes || [];
-        return this.#pairedDevices;
+        this.pairedDevices = result.hashes || [];
+        return this.pairedDevices;
       } catch {
         return [];
       }
     }
 
-    async #deviceMatchesSaved(device) {
-      const pairedIds = await this.#getPairedDevices();
+    async deviceMatchesSaved(device) {
+      const pairedIds = await this.getPairedDevices();
       return pairedIds.includes(device.deviceId);
     }
 
-    async #renderDevices() {
-      if (!this.#dialog) return;
-      const deviceList = this.#dialog.querySelector("#webhidDeviceList");
+    async renderDevices() {
+      if (!this.dialog) return;
+      const deviceList = this.dialog.querySelector("#webhidDeviceList");
       if (!deviceList) return;
       deviceList.innerHTML = "";
 
-      if (this.#devices.length === 0) {
+      if (this.devices.length === 0) {
         deviceList.innerHTML =
           '<div class="webhid-no-devices">No HID devices found</div>';
         return;
       }
 
       const filteredDevices = applyFilters(
-        this.#devices,
-        this.#filters,
-        this.#exclusionFilters,
+        this.devices,
+        this.filters,
+        this.exclusionFilters,
       );
       if (filteredDevices.length === 0) {
         logger.warn(
           "picker: 0/" +
-            this.#devices.length +
+            this.devices.length +
             " devices matched filters=" +
-            JSON.stringify(this.#filters || []),
+            JSON.stringify(this.filters || []),
         );
-        for (const device of this.#devices) {
+        for (const device of this.devices) {
           const vidHex = "0x" + (device.vendorId || 0).toString(16).padStart(4, "0");
           const pidHex =
             "0x" + (device.productId || 0).toString(16).padStart(4, "0");
@@ -217,19 +218,19 @@
         "picker: " +
           filteredDevices.length +
           "/" +
-          this.#devices.length +
+          this.devices.length +
           " devices matched filters",
       );
 
       const groups = groupDevices(filteredDevices);
 
       const pairedStatuses = await Promise.all(
-        filteredDevices.map((device) => this.#deviceMatchesSaved(device)),
+        filteredDevices.map((device) => this.deviceMatchesSaved(device)),
       );
 
-      this.#deviceGroups = {};
+      this.deviceGroups = {};
 
-      const template = this.#shadow.getElementById("webhid-device-template");
+      const template = this.shadow.getElementById("webhid-device-template");
 
       for (const [name, devices] of groups.entries()) {
         let isPaired = false;
@@ -244,7 +245,7 @@
           devices.length === 1
             ? devices[0].deviceId
             : "group:" + devices[0].deviceId;
-        this.#deviceGroups[groupId] = devices.slice();
+        this.deviceGroups[groupId] = devices.slice();
 
         const device = devices[0];
         const type = guessDeviceType(device);
@@ -285,24 +286,24 @@
       }
     }
 
-    #onDeviceSelected(devices) {
+    onDeviceSelected(devices) {
       const devicesArr = Array.isArray(devices) ? devices : [devices];
       const event = new CustomEvent("webhid-device-selected", {
         detail: { devices: devicesArr },
       });
       (async () => {
         try {
-          const paired = await this.#getPairedDevices();
+          const paired = await this.getPairedDevices();
           for (const d of devicesArr) {
             if (!paired.includes(d.deviceId)) paired.push(d.deviceId);
           }
-          this.#pairedDevices = paired;
+          this.pairedDevices = paired;
         } catch {}
       })();
       window.dispatchEvent(event);
     }
 
-    #onDeviceCancelled() {
+    onDeviceCancelled() {
       window.dispatchEvent(
         new CustomEvent("webhid-device-cancelled", { detail: {} }),
       );

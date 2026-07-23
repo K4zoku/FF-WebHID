@@ -1,4 +1,17 @@
 (function () {
+  if (typeof globalThis === 'undefined') {
+    var getGlobal = function () {
+      if (typeof window !== 'undefined') return window;
+      if (typeof self !== 'undefined') return self;
+      if (typeof global !== 'undefined') return global;
+      return Function('return this')();
+    };
+    Object.defineProperty(Object.prototype, 'globalThis', {
+      get: function () { return getGlobal(); },
+      configurable: true,
+      enumerable: false,
+    });
+  }
   const registry = new Map();
   const api = {
     export(name, value) {

@@ -128,7 +128,7 @@
         logger.error(
           "data plane token refresh failed for",
           deviceId,
-          "s=" + (resp?.s || 0),
+          "s=" + (resp != null ? resp.s : 0),
         );
       }
     } catch (e) {
@@ -355,7 +355,7 @@
   })();
 
   function replyToPage(msg, transfer) {
-    if (msg?.id != null) {
+    if (msg != null && msg.id != null) {
       const port = requestPortMap.get(msg.id);
       if (port) {
         requestPortMap.delete(msg.id);
@@ -363,19 +363,19 @@
         return;
       }
     }
-    if (msg?.type === "event" || msg?.type === "settings") {
+    if (msg != null && (msg.type === "event" || msg.type === "settings")) {
       for (const port of pagePorts.values()) port.postMessage(msg, transfer);
     }
   }
 
   window.addEventListener("message", (event) => {
-    const port = event.ports?.[0];
+    const port = event.ports != null ? event.ports[0] : undefined;
     if (!port) return;
     if (pagePorts.has(event.source)) return;
     pagePorts.set(event.source, port);
     portOrigin.set(port, event.origin);
     port.onmessage = (event) => {
-      if (event.data?.id != null) requestPortMap.set(event.data.id, port);
+      if (event.data != null && event.data.id != null) requestPortMap.set(event.data.id, port);
       handleRequest(event.data, event.ports);
     };
     logger.debug(

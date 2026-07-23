@@ -70,7 +70,7 @@
       const n = parseInt(v, 10);
       if (!isNaN(n)) return n;
       const map = { error: 0, warn: 1, warning: 1, info: 2, debug: 3 };
-      return map[v.toLowerCase()] ?? LEVEL_WARN;
+      return map[v.toLowerCase()] != null ? map[v.toLowerCase()] : LEVEL_WARN;
     }
     return LEVEL_WARN;
   }
@@ -79,7 +79,7 @@
     if (logger.loaded) return;
     logger.loaded = true;
     try {
-      if (!browser?.storage?.local) return;
+      if (!browser || !browser.storage || !browser.storage.local) return;
       const result = await browser.storage.local.get({ logLevel: LEVEL_WARN });
       applyLevel(parseLevel(result.logLevel));
       browser.storage.onChanged.addListener((changes, area) => {

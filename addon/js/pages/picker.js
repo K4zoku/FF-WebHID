@@ -151,7 +151,7 @@
       action: "pickerResult",
       requestId: pendingRequest.requestId,
       tabId: pendingRequest.tabId,
-      windowId: browser.windows?.getCurrent
+      windowId: browser.windows.getCurrent != null
         ? (await browser.windows.getCurrent()).id
         : undefined,
       selected: true,
@@ -167,7 +167,7 @@
         action: "pickerResult",
         requestId: pendingRequest.requestId,
         tabId: pendingRequest.tabId,
-        windowId: browser.windows?.getCurrent
+        windowId: browser.windows.getCurrent != null
           ? (await browser.windows.getCurrent()).id
           : undefined,
         selected: false,
@@ -183,7 +183,7 @@
         action: "pickerResult",
         requestId: pendingRequest.requestId,
         tabId: pendingRequest.tabId,
-        windowId: browser.windows?.getCurrent ? undefined : undefined,
+        windowId: undefined,
         selected: false,
       });
     }

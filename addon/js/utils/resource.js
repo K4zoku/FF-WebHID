@@ -4,8 +4,9 @@
   webhid.export("fetchResource", async function fetchResource(path) {
     if (cache.has(path)) return cache.get(path);
     const resp = await browser.runtime.sendMessage({ action: "fetchResource", path });
-    if (resp?.error) throw new Error(resp.error);
-    const text = resp?.text || "";
+    if (resp != null && resp.error) throw new Error(resp.error);
+    var text = resp != null ? resp.text : undefined;
+    text = text != null ? text : "";
     cache.set(path, text);
     return text;
   });
