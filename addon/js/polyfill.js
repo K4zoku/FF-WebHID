@@ -253,6 +253,11 @@
       value: async function () {
         const s = devState.get(this);
         if (!s) throw new DOMException("Invalid state", "InvalidStateError");
+        if (s.forgotten)
+          throw new DOMException(
+            "Device has been forgotten",
+            "InvalidStateError",
+          );
         if (s.opened)
           throw new DOMException("Device is already open", "InvalidStateError");
         // S4: Reject concurrent open() calls without exposing the opening
@@ -304,24 +309,21 @@
       value: async function () {
         const s = devState.get(this);
         if (!s) return;
+        if (s.forgotten)
+          throw new DOMException(
+            "Device has been forgotten",
+            "InvalidStateError",
+          );
         if (!s.opened) return;
         logger.debug("close deviceId=" + s.deviceId);
         try {
           const response = await sendRequest("close", { deviceId: s.deviceId });
           if (http.isOk(response.s)) {
             s.opened = false;
-            // E3: Reject any still-pending sendReport / sendFeatureReport /
-            // receiveFeatureReport Promises before tearing down the data port
-            // so they do not dangle forever after the device is closed.
-            if (s.dataPending && s.dataPending.size) {
-              const err = new DOMException("Device closed", "NetworkError");
-              for (const [, p] of s.dataPending) {
-                try {
-                  p.reject(err);
-                } catch {}
-              }
-              s.dataPending.clear();
-            }
+            rejectPendingReports(
+              s,
+              new DOMException("Device closed", "AbortError"),
+            );
             if (s.dataPort) {
               s.dataPort.onmessage = null;
               s.dataPort.close();
@@ -345,6 +347,7 @@
         if (!s) throw new DOMException("Invalid state", "InvalidStateError");
         if (!s.opened)
           throw new DOMException("Device is not open", "InvalidStateError");
+        validateReportId(reportId, s.collections);
         const view =
           data instanceof ArrayBuffer
             ? new Uint8Array(data)
@@ -384,6 +387,7 @@
         if (!s) throw new DOMException("Invalid state", "InvalidStateError");
         if (!s.opened)
           throw new DOMException("Device is not open", "InvalidStateError");
+        validateReportId(reportId, s.collections);
         try {
           if (!s.dataPort) throw new Error("data port not connected");
           const reqId = ++nextReqId;
@@ -416,6 +420,7 @@
         if (!s) throw new DOMException("Invalid state", "InvalidStateError");
         if (!s.opened)
           throw new DOMException("Device is not open", "InvalidStateError");
+        validateReportId(reportId, s.collections);
         const view =
           data instanceof ArrayBuffer
             ? new Uint8Array(data)
@@ -453,12 +458,27 @@
       value: async function () {
         const s = devState.get(this);
         if (!s) return;
-        if (s.opened) await this.close();
+        if (s.forgotten) return;
+        s.forgotten = true;
+        rejectPendingReports(
+          s,
+          new DOMException("Device forgotten", "AbortError"),
+        );
+        if (s.opened) {
+          s.opened = false;
+          try {
+            await sendRequest("close", { deviceId: s.deviceId });
+          } catch (error) {
+            logger.warn("forget: close failed:", error?.message || error);
+          }
+          if (s.dataPort) {
+            s.dataPort.onmessage = null;
+            s.dataPort.close();
+            s.dataPort = null;
+          }
+          this.dispatchEvent(new Event("close"));
+        }
         await sendRequest("unpairDevice", { deviceId: s.deviceId });
-        // S2: Invalidate both the paired-hash cache and the device-info
-        // cache so subsequent getDevices() calls reflect the unpairing.
-        // Without this the device kept reappearing in getDevices() even
-        // after forget() succeeded.
         pairedDevices = null;
         deviceInfoCache = null;
         deviceRegistry.delete(s.deviceId);
@@ -544,6 +564,60 @@
         );
       }
       return;
+    }
+  }
+
+  /** Rejects and clears any pending sendReport/sendFeatureReport/receiveFeatureReport promises for a device. */
+  function rejectPendingReports(s, err) {
+    if (!s.dataPending || !s.dataPending.size) return;
+    for (const [, p] of s.dataPending) {
+      try {
+        p.reject(err);
+      } catch {}
+    }
+    s.dataPending.clear();
+  }
+
+  /** Returns whether any report in a collection (or its children) declares a non-zero report ID. */
+  function collectionUsesReportIds(collection) {
+    const reports = [
+      ...(collection.inputReports || []),
+      ...(collection.outputReports || []),
+      ...(collection.featureReports || []),
+    ];
+    if (reports.some((r) => r.reportId !== 0)) return true;
+    return (collection.children || []).some(collectionUsesReportIds);
+  }
+
+  /** Returns whether a device's HID interface uses report IDs. */
+  function deviceUsesReportIds(collections) {
+    return (collections || []).some(collectionUsesReportIds);
+  }
+
+  /**
+   * Validates a sendReport/sendFeatureReport/receiveFeatureReport reportId:
+   * must be an integer in [0, 255], must be 0 iff the interface does not
+   * use report IDs. Throws TypeError on violation.
+   */
+  function validateReportId(reportId, collections) {
+    if (
+      typeof reportId !== "number" ||
+      !Number.isInteger(reportId) ||
+      reportId < 0 ||
+      reportId > 255
+    ) {
+      throw new TypeError("reportId must be an integer in the range 0-255");
+    }
+    const usesReportIds = deviceUsesReportIds(collections);
+    if (reportId === 0 && usesReportIds) {
+      throw new TypeError(
+        "reportId must not be 0 for a device that uses report IDs",
+      );
+    }
+    if (reportId !== 0 && !usesReportIds) {
+      throw new TypeError(
+        "reportId must be 0 for a device that does not use report IDs",
+      );
     }
   }
 
