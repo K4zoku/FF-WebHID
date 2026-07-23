@@ -189,6 +189,7 @@ jobs:
           dotnet tool install --global wix --version 6.0.2
           $env:PATH = "$env:USERPROFILE\.dotnet\tools;$env:PATH"
           $pkg = Get-Content package.json -Raw | ConvertFrom-Json
+          wix extension add -g WixToolset.UI.wixext/6.0.2
           ./packaging/windows/build-msi.ps1 -Version $pkg.version -Arch x86_64 -OutputDir artifacts-msi-x86_64
           ./packaging/windows/build-msi.ps1 -Version $pkg.version -Arch aarch64 -OutputDir artifacts-msi-aarch64
 
