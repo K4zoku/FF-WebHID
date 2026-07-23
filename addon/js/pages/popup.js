@@ -61,14 +61,14 @@
   }
 
   async function removeDevice(hash) {
-    if (!siteDevicesKey) return;
-    const result = await browser.storage.local.get(siteDevicesKey);
-    let hashes = result[siteDevicesKey] || [];
-    hashes = hashes.filter((h) => h !== hash);
-    await browser.storage.local.set({ [siteDevicesKey]: hashes });
-    browser.runtime
-      .sendMessage({ action: "close", deviceId: hash })
-      .catch(() => {});
+    if (!siteDevicesKey || !origin) return;
+    try {
+      await browser.runtime.sendMessage({
+        action: "revokeDevice",
+        deviceId: hash,
+        origin,
+      });
+    } catch {}
     renderDevices();
   }
 

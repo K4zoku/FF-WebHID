@@ -627,6 +627,49 @@
         return true;
       }
 
+      case "revokeDevice": {
+        (async () => {
+          try {
+            const origin = request.origin;
+            if (!origin) {
+              sendResponse({ success: false, error: "no origin" });
+              return;
+            }
+            const storageKey = encodeURIComponent(origin);
+            const result = await browser.storage.local.get(storageKey);
+            let hashes = result[storageKey] || [];
+            hashes = hashes.filter((h) => h !== request.deviceId);
+            await browser.storage.local.set({ [storageKey]: hashes });
+            removeDeviceInfo(request.deviceId);
+            await NativeMessaging.closeDevice(request.deviceId).catch(
+              () => {},
+            );
+            const tabs = await browser.tabs.query({});
+            for (const tab of tabs) {
+              if (!tab.url) continue;
+              let tabOrigin;
+              try {
+                tabOrigin = new URL(tab.url).origin;
+              } catch {
+                continue;
+              }
+              if (tabOrigin !== origin) continue;
+              unregisterDeviceTab(request.deviceId, tab.id);
+              browser.tabs
+                .sendMessage(tab.id, {
+                  action: "webhidDeviceEvent",
+                  event: { eventType: "revoked", deviceId: request.deviceId },
+                })
+                .catch(() => {});
+            }
+            sendResponse({ success: true, hashes });
+          } catch (e) {
+            sendResponse({ success: false, error: e.message });
+          }
+        })();
+        return true;
+      }
+
       case "setDataPlane":
         if (!isTabAuthorizedForDevice(sender.tab?.id, request.deviceId)) {
           sendResponse({ s: 403 });

@@ -459,29 +459,8 @@
         const s = devState.get(this);
         if (!s) return;
         if (s.forgotten) return;
-        s.forgotten = true;
-        rejectPendingReports(
-          s,
-          new DOMException("Device forgotten", "AbortError"),
-        );
-        if (s.opened) {
-          s.opened = false;
-          try {
-            await sendRequest("close", { deviceId: s.deviceId });
-          } catch (error) {
-            logger.warn("forget: close failed:", error?.message || error);
-          }
-          if (s.dataPort) {
-            s.dataPort.onmessage = null;
-            s.dataPort.close();
-            s.dataPort = null;
-          }
-          this.dispatchEvent(new Event("close"));
-        }
+        await teardownForgottenDevice(this, s);
         await sendRequest("unpairDevice", { deviceId: s.deviceId });
-        pairedDevices = null;
-        deviceInfoCache = null;
-        deviceRegistry.delete(s.deviceId);
       },
       enumerable: false,
       configurable: true,
@@ -525,6 +504,10 @@
 
   async function dispatchDeviceEvent(detail) {
     if (!detail) return;
+    if (detail.eventType === "revoked") {
+      if (detail.deviceId) await forceForgetDevice(detail.deviceId);
+      return;
+    }
     if (detail.eventType === "connect" || detail.eventType === "disconnect") {
       let dev = detail.deviceId ? deviceRegistry.get(detail.deviceId) : null;
       if (!dev && detail.eventType === "connect" && detail.deviceId) {
@@ -619,6 +602,46 @@
         "reportId must be 0 for a device that does not use report IDs",
       );
     }
+  }
+
+  async function teardownForgottenDevice(dev, s) {
+    s.forgotten = true;
+    rejectPendingReports(
+      s,
+      new DOMException("Device forgotten", "AbortError"),
+    );
+    if (s.opened) {
+      s.opened = false;
+      try {
+        await sendRequest("close", { deviceId: s.deviceId });
+      } catch (error) {
+        logger.warn(
+          "teardownForgottenDevice: close failed:",
+          error?.message || error,
+        );
+      }
+      if (s.dataPort) {
+        s.dataPort.onmessage = null;
+        s.dataPort.close();
+        s.dataPort = null;
+      }
+      dev.dispatchEvent(new Event("close"));
+    }
+    pairedDevices = null;
+    deviceInfoCache = null;
+    deviceRegistry.delete(s.deviceId);
+  }
+
+  async function forceForgetDevice(deviceId) {
+    const dev = deviceRegistry.get(deviceId);
+    if (!dev) {
+      pairedDevices = null;
+      deviceInfoCache = null;
+      return;
+    }
+    const s = devState.get(dev);
+    if (!s || s.forgotten) return;
+    await teardownForgottenDevice(dev, s);
   }
 
   function onDataPortMessage(s, d) {
