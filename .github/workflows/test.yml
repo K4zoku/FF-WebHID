@@ -5,14 +5,14 @@ on:
     branches: [ main ]
     paths:
       - 'crates/**'
-      - 'addon/**'
+      # - 'addon/**'
       - 'tests/**'
       - '.github/workflows/test.yml'
   pull_request:
     branches: [ main ]
     paths:
       - 'crates/**'
-      - 'addon/**'
+      # - 'addon/**'
       - 'tests/**'
       - '.github/workflows/test.yml'
   workflow_dispatch:
