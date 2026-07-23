@@ -33,9 +33,9 @@
 
     async #loadFragment() {
       const html = await fetchResource("html/picker.fragment.html");
-      const doc = new DOMParser().parseFromString(html, "text/html");
-      const tpl = doc.querySelector("#webhid-picker-template");
-      this.#shadow.appendChild(tpl.content.cloneNode(true));
+      const templateDoc = new DOMParser().parseFromString(html, "text/html");
+      const template = templateDoc.querySelector("#webhid-picker-template");
+      this.#shadow.appendChild(template.content.cloneNode(true));
 
       this.#dialog = this.#shadow.querySelector(".webhid-modal");
 
@@ -191,14 +191,14 @@
             " devices matched filters=" +
             JSON.stringify(this.#filters || []),
         );
-        for (const d of this.#devices) {
-          const vidHex = "0x" + (d.vendorId || 0).toString(16).padStart(4, "0");
+        for (const device of this.#devices) {
+          const vidHex = "0x" + (device.vendorId || 0).toString(16).padStart(4, "0");
           const pidHex =
-            "0x" + (d.productId || 0).toString(16).padStart(4, "0");
-          const upHex = "0x" + (d.usagePage || 0).toString(16).padStart(4, "0");
+            "0x" + (device.productId || 0).toString(16).padStart(4, "0");
+          const upHex = "0x" + (device.usagePage || 0).toString(16).padStart(4, "0");
           logger.warn(
             "  excluded: " +
-              (d.productName || "(unnamed)") +
+              (device.productName || "(unnamed)") +
               " VID=" +
               vidHex +
               " PID=" +
@@ -206,7 +206,7 @@
               " usagePage=" +
               upHex +
               " usage=" +
-              (d.usage || 0),
+              (device.usage || 0),
           );
         }
         deviceList.innerHTML =
@@ -229,15 +229,15 @@
 
       this.#deviceGroups = {};
 
-      const tpl = this.#shadow.getElementById("webhid-device-template");
+      const template = this.#shadow.getElementById("webhid-device-template");
 
       for (const [name, devices] of groups.entries()) {
         let isPaired = false;
         const deviceIds = [];
-        for (const d of devices) {
-          const idx = filteredDevices.indexOf(d);
-          if (idx >= 0 && pairedStatuses[idx]) isPaired = true;
-          deviceIds.push(d.deviceId);
+        for (const device of devices) {
+          const index = filteredDevices.indexOf(device);
+          if (index >= 0 && pairedStatuses[index]) isPaired = true;
+          deviceIds.push(device.deviceId);
         }
 
         const groupId =
@@ -249,7 +249,7 @@
         const device = devices[0];
         const type = guessDeviceType(device);
 
-        const clone = tpl.content.cloneNode(true);
+        const clone = template.content.cloneNode(true);
         const item = clone.querySelector(".webhid-device-item");
         const radio = clone.querySelector(".webhid-device-radio");
 

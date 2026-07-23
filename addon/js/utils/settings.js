@@ -10,8 +10,8 @@
 //   settings.dataPlane             // read
 //   settings.dataPlane = 'ws'      // write (fires listeners)
 //   settings.set({ dataPlane: 'ws' })  // bulk write, returns changed keys
-//   settings.on('dataPlane', cb)   // subscribe single key
-//   settings.on(['k1', 'k2'], cb)  // subscribe multiple keys
+//   settings.on('dataPlane', callback)   // subscribe single key
+//   settings.on(['k1', 'k2'], callback)  // subscribe multiple keys
 //   settings.getAll()              // snapshot all values
 //
 // Listeners fire ONLY when a value actually changes (=== comparison).
@@ -31,8 +31,8 @@
     const listeners = new Map();
 
     function emit(key, value) {
-      const cbs = listeners.get(key);
-      if (cbs) for (const cb of cbs) cb(value, values);
+      const callbacks = listeners.get(key);
+      if (callbacks) for (const callback of callbacks) callback(value, values);
     }
 
     const api = {

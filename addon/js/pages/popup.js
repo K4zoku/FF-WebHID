@@ -106,29 +106,29 @@
 
     let openCount = 0;
     for (const hash of hashes) {
-      let dev = cache.find((d) => d.deviceId === hash);
-      if (!dev) {
+      let device = cache.find((d) => d.deviceId === hash);
+      if (!device) {
         try {
           const r = await browser.runtime.sendMessage({
             action: "getDeviceInfo",
             deviceId: hash,
           });
-          dev = r?.device || null;
+          device = r?.device || null;
         } catch {}
       }
       if (token !== renderToken) return;
 
       const isDisconnected = !cache.some((d) => d.deviceId === hash);
-      const name = dev ? dev.productName || "Unknown" : "Paired device";
-      const type = guessDeviceType(dev || { productName: name });
-      const vid = dev ? dev.vendorId || 0 : 0;
-      const pid = dev ? dev.productId || 0 : 0;
-      const manufacturer = dev ? dev.manufacturer || "" : "";
+      const name = device ? device.productName || "Unknown" : "Paired device";
+      const type = guessDeviceType(device || { productName: name });
+      const vid = device ? device.vendorId || 0 : 0;
+      const pid = device ? device.productId || 0 : 0;
+      const manufacturer = device ? device.manufacturer || "" : "";
 
       const card = document.createElement("div");
       card.className = "device-card";
       if (isDisconnected) card.classList.add("disconnected");
-      if (dev && !isDisconnected && openIds.has(dev.deviceId))
+      if (device && !isDisconnected && openIds.has(device.deviceId))
         card.classList.add("open");
 
       const icon = document.createElement("img");
@@ -166,7 +166,7 @@
       card.appendChild(btn);
 
       list.appendChild(card);
-      if (dev && !isDisconnected && openIds.has(dev.deviceId)) openCount++;
+      if (device && !isDisconnected && openIds.has(device.deviceId)) openCount++;
     }
     document.getElementById("device-count").textContent =
       `(${openCount}/${hashes.length})`;
@@ -176,8 +176,8 @@
 
   browser.runtime.onMessage.addListener((message) => {
     if (message.action === "webhidDeviceEvent" && message.event) {
-      const ev = message.event;
-      if (ev.eventType === "connect" || ev.eventType === "disconnect") {
+      const messageEvent = message.event;
+      if (messageEvent.eventType === "connect" || messageEvent.eventType === "disconnect") {
         renderDevices();
       }
     }

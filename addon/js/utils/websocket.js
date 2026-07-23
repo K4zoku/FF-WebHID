@@ -49,21 +49,21 @@
         opts.onReady && opts.onReady();
       };
       ws.onerror = (e) => log("error", "WS ERROR: " + (e.message || e));
-      ws.onclose = (ev) => {
+      ws.onclose = (event) => {
         ws = null;
-        log("debug", "WS closed code=" + ev.code);
+        log("debug", "WS closed code=" + event.code);
         if (
-          ev.code === WS_CLOSE_UNKNOWN_TOKEN ||
-          ev.code === WS_CLOSE_BAD_TOKEN
+          event.code === WS_CLOSE_UNKNOWN_TOKEN ||
+          event.code === WS_CLOSE_BAD_TOKEN
         ) {
           log(
             "warn",
             "WS closed with auth-failure code " +
-              ev.code +
+              event.code +
               "; requesting token refresh",
           );
           connectMsg = null;
-          opts.onAuthFailed && opts.onAuthFailed(ev.code);
+          opts.onAuthFailed && opts.onAuthFailed(event.code);
           return;
         }
         opts.onClosed && opts.onClosed();

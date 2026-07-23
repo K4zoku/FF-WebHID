@@ -39,7 +39,7 @@
       const devices =
         http.isOk(response.s) && Array.isArray(response.D) ? response.D : [];
       deviceInfoCache = new Map();
-      for (const d of devices) deviceInfoCache.set(d.deviceId, d);
+      for (const device of devices) deviceInfoCache.set(device.deviceId, device);
       return deviceInfoCache;
     } catch {
       deviceInfoCache = new Map();
@@ -82,7 +82,7 @@
 
   bridgePort.onmessage = (event) => {
     if (!event.data) return;
-    if (event.data.type === "res") {
+    if (event.data.type === "response") {
       const handler = pending[event.data.id];
       if (handler) {
         delete pending[event.data.id];
@@ -94,7 +94,7 @@
       settings.set(event.data.settings || {});
       return;
     }
-    if (event.data.type === "evt") {
+    if (event.data.type === "event") {
       dispatchDeviceEvent(event.data.event);
     }
   };
@@ -128,11 +128,11 @@
         resolve(result);
       };
       const msg = { id, action, payload: payload || {} };
-      const xfers = [];
+      const transfers = [];
       if (payload && payload.data instanceof Uint8Array) {
-        xfers.push(payload.data.buffer);
+        transfers.push(payload.data.buffer);
       }
-      bridgePort.postMessage(msg, xfers.length ? xfers : undefined);
+      bridgePort.postMessage(msg, transfers.length ? transfers : undefined);
     });
   }
 
@@ -143,11 +143,11 @@
       payload: payload || {},
       fireAndForget: true,
     };
-    const xfers = [];
+    const transfers = [];
     if (payload && payload.data instanceof Uint8Array) {
-      xfers.push(payload.data.buffer);
+      transfers.push(payload.data.buffer);
     }
-    bridgePort.postMessage(msg, xfers.length ? xfers : undefined);
+    bridgePort.postMessage(msg, transfers.length ? transfers : undefined);
   }
 
   settings.on("dataPlane", (v) => logger.info("data plane changed: " + v));
@@ -156,9 +156,9 @@
     if (logger.applyLevel) logger.applyLevel(v);
   });
 
-  sendRequest("getSettings", {}).then((s) => {
-    if (!s) return;
-    settings.set(s);
+  sendRequest("getSettings", {}).then((result) => {
+    if (!result) return;
+    settings.set(result);
     logger.info(
       "data plane: " +
         settings.dataPlane +
@@ -230,11 +230,11 @@
         return devState.get(this)?.oninputreport ?? null;
       },
       set(v) {
-        const s = devState.get(this);
-        if (!s) return;
-        if (s.oninputreport)
-          s.et.removeEventListener("inputreport", s.oninputreport);
-        s.oninputreport = v;
+        const state = devState.get(this);
+        if (!state) return;
+        if (state.oninputreport)
+          state.eventTarget.removeEventListener("inputreport", state.oninputreport);
+        state.oninputreport = v;
         if (v) this.addEventListener("inputreport", v);
       },
       enumerable: false,
@@ -242,45 +242,45 @@
     },
     open: {
       value: async function () {
-        const s = devState.get(this);
-        if (!s) throw new DOMException("Invalid state", "InvalidStateError");
-        if (s.forgotten)
+        const state = devState.get(this);
+        if (!state) throw new DOMException("Invalid state", "InvalidStateError");
+        if (state.forgotten)
           throw new DOMException(
             "Device has been forgotten",
             "InvalidStateError",
           );
-        if (s.opened)
+        if (state.opened)
           throw new DOMException("Device is already open", "InvalidStateError");
         // S4: Reject concurrent open() calls without exposing the opening
         // flag on the device surface (spec only defines `opened`). This
         // closes the await-gap race where two calls could both pass the
-        // `s.opened` guard and both flip `opened` to true.
-        if (s.opening)
+        // `state.opened` guard and both flip `opened` to true.
+        if (state.opening)
           throw new DOMException("Device is already open", "InvalidStateError");
-        s.opening = true;
+        state.opening = true;
         try {
           const response = await sendRequest("open", {
-            deviceId: s.deviceId,
-            reportSize: s.maxInputReportSize + 3,
+            deviceId: state.deviceId,
+            reportSize: state.maxInputReportSize + 3,
           });
           if (http.isOk(response.s)) {
             const dataChannel = new MessageChannel();
-            s.dataPort = dataChannel.port1;
-            s.dataPort.onmessage = (ev) => onDataPortMessage(s, ev.data);
+            state.dataPort = dataChannel.port1;
+            state.dataPort.onmessage = (event) => onDataPortMessage(state, event.data);
             bridgePort.postMessage(
               {
                 id: 0,
                 action: "dataPort",
-                payload: { deviceId: s.deviceId },
+                payload: { deviceId: state.deviceId },
               },
               [dataChannel.port2],
             );
             // S3: Flip `opened` only after the data channel is fully wired.
-            // Previously `s.opened = true` was set before the port was set
+            // Previously `state.opened = true` was set before the port was set
             // up, leaving a partial-state window where sendReport would
             // throw "data port not connected" despite opened === true.
-            s.opened = true;
-            logger.info("open deviceId=" + s.deviceId);
+            state.opened = true;
+            logger.info("open deviceId=" + state.deviceId);
             this.dispatchEvent(new Event("open"));
             return true;
           }
@@ -288,7 +288,7 @@
         } catch (error) {
           throw new DOMException(error.message, "InvalidStateError");
         } finally {
-          s.opening = false;
+          state.opening = false;
         }
       },
       enumerable: false,
@@ -297,27 +297,27 @@
     },
     close: {
       value: async function () {
-        const s = devState.get(this);
-        if (!s) return;
-        if (s.forgotten)
+        const state = devState.get(this);
+        if (!state) return;
+        if (state.forgotten)
           throw new DOMException(
             "Device has been forgotten",
             "InvalidStateError",
           );
-        if (!s.opened) return;
-        logger.debug("close deviceId=" + s.deviceId);
+        if (!state.opened) return;
+        logger.debug("close deviceId=" + state.deviceId);
         try {
-          const response = await sendRequest("close", { deviceId: s.deviceId });
+          const response = await sendRequest("close", { deviceId: state.deviceId });
           if (http.isOk(response.s)) {
-            s.opened = false;
+            state.opened = false;
             rejectPendingReports(
-              s,
+              state,
               new DOMException("Device closed", "AbortError"),
             );
-            if (s.dataPort) {
-              s.dataPort.onmessage = null;
-              s.dataPort.close();
-              s.dataPort = null;
+            if (state.dataPort) {
+              state.dataPort.onmessage = null;
+              state.dataPort.close();
+              state.dataPort = null;
             }
             this.dispatchEvent(new Event("close"));
           } else {
@@ -333,11 +333,11 @@
     },
     sendReport: {
       value: async function (reportId, data) {
-        const s = devState.get(this);
-        if (!s) throw new DOMException("Invalid state", "InvalidStateError");
-        if (!s.opened)
+        const state = devState.get(this);
+        if (!state) throw new DOMException("Invalid state", "InvalidStateError");
+        if (!state.opened)
           throw new DOMException("Device is not open", "InvalidStateError");
-        validateReportId(reportId, s.collections);
+        validateReportId(reportId, state.collections);
         const view =
           data instanceof ArrayBuffer
             ? new Uint8Array(data)
@@ -347,21 +347,21 @@
           logger.debug(
             "sendReport reportId=" + reportId + " len=" + buffer.length,
           );
-          if (!s.dataPort) throw new Error("data port not connected");
+          if (!state.dataPort) throw new Error("data port not connected");
           const reqId = ++nextReqId;
           const msg = { type: "send", reqId, reportId, data: buffer };
           if (settings.fireAndForget) {
-            s.dataPort.postMessage(msg, [buffer.buffer]);
+            state.dataPort.postMessage(msg, [buffer.buffer]);
             return;
           }
           return new Promise((resolve, reject) => {
-            s.dataPending = s.dataPending || new Map();
-            s.dataPending.set(reqId, {
+            state.dataPending = state.dataPending || new Map();
+            state.dataPending.set(reqId, {
               resolve: () => resolve(),
               reject: (e) =>
                 reject(new DOMException(e.message || e, "NetworkError")),
             });
-            s.dataPort.postMessage(msg, [buffer.buffer]);
+            state.dataPort.postMessage(msg, [buffer.buffer]);
           });
         } catch (error) {
           throw new DOMException(error.message, "NetworkError");
@@ -373,28 +373,28 @@
     },
     receiveFeatureReport: {
       value: async function (reportId) {
-        const s = devState.get(this);
-        if (!s) throw new DOMException("Invalid state", "InvalidStateError");
-        if (!s.opened)
+        const state = devState.get(this);
+        if (!state) throw new DOMException("Invalid state", "InvalidStateError");
+        if (!state.opened)
           throw new DOMException("Device is not open", "InvalidStateError");
-        validateReportId(reportId, s.collections);
+        validateReportId(reportId, state.collections);
         try {
-          if (!s.dataPort) throw new Error("data port not connected");
+          if (!state.dataPort) throw new Error("data port not connected");
           const reqId = ++nextReqId;
           return new Promise((resolve, reject) => {
-            s.dataPending = s.dataPending || new Map();
-            s.dataPending.set(reqId, {
-              resolve: (d) => {
-                if (!d) return resolve(new DataView(new ArrayBuffer(0)));
-                const buf = d instanceof Uint8Array ? d : new Uint8Array(d);
+            state.dataPending = state.dataPending || new Map();
+            state.dataPending.set(reqId, {
+              resolve: (data) => {
+                if (!data) return resolve(new DataView(new ArrayBuffer(0)));
+                const buffer = data instanceof Uint8Array ? data : new Uint8Array(data);
                 resolve(
-                  new DataView(buf.buffer, buf.byteOffset, buf.byteLength),
+                  new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength),
                 );
               },
               reject: (e) =>
                 reject(new DOMException(e.message || e, "NetworkError")),
             });
-            s.dataPort.postMessage({ type: "receiveFeature", reqId, reportId });
+            state.dataPort.postMessage({ type: "receiveFeature", reqId, reportId });
           });
         } catch (error) {
           throw new DOMException(error.message, "NetworkError");
@@ -406,11 +406,11 @@
     },
     sendFeatureReport: {
       value: async function (reportId, data) {
-        const s = devState.get(this);
-        if (!s) throw new DOMException("Invalid state", "InvalidStateError");
-        if (!s.opened)
+        const state = devState.get(this);
+        if (!state) throw new DOMException("Invalid state", "InvalidStateError");
+        if (!state.opened)
           throw new DOMException("Device is not open", "InvalidStateError");
-        validateReportId(reportId, s.collections);
+        validateReportId(reportId, state.collections);
         const view =
           data instanceof ArrayBuffer
             ? new Uint8Array(data)
@@ -420,21 +420,21 @@
           "sendFeatureReport reportId=" + reportId + " len=" + buffer.length,
         );
         try {
-          if (!s.dataPort) throw new Error("data port not connected");
+          if (!state.dataPort) throw new Error("data port not connected");
           const reqId = ++nextReqId;
           const msg = { type: "sendFeature", reqId, reportId, data: buffer };
           if (settings.fireAndForget) {
-            s.dataPort.postMessage(msg, [buffer.buffer]);
+            state.dataPort.postMessage(msg, [buffer.buffer]);
             return undefined;
           }
           return new Promise((resolve, reject) => {
-            s.dataPending = s.dataPending || new Map();
-            s.dataPending.set(reqId, {
+            state.dataPending = state.dataPending || new Map();
+            state.dataPending.set(reqId, {
               resolve: () => resolve(undefined),
               reject: (e) =>
                 reject(new DOMException(e.message || e, "NetworkError")),
             });
-            s.dataPort.postMessage(msg, [buffer.buffer]);
+            state.dataPort.postMessage(msg, [buffer.buffer]);
           });
         } catch (error) {
           throw new DOMException(error.message, "NetworkError");
@@ -446,11 +446,11 @@
     },
     forget: {
       value: async function () {
-        const s = devState.get(this);
-        if (!s) return;
-        if (s.forgotten) return;
-        await teardownForgottenDevice(this, s);
-        await sendRequest("unpairDevice", { deviceId: s.deviceId });
+        const state = devState.get(this);
+        if (!state) return;
+        if (state.forgotten) return;
+        await teardownForgottenDevice(this, state);
+        await sendRequest("unpairDevice", { deviceId: state.deviceId });
       },
       enumerable: false,
       configurable: true,
@@ -458,8 +458,8 @@
     },
     addEventListener: {
       value: function (type, listener) {
-        const s = devState.get(this);
-        if (s) s.et.addEventListener(type, listener);
+        const state = devState.get(this);
+        if (state) state.eventTarget.addEventListener(type, listener);
       },
       enumerable: false,
       configurable: true,
@@ -467,8 +467,8 @@
     },
     removeEventListener: {
       value: function (type, listener) {
-        const s = devState.get(this);
-        if (s) s.et.removeEventListener(type, listener);
+        const state = devState.get(this);
+        if (state) state.eventTarget.removeEventListener(type, listener);
       },
       enumerable: false,
       configurable: true,
@@ -499,18 +499,18 @@
       return;
     }
     if (detail.eventType === "connect" || detail.eventType === "disconnect") {
-      let dev = detail.deviceId ? deviceRegistry.get(detail.deviceId) : null;
-      if (!dev && detail.eventType === "connect" && detail.deviceId) {
+      let device = detail.deviceId ? deviceRegistry.get(detail.deviceId) : null;
+      if (!device && detail.eventType === "connect" && detail.deviceId) {
         try {
-          dev = await resolvePairedDevice(detail.deviceId);
+          device = await resolvePairedDevice(detail.deviceId);
         } catch (e) {
           logger.warn("connect event lookup failed:", e?.message || e);
         }
       }
-      if (hidInstance && dev) {
+      if (hidInstance && device) {
         if (detail.eventType === "disconnect") deviceInfoCache = null;
         hidInstance.dispatchEvent(
-          new HIDConnectionEvent(detail.eventType, { device: dev }),
+          new HIDConnectionEvent(detail.eventType, { device: device }),
         );
         if (detail.eventType === "disconnect") {
           deviceRegistry.delete(detail.deviceId);
@@ -519,8 +519,8 @@
       return;
     }
     if (detail.eventType === "input_report") {
-      const dev = detail.deviceId ? deviceRegistry.get(detail.deviceId) : null;
-      if (dev) {
+      const device = detail.deviceId ? deviceRegistry.get(detail.deviceId) : null;
+      if (device) {
         const dataView = detail.data
           ? new DataView(
               detail.data.buffer || detail.data,
@@ -528,9 +528,9 @@
               detail.data.byteLength,
             )
           : new DataView(new ArrayBuffer(0));
-        dev.dispatchEvent(
+        device.dispatchEvent(
           new HIDInputReportEvent("inputreport", {
-            device: dev,
+            device: device,
             reportId: detail.reportId,
             data: dataView,
           }),
@@ -541,14 +541,14 @@
   }
 
   /** Rejects and clears any pending sendReport/sendFeatureReport/receiveFeatureReport promises for a device. */
-  function rejectPendingReports(s, err) {
-    if (!s.dataPending || !s.dataPending.size) return;
-    for (const [, p] of s.dataPending) {
+  function rejectPendingReports(state, error) {
+    if (!state.dataPending || !state.dataPending.size) return;
+    for (const [, entry] of state.dataPending) {
       try {
-        p.reject(err);
+        entry.reject(error);
       } catch {}
     }
-    s.dataPending.clear();
+    state.dataPending.clear();
   }
 
   /** Returns whether any report in a collection (or its children) declares a non-zero report ID. */
@@ -594,79 +594,79 @@
     }
   }
 
-  async function teardownForgottenDevice(dev, s) {
-    s.forgotten = true;
-    rejectPendingReports(s, new DOMException("Device forgotten", "AbortError"));
-    if (s.opened) {
-      s.opened = false;
+  async function teardownForgottenDevice(device, state) {
+    state.forgotten = true;
+    rejectPendingReports(state, new DOMException("Device forgotten", "AbortError"));
+    if (state.opened) {
+      state.opened = false;
       try {
-        await sendRequest("close", { deviceId: s.deviceId });
+        await sendRequest("close", { deviceId: state.deviceId });
       } catch (error) {
         logger.warn(
           "teardownForgottenDevice: close failed:",
           error?.message || error,
         );
       }
-      if (s.dataPort) {
-        s.dataPort.onmessage = null;
-        s.dataPort.close();
-        s.dataPort = null;
+      if (state.dataPort) {
+        state.dataPort.onmessage = null;
+        state.dataPort.close();
+        state.dataPort = null;
       }
-      dev.dispatchEvent(new Event("close"));
+      device.dispatchEvent(new Event("close"));
     }
     pairedDevices = null;
     deviceInfoCache = null;
-    deviceRegistry.delete(s.deviceId);
+    deviceRegistry.delete(state.deviceId);
   }
 
   async function forceForgetDevice(deviceId) {
-    const dev = deviceRegistry.get(deviceId);
-    if (!dev) {
+    const device = deviceRegistry.get(deviceId);
+    if (!device) {
       pairedDevices = null;
       deviceInfoCache = null;
       return;
     }
-    const s = devState.get(dev);
-    if (!s || s.forgotten) return;
-    await teardownForgottenDevice(dev, s);
+    const state = devState.get(device);
+    if (!state || state.forgotten) return;
+    await teardownForgottenDevice(device, state);
   }
 
-  function onDataPortMessage(s, d) {
-    if (!d) return;
-    if (d.type === "sendResult" || d.type === "featureResult") {
-      const p = s.dataPending?.get(d.reqId);
-      if (!p) return;
-      s.dataPending.delete(d.reqId);
-      if (d.error) p.reject(new Error(d.error));
-      else if (d.type === "featureResult") p.resolve(d.data);
-      else p.resolve();
+  function onDataPortMessage(state, data) {
+    if (!data) return;
+    if (data.type === "sendResult" || data.type === "featureResult") {
+      const entry = state.dataPending?.get(data.reqId);
+      if (!entry) return;
+      state.dataPending.delete(data.reqId);
+      if (data.error) entry.reject(new Error(data.error));
+      else if (data.type === "featureResult") entry.resolve(data.data);
+      else entry.resolve();
       return;
     }
-    if (d.type === "inputReport") {
-      const dataView = d.data
+    if (data.type === "inputReport") {
+      const dataView = data.data
         ? new DataView(
-            d.data.buffer || d.data,
-            d.data.byteOffset || 0,
-            d.data.byteLength,
+            data.data.buffer || data.data,
+            data.data.byteOffset || 0,
+            data.data.byteLength,
           )
         : new DataView(new ArrayBuffer(0));
-      const dev = s.self;
-      if (dev)
-        dev.dispatchEvent(
+      const device = state.self;
+      if (device)
+        device.dispatchEvent(
           new HIDInputReportEvent("inputreport", {
-            device: dev,
-            reportId: d.reportId,
+            device: device,
+            reportId: data.reportId,
             data: dataView,
           }),
         );
       return;
     }
-    if (d.type === "disconnect") {
+    if (data.type === "disconnect") {
       deviceInfoCache = null;
-      const dev = s.self;
-      if (dev)
-        dev.dispatchEvent(
-          new HIDConnectionEvent("disconnect", { device: dev }),
+      const device = state.self;
+      if (device)
+        device.dispatchEvent(
+          new HIDConnectionEvent("disconnect", { device: device }),
         );
       return;
     }
@@ -689,10 +689,10 @@
 
   function createHIDDevice(deviceInfo) {
     const obj = Object.create(HIDDevice.prototype);
-    const et = new EventTarget();
-    obj.dispatchEvent = et.dispatchEvent.bind(et);
+    const eventTarget = new EventTarget();
+    obj.dispatchEvent = eventTarget.dispatchEvent.bind(eventTarget);
     const state = {
-      et: et,
+      eventTarget: eventTarget,
       self: obj,
       deviceId: deviceInfo.deviceId,
       vendorId: deviceInfo.vendorId,
@@ -717,9 +717,9 @@
   function getOrCreateDevice(deviceInfo) {
     const id = deviceInfo.deviceId;
     if (id && deviceRegistry.has(id)) return deviceRegistry.get(id);
-    const dev = createHIDDevice(deviceInfo);
-    if (id) deviceRegistry.set(id, dev);
-    return dev;
+    const device = createHIDDevice(deviceInfo);
+    if (id) deviceRegistry.set(id, device);
+    return device;
   }
 
   function HIDInputReportEvent(type, init) {
@@ -876,8 +876,8 @@
                 reject(new DOMException("No device selected", "NotFoundError"));
                 return;
               }
-              await Promise.all(devices.map((d) => pairDevice(d)));
-              resolve(devices.map((d) => getOrCreateDevice(d)));
+              await Promise.all(devices.map((device) => pairDevice(device)));
+              resolve(devices.map((device) => getOrCreateDevice(device)));
             } catch (e) {
               reject(
                 new DOMException(
@@ -900,8 +900,8 @@
     },
     addEventListener: {
       value: function (type, listener) {
-        const s = hidState.get(this);
-        if (s) s.et.addEventListener(type, listener);
+        const state = hidState.get(this);
+        if (state) state.eventTarget.addEventListener(type, listener);
       },
       enumerable: false,
       configurable: true,
@@ -909,8 +909,8 @@
     },
     removeEventListener: {
       value: function (type, listener) {
-        const s = hidState.get(this);
-        if (s) s.et.removeEventListener(type, listener);
+        const state = hidState.get(this);
+        if (state) state.eventTarget.removeEventListener(type, listener);
       },
       enumerable: false,
       configurable: true,
@@ -921,11 +921,11 @@
         return hidState.get(this)?.onconnect ?? null;
       },
       set(v) {
-        const s = hidState.get(this);
-        if (!s) return;
-        if (s.onconnect) s.et.removeEventListener("connect", s.onconnect);
-        s.onconnect = v;
-        if (v) s.et.addEventListener("connect", v);
+        const state = hidState.get(this);
+        if (!state) return;
+        if (state.onconnect) state.eventTarget.removeEventListener("connect", state.onconnect);
+        state.onconnect = v;
+        if (v) state.eventTarget.addEventListener("connect", v);
       },
       enumerable: false,
       configurable: true,
@@ -935,12 +935,12 @@
         return hidState.get(this)?.ondisconnect ?? null;
       },
       set(v) {
-        const s = hidState.get(this);
-        if (!s) return;
-        if (s.ondisconnect)
-          s.et.removeEventListener("disconnect", s.ondisconnect);
-        s.ondisconnect = v;
-        if (v) s.et.addEventListener("disconnect", v);
+        const state = hidState.get(this);
+        if (!state) return;
+        if (state.ondisconnect)
+          state.eventTarget.removeEventListener("disconnect", state.ondisconnect);
+        state.ondisconnect = v;
+        if (v) state.eventTarget.addEventListener("disconnect", v);
       },
       enumerable: false,
       configurable: true,
@@ -949,9 +949,9 @@
 
   function createHID() {
     const obj = Object.create(HID.prototype);
-    const et = new EventTarget();
-    obj.dispatchEvent = et.dispatchEvent.bind(et);
-    hidState.set(obj, { et: et, onconnect: null, ondisconnect: null });
+    const eventTarget = new EventTarget();
+    obj.dispatchEvent = eventTarget.dispatchEvent.bind(eventTarget);
+    hidState.set(obj, { eventTarget: eventTarget, onconnect: null, ondisconnect: null });
     return obj;
   }
 

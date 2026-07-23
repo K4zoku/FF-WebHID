@@ -19,8 +19,8 @@ window.addEventListener("message", (event) => {
   if (!port) return;
   if (pagePort) return;
   pagePort = port;
-  pagePort.onmessage = (ev) => {
-    handleRequest(ev.data, ev.ports);
+  pagePort.onmessage = (event) => {
+    handleRequest(event.data, event.ports);
   };
   logger.debug("[test-bridge] page port established");
 });
@@ -44,7 +44,7 @@ async function handleRequest(data, ports) {
         window.removeEventListener("webhid-device-selected", onSelected);
         window.removeEventListener("webhid-device-cancelled", onCancelled);
         replyToPage({
-          type: "res",
+          type: "response",
           id,
           result: { devices: e.detail.devices },
         });
@@ -53,7 +53,7 @@ async function handleRequest(data, ports) {
         window.removeEventListener("webhid-device-selected", onSelected);
         window.removeEventListener("webhid-device-cancelled", onCancelled);
         replyToPage({
-          type: "res",
+          type: "response",
           id,
           result: { cancelled: true },
         });
@@ -69,21 +69,21 @@ async function handleRequest(data, ports) {
       const port = ports && ports[0];
       if (port && deviceId) {
         dataPorts.set(deviceId, port);
-        port.onmessage = (ev) => {
-          onDataPortMessage(deviceId, ev.data);
+        port.onmessage = (event) => {
+          onDataPortMessage(deviceId, event.data);
         };
       }
-      replyToPage({ type: "res", id, result: { s: 204 } });
+      replyToPage({ type: "response", id, result: { s: 204 } });
       return;
     }
 
     const msg = Object.assign({ action }, payload || {});
     const response = await browser.runtime.sendMessage(msg);
-    const xfers =
+    const transfers =
       response && response.d instanceof Uint8Array ? [response.d.buffer] : [];
-    replyToPage({ type: "res", id, result: response }, xfers);
+    replyToPage({ type: "response", id, result: response }, transfers);
   } catch (error) {
-    replyToPage({ type: "res", id, result: { s: 500 } });
+    replyToPage({ type: "response", id, result: { s: 500 } });
   }
 }
 
@@ -118,12 +118,12 @@ async function onDataPortMessage(deviceId, msg) {
             data: data || null,
           });
       } else {
-        const err = response && !http.isOk(response.s) ? "send failed" : null;
+        const error = response && !http.isOk(response.s) ? "send failed" : null;
         if (port)
           port.postMessage({
             type: msg.type === "send" ? "sendResult" : "featureResult",
             reqId: msg.reqId,
-            error: err,
+            error: error,
           });
       }
     } catch {
@@ -140,30 +140,30 @@ async function onDataPortMessage(deviceId, msg) {
 
 browser.runtime.onMessage.addListener((message) => {
   if (message.action === "webhidDeviceEvent" && message.event) {
-    const ev = message.event;
-    if (ev.eventType === "input_report") {
-      const port = dataPorts.get(ev.deviceId);
+    const event = message.event;
+    if (event.eventType === "input_report") {
+      const port = dataPorts.get(event.deviceId);
       if (port) {
-        const view = ev.data;
-        const buf = view ? view.buffer || view : null;
+        const view = event.data;
+        const buffer = view ? view.buffer || view : null;
         try {
           port.postMessage(
-            { type: "inputReport", reportId: ev.reportId, data: buf },
-            buf ? [buf] : [],
+            { type: "inputReport", reportId: event.reportId, data: buffer },
+            buffer ? [buffer] : [],
           );
         } catch {}
         return;
       }
     }
-    if (ev.eventType === "disconnect") {
-      const port = dataPorts.get(ev.deviceId);
+    if (event.eventType === "disconnect") {
+      const port = dataPorts.get(event.deviceId);
       if (port) {
         try {
           port.postMessage({ type: "disconnect" });
         } catch {}
       }
     }
-    replyToPage({ type: "evt", event: ev });
+    replyToPage({ type: "event", event: event });
   }
 });
 

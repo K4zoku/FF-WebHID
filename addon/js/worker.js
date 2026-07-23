@@ -33,7 +33,7 @@ self.onmessage = ({ data: msg, ports }) => {
   }
   if (msg.type === "setPort") {
     dataPort = ports[0];
-    dataPort.onmessage = (ev) => handleDataPortMessage(ev.data);
+    dataPort.onmessage = (event) => handleDataPortMessage(event.data);
     logger.debug("data port received from bridge");
     return;
   }
@@ -72,8 +72,8 @@ function pushInputBatch(batch) {
     const reportId = batch[offset];
     const payloadLen = len - 1;
     if (payloadLen > 0) {
-      const buf = new ArrayBuffer(payloadLen);
-      const view = new Uint8Array(buf);
+      const buffer = new ArrayBuffer(payloadLen);
+      const view = new Uint8Array(buffer);
       view.set(batch.subarray(offset + 1, offset + len));
       if (logger.level >= 3) {
         let hex = "";
@@ -89,8 +89,8 @@ function pushInputBatch(batch) {
         );
       }
       if (dataPort) {
-        dataPort.postMessage({ type: "inputReport", reportId, data: buf }, [
-          buf,
+        dataPort.postMessage({ type: "inputReport", reportId, data: buffer }, [
+          buffer,
         ]);
       }
     } else {
@@ -126,9 +126,9 @@ function handleSend(msg, msgType) {
   }
   const reqId = nextReqId++;
   const frame = new Uint8Array(6 + payload.length);
-  const dv = new DataView(frame.buffer);
+  const dataView = new DataView(frame.buffer);
   frame[0] = msgType;
-  dv.setUint32(1, reqId, true);
+  dataView.setUint32(1, reqId, true);
   frame[5] = msg.reportId;
   frame.set(payload, 6);
   const isFeature = msgType !== MSG_SEND_REPORT;
@@ -157,10 +157,10 @@ function handleSend(msg, msgType) {
   // reject the pending entry immediately so the caller's Promise resolves
   // instead of hanging until the worker is torn down.
   if (!transport.send(frame)) {
-    const p = pending.get(reqId);
-    if (p) {
+    const entry = pending.get(reqId);
+    if (entry) {
       pending.delete(reqId);
-      p.reject(new Error("ws closed"));
+      entry.reject(new Error("ws closed"));
     }
   }
 }
@@ -176,9 +176,9 @@ function handleReceiveFeature(msg) {
   }
   const reqId = nextReqId++;
   const frame = new Uint8Array(6);
-  const dv = new DataView(frame.buffer);
+  const dataView = new DataView(frame.buffer);
   frame[0] = MSG_RECEIVE_FEATURE_REPORT;
-  dv.setUint32(1, reqId, true);
+  dataView.setUint32(1, reqId, true);
   frame[5] = msg.reportId;
   pending.set(reqId, {
     resolve: (data) => {
@@ -196,10 +196,10 @@ function handleReceiveFeature(msg) {
   // E2: Same race protection as handleSend — reject immediately if the WS
   // transport refused the frame, otherwise the feature-read Promise hangs.
   if (!transport.send(frame)) {
-    const p = pending.get(reqId);
-    if (p) {
+    const entry = pending.get(reqId);
+    if (entry) {
       pending.delete(reqId);
-      p.reject(new Error("ws closed"));
+      entry.reject(new Error("ws closed"));
     }
   }
 }
@@ -211,20 +211,20 @@ function replyData(msg, transfer) {
 function handleControlResponse(batch) {
   if (batch.length < 6) return;
   const respType = batch[0];
-  const dv = new DataView(batch.buffer, batch.byteOffset, batch.byteLength);
-  const reqId = dv.getUint32(1, true);
+  const dataView = new DataView(batch.buffer, batch.byteOffset, batch.byteLength);
+  const reqId = dataView.getUint32(1, true);
   const status = batch[5];
-  const p = pending.get(reqId);
-  if (!p) return;
+  const entry = pending.get(reqId);
+  if (!entry) return;
   pending.delete(reqId);
   if (respType === RESP_RECEIVE_FEATURE_REPORT) {
-    if (status !== 0) return p.reject(new Error("feature read failed"));
-    if (batch.length < 8) return p.reject(new Error("short feature resp"));
-    const len = dv.getUint16(6, true);
+    if (status !== 0) return entry.reject(new Error("feature read failed"));
+    if (batch.length < 8) return entry.reject(new Error("short feature resp"));
+    const len = dataView.getUint16(6, true);
     const out = new Uint8Array(len);
     if (len > 0 && batch.length >= 8 + len) out.set(batch.subarray(8, 8 + len));
-    return p.resolve(out);
+    return entry.resolve(out);
   }
-  if (status === 0) p.resolve();
-  else p.reject(new Error("write failed status=" + status));
+  if (status === 0) entry.resolve();
+  else entry.reject(new Error("write failed status=" + status));
 }

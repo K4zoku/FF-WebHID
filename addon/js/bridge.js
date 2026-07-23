@@ -62,12 +62,12 @@
         } catch {}
         const returned = await new Promise((resolve) => {
           let done = false;
-          const onMsg = (ev) => {
+          const onMsg = (event) => {
             if (done) return;
-            if (ev.data && ev.data.type === "returnPort") {
+            if (event.data && event.data.type === "returnPort") {
               done = true;
               worker.onmessage = null;
-              resolve((ev.ports && ev.ports[0]) || null);
+              resolve((event.ports && event.ports[0]) || null);
             }
           };
           worker.onmessage = onMsg;
@@ -169,11 +169,11 @@
         dataPorts.delete(deviceId);
         const queue = workerQueues.get(deviceId);
         if (queue) {
-          const cbMap = workerCallbacks.get(deviceId);
-          for (const wMsg of queue) {
-            if (cbMap && cbMap.has(wMsg.reqId)) {
-              cbMap.get(wMsg.reqId)({ error: "worker spawn failed" });
-              cbMap.delete(wMsg.reqId);
+          const callbackMap = workerCallbacks.get(deviceId);
+          for (const workerMsg of queue) {
+            if (callbackMap && callbackMap.has(workerMsg.reqId)) {
+              callbackMap.get(workerMsg.reqId)({ error: "worker spawn failed" });
+              callbackMap.delete(workerMsg.reqId);
             }
           }
           workerQueues.delete(deviceId);
@@ -194,8 +194,8 @@
           workerReady.add(deviceId);
           const queue = workerQueues.get(deviceId);
           if (queue) {
-            for (const wMsg of queue) {
-              worker.postMessage(wMsg, wMsg.data ? [wMsg.data.buffer] : []);
+            for (const workerMsg of queue) {
+              worker.postMessage(workerMsg, workerMsg.data ? [workerMsg.data.buffer] : []);
             }
             workerQueues.delete(deviceId);
           }
@@ -232,11 +232,11 @@
           // E1 (consistency): also resolve orphaned callbacks on auth-failed so
           // in-flight sendReport/receiveFeatureReport do not dangle while the
           // token refresh is in progress.
-          const orphanCbMap = workerCallbacks.get(deviceId);
-          if (orphanCbMap) {
-            for (const [, cb] of orphanCbMap)
-              cb({ error: "worker auth-failed" });
-            orphanCbMap.clear();
+          const orphanCallbackMap = workerCallbacks.get(deviceId);
+          if (orphanCallbackMap) {
+            for (const [, callback] of orphanCallbackMap)
+              callback({ error: "worker auth-failed" });
+            orphanCallbackMap.clear();
           }
           workers.delete(deviceId);
           workerReady.delete(deviceId);
@@ -249,16 +249,16 @@
           // E1: Resolve any pending worker callbacks so callers' Promises
           // do not hang forever when the data worker dies unexpectedly.
           // Mirrors the _controlPending pattern used on the control plane.
-          const orphanCbMap = workerCallbacks.get(deviceId);
-          if (orphanCbMap) {
-            for (const [, cb] of orphanCbMap) cb({ error: "worker closed" });
-            orphanCbMap.clear();
+          const orphanCallbackMap = workerCallbacks.get(deviceId);
+          if (orphanCallbackMap) {
+            for (const [, callback] of orphanCallbackMap) callback({ error: "worker closed" });
+            orphanCallbackMap.clear();
           }
           workers.delete(deviceId);
           workerReady.delete(deviceId);
           dataPorts.delete(deviceId);
           replyToPage({
-            type: "evt",
+            type: "event",
             event: { eventType: "disconnect", deviceId: deviceId },
           });
           return;
@@ -282,7 +282,7 @@
           }
           replyToPage(
             {
-              type: "evt",
+              type: "event",
               event: {
                 eventType: "input_report",
                 deviceId: deviceId,
@@ -295,13 +295,13 @@
           return;
         }
         if (data.type === "sendResult" || data.type === "featureResult") {
-          const cbMap = workerCallbacks.get(deviceId);
-          if (cbMap && cbMap.has(data.reqId)) {
-            const cb = cbMap.get(data.reqId);
-            cbMap.delete(data.reqId);
-            if (data.error) cb({ s: 500 });
-            else if (data.data) cb({ s: 200, d: data.data });
-            else cb({ s: 204 });
+          const callbackMap = workerCallbacks.get(deviceId);
+          if (callbackMap && callbackMap.has(data.reqId)) {
+            const callback = callbackMap.get(data.reqId);
+            callbackMap.delete(data.reqId);
+            if (data.error) callback({ s: 500 });
+            else if (data.data) callback({ s: 200, d: data.data });
+            else callback({ s: 204 });
           }
         }
       };
@@ -363,7 +363,7 @@
         return;
       }
     }
-    if (msg?.type === "evt" || msg?.type === "settings") {
+    if (msg?.type === "event" || msg?.type === "settings") {
       for (const port of pagePorts.values()) port.postMessage(msg, transfer);
     }
   }
@@ -374,9 +374,9 @@
     if (pagePorts.has(event.source)) return;
     pagePorts.set(event.source, port);
     portOrigin.set(port, event.origin);
-    port.onmessage = (ev) => {
-      if (ev.data?.id != null) requestPortMap.set(ev.data.id, port);
-      handleRequest(ev.data, ev.ports);
+    port.onmessage = (event) => {
+      if (event.data?.id != null) requestPortMap.set(event.data.id, port);
+      handleRequest(event.data, event.ports);
     };
     logger.debug(
       "[bridge] page port established for",
@@ -414,10 +414,10 @@
           worker.postMessage({ type: "setPort" }, [port]);
         } catch (e) {
           logger.warn("set-port transfer failed for", deviceId, ":", e.message);
-          port.onmessage = (ev) => onDataPortMessage(deviceId, ev.data);
+          port.onmessage = (event) => onDataPortMessage(deviceId, event.data);
         }
       } else {
-        port.onmessage = (ev) => onDataPortMessage(deviceId, ev.data);
+        port.onmessage = (event) => onDataPortMessage(deviceId, event.data);
       }
       return;
     }
@@ -435,9 +435,9 @@
           }
         }
         settings.set(global);
-        replyToPage({ type: "res", id, result: global });
+        replyToPage({ type: "response", id, result: global });
       } catch (e) {
-        replyToPage({ type: "res", id, result: {} });
+        replyToPage({ type: "response", id, result: {} });
       }
       return;
     }
@@ -469,74 +469,74 @@
       // Worker WS data plane.
       const worker = workers.get(deviceId);
       if (worker && workerReady.has(deviceId)) {
-        const wType =
+        const workerType =
           action === "workerSend"
             ? "send"
             : action === "workerSendFeature"
               ? "sendFeature"
               : "receiveFeature";
-        const wMsg = { type: wType, reqId: id, reportId: payload.reportId };
+        const workerMsg = { type: workerType, reqId: id, reportId: payload.reportId };
         if (action === "workerSend" || action === "workerSendFeature")
-          wMsg.data = payload.data;
+          workerMsg.data = payload.data;
 
         if (!isFireAndForget || action === "workerReceiveFeature") {
-          let cbMap = workerCallbacks.get(deviceId);
-          if (!cbMap) {
-            cbMap = new Map();
-            workerCallbacks.set(deviceId, cbMap);
+          let callbackMap = workerCallbacks.get(deviceId);
+          if (!callbackMap) {
+            callbackMap = new Map();
+            workerCallbacks.set(deviceId, callbackMap);
           }
-          cbMap.set(id, (data) => {
+          callbackMap.set(id, (data) => {
             const result = data.error
               ? { s: 500 }
               : data.data
                 ? { s: 200, d: data.data }
                 : { s: 204 };
-            const xfers =
+            const transfers =
               result.d instanceof Uint8Array ? [result.d.buffer] : [];
             replyToPage(
-              { type: "res", id, result },
-              xfers.length ? xfers : undefined,
+              { type: "response", id, result },
+              transfers.length ? transfers : undefined,
             );
           });
         }
-        worker.postMessage(wMsg);
+        worker.postMessage(workerMsg);
         return;
       }
 
       if (worker) {
-        const wType =
+        const workerType =
           action === "workerSend"
             ? "send"
             : action === "workerSendFeature"
               ? "sendFeature"
               : "receiveFeature";
-        const wMsg = { type: wType, reqId: id, reportId: payload.reportId };
+        const workerMsg = { type: workerType, reqId: id, reportId: payload.reportId };
         if (action === "workerSend" || action === "workerSendFeature")
-          wMsg.data = payload.data;
+          workerMsg.data = payload.data;
 
         if (!isFireAndForget || action === "workerReceiveFeature") {
-          let cbMap = workerCallbacks.get(deviceId);
-          if (!cbMap) {
-            cbMap = new Map();
-            workerCallbacks.set(deviceId, cbMap);
+          let callbackMap = workerCallbacks.get(deviceId);
+          if (!callbackMap) {
+            callbackMap = new Map();
+            workerCallbacks.set(deviceId, callbackMap);
           }
-          cbMap.set(id, (data) => {
+          callbackMap.set(id, (data) => {
             const result = data.error
               ? { s: 500 }
               : data.data
                 ? { s: 200, d: data.data }
                 : { s: 204 };
-            const xfers =
+            const transfers =
               result.d instanceof Uint8Array ? [result.d.buffer] : [];
             replyToPage(
-              { type: "res", id, result },
-              xfers.length ? xfers : undefined,
+              { type: "response", id, result },
+              transfers.length ? transfers : undefined,
             );
           });
         }
 
         if (!workerQueues.has(deviceId)) workerQueues.set(deviceId, []);
-        workerQueues.get(deviceId).push(wMsg);
+        workerQueues.get(deviceId).push(workerMsg);
         return;
       }
 
@@ -554,16 +554,16 @@
           return;
         }
         const response = await browser.runtime.sendMessage(msg);
-        const xfers =
+        const transfers =
           response && response.d instanceof Uint8Array
             ? [response.d.buffer]
             : [];
         replyToPage(
-          { type: "res", id, result: response },
-          xfers.length ? xfers : undefined,
+          { type: "response", id, result: response },
+          transfers.length ? transfers : undefined,
         );
       } catch (error) {
-        replyToPage({ type: "res", id, result: { s: 500 } });
+        replyToPage({ type: "response", id, result: { s: 500 } });
       }
       return;
     }
@@ -588,7 +588,7 @@
           .catch(() => {});
         const pickerTimeout = setTimeout(() => {
           replyToPage({
-            type: "res",
+            type: "response",
             id,
             result: { cancelled: true },
           });
@@ -599,13 +599,13 @@
           browser.runtime.onMessage.removeListener(onPickerResult);
           if (msg.selected && msg.devices) {
             replyToPage({
-              type: "res",
+              type: "response",
               id,
               result: { devices: msg.devices },
             });
           } else {
             replyToPage({
-              type: "res",
+              type: "response",
               id,
               result: { cancelled: true },
             });
@@ -623,7 +623,7 @@
       onSelected = (e) => {
         cleanup();
         replyToPage({
-          type: "res",
+          type: "response",
           id,
           result: { devices: e.detail.devices },
         });
@@ -631,7 +631,7 @@
       onCancelled = () => {
         cleanup();
         replyToPage({
-          type: "res",
+          type: "response",
           id,
           result: { cancelled: true },
         });
@@ -651,7 +651,7 @@
           payload.deviceId,
         );
         if (!allowed) {
-          replyToPage({ type: "res", id, result: { s: 403 } });
+          replyToPage({ type: "response", id, result: { s: 403 } });
           return;
         }
       }
@@ -693,14 +693,14 @@
         despawnDataPlane(deviceId);
       }
 
-      const xfers =
+      const transfers =
         response && response.d instanceof Uint8Array ? [response.d.buffer] : [];
       replyToPage(
-        { type: "res", id, result: response },
-        xfers.length ? xfers : undefined,
+        { type: "response", id, result: response },
+        transfers.length ? transfers : undefined,
       );
     } catch (error) {
-      replyToPage({ type: "res", id, result: { s: 500 } });
+      replyToPage({ type: "response", id, result: { s: 500 } });
     }
   }
 
@@ -720,7 +720,7 @@
       }
       // Notify page world that this device is no longer usable as-is.
       replyToPage({
-        type: "evt",
+        type: "event",
         event: { eventType: "disconnect", deviceId },
       });
     }
@@ -740,23 +740,23 @@
       return;
     }
     if (message.action === "webhidDeviceEvent" && message.event) {
-      const ev = message.event;
-      if (ev.eventType === "input_report") {
-        const port = dataPorts.get(ev.deviceId);
+      const messageEvent = message.event;
+      if (messageEvent.eventType === "input_report") {
+        const port = dataPorts.get(messageEvent.deviceId);
         if (port) {
-          const view = ev.data;
-          const buf = view ? view.buffer || view : null;
+          const view = messageEvent.data;
+          const buffer = view ? view.buffer || view : null;
           try {
             port.postMessage(
-              { type: "inputReport", reportId: ev.reportId, data: buf },
-              buf ? [buf] : [],
+              { type: "inputReport", reportId: messageEvent.reportId, data: buffer },
+              buffer ? [buffer] : [],
             );
           } catch {}
           return;
         }
       }
-      if (ev.eventType === "disconnect") {
-        const port = dataPorts.get(ev.deviceId);
+      if (messageEvent.eventType === "disconnect") {
+        const port = dataPorts.get(messageEvent.deviceId);
         if (port) {
           try {
             port.postMessage({ type: "disconnect" });
@@ -766,11 +766,11 @@
       if (
         devicePicker &&
         devicePicker.isOpen &&
-        (ev.eventType === "connect" || ev.eventType === "disconnect")
+        (messageEvent.eventType === "connect" || messageEvent.eventType === "disconnect")
       ) {
         devicePicker.refreshDevices();
       }
-      replyToPage({ type: "evt", event: ev });
+      replyToPage({ type: "event", event: messageEvent });
     }
   });
 
@@ -791,7 +791,7 @@
       if (msg.type === "send" || msg.type === "sendFeature")
         payload.data = msg.data;
       const port = dataPorts.get(deviceId);
-      const cb = (response) => {
+      const callback = (response) => {
         if (!port) return;
         if (msg.type === "receiveFeature") {
           const data =
@@ -804,12 +804,12 @@
             });
           } catch {}
         } else {
-          const err = response && !http.isOk(response.s) ? "send failed" : null;
+          const error = response && !http.isOk(response.s) ? "send failed" : null;
           try {
             port.postMessage({
               type: msg.type === "send" ? "sendResult" : "featureResult",
               reqId: msg.reqId,
-              error: err,
+              error: error,
             });
           } catch {}
         }
@@ -817,8 +817,8 @@
       const m = Object.assign({ action }, payload);
       browser.runtime
         .sendMessage(m)
-        .then(cb)
-        .catch(() => cb({ s: 500 }));
+        .then(callback)
+        .catch(() => callback({ s: 500 }));
       return;
     }
   }
@@ -838,7 +838,7 @@
       for (const id of openDevices) {
         const port = dataPorts.get(id);
         if (port && !port.onmessage) {
-          port.onmessage = (ev) => onDataPortMessage(id, ev.data);
+          port.onmessage = (event) => onDataPortMessage(id, event.data);
         }
       }
     }
