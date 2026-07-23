@@ -26,13 +26,15 @@ jobs:
           echo "VERSION=$(git describe --tags | sed 's/^v//;s/_/./;s/\([^-]*-g\)/r\1/;s/-/./g')" >> "$GITHUB_OUTPUT"
 
       - name: Build Addon XPI
-        run: make build-addon
+        run: |
+          make build-addon
+          mv dist/webhid-addon.xpi dist/webhid-addon-${{ steps.variables.outputs.VERSION }}.xpi
 
       - name: Upload XPI artifact
         uses: actions/upload-artifact@v7
         with:
           name: webhid-addon-${{ steps.variables.outputs.VERSION }}
-          path: dist/webhid-addon.xpi
+          path: dist/webhid-addon-${{ steps.variables.outputs.VERSION }}.xpi
           archive: false
 
   build:
