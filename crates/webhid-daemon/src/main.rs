@@ -30,7 +30,6 @@ fn resolve_socket_path() -> String {
     }
     #[cfg(target_os = "linux")]
     if unsafe { libc::geteuid() } != 0 {
-        log::warn!("Running as root is not recommended. Consider adding a udev rule to grant device permissions instead.");
         if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
             if !dir.is_empty() {
                 return format!("{dir}/webhid/webhid.sock");
@@ -38,6 +37,8 @@ fn resolve_socket_path() -> String {
         }
         let uid = unsafe { libc::getuid() };
         return format!("/run/user/{uid}/webhid/webhid.sock");
+    } else {
+        log::warn!("Running as root is not recommended. Consider adding a udev rule to grant device permissions instead.");
     }
     DEFAULT_SOCKET.to_string()
 }
