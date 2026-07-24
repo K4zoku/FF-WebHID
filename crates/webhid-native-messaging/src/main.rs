@@ -18,6 +18,73 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader, B
 const MAX_FRAME_SIZE: usize = 1024 * 1024;
 const CONNECT_TIMEOUT_MS: u64 = 5000;
 
+/// Syscall allow-list for the NM forwarder (pure byte pipe, no server).
+#[cfg(all(target_os = "linux", not(debug_assertions)))]
+const NM_SYSCALLS: &[libc::c_long] = &[
+    libc::SYS_read,
+    libc::SYS_write,
+    libc::SYS_pread64,
+    libc::SYS_pwrite64,
+    libc::SYS_readv,
+    libc::SYS_writev,
+    libc::SYS_close,
+    libc::SYS_dup,
+    libc::SYS_fcntl,
+    libc::SYS_lseek,
+    libc::SYS_openat,
+    libc::SYS_fstat,
+    libc::SYS_newfstatat,
+    libc::SYS_access,
+    libc::SYS_mmap,
+    libc::SYS_munmap,
+    libc::SYS_mprotect,
+    libc::SYS_brk,
+    libc::SYS_madvise,
+    libc::SYS_socket,
+    libc::SYS_connect,
+    libc::SYS_getsockname,
+    libc::SYS_setsockopt,
+    libc::SYS_getsockopt,
+    libc::SYS_sendmsg,
+    libc::SYS_recvmsg,
+    libc::SYS_epoll_create1,
+    libc::SYS_epoll_ctl,
+    libc::SYS_epoll_wait,
+    libc::SYS_eventfd2,
+    libc::SYS_clone,
+    libc::SYS_clone3,
+    libc::SYS_futex,
+    libc::SYS_set_robust_list,
+    libc::SYS_get_robust_list,
+    libc::SYS_set_tid_address,
+    libc::SYS_rseq,
+    libc::SYS_exit_group,
+    libc::SYS_exit,
+    libc::SYS_getpid,
+    libc::SYS_gettid,
+    libc::SYS_getuid,
+    libc::SYS_getgid,
+    libc::SYS_geteuid,
+    libc::SYS_getegid,
+    libc::SYS_tgkill,
+    libc::SYS_rt_sigaction,
+    libc::SYS_rt_sigprocmask,
+    libc::SYS_rt_sigreturn,
+    libc::SYS_sigaltstack,
+    libc::SYS_clock_gettime,
+    libc::SYS_clock_nanosleep,
+    libc::SYS_nanosleep,
+    libc::SYS_getrandom,
+    libc::SYS_prctl,
+    libc::SYS_pipe2,
+    libc::SYS_uname,
+    libc::SYS_sched_yield,
+];
+
+/// Fallback: empty list for debug / non-Linux (seccomp is a no-op).
+#[cfg(not(all(target_os = "linux", not(debug_assertions))))]
+const NM_SYSCALLS: &[libc::c_long] = &[];
+
 /// Write a JSON error frame to the NM host's stdout (→ addon).
 /// Format: `{"s":503,"E":"<msg>"}`: addon's `port.onMessage` receives it,
 /// logs the error, and the pending request (if any) gets rejected.
@@ -73,6 +140,9 @@ async fn main() -> anyhow::Result<()> {
     }
 
     webhid::logging::init_logger();
+
+    webhid::security::apply_prctl_hardening();
+    webhid::security::apply_seccomp_filter(&NM_SYSCALLS);
 
     #[cfg(unix)]
     let daemon = {

@@ -723,6 +723,7 @@ version = "2.2.0"
 dependencies = [
  "base64",
  "bytes",
+ "libc",
  "log",
  "serde",
  "serde_json",

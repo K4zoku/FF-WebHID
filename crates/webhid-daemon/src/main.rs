@@ -3,6 +3,7 @@ mod descriptor;
 mod device_mgr;
 mod hid;
 mod hotplug;
+mod security;
 mod websocket;
 
 use std::sync::Arc;
@@ -80,6 +81,9 @@ async fn main() -> anyhow::Result<()> {
 
     webhid::logging::init_logger();
 
+    webhid::security::apply_prctl_hardening();
+    webhid::security::apply_seccomp_filter(crate::security::DAEMON_SYSCALLS);
+
     let nm_host_info = detect_nm_host_mode();
     let nm_host_mode = nm_host_info.is_some();
 
@@ -153,6 +157,10 @@ async fn main() -> anyhow::Result<()> {
         loop {
             match listener.accept().await {
                 Ok((stream, _addr)) => {
+                    if !security::verify_peer(&stream) {
+                        log::warn!("[client] rejected: peer not in webhid group");
+                        continue;
+                    }
                     let mgr = Arc::clone(&device_mgr);
                     let rx = event_tx.subscribe();
                     tokio::spawn(async move {

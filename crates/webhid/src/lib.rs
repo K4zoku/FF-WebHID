@@ -1,5 +1,6 @@
 pub mod logging;
 pub mod protocol;
+pub mod security;
 pub mod types;
 
 pub use types::*;
