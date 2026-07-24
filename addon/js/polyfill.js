@@ -893,12 +893,12 @@
           pending[id] = async (result) => {
             try {
               if (result.cancelled) {
-                reject(new DOMException("No device selected", "NotFoundError"));
+                resolve([]);
                 return;
               }
               const devices = result.devices;
               if (!devices || devices.length === 0) {
-                reject(new DOMException("No device selected", "NotFoundError"));
+                resolve([]);
                 return;
               }
               await Promise.all(devices.map((device) => pairDevice(device)));

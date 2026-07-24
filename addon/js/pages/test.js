@@ -184,10 +184,11 @@ document.getElementById("btn-request").addEventListener("click", async () => {
         .then(renderDeviceList)
         .catch(() => {});
       setBadge("badge-nm", "NM: ok", true);
+    } else {
+      log("Picker cancelled");
     }
   } catch (e) {
-    if (e.name !== "NotFoundError") logErr("Request failed: " + e.message);
-    else log("Picker cancelled");
+    logErr("Request failed: " + e.message);
   }
 });
 
