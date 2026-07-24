@@ -15,7 +15,7 @@ use webhid::IpcResponse;
 
 use device_mgr::DeviceManager;
 
-const DEFAULT_WS_PORT: u16 = 31337;
+const DEFAULT_WS_PORT: u16 = 0;
 const EVENT_CAPACITY: usize = 8192;
 
 #[cfg(target_os = "linux")]

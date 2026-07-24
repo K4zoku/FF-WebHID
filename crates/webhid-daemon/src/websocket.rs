@@ -115,9 +115,8 @@ async fn handle_websocket(
     device_mgr: Arc<DeviceManager>,
     _ws_port: u16,
 ) -> anyhow::Result<()> {
-    // Capture the session token from the HTTP upgrade request.
-    let token_holder: Arc<std::sync::Mutex<Option<String>>> = Arc::new(std::sync::Mutex::new(None));
-    let token_ref = Arc::clone(&token_holder);
+    let hash_holder: Arc<std::sync::Mutex<Option<String>>> = Arc::new(std::sync::Mutex::new(None));
+    let hash_ref = Arc::clone(&hash_holder);
 
     let ws_stream =
         tokio_tungstenite::accept_hdr_async(stream, move |req: &Request, res: Response| {
@@ -132,15 +131,14 @@ async fn handle_websocket(
                     .unwrap();
                 return Err(resp);
             }
-            // Read token from Sec-WebSocket-Protocol header (subprotocol).
-            let token = req
+            let hash = req
                 .headers()
                 .get("sec-websocket-protocol")
                 .and_then(|v| v.to_str().ok())
                 .and_then(|s| s.strip_prefix("webhid."))
                 .map(String::from);
-            let mut holder = token_ref.lock().unwrap_or_else(|e| e.into_inner());
-            *holder = token;
+            let mut holder = hash_ref.lock().unwrap_or_else(|e| e.into_inner());
+            *holder = hash;
             let mut res = res;
             if let Some(proto) = req.headers().get("sec-websocket-protocol") {
                 res.headers_mut()
@@ -158,32 +156,31 @@ async fn handle_websocket(
         }
     };
 
-    let token = token_holder.lock().unwrap_or_else(|e| e.into_inner()).take();
-    let (token, ws_stream) = match token {
-        Some(t) if t.len() == 32 && t.chars().all(|c| c.is_ascii_hexdigit()) => (t, ws_stream),
+    let hash = hash_holder.lock().unwrap_or_else(|e| e.into_inner()).take();
+    let (hash, ws_stream) = match hash {
+        Some(h) if h.len() == 64 && h.chars().all(|c| c.is_ascii_hexdigit()) => (h, ws_stream),
         Some(_) => {
-            log::warn!("[ws] invalid token format; closing");
+            log::warn!("[ws] invalid auth hash format; closing");
             let _ = send_close(ws_stream, WS_CLOSE_BAD_TOKEN, "bad token").await;
             return Ok(());
         }
         None => {
-            log::warn!("[ws] no token provided; closing");
+            log::warn!("[ws] no auth hash provided; closing");
             let _ = send_close(ws_stream, WS_CLOSE_BAD_TOKEN, "no token").await;
             return Ok(());
         }
     };
 
-    // Device session token.
-    let device_id = match device_mgr.get_device_by_token(&token) {
+    let device_id = match device_mgr.get_device_by_ws_auth(&hash) {
         Some(id) => id,
         None => {
-            log::warn!("[ws] unknown token; closing");
+            log::warn!("[ws] unknown auth hash; closing");
             let _ = send_close(ws_stream, WS_CLOSE_UNKNOWN_TOKEN, "unknown token").await;
             return Ok(());
         }
     };
 
-    log::info!("[ws] authenticated token for device_id={device_id:#x}");
+    log::info!("[ws] authenticated hash for device_id={device_id:#x}");
 
     let mut event_rx = event_tx.subscribe();
 

@@ -36,6 +36,7 @@
   const workerQueues = new Map();
   const dataPorts = new Map();
   let wsPort = null;
+  let wsNonce = null;
   const settings = createSettingsStore(GLOBAL_DEFAULTS);
   settings.on("logLevel", (v) => logger.applyLevel(v));
   const pagePorts = new Map();
@@ -48,6 +49,15 @@
     const key = encodeURIComponent(origin);
     const result = await browser.storage.local.get(key);
     return (result[key] || []).includes(deviceId);
+  }
+
+  async function computeWsAuthHash(sessionToken) {
+    if (!wsNonce || !sessionToken) return null;
+    const data = new TextEncoder().encode(sessionToken + wsNonce);
+    const digest = await crypto.subtle.digest("SHA-256", data);
+    return Array.from(new Uint8Array(digest))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
   }
 
   async function despawnDataPlane(deviceId, { keepPort = false } = {}) {
@@ -135,9 +145,17 @@
       logger.error("data plane token refresh error:", e.message);
     }
   }
-
   async function spawnWorker(deviceId, sessionToken, wsPort, opts = {}, gen) {
     if (workers.has(deviceId)) return true;
+    const wsAuthHash = await computeWsAuthHash(sessionToken);
+    if (!wsAuthHash) {
+      logger.warn(
+        "cannot derive WS auth hash for",
+        deviceId,
+        "; wsNonce missing — falling back to NM",
+      );
+      return false;
+    }
     let worker;
     try {
       worker = new Worker(location.href);
@@ -315,7 +333,7 @@
       worker.postMessage({
         type: "connect",
         wsPort,
-        token: sessionToken,
+        token: wsAuthHash,
         reportSize: opts.reportSize || 64,
         logLevel: logger.level,
       });
@@ -343,6 +361,13 @@
       const resp = await browser.runtime.sendMessage({ action: "handshake" });
       if (http.isOk(resp.s) && resp.w) {
         wsPort = resp.w;
+        wsNonce = resp.N || null;
+        if (!wsNonce) {
+          logger.warn(
+            "handshake: daemon did not send ws_nonce (old version?); " +
+              "WS data plane will fall back to NM",
+          );
+        }
         const global = await browser.storage.local.get(GLOBAL_DEFAULTS);
         const origin = window.location.origin;
         const siteKey = origin ? `site:${origin}` : null;
@@ -410,6 +435,20 @@
       const port = ports && ports[0];
       if (!deviceId || !port) {
         logger.warn("data-port: missing deviceId or port");
+        return;
+      }
+      const requestOrigin = getRequestOrigin(data);
+      const allowed = await isDeviceAllowedForOrigin(requestOrigin, deviceId);
+      if (!allowed) {
+        logger.warn(
+          "data-port: origin",
+          requestOrigin,
+          "not authorized for device",
+          deviceId,
+        );
+        try {
+          port.close();
+        } catch {}
         return;
       }
       dataPorts.set(deviceId, port);

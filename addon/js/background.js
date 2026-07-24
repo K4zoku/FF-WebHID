@@ -624,6 +624,10 @@
 
       case "close": {
         const tabId = sender.tab != null ? sender.tab.id : undefined;
+        if (!isTabAuthorizedForDevice(tabId, request.deviceId)) {
+          sendResponse({ s: 403 });
+          return true;
+        }
         NativeMessaging.closeDevice(request.deviceId)
           .then((response) => {
             if (http.isOk(response.s))

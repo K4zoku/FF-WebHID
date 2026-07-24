@@ -199,6 +199,7 @@ async fn dispatch(device_mgr: &DeviceManager, req: NmRequest, ws_port: u16) -> N
         NmRequest::Handshake { .. } => NmResponse {
             status: Some(200),
             ws_port: Some(ws_port),
+            ws_nonce: Some(device_mgr.ws_nonce().to_string()),
             ..Default::default()
         },
     };
