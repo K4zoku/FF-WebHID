@@ -114,17 +114,19 @@ jobs:
       - name: Build .deb (Linux)
         if: runner.os == 'Linux'
         run: |
-          VER=$(grep -oP '"version":\s*"\K[^"]+' package.json)
           DEB_ARCH=$(if [ "${{ matrix.arch }}" = "aarch64" ]; then echo "arm64"; else echo "amd64"; fi)
-          ./packaging/linux/debian/build-deb.sh "$VER" "$DEB_ARCH"
+          ./packaging/linux/debian/build-deb.sh "${{ steps.variables.outputs.VERSION }}" "$DEB_ARCH"
+          mv "dist/webhid-${{ steps.variables.outputs.VERSION }}-${DEB_ARCH}.deb" \
+             "dist/webhid-linux-${{ matrix.arch }}-${{ steps.variables.outputs.VERSION }}.deb"
         shell: bash
 
       - name: Build .rpm (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get install -y rpm
-          VER=$(grep -oP '"version":\s*"\K[^"]+' package.json)
-          ./packaging/linux/rpm/build-rpm.sh "$VER" "${{ matrix.arch }}"
+          ./packaging/linux/rpm/build-rpm.sh "${{ steps.variables.outputs.VERSION }}" "${{ matrix.arch }}"
+          mv "dist/webhid-${{ steps.variables.outputs.VERSION }}-1.${{ matrix.arch }}.rpm" \
+             "dist/webhid-linux-${{ matrix.arch }}-${{ steps.variables.outputs.VERSION }}.rpm"
         shell: bash
 
       - name: Prepare Artifacts (macOS)
@@ -190,10 +192,13 @@ jobs:
         run: |
           dotnet tool install --global wix --version 6.0.2
           $env:PATH = "$env:USERPROFILE\.dotnet\tools;$env:PATH"
-          $pkg = Get-Content package.json -Raw | ConvertFrom-Json
           wix extension add -g WixToolset.UI.wixext/6.0.2
-          ./packaging/windows/build-msi.ps1 -Version $pkg.version -Arch x86_64 -OutputDir artifacts-msi-x86_64
-          ./packaging/windows/build-msi.ps1 -Version $pkg.version -Arch aarch64 -OutputDir artifacts-msi-aarch64
+          ./packaging/windows/build-msi.ps1 -Version "${{ steps.variables.outputs.VERSION }}" -Arch x86_64 -OutputDir artifacts-msi-x86_64
+          ./packaging/windows/build-msi.ps1 -Version "${{ steps.variables.outputs.VERSION }}" -Arch aarch64 -OutputDir artifacts-msi-aarch64
+          Move-Item "artifacts-msi-x86_64/webhid-windows-x86_64-v${{ steps.variables.outputs.VERSION }}.msi" `
+            "artifacts-msi-x86_64/webhid-windows-x86_64-${{ steps.variables.outputs.VERSION }}.msi" -Force
+          Move-Item "artifacts-msi-aarch64/webhid-windows-aarch64-v${{ steps.variables.outputs.VERSION }}.msi" `
+            "artifacts-msi-aarch64/webhid-windows-aarch64-${{ steps.variables.outputs.VERSION }}.msi" -Force
 
       - name: Upload Windows x86_64 portable
         if: runner.os == 'Windows'
@@ -292,7 +297,7 @@ jobs:
       - name: Download XPI
         uses: actions/download-artifact@v8
         with:
-          name: webhid-addon-${{ steps.variables.outputs.VERSION }}
+          name: webhid-addon-${{ steps.variables.outputs.VERSION }}.xpi
           path: dist/
 
       - name: Download Linux x86_64
@@ -316,7 +321,7 @@ jobs:
       - name: Download Windows x86_64 MSI
         uses: actions/download-artifact@v8
         with:
-          name: webhid-windows-x86_64-msi-${{ steps.variables.outputs.VERSION }}
+          name: webhid-windows-x86_64-${{ steps.variables.outputs.VERSION }}.msi
           path: artifacts-windows-x86_64-msi/
 
       - name: Download Windows aarch64 portable
@@ -328,7 +333,7 @@ jobs:
       - name: Download Windows aarch64 MSI
         uses: actions/download-artifact@v8
         with:
-          name: webhid-windows-aarch64-msi-${{ steps.variables.outputs.VERSION }}
+          name: webhid-windows-aarch64-${{ steps.variables.outputs.VERSION }}.msi
           path: artifacts-windows-aarch64-msi/
 
       - name: Download macOS x86_64
@@ -352,25 +357,25 @@ jobs:
       - name: Download Linux x86_64 .deb
         uses: actions/download-artifact@v8
         with:
-          name: webhid-linux-x86_64-deb-${{ steps.variables.outputs.VERSION }}
+          name: webhid-linux-x86_64-${{ steps.variables.outputs.VERSION }}.deb
           path: debs-x86_64/
 
       - name: Download Linux aarch64 .deb
         uses: actions/download-artifact@v8
         with:
-          name: webhid-linux-aarch64-deb-${{ steps.variables.outputs.VERSION }}
+          name: webhid-linux-aarch64-${{ steps.variables.outputs.VERSION }}.deb
           path: debs-aarch64/
 
       - name: Download Linux x86_64 .rpm
         uses: actions/download-artifact@v8
         with:
-          name: webhid-linux-x86_64-rpm-${{ steps.variables.outputs.VERSION }}
+          name: webhid-linux-x86_64-${{ steps.variables.outputs.VERSION }}.rpm
           path: rpms-x86_64/
 
       - name: Download Linux aarch64 .rpm
         uses: actions/download-artifact@v8
         with:
-          name: webhid-linux-aarch64-rpm-${{ steps.variables.outputs.VERSION }}
+          name: webhid-linux-aarch64-${{ steps.variables.outputs.VERSION }}.rpm
           path: rpms-aarch64/
 
       - name: Package artifacts per platform

@@ -20,6 +20,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Define variables
         id: variables
@@ -35,11 +37,12 @@ jobs:
         run: npm run lint
 
       - name: Build Addon XPI
-        run: make build-addon
+        run: |
+          make build-addon
+          mv dist/webhid-addon.xpi dist/webhid-addon-${{ steps.variables.outputs.VERSION }}.xpi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: webhid-addon-${{ steps.variables.outputs.VERSION }}
-          path: dist/webhid-addon.xpi
+          path: dist/webhid-addon-${{ steps.variables.outputs.VERSION }}.xpi
           archive: false

@@ -51,6 +51,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Define variables
         id: variables
@@ -111,17 +113,19 @@ jobs:
       - name: Build .deb (Linux)
         if: runner.os == 'Linux'
         run: |
-          VER=$(grep -oP '"version":\s*"\K[^"]+' package.json)
           DEB_ARCH=$(if [ "${{ matrix.arch }}" = "aarch64" ]; then echo "arm64"; else echo "amd64"; fi)
-          ./packaging/linux/debian/build-deb.sh "$VER" "$DEB_ARCH"
+          ./packaging/linux/debian/build-deb.sh "${{ steps.variables.outputs.VERSION }}" "$DEB_ARCH"
+          mv "dist/webhid-${{ steps.variables.outputs.VERSION }}-${DEB_ARCH}.deb" \
+             "dist/webhid-linux-${{ matrix.arch }}-${{ steps.variables.outputs.VERSION }}.deb"
         shell: bash
 
       - name: Build .rpm (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get install -y rpm
-          VER=$(grep -oP '"version":\s*"\K[^"]+' package.json)
-          ./packaging/linux/rpm/build-rpm.sh "$VER" "${{ matrix.arch }}"
+          ./packaging/linux/rpm/build-rpm.sh "${{ steps.variables.outputs.VERSION }}" "${{ matrix.arch }}"
+          mv "dist/webhid-${{ steps.variables.outputs.VERSION }}-1.${{ matrix.arch }}.rpm" \
+             "dist/webhid-linux-${{ matrix.arch }}-${{ steps.variables.outputs.VERSION }}.rpm"
         shell: bash
 
       - name: Build .msi (Windows)
@@ -130,10 +134,13 @@ jobs:
         run: |
           dotnet tool install --global wix --version 6.0.2
           $env:PATH = "$env:USERPROFILE\.dotnet\tools;$env:PATH"
-          $pkg = Get-Content package.json -Raw | ConvertFrom-Json
           wix extension add -g WixToolset.UI.wixext/6.0.2
-          ./packaging/windows/build-msi.ps1 -Version $pkg.version -Arch x86_64 -OutputDir artifacts-msi-x86_64
-          ./packaging/windows/build-msi.ps1 -Version $pkg.version -Arch aarch64 -OutputDir artifacts-msi-aarch64
+          ./packaging/windows/build-msi.ps1 -Version "${{ steps.variables.outputs.VERSION }}" -Arch x86_64 -OutputDir artifacts-msi-x86_64
+          ./packaging/windows/build-msi.ps1 -Version "${{ steps.variables.outputs.VERSION }}" -Arch aarch64 -OutputDir artifacts-msi-aarch64
+          Move-Item "artifacts-msi-x86_64/webhid-windows-x86_64-v${{ steps.variables.outputs.VERSION }}.msi" `
+            "artifacts-msi-x86_64/webhid-windows-x86_64-${{ steps.variables.outputs.VERSION }}.msi" -Force
+          Move-Item "artifacts-msi-aarch64/webhid-windows-aarch64-v${{ steps.variables.outputs.VERSION }}.msi" `
+            "artifacts-msi-aarch64/webhid-windows-aarch64-${{ steps.variables.outputs.VERSION }}.msi" -Force
 
       - name: Prepare Artifacts (Linux)
         if: runner.os == 'Linux'
@@ -194,16 +201,14 @@ jobs:
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.artifact_name }}-deb-${{ steps.variables.outputs.VERSION }}
-          path: dist/*.deb
+          path: dist/webhid-linux-${{ matrix.arch }}-${{ steps.variables.outputs.VERSION }}.deb
           archive: false
 
       - name: Upload .rpm (Linux)
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.artifact_name }}-rpm-${{ steps.variables.outputs.VERSION }}
-          path: dist/*.rpm
+          path: dist/webhid-linux-${{ matrix.arch }}-${{ steps.variables.outputs.VERSION }}.rpm
           archive: false
 
       - name: Upload macOS x86_64
@@ -238,8 +243,7 @@ jobs:
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v7
         with:
-          name: webhid-windows-x86_64-msi-${{ steps.variables.outputs.VERSION }}
-          path: artifacts-msi-x86_64/*.msi
+          path: artifacts-msi-x86_64/webhid-windows-x86_64-${{ steps.variables.outputs.VERSION }}.msi
           archive: false
 
       - name: Upload Windows aarch64 portable
@@ -253,6 +257,5 @@ jobs:
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v7
         with:
-          name: webhid-windows-aarch64-msi-${{ steps.variables.outputs.VERSION }}
-          path: artifacts-msi-aarch64/*.msi
+          path: artifacts-msi-aarch64/webhid-windows-aarch64-${{ steps.variables.outputs.VERSION }}.msi
           archive: false
