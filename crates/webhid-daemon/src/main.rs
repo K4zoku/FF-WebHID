@@ -29,6 +29,7 @@ fn resolve_socket_path() -> String {
     }
     #[cfg(target_os = "linux")]
     if unsafe { libc::geteuid() } != 0 {
+        log::warn!("Running as root is not recommended. Consider adding a udev rule to grant device permissions instead.");
         if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
             if !dir.is_empty() {
                 return format!("{dir}/webhid/webhid.sock");
