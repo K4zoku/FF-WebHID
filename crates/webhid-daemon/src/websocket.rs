@@ -271,7 +271,6 @@ async fn handle_websocket(
         // Adaptive mode.
         let coalesce = Duration::from_micros(ADAPTIVE_COALESCE_US);
         loop {
-            // 1. Block for first event.
             let event_result = event_rx.recv().await;
             if !handle_event(
                 event_result,
@@ -282,7 +281,6 @@ async fn handle_websocket(
                 break;
             }
 
-            // 2. Drain immediately-available events.
             drain_available(
                 &mut event_rx,
                 device_id_for_sender,
@@ -290,8 +288,6 @@ async fn handle_websocket(
                 &tx_for_sender,
             );
 
-            // 3. Burst coalescing: if multiple reports accumulated, wait
-            //    briefly for more before flushing.
             if batch.len() > 1 {
                 tokio::select! {
                     _ = tokio::time::sleep(coalesce) => {}
@@ -304,7 +300,6 @@ async fn handle_websocket(
                 }
             }
 
-            // 4. Flush.
             if !batch.is_empty() {
                 write_batch_frame(&mut frame_buf, &batch);
                 let frame = std::mem::take(&mut frame_buf);
@@ -316,7 +311,6 @@ async fn handle_websocket(
         }
     });
 
-    // Wait for tasks to complete.
     tokio::select! {
         _ = &mut outgoing_task => {},
         _ = &mut receiver_task => {},

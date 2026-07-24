@@ -13,17 +13,6 @@ use webhid::{DeviceInfo, IpcResponse};
 
 use crate::hid;
 
-// M1: We use `.lock().unwrap_or_else(|e| e.into_inner())` instead of
-// `.lock().unwrap()` throughout this crate. A Mutex becomes "poisoned" when
-// a thread panics while holding the lock; the default `.unwrap()` would then
-// propagate the poison to every subsequent lock attempt, permanently
-// disabling that mutex for the lifetime of the process. The std-recommended
-// recovery is to extract the inner guard via `PoisonError::into_inner`,
-// which lets the next locker proceed (the data may be in an inconsistent
-// state, but that is generally preferable to a hard failure for a long-
-// running daemon). The panic that caused the poison is still logged via
-// the panic hook, so we don't lose the diagnostic.
-
 struct Entry {
     device: Arc<Mutex<HidDevice>>,
     stop_flag: Arc<AtomicBool>,
@@ -76,7 +65,7 @@ impl DeviceManager {
                 drop(map);
                 self.tokens
                     .lock()
-                    .unwrap()
+                    .unwrap_or_else(|e| e.into_inner())
                     .insert(session_token.clone(), device_id);
                 log::info!("[device_mgr] {device_id:#x} refcount → {rc} (existing session)");
                 return Ok((device_id, Some(session_token)));
@@ -87,19 +76,10 @@ impl DeviceManager {
         let id = info.device_id;
 
         let stop_flag = Arc::new(AtomicBool::new(false));
-        // E9: Previously this code called open_by_device_id a second time just
-        // to obtain a second HidDevice handle for the reader task. If the
-        // device was unplugged in the tiny gap between the two opens, the
-        // second call would fail (and even worse, future changes could leave
-        // the first handle dangling untracked). The reader task only needs an
-        // independent handle to avoid read/write contention on the same
-        // hidapi handle; if we can't get a second one we surface the error
-        // immediately instead of leaving the writer handle orphaned.
+
         let reader_device = match hid::open_by_device_id(id) {
             Ok((_, _, d)) => d,
             Err(e) => {
-                // `device` (the writer handle we already opened) is dropped
-                // here on return, so no resource leak.
                 return Err(e);
             }
         };
@@ -113,7 +93,7 @@ impl DeviceManager {
             drop(map);
             self.tokens
                 .lock()
-                .unwrap()
+                .unwrap_or_else(|e| e.into_inner())
                 .insert(session_token.clone(), id);
             log::info!("[device_mgr] {id:#x} refcount → {rc} (existing session)");
             return Ok((id, Some(session_token)));
@@ -131,7 +111,7 @@ impl DeviceManager {
         map.insert(id, entry);
         self.tokens
             .lock()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .insert(session_token.clone(), id);
 
         let dev_id = id;
@@ -300,16 +280,6 @@ impl DeviceManager {
         self.tokens.lock().unwrap_or_else(|e| e.into_inner()).clear();
     }
 
-    /// Forcefully close a device regardless of its refcount.
-    ///
-    /// M2: Used by the hotplug path when the OS reports a device has been
-    /// physically removed. The normal `close()` decrements refcount and
-    /// only tears down the device when refcount hits 0 — that is the right
-    /// behavior for an explicit per-session close from a tab, but it is the
-    /// wrong behavior when the hardware is gone: every open session is now
-    /// invalid and the device entry must be removed so subsequent
-    /// sendReport / receiveFeatureReport calls fail cleanly with 404
-    /// instead of writing to a stale handle.
     pub fn force_close(&self, device_id: u32) {
         let mut map = self.devices.lock().unwrap_or_else(|e| e.into_inner());
         let Some(mut entry) = map.remove(&device_id) else {

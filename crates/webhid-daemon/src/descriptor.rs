@@ -1,8 +1,4 @@
 //! HID report descriptor parser → Chromium-shaped collections tree.
-//!
-//! Ported from `webhid-descriptor-wasm` (no WASM/bindgen dependencies).
-//! Uses `hidreport` to parse raw descriptor bytes, then builds a
-//! collections tree matching Chromium's `HIDDevice.collections` exactly.
 
 use hidreport::{
     Collection as HidCollection, Field, FieldAttributes, ReportDescriptor, UnitSystem, Units,

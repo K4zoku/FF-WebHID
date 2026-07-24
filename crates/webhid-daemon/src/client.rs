@@ -32,13 +32,6 @@ pub async fn handle(
         loop {
             match event_rx.recv().await {
                 Ok(ev) => {
-                    // M2: When the OS hotplug layer reports a device has
-                    // been physically removed, proactively tear down the
-                    // device_mgr entry for it. Without this, the device
-                    // stays in the map with a stale HidDevice handle and
-                    // stale session tokens; subsequent sendReport calls
-                    // would write to a dead handle and the reader task
-                    // (which already errored out) would never clean up.
                     if let webhid::IpcResponse::DeviceDisconnected {
                         ref device,
                         ..
@@ -69,18 +62,6 @@ pub async fn handle(
         let request: NmRequest = match protocol::read_nm_request(&mut reader).await {
             Ok(r) => r,
             Err(e) => {
-                // E7: Be graceful on InvalidData (JSON decode failure or bad
-                // base64 inside a packed TLV). The WS handler already replies
-                // with a JSON error and keeps the connection alive; the NM
-                // path used to bail on any error, killing the whole NM
-                // connection on a single malformed frame and forcing a
-                // reconnect. We now reply with a 400-level response (no id
-                // since we couldn't parse one) and keep reading the next
-                // frame.
-                //
-                // Other error kinds (UnexpectedEof, ConnectionReset, …)
-                // still terminate the loop — we cannot recover from those
-                // because the byte stream is no longer aligned.
                 if e.kind() == std::io::ErrorKind::InvalidData {
                     log::warn!("[client] malformed NM frame dropped: {e}");
                     let err_resp = NmMessage::Control(NmResponse::err(400));
