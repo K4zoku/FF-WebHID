@@ -132,14 +132,15 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          $version = (Get-Content .version.json -Raw | ConvertFrom-Json).version
           dotnet tool install --global wix --version 6.0.2
           $env:PATH = "$env:USERPROFILE\.dotnet\tools;$env:PATH"
           wix extension add -g WixToolset.UI.wixext/6.0.2
-          ./packaging/windows/build-msi.ps1 -Version "${{ steps.variables.outputs.VERSION }}" -Arch x86_64 -OutputDir artifacts-msi-x86_64
-          ./packaging/windows/build-msi.ps1 -Version "${{ steps.variables.outputs.VERSION }}" -Arch aarch64 -OutputDir artifacts-msi-aarch64
-          Move-Item "artifacts-msi-x86_64/webhid-windows-x86_64-v${{ steps.variables.outputs.VERSION }}.msi" `
+          ./packaging/windows/build-msi.ps1 -Version $version -Arch x86_64 -OutputDir artifacts-msi-x86_64
+          ./packaging/windows/build-msi.ps1 -Version $version -Arch aarch64 -OutputDir artifacts-msi-aarch64
+          Move-Item "artifacts-msi-x86_64/webhid-windows-x86_64-v${version}.msi" `
             "artifacts-msi-x86_64/webhid-windows-x86_64-${{ steps.variables.outputs.VERSION }}.msi" -Force
-          Move-Item "artifacts-msi-aarch64/webhid-windows-aarch64-v${{ steps.variables.outputs.VERSION }}.msi" `
+          Move-Item "artifacts-msi-aarch64/webhid-windows-aarch64-v${version}.msi" `
             "artifacts-msi-aarch64/webhid-windows-aarch64-${{ steps.variables.outputs.VERSION }}.msi" -Force
 
       - name: Prepare Artifacts (Linux)
