@@ -116,7 +116,7 @@ jobs:
           DEB_ARCH=$(if [ "${{ matrix.arch }}" = "aarch64" ]; then echo "arm64"; else echo "amd64"; fi)
           ./packaging/linux/debian/build-deb.sh "${{ steps.variables.outputs.VERSION }}" "$DEB_ARCH"
           mv "dist/webhid-${{ steps.variables.outputs.VERSION }}-${DEB_ARCH}.deb" \
-             "dist/webhid-linux-${{ matrix.arch }}-${{ steps.variables.outputs.VERSION }}.deb"
+             "dist/webhid-linux-${{ matrix.arch }}-v${{ steps.variables.outputs.VERSION }}.deb"
         shell: bash
 
       - name: Build .rpm (Linux)
@@ -125,7 +125,7 @@ jobs:
           sudo apt-get install -y rpm
           ./packaging/linux/rpm/build-rpm.sh "${{ steps.variables.outputs.VERSION }}" "${{ matrix.arch }}"
           mv "dist/webhid-${{ steps.variables.outputs.VERSION }}-1.${{ matrix.arch }}.rpm" \
-             "dist/webhid-linux-${{ matrix.arch }}-${{ steps.variables.outputs.VERSION }}.rpm"
+             "dist/webhid-linux-${{ matrix.arch }}-v${{ steps.variables.outputs.VERSION }}.rpm"
         shell: bash
 
       - name: Build .msi (Windows)
@@ -139,9 +139,9 @@ jobs:
           ./packaging/windows/build-msi.ps1 -Version $version -Arch x86_64 -OutputDir artifacts-msi-x86_64
           ./packaging/windows/build-msi.ps1 -Version $version -Arch aarch64 -OutputDir artifacts-msi-aarch64
           Move-Item "artifacts-msi-x86_64/webhid-windows-x86_64-v${version}.msi" `
-            "artifacts-msi-x86_64/webhid-windows-x86_64-${{ steps.variables.outputs.VERSION }}.msi" -Force
+            "artifacts-msi-x86_64/webhid-windows-x86_64-v${{ steps.variables.outputs.VERSION }}.msi" -Force
           Move-Item "artifacts-msi-aarch64/webhid-windows-aarch64-v${version}.msi" `
-            "artifacts-msi-aarch64/webhid-windows-aarch64-${{ steps.variables.outputs.VERSION }}.msi" -Force
+            "artifacts-msi-aarch64/webhid-windows-aarch64-v${{ steps.variables.outputs.VERSION }}.msi" -Force
 
       - name: Prepare Artifacts (Linux)
         if: runner.os == 'Linux'
@@ -195,68 +195,68 @@ jobs:
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.artifact_name }}-${{ steps.variables.outputs.VERSION }}
+          name: ${{ matrix.artifact_name }}-v${{ steps.variables.outputs.VERSION }}
           path: artifacts/
 
       - name: Upload .deb (Linux)
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v7
         with:
-          path: dist/webhid-linux-${{ matrix.arch }}-${{ steps.variables.outputs.VERSION }}.deb
+          path: dist/webhid-linux-${{ matrix.arch }}-v${{ steps.variables.outputs.VERSION }}.deb
           archive: false
 
       - name: Upload .rpm (Linux)
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v7
         with:
-          path: dist/webhid-linux-${{ matrix.arch }}-${{ steps.variables.outputs.VERSION }}.rpm
+          path: dist/webhid-linux-${{ matrix.arch }}-v${{ steps.variables.outputs.VERSION }}.rpm
           archive: false
 
       - name: Upload macOS x86_64
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v7
         with:
-          name: webhid-macos-x86_64-${{ steps.variables.outputs.VERSION }}
+          name: webhid-macos-x86_64-v${{ steps.variables.outputs.VERSION }}
           path: artifacts-x86_64/
 
       - name: Upload macOS aarch64
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v7
         with:
-          name: webhid-macos-aarch64-${{ steps.variables.outputs.VERSION }}
+          name: webhid-macos-aarch64-v${{ steps.variables.outputs.VERSION }}
           path: artifacts-aarch64/
 
       - name: Upload macOS universal
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v7
         with:
-          name: webhid-macos-universal-${{ steps.variables.outputs.VERSION }}
+          name: webhid-macos-universal-v${{ steps.variables.outputs.VERSION }}
           path: artifacts-universal/
 
       - name: Upload Windows x86_64 portable
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v7
         with:
-          name: webhid-windows-x86_64-${{ steps.variables.outputs.VERSION }}
+          name: webhid-windows-x86_64-v${{ steps.variables.outputs.VERSION }}
           path: artifacts-portable-x86_64/
 
       - name: Upload Windows x86_64 MSI
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v7
         with:
-          path: artifacts-msi-x86_64/webhid-windows-x86_64-${{ steps.variables.outputs.VERSION }}.msi
+          path: artifacts-msi-x86_64/webhid-windows-x86_64-v${{ steps.variables.outputs.VERSION }}.msi
           archive: false
 
       - name: Upload Windows aarch64 portable
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v7
         with:
-          name: webhid-windows-aarch64-${{ steps.variables.outputs.VERSION }}
+          name: webhid-windows-aarch64-v${{ steps.variables.outputs.VERSION }}
           path: artifacts-portable-aarch64/
 
       - name: Upload Windows aarch64 MSI
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v7
         with:
-          path: artifacts-msi-aarch64/webhid-windows-aarch64-${{ steps.variables.outputs.VERSION }}.msi
+          path: artifacts-msi-aarch64/webhid-windows-aarch64-v${{ steps.variables.outputs.VERSION }}.msi
           archive: false

@@ -39,10 +39,10 @@ jobs:
       - name: Build Addon XPI
         run: |
           make build-addon
-          mv dist/webhid-addon.xpi dist/webhid-addon-${{ steps.variables.outputs.VERSION }}.xpi
+          mv dist/webhid-addon.xpi dist/webhid-addon-v${{ steps.variables.outputs.VERSION }}.xpi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          path: dist/webhid-addon-${{ steps.variables.outputs.VERSION }}.xpi
+          path: dist/webhid-addon-v${{ steps.variables.outputs.VERSION }}.xpi
           archive: false
