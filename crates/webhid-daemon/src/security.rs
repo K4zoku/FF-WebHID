@@ -24,6 +24,7 @@ pub const DAEMON_SYSCALLS: &[libc::c_long] = &[
     libc::SYS_getdents64,
     libc::SYS_readlinkat,
     libc::SYS_faccessat,
+    #[cfg(target_arch = "x86_64")]
     libc::SYS_access,
     libc::SYS_truncate,
     libc::SYS_ftruncate,
@@ -50,6 +51,7 @@ pub const DAEMON_SYSCALLS: &[libc::c_long] = &[
     libc::SYS_socketpair,
     libc::SYS_epoll_create1,
     libc::SYS_epoll_ctl,
+    #[cfg(target_arch = "x86_64")]
     libc::SYS_epoll_wait,
     libc::SYS_epoll_pwait,
     libc::SYS_eventfd2,
@@ -92,8 +94,9 @@ pub const DAEMON_SYSCALLS: &[libc::c_long] = &[
 
 /// Fallback: empty list for debug / non-Linux (seccomp is a no-op).
 #[cfg(not(all(target_os = "linux", not(debug_assertions))))]
-pub const DAEMON_SYSCALLS: &[libc::c_long] = &[];
+pub const DAEMON_SYSCALLS: &[()] = &[];
 
+#[cfg(target_os = "linux")]
 fn resolve_webhid_gid() -> Option<libc::gid_t> {
     static GID: OnceLock<Option<libc::gid_t>> = OnceLock::new();
     *GID.get_or_init(|| {
@@ -113,6 +116,7 @@ fn resolve_webhid_gid() -> Option<libc::gid_t> {
 /// belongs to the `webhid` group.
 ///
 /// Returns `true` if the peer's credentials are acceptable, `false` otherwise.
+#[cfg(target_os = "linux")]
 pub fn verify_peer(stream: &UnixStream) -> bool {
     let cred = match stream.peer_cred() {
         Ok(c) => c,

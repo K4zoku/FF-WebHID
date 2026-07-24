@@ -24,7 +24,7 @@ pub fn apply_prctl_hardening() {
 
 /// No-op on non-Linux or debug builds.
 #[cfg(not(all(target_os = "linux", not(debug_assertions))))]
-pub fn apply_seccomp_filter(_syscalls: &[libc::c_long]) {}
+pub fn apply_seccomp_filter<T>(_syscalls: &[T]) {}
 
 /// Apply a strict seccomp BPF filter (Linux, release-only).
 ///

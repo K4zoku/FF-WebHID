@@ -34,6 +34,7 @@ const NM_SYSCALLS: &[libc::c_long] = &[
     libc::SYS_openat,
     libc::SYS_fstat,
     libc::SYS_newfstatat,
+    #[cfg(target_arch = "x86_64")]
     libc::SYS_access,
     libc::SYS_mmap,
     libc::SYS_munmap,
@@ -49,6 +50,7 @@ const NM_SYSCALLS: &[libc::c_long] = &[
     libc::SYS_recvmsg,
     libc::SYS_epoll_create1,
     libc::SYS_epoll_ctl,
+    #[cfg(target_arch = "x86_64")]
     libc::SYS_epoll_wait,
     libc::SYS_eventfd2,
     libc::SYS_clone,
@@ -83,7 +85,7 @@ const NM_SYSCALLS: &[libc::c_long] = &[
 
 /// Fallback: empty list for debug / non-Linux (seccomp is a no-op).
 #[cfg(not(all(target_os = "linux", not(debug_assertions))))]
-const NM_SYSCALLS: &[libc::c_long] = &[];
+const NM_SYSCALLS: &[()] = &[];
 
 /// Write a JSON error frame to the NM host's stdout (→ addon).
 /// Format: `{"s":503,"E":"<msg>"}`: addon's `port.onMessage` receives it,

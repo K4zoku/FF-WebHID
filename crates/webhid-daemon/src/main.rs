@@ -158,6 +158,7 @@ async fn main() -> anyhow::Result<()> {
         loop {
             match listener.accept().await {
                 Ok((stream, _addr)) => {
+                    #[cfg(target_os = "linux")]
                     if !security::verify_peer(&stream) {
                         log::warn!("[client] rejected: peer not in webhid group");
                         continue;
