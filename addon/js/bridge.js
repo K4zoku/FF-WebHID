@@ -44,7 +44,7 @@
   const spawnGen = new Map();
 
   async function isDeviceAllowedForOrigin(origin, deviceId) {
-    if (!origin || !deviceId) return false;
+    if (!origin || origin === "null" || !deviceId) return false;
     const key = encodeURIComponent(origin);
     const result = await browser.storage.local.get(key);
     return (result[key] || []).includes(deviceId);
