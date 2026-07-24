@@ -54,13 +54,21 @@ build:
 	@echo "==> Building Rust crates (release)…"
 	cargo build --release $(CARGO_ARGS) --manifest-path "$(CRATES_DIR)/Cargo.toml"
 
+MV ?= 3
+
 build-addon:
 	@mkdir -p "$(DIST_DIR)"
-	@test -f "$(ADDON_DIR)/manifest.json" || { echo "manifest.json not found in $(ADDON_DIR)" >&2; exit 1; }
-	@rm -f "$(DIST_DIR)/webhid-addon.xpi"
-	@echo "==> Packaging addon XPI…"
-	cd "$(ADDON_DIR)" && zip -r -X "$(DIST_DIR)/webhid-addon.xpi" . -x "*.DS_Store" "*/.git/*" >/dev/null
-	@echo "Created $(DIST_DIR)/webhid-addon.xpi"
+	@test -f "$(ADDON_DIR)/manifest.v$(MV).json" || { echo "manifest.v$(MV).json not found in $(ADDON_DIR)" >&2; exit 1; }
+	@rm -f "$(DIST_DIR)/webhid-addon-mv$(MV).xpi"
+	@if [ -f "$(ADDON_DIR)/manifest.json" ]; then \
+		cp "$(ADDON_DIR)/manifest.json" "$(ADDON_DIR)/.manifest.bak"; fi
+	@cp "$(ADDON_DIR)/manifest.v$(MV).json" "$(ADDON_DIR)/manifest.json"
+	@echo "==> Packaging addon XPI (MV$(MV))…"
+	cd "$(ADDON_DIR)" && zip -r -X "$(DIST_DIR)/webhid-addon-mv$(MV).xpi" . -x "*.DS_Store" "*/.git/*" "manifest.v?.*" ".manifest.bak" >/dev/null
+	@echo "Created $(DIST_DIR)/webhid-addon-mv$(MV).xpi"
+	@if [ -f "$(ADDON_DIR)/.manifest.bak" ]; then \
+		mv "$(ADDON_DIR)/.manifest.bak" "$(ADDON_DIR)/manifest.json"; \
+	else rm -f "$(ADDON_DIR)/manifest.json"; fi
 
 package: build build-addon
 

@@ -43,7 +43,10 @@
           listeners.get(k).add(callback);
         }
         return () => {
-          for (const k of keys) listeners.get(k)?.delete(callback);
+          for (const k of keys) {
+            var cbs = listeners.get(k);
+            if (cbs != null) cbs.delete(callback);
+          }
         };
       },
       set(patch) {

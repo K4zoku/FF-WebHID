@@ -99,7 +99,8 @@
       const r = await browser.tabs.sendMessage(tab.id, {
         action: "getOpenDeviceIds",
       });
-      if (r?.ids) openIds = new Set(r.ids);
+      var rIds = r != null ? r.ids : undefined;
+      if (rIds) openIds = new Set(rIds);
     } catch {}
 
     if (token !== renderToken) return;
@@ -113,7 +114,7 @@
             action: "getDeviceInfo",
             deviceId: hash,
           });
-          device = r?.device || null;
+          device = r != null ? (r.device != null ? r.device : null) : null;
         } catch {}
       }
       if (token !== renderToken) return;

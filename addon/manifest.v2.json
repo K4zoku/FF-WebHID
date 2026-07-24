@@ -1,0 +1,78 @@
+{
+  "manifest_version": 2,
+  "name": "WebHID",
+  "version": "2.1.1",
+  "description": "WebHID API implementation for Firefox",
+  "icons": {
+    "48": "icons/icon.svg"
+  },
+  "permissions": [
+    "nativeMessaging",
+    "storage",
+    "webRequest",
+    "webRequestBlocking",
+    "notifications",
+    "<all_urls>"
+  ],
+  "background": {
+    "scripts": [
+      "js/utils/bootstrap.js",
+      "js/utils/resource.js",
+      "js/utils/http.js",
+      "js/utils/logger.js",
+      "js/utils/settings.js",
+      "js/utils/base64.js",
+      "js/background.js"
+    ]
+  },
+  "page_action": {
+    "default_popup": "html/popup.html",
+    "default_icon": "icons/gamepad.svg",
+    "show_matches": [
+      "http://*/*",
+      "https://*/*"
+    ]
+  },
+  "browser_action": {
+    "default_icon": "icons/icon.svg",
+    "default_title": "WebHID"
+  },
+  "options_ui": {
+    "page": "html/settings.html",
+    "browser_style": false
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "js/inject-main.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true
+    },
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "js/utils/bootstrap.js",
+        "js/utils/resource.js",
+        "js/utils/http.js",
+        "js/utils/logger.js",
+        "js/utils/device.js",
+        "js/utils/settings.js",
+        "js/picker.js",
+        "js/bridge.js"
+      ],
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [],
+  "applications": {
+    "gecko": {
+      "id": "webhid@k4zoku.dev"
+    }
+  }
+}

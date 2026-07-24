@@ -15,7 +15,7 @@ function replyToPage(msg, transfer) {
 
 window.addEventListener("message", (event) => {
   if (event.source !== window) return;
-  const port = event.ports?.[0];
+  const port = event.ports != null ? event.ports[0] : undefined;
   if (!port) return;
   if (pagePort) return;
   pagePort = port;

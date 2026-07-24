@@ -549,19 +549,25 @@
   loadNmHostSetting().then(() => NativeMessaging.connect());
   browser.tabs.onRemoved.addListener((tabId) => purgeTab(tabId));
 
-  if (browser.action?.onClicked) {
-    browser.action.onClicked.addListener(() => {
+  var actionApi = browser.browserAction || browser.action || null;
+  if (actionApi && actionApi.onClicked) {
+    actionApi.onClicked.addListener(function () {
       browser.runtime.openOptionsPage();
     });
   }
 
-  if (browser.notifications?.onClicked) {
-    browser.notifications.onClicked.addListener(() => {
+  var notificationsApi = browser.notifications || null;
+  if (notificationsApi && notificationsApi.onClicked) {
+    notificationsApi.onClicked.addListener(function () {
       if (pendingPicker.size > 0) {
-        const [tabId, req] = [...pendingPicker.entries()][0];
-        browser.tabs.update(tabId, { active: true }).catch(() => {});
-        browser.pageAction.openPopup?.().catch(() => {});
-        browser.notifications.clear("webhid-picker").catch(() => {});
+        var entries = pendingPicker.entries();
+        var first = entries.next();
+        if (first.done) return;
+        var tabId = first.value[0];
+        var req = first.value[1];
+        browser.tabs.update(tabId, { active: true }).catch(function () {});
+        if (browser.pageAction.openPopup) browser.pageAction.openPopup().catch(function () {});
+        notificationsApi.clear("webhid-picker").catch(function () {});
       }
     });
   }
@@ -597,7 +603,7 @@
         return true;
 
       case "open": {
-        const tabId = sender.tab?.id;
+        const tabId = sender.tab != null ? sender.tab.id : undefined;
         isDeviceAllowedForOrigin(request.origin, request.deviceId).then(
           (allowed) => {
             if (!allowed) {
@@ -617,7 +623,7 @@
       }
 
       case "close": {
-        const tabId = sender.tab?.id;
+        const tabId = sender.tab != null ? sender.tab.id : undefined;
         NativeMessaging.closeDevice(request.deviceId)
           .then((response) => {
             if (http.isOk(response.s))
@@ -670,7 +676,7 @@
       }
 
       case "setDataPlane":
-        if (!isTabAuthorizedForDevice(sender.tab?.id, request.deviceId)) {
+        if (!isTabAuthorizedForDevice(sender.tab != null ? sender.tab.id : undefined, request.deviceId)) {
           sendResponse({ s: 403 });
           return true;
         }
@@ -684,7 +690,7 @@
         return true;
 
       case "sendReport":
-        if (!isTabAuthorizedForDevice(sender.tab?.id, request.deviceId)) {
+        if (!isTabAuthorizedForDevice(sender.tab != null ? sender.tab.id : undefined, request.deviceId)) {
           sendResponse({ s: 403 });
           return true;
         }
@@ -694,9 +700,9 @@
             " reportId=" +
             (request.reportId || 0) +
             " dataLen=" +
-            (request.data?.length ?? "undefined") +
+            (request.data == null ? void 0 : request.data.length != null ? request.data.length : "undefined") +
             " dataCtor=" +
-            (request.data?.constructor?.name ?? "undefined"),
+            (request.data == null ? void 0 : request.data.constructor == null ? void 0 : request.data.constructor.name != null ? request.data.constructor.name : "undefined"),
         );
         NativeMessaging.sendReport(
           request.deviceId,
@@ -714,7 +720,7 @@
         return true;
 
       case "receiveFeatureReport":
-        if (!isTabAuthorizedForDevice(sender.tab?.id, request.deviceId)) {
+        if (!isTabAuthorizedForDevice(sender.tab != null ? sender.tab.id : undefined, request.deviceId)) {
           sendResponse({ s: 403 });
           return true;
         }
@@ -724,7 +730,7 @@
         return true;
 
       case "sendFeatureReport":
-        if (!isTabAuthorizedForDevice(sender.tab?.id, request.deviceId)) {
+        if (!isTabAuthorizedForDevice(sender.tab != null ? sender.tab.id : undefined, request.deviceId)) {
           sendResponse({ s: 403 });
           return true;
         }
@@ -786,7 +792,7 @@
         return true;
 
       case "registerDevice": {
-        const tabId = sender.tab?.id;
+        const tabId = sender.tab != null ? sender.tab.id : undefined;
         if (request.deviceId && tabId != null)
           registerDeviceTab(request.deviceId, tabId);
         sendResponse({ s: 204 });
@@ -794,7 +800,7 @@
       }
 
       case "unregisterDevice": {
-        const tabId = sender.tab?.id;
+        const tabId = sender.tab != null ? sender.tab.id : undefined;
         if (request.deviceId && tabId != null)
           unregisterDeviceTab(request.deviceId, tabId);
         sendResponse({ s: 204 });
@@ -802,12 +808,12 @@
       }
 
       case "deviceCountChanged":
-        if (browser.action) {
-          const tabId = sender.tab?.id;
+        if (actionApi) {
+          var tabId = sender.tab != null ? sender.tab.id : undefined;
           if (tabId != null) {
-            browser.action.setBadgeText({
+            actionApi.setBadgeText({
               text: request.count > 0 ? String(request.count) : "",
-              tabId,
+              tabId: tabId,
             });
           }
         }
@@ -850,7 +856,7 @@
       }
 
       case "showPicker": {
-        const tabId = sender.tab?.id;
+        const tabId = sender.tab != null ? sender.tab.id : undefined;
         if (tabId == null) {
           sendResponse({ error: "no tab" });
           return false;
@@ -866,8 +872,10 @@
         pendingPicker.set(tabId, req);
 
         if (req.mode === "window") {
-          const screenW = globalThis.screen?.availWidth || 1280;
-          const screenH = globalThis.screen?.availHeight || 720;
+          var screenAvailW = globalThis.screen != null ? globalThis.screen.availWidth : undefined;
+          var screenAvailH = globalThis.screen != null ? globalThis.screen.availHeight : undefined;
+          var screenW = screenAvailW != null ? screenAvailW : 1280;
+          var screenH = screenAvailH != null ? screenAvailH : 720;
           const winW = Math.min(380, screenW - 20);
           const winH = Math.min(480, screenH - 80);
           const left = Math.max(0, Math.round((screenW - winW) / 2));
@@ -891,7 +899,7 @@
             tabId,
             popup: "html/picker.html",
           });
-          browser.pageAction.openPopup?.().catch(() => {});
+          if (browser.pageAction.openPopup) browser.pageAction.openPopup().catch(function () {});
           browser.tabs
             .query({ active: true, currentWindow: true })
             .then((tabs) => {
@@ -926,10 +934,11 @@
         }
         const req = tabId != null ? pendingPicker.get(tabId) : null;
         if (tabId != null) pendingPicker.delete(tabId);
-        if (req?.mode === "pageAction") {
+        var reqMode = req != null ? req.mode : undefined;
+        if (reqMode === "pageAction") {
           browser.pageAction.setIcon({ tabId, path: "icons/gamepad.svg" });
           browser.pageAction.setPopup({ tabId, popup: "html/popup.html" });
-          browser.notifications?.clear("webhid-picker").catch(() => {});
+          if (browser.notifications) browser.notifications.clear("webhid-picker").catch(function () {});
         }
         if (request.windowId != null) {
           browser.windows.remove(request.windowId).catch(() => {});

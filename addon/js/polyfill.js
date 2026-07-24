@@ -1,5 +1,5 @@
 (function () {
-  if (window.navigator?.hid) return;
+  if (window.navigator == null || window.navigator.hid) return;
   const webhid = globalThis.webhid;
   const logger = webhid.import("logger");
   const http = webhid.import("http");
@@ -67,14 +67,14 @@
           "pairDevice returned non-success for deviceId=" +
             deviceInfo.deviceId +
             ": " +
-            http.name(result?.s || 0),
+            http.name(result != null ? result.s : 0),
         );
       }
     } catch (e) {
       // S5: Log the underlying error too. Previously this was a bare
       // `catch {}` which made pairing failures invisible to anyone trying
       // to debug "I picked a device but getDevices() is empty".
-      logger.warn("pairDevice error:", e?.message || e);
+      logger.warn("pairDevice error:", e != null ? (e.message != null ? e.message : e) : e);
     }
   }
 
@@ -109,7 +109,7 @@
       // can override via opts.timeoutMs; pass 0 to disable. On timeout
       // we resolve with { s: 504 } so existing status-checking code
       // (http.isOk) treats it as a failure rather than a crash.
-      const timeoutMs = opts.timeoutMs ?? 30000;
+      const timeoutMs = opts.timeoutMs != null ? opts.timeoutMs : 30000;
       let settled = false;
       let timer = null;
       if (timeoutMs > 0) {
@@ -193,42 +193,46 @@
   Object.defineProperties(HIDDevice.prototype, {
     opened: {
       get() {
-        return devState.get(this)?.opened ?? false;
+        return devState.get(this) == null ? void 0 : devState.get(this).opened != null ? devState.get(this).opened : false;
       },
       enumerable: false,
       configurable: true,
     },
     vendorId: {
       get() {
-        return devState.get(this)?.vendorId;
+        var dev = devState.get(this);
+        return dev != null ? dev.vendorId : undefined;
       },
       enumerable: false,
       configurable: true,
     },
     productId: {
       get() {
-        return devState.get(this)?.productId;
+        var dev = devState.get(this);
+        return dev != null ? dev.productId : undefined;
       },
       enumerable: false,
       configurable: true,
     },
     productName: {
       get() {
-        return devState.get(this)?.productName;
+        var dev = devState.get(this);
+        return dev != null ? dev.productName : undefined;
       },
       enumerable: false,
       configurable: true,
     },
     collections: {
       get() {
-        return devState.get(this)?.collections;
+        var dev = devState.get(this);
+        return dev != null ? dev.collections : undefined;
       },
       enumerable: false,
       configurable: true,
     },
     oninputreport: {
       get() {
-        return devState.get(this)?.oninputreport ?? null;
+        return devState.get(this) == null ? void 0 : devState.get(this).oninputreport != null ? devState.get(this).oninputreport : null;
       },
       set(v) {
         const state = devState.get(this);
@@ -524,7 +528,7 @@
         try {
           device = await resolvePairedDevice(detail.deviceId);
         } catch (e) {
-          logger.warn("connect event lookup failed:", e?.message || e);
+          logger.warn("connect event lookup failed:", e != null ? (e.message != null ? e.message : e) : e);
         }
       }
       if (hidInstance && device) {
@@ -629,7 +633,7 @@
       } catch (error) {
         logger.warn(
           "teardownForgottenDevice: close failed:",
-          error?.message || error,
+          error != null ? (error.message != null ? error.message : error) : error,
         );
       }
       if (state.dataPort) {
@@ -659,7 +663,7 @@
   function onDataPortMessage(state, data) {
     if (!data) return;
     if (data.type === "sendResult" || data.type === "featureResult") {
-      const entry = state.dataPending?.get(data.reqId);
+      const entry = state.dataPending != null ? state.dataPending.get(data.reqId) : undefined;
       if (!entry) return;
       state.dataPending.delete(data.reqId);
       if (data.error) entry.reject(new Error(data.error));
@@ -754,9 +758,9 @@
       new.target || HIDInputReportEvent,
     );
     obj[irState] = {
-      device: init?.device,
-      reportId: init?.reportId,
-      data: init?.data,
+      device: init != null ? init.device : undefined,
+      reportId: init != null ? init.reportId : undefined,
+      data: init != null ? init.data : undefined,
     };
     return obj;
   }
@@ -769,21 +773,24 @@
   Object.defineProperties(HIDInputReportEvent.prototype, {
     device: {
       get() {
-        return this[irState]?.device;
+        var st = this[irState];
+        return st != null ? st.device : undefined;
       },
       enumerable: false,
       configurable: true,
     },
     reportId: {
       get() {
-        return this[irState]?.reportId;
+        var st = this[irState];
+        return st != null ? st.reportId : undefined;
       },
       enumerable: false,
       configurable: true,
     },
     data: {
       get() {
-        return this[irState]?.data;
+        var st = this[irState];
+        return st != null ? st.data : undefined;
       },
       enumerable: false,
       configurable: true,
@@ -796,7 +803,7 @@
       [type],
       new.target || HIDConnectionEvent,
     );
-    evtState.set(obj, { device: init?.device ?? init });
+    evtState.set(obj, { device: init == null ? void 0 : init.device != null ? init.device : init });
     return obj;
   }
   HIDConnectionEvent.prototype = Object.create(Event.prototype);
@@ -807,7 +814,8 @@
   });
   Object.defineProperty(HIDConnectionEvent.prototype, "device", {
     get() {
-      return evtState.get(this)?.device;
+      var st = evtState.get(this);
+      return st != null ? st.device : undefined;
     },
     enumerable: false,
     configurable: true,
@@ -906,7 +914,7 @@
             } catch (e) {
               reject(
                 new DOMException(
-                  e?.message || "requestDevice failed",
+                  e != null ? e.message : "requestDevice failed",
                   "NetworkError",
                 ),
               );
@@ -943,7 +951,7 @@
     },
     onconnect: {
       get() {
-        return hidState.get(this)?.onconnect ?? null;
+        return hidState.get(this) == null ? void 0 : hidState.get(this).onconnect != null ? hidState.get(this).onconnect : null;
       },
       set(v) {
         const state = hidState.get(this);
@@ -958,7 +966,7 @@
     },
     ondisconnect: {
       get() {
-        return hidState.get(this)?.ondisconnect ?? null;
+        return hidState.get(this) == null ? void 0 : hidState.get(this).ondisconnect != null ? hidState.get(this).ondisconnect : null;
       },
       set(v) {
         const state = hidState.get(this);
