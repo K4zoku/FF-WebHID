@@ -1,3 +1,86 @@
-# Allow all users logged in at the console to access hidraw devices.
-# This is required for WebHID daemon to enumerate and communicate with HID devices.
+# Grant console users access to hidraw devices for the WebHID daemon, excluding
+# known FIDO/U2F security keys (matches Chromium's hid_blocklist.cc one-to-one).
+#
+# FIDO usage-page (0xF1D0) catch-all cannot be expressed in udev (no usage-page
+# attribute in sysfs); the daemon enforces that at runtime.
+# Keyboard/mouse/system-control blocks are also daemon-enforced per project design.
+#
+# Source: chromium/src/+/main/services/device/public/cpp/hid/hid_blocklist.cc
+
 KERNEL=="hidraw*", TAG+="uaccess"
+
+# KEY-ID / Feitian
+KERNEL=="hidraw*", ATTRS{idVendor}=="096e", ATTRS{idProduct}=="0850", TAG-="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="096e", ATTRS{idProduct}=="0852", TAG-="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="096e", ATTRS{idProduct}=="0853", TAG-="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="096e", ATTRS{idProduct}=="0854", TAG-="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="096e", ATTRS{idProduct}=="0856", TAG-="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="096e", ATTRS{idProduct}=="0858", TAG-="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="096e", ATTRS{idProduct}=="085a", TAG-="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="096e", ATTRS{idProduct}=="085b", TAG-="uaccess"
+# HyperFIDO
+KERNEL=="hidraw*", ATTRS{idVendor}=="096e", ATTRS{idProduct}=="0880", TAG-="uaccess"
+
+# HID Global BlueTrust Token
+KERNEL=="hidraw*", ATTRS{idVendor}=="09c3", ATTRS{idProduct}=="0023", TAG-="uaccess"
+
+# Yubikey
+KERNEL=="hidraw*", ATTRS{idVendor}=="1050", ATTRS{idProduct}=="0010", TAG-="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="1050", ATTRS{idProduct}=="0018", TAG-="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="1050", ATTRS{idProduct}=="0030", TAG-="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="1050", ATTRS{idProduct}=="0110", TAG-="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="1050", ATTRS{idProduct}=="0111", TAG-="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="1050", ATTRS{idProduct}=="0112", TAG-="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="1050", ATTRS{idProduct}=="0113", TAG-="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="1050", ATTRS{idProduct}=="0114", TAG-="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="1050", ATTRS{idProduct}=="0115", TAG-="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="1050", ATTRS{idProduct}=="0116", TAG-="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="1050", ATTRS{idProduct}=="0120", TAG-="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="1050", ATTRS{idProduct}=="0200", TAG-="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="1050", ATTRS{idProduct}=="0211", TAG-="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="1050", ATTRS{idProduct}=="0401", TAG-="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="1050", ATTRS{idProduct}=="0402", TAG-="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="1050", ATTRS{idProduct}=="0403", TAG-="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="1050", ATTRS{idProduct}=="0404", TAG-="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="1050", ATTRS{idProduct}=="0405", TAG-="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="1050", ATTRS{idProduct}=="0406", TAG-="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="1050", ATTRS{idProduct}=="0407", TAG-="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="1050", ATTRS{idProduct}=="0410", TAG-="uaccess"
+
+# U2F Zero
+KERNEL=="hidraw*", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="8acf", TAG-="uaccess"
+
+# Mooltipass Mini-BLE / Arduino sketch
+KERNEL=="hidraw*", ATTRS{idVendor}=="1209", ATTRS{idProduct}=="4321", TAG-="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="1209", ATTRS{idProduct}=="4322", TAG-="uaccess"
+
+# Google Titan
+KERNEL=="hidraw*", ATTRS{idVendor}=="18d1", ATTRS{idProduct}=="5026", TAG-="uaccess"
+
+# VASCO
+KERNEL=="hidraw*", ATTRS{idVendor}=="1a44", ATTRS{idProduct}=="00bb", TAG-="uaccess"
+
+# OnlyKey
+KERNEL=="hidraw*", ATTRS{idVendor}=="1d50", ATTRS{idProduct}=="60fc", TAG-="uaccess"
+
+# Keydo AES / Neowave Keydo
+KERNEL=="hidraw*", ATTRS{idVendor}=="1e0d", ATTRS{idProduct}=="f1ae", TAG-="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="1e0d", ATTRS{idProduct}=="f1d0", TAG-="uaccess"
+
+# Thetis
+KERNEL=="hidraw*", ATTRS{idVendor}=="1ea8", ATTRS{idProduct}=="f025", TAG-="uaccess"
+
+# Nitrokey
+KERNEL=="hidraw*", ATTRS{idVendor}=="20a0", ATTRS{idProduct}=="4287", TAG-="uaccess"
+
+# JaCarta
+KERNEL=="hidraw*", ATTRS{idVendor}=="24dc", ATTRS{idProduct}=="0101", TAG-="uaccess"
+
+# Happlink
+KERNEL=="hidraw*", ATTRS{idVendor}=="2581", ATTRS{idProduct}=="f1d0", TAG-="uaccess"
+
+# Bluink
+KERNEL=="hidraw*", ATTRS{idVendor}=="2abe", ATTRS{idProduct}=="1002", TAG-="uaccess"
+
+# Feitian USB, HyperFIDO
+KERNEL=="hidraw*", ATTRS{idVendor}=="2ccf", ATTRS{idProduct}=="0880", TAG-="uaccess"
