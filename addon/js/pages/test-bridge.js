@@ -39,28 +39,14 @@ async function handleRequest(data, ports) {
         ))();
         document.documentElement.appendChild(devicePicker.host);
       }
-      let onSelected, onCancelled;
-      onSelected = (e) => {
-        window.removeEventListener("webhid-device-selected", onSelected);
-        window.removeEventListener("webhid-device-cancelled", onCancelled);
-        replyToPage({
-          type: "response",
-          id,
-          result: { devices: e.detail.devices },
-        });
-      };
-      onCancelled = () => {
-        window.removeEventListener("webhid-device-selected", onSelected);
-        window.removeEventListener("webhid-device-cancelled", onCancelled);
-        replyToPage({
-          type: "response",
-          id,
-          result: { cancelled: true },
-        });
-      };
-      window.addEventListener("webhid-device-selected", onSelected);
-      window.addEventListener("webhid-device-cancelled", onCancelled);
-      devicePicker.show(filters);
+      const result = await devicePicker.show(filters);
+      replyToPage({
+        type: "response",
+        id,
+        result: result.devices.length
+          ? { devices: result.devices }
+          : { cancelled: true },
+      });
       return;
     }
 

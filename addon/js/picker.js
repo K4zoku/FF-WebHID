@@ -19,6 +19,7 @@
     #deviceGroups = {};
     #pairedDevices = null;
     #fragmentReady = null;
+    #resolveShow = null;
 
     constructor() {
       this.#host = document.createElement("div");
@@ -101,6 +102,10 @@
       }
 
       this.#loadDevices();
+
+      return new Promise((resolve) => {
+        this.#resolveShow = resolve;
+      });
     }
 
     async refreshDevices() {
@@ -289,9 +294,6 @@
 
     #onDeviceSelected(devices) {
       const devicesArr = Array.isArray(devices) ? devices : [devices];
-      const event = new CustomEvent("webhid-device-selected", {
-        detail: { devices: devicesArr },
-      });
       (async () => {
         try {
           const paired = await this.#getPairedDevices();
@@ -301,13 +303,13 @@
           this.#pairedDevices = paired;
         } catch {}
       })();
-      window.dispatchEvent(event);
+      this.#resolveShow?.({ devices: devicesArr });
+      this.#resolveShow = null;
     }
 
     #onDeviceCancelled() {
-      window.dispatchEvent(
-        new CustomEvent("webhid-device-cancelled", { detail: {} }),
-      );
+      this.#resolveShow?.({ devices: [] });
+      this.#resolveShow = null;
     }
   }
 

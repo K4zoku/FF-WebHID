@@ -629,30 +629,14 @@
         return;
       }
 
-      let onSelected, onCancelled;
-      const cleanup = () => {
-        window.removeEventListener("webhid-device-selected", onSelected);
-        window.removeEventListener("webhid-device-cancelled", onCancelled);
-      };
-      onSelected = (e) => {
-        cleanup();
-        replyToPage({
-          type: "response",
-          id,
-          result: { devices: e.detail.devices },
-        });
-      };
-      onCancelled = () => {
-        cleanup();
-        replyToPage({
-          type: "response",
-          id,
-          result: { cancelled: true },
-        });
-      };
-      window.addEventListener("webhid-device-selected", onSelected);
-      window.addEventListener("webhid-device-cancelled", onCancelled);
-      devicePicker.show(filters, exclusionFilters);
+      const result = await devicePicker.show(filters, exclusionFilters);
+      replyToPage({
+        type: "response",
+        id,
+        result: result.devices.length
+          ? { devices: result.devices }
+          : { cancelled: true },
+      });
       return;
     }
 
