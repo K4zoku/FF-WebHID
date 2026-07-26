@@ -3,7 +3,6 @@
   const http = webhid.import("http");
   const createSettingsStore = webhid.import("createSettingsStore");
   const GLOBAL_DEFAULTS = webhid.import("GLOBAL_DEFAULTS");
-  const fetchResource = webhid.import("fetchResource");
   logger.initLogger("bg");
 
   let deviceCache = [];
@@ -49,6 +48,8 @@
   }
 
   const deviceTabMap = new Map();
+  const permissionsPolicy = new Map();
+  const allowedCrossOrigin = new Map();
 
   let workerBundle = null;
   let workerBundlePromise = null;
@@ -119,6 +120,30 @@
       return { responseHeaders: headers };
     },
     { urls: ["<all_urls>"], types: ["script"] },
+    ["blocking", "responseHeaders"],
+  );
+
+  browser.webRequest.onHeadersReceived.addListener(
+    (details) => {
+      const ph = details.responseHeaders?.find(
+        (h) => h.name.toLowerCase() === "permissions-policy"
+      )?.value;
+      if (!ph) return {};
+      for (const raw of ph.split(",")) {
+        const eq = raw.trim().indexOf("=");
+        if (eq === -1) continue;
+        const f = raw.trim().slice(0, eq).trim().toLowerCase();
+        const v = raw.trim().slice(eq + 1).trim();
+        if (f !== "hid") continue;
+        const parsed = v === "()" ? "none" : v === "*" ? "all" : v === "self" ? "self" : v;
+        const key = `${details.tabId}:${details.frameId}`;
+        permissionsPolicy.set(key, parsed);
+        logger.debug("Permissions-Policy stored: " + key + " hid=" + parsed);
+        break;
+      }
+      return {};
+    },
+    { urls: ["<all_urls>"], types: ["main_frame", "sub_frame"] },
     ["blocking", "responseHeaders"],
   );
 
@@ -927,6 +952,61 @@
         sendResponse(
           pendingPicker.size > 0 ? [...pendingPicker.values()][0] : null,
         );
+        return false;
+      }
+
+      case "getPolicy": {
+        const sid = sender.frameId;
+        const tid = sender.tab?.id;
+        let hid = null;
+        // 1) Check frame's own policy.
+        if (tid != null) {
+          hid = permissionsPolicy.get(`${tid}:${sid}`);
+        }
+        // 2) Fall back to top-frame policy.
+        if (hid == null && tid != null) {
+          hid = permissionsPolicy.get(`${tid}:0`);
+        }
+        logger.debug("getPolicy tid=" + tid + " sid=" + sid + " hid=" + hid + " crossOrigin=" + request.isCrossOrigin + " url=" + request.url);
+        if (hid === "none") {
+          sendResponse({ policy: { hid: "none" } });
+          return true;
+        }
+        // 3) Cross-origin: check allow attr.
+        if (request.isCrossOrigin) {
+          if (request.hasAllowAttr) {
+            sendResponse({ policy: { hid: "allowed" } });
+            return true;
+          }
+          let allowKey = tid != null ? `${tid}:${sid}` : null;
+          if (allowKey && allowedCrossOrigin.has(allowKey)) {
+            sendResponse({ policy: { hid: "allowed" } });
+            return true;
+          }
+          const urlKey = `url:${request.url}`;
+          if (allowedCrossOrigin.has(urlKey)) {
+            sendResponse({ policy: { hid: "allowed" } });
+            return true;
+          }
+          sendResponse({ policy: { hid: "none" } });
+          return true;
+        }
+        // 4) Same-origin: allowed.
+        sendResponse({ policy: { hid: "allowed" } });
+        return true;
+      }
+
+      case "setFrameAllow": {
+        let key;
+        if (request.frameId === -1 && request.url) {
+          key = `url:${request.url}`;
+        } else {
+          const tid = sender.tab?.id;
+          if (tid == null) { sendResponse({ ok: false }); return false; }
+          key = `${tid}:${request.frameId}`;
+        }
+        allowedCrossOrigin.set(key, true);
+        sendResponse({ ok: true });
         return false;
       }
 

@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Worker Check</title></head>
+<body>
+<pre id="__worker-result">waiting...</pre>
+<script>
+(async function() {
+  try {
+    const ts = Date.now();
+    const url = '/worker.js?_=' + ts;
+    const w = new Worker(url);
+    const result = await new Promise((resolve, reject) => {
+      w.onmessage = (e) => resolve(e.data);
+      w.onerror = (e) => reject(e.message);
+      setTimeout(() => reject('timeout'), 5000);
+    });
+    document.getElementById('__worker-result').textContent = JSON.stringify(result);
+  } catch (e) {
+    document.getElementById('__worker-result').textContent = JSON.stringify({
+      error: e.message || String(e),
+    });
+  }
+})();
+</script>
+</body></html>

@@ -40,8 +40,10 @@
   const settings = createSettingsStore(GLOBAL_DEFAULTS);
   settings.on("logLevel", (v) => logger.applyLevel(v));
   const pagePorts = new Map();
+  const pageSourceByPort = new Map();
   const requestPortMap = new Map();
   const portOrigin = new Map();
+  const allowAttrMap = new Map();
   const spawnGen = new Map();
 
   async function isDeviceAllowedForOrigin(origin, deviceId) {
@@ -385,6 +387,24 @@
     }
   })();
 
+  if (window === window.top) {
+    function reportIframes() {
+      const iframes = document.querySelectorAll('iframe[allow*="hid" i]');
+      for (const iframe of iframes) {
+        const src = iframe.src || iframe.getAttribute("src") || "";
+        if (!src) continue;
+        browser.runtime.sendMessage({
+          action: "setFrameAllow",
+          url: src,
+          frameId: -1,
+        }).catch(() => {});
+      }
+    }
+    reportIframes();
+    const observer = new MutationObserver(() => reportIframes());
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+  }
+
   function replyToPage(msg, transfer) {
     if (msg != null && msg.id != null) {
       const port = requestPortMap.get(msg.id);
@@ -403,11 +423,21 @@
     const port = event.ports != null ? event.ports[0] : undefined;
     if (!port) return;
     if (pagePorts.has(event.source)) return;
-    pagePorts.set(event.source, port);
+    const source = event.source;
+    pagePorts.set(source, port);
+    pageSourceByPort.set(port, source);
     portOrigin.set(port, event.origin);
+    if (window === window.top) {
+      for (const iframe of document.querySelectorAll('iframe')) {
+        if (iframe.contentWindow === source) {
+          if (iframe.hasAttribute('allow')) allowAttrMap.set(source, true);
+          break;
+        }
+      }
+    }
     port.onmessage = (event) => {
       if (event.data != null && event.data.id != null) requestPortMap.set(event.data.id, port);
-      handleRequest(event.data, event.ports);
+      handleRequest(event.data, event.ports, source);
     };
     logger.debug(
       "[bridge] page port established for",
@@ -420,7 +450,7 @@
     return port ? portOrigin.get(port) : window.location.origin;
   }
 
-  async function handleRequest(data, ports) {
+  async function handleRequest(data, ports, source) {
     if (!data || data.id === undefined) return;
 
     const { id, action: reqAction, payload } = data;
@@ -464,6 +494,33 @@
       } else {
         port.onmessage = (event) => onDataPortMessage(deviceId, event.data);
       }
+      return;
+    }
+
+    if (action === "getPolicy") {
+      (async () => {
+        try {
+          const requestFrameUrl = (payload && payload.frameUrl) || "";
+          let hasAllowAttr = false;
+          if (window === window.top && requestFrameUrl) {
+            for (const iframe of document.querySelectorAll('iframe[allow*="hid" i]')) {
+              const s = iframe.src || iframe.getAttribute("src") || "";
+              if (s === requestFrameUrl) { hasAllowAttr = true; break; }
+            }
+          }
+          const resp = await browser.runtime.sendMessage({
+            action: "getPolicy",
+            isCrossOrigin: payload && payload.isCrossOrigin ? true : false,
+            url: requestFrameUrl || location.href,
+            hasAllowAttr,
+          });
+          const result = resp ? resp.policy || { hid: "allowed" } : { hid: "allowed" };
+          result._dbg = { requestFrameUrl, hasAllowAttr, top: window === window.top };
+          replyToPage({ type: "response", id, result });
+        } catch (e) {
+          replyToPage({ type: "response", id, result: { hid: "allowed", _err: String(e) } });
+        }
+      })();
       return;
     }
 

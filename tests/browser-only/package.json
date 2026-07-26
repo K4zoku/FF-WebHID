@@ -1,0 +1,17 @@
+{
+  "name": "ff-webhid-browser-only",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "test:debug": "playwright test --debug"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.52.0"
+  },
+  "dependencies": {
+    "playwright-webextext": "^0.0.5",
+    "tslib": "^2.8.1"
+  }
+}

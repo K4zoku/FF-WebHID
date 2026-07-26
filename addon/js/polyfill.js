@@ -1,5 +1,20 @@
 (function () {
-  if (window.navigator == null || window.navigator.hid) return;
+  if (window.navigator == null) return;
+
+  function getCallerFrameUrl() {
+    try {
+      const stack = new Error().stack;
+      if (!stack) return location.href;
+      const lines = stack.split('\n');
+      for (let i = lines.length - 1; i >= 0; i--) {
+        const m = lines[i].match(/@(.*?):\d+:\d+/);
+        if (m && m[1].startsWith('http')) {
+          return m[1];
+        }
+      }
+    } catch {}
+    return location.href;
+  }
   const webhid = globalThis.webhid;
   const logger = webhid.import("logger");
   const http = webhid.import("http");
@@ -11,6 +26,7 @@
 
   let nextReqId = 0;
   const pending = {};
+  const frameNonce = crypto.randomUUID();
 
   const channel = new MessageChannel();
   const bridgePort = channel.port1;
@@ -102,7 +118,7 @@
 
   function sendRequest(action, payload, opts = {}) {
     return new Promise((resolve) => {
-      const id = ++nextReqId;
+      const id = frameNonce + ':' + (++nextReqId);
       // S4: Default 30s timeout so a request whose response never comes
       // back (bridge died, content-script context invalidated, page
       // navigated) does not leave the caller hanging forever. Callers
@@ -168,6 +184,36 @@
         ")",
     );
   });
+
+  function getPolicyContext() {
+    const url = getCallerFrameUrl();
+    let isCrossOrigin = false;
+    if (window !== window.top) {
+      try { window.parent.location.origin; } catch { isCrossOrigin = true; }
+    }
+    return { isCrossOrigin, frameUrl: url };
+  }
+
+  function getPolicy() {
+    return sendRequest("getPolicy", getPolicyContext());
+  }
+
+  const originalQuery = navigator.permissions?.query?.bind(navigator.permissions);
+  if (originalQuery) {
+    navigator.permissions.query = async (desc) => {
+      if (desc && desc.name === "hid") {
+        const policy = await getPolicy();
+        return {
+          state: policy && policy.hid === "none" ? "denied" : "granted",
+          onchange: null,
+          addEventListener: () => {},
+          removeEventListener: () => {},
+          dispatchEvent: () => false,
+        };
+      }
+      return originalQuery(desc);
+    };
+  }
 
   const devState = new WeakMap();
   const hidState = new WeakMap();
@@ -833,7 +879,10 @@
   Object.defineProperties(HID.prototype, {
     getDevices: {
       value: async function () {
-        logger.debug("getDevices");
+        const policy = await getPolicy();
+        if (policy && policy.hid === "none") {
+          throw new DOMException("Access to HID is blocked by Permissions Policy", "SecurityError");
+        }
         try {
           const pairedHashes = await getPairedDevices();
           const deviceCache = await getDeviceCache();
@@ -855,6 +904,10 @@
     },
     requestDevice: {
       value: async function (options = {}) {
+        const policy = await getPolicy();
+        if (policy && policy.hid === "none") {
+          throw new DOMException("Access to HID is blocked by Permissions Policy", "SecurityError");
+        }
         if (navigator.userActivation && !navigator.userActivation.isActive) {
           throw new DOMException(
             "Must be handling a user gesture to perform a hid.requestDevice() call.",
@@ -896,7 +949,7 @@
             JSON.stringify(exclusionFilters),
         );
         return new Promise((resolve, reject) => {
-          const id = ++nextReqId;
+          const id = frameNonce + ':' + (++nextReqId);
           pending[id] = async (result) => {
             try {
               if (result.cancelled) {
