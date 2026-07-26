@@ -52,6 +52,16 @@
 </div>
 <div class="setting">
   <div class="setting-info">
+    <h3>Worker Polyfill</h3>
+    <p>Inject WebHID API stubs into Web Worker scripts (<code>new Worker()</code>, <code>new SharedWorker()</code>). Workers get <code>navigator.hid</code>, <code>HIDDevice</code>, and related constructors. Methods throw <code>NotSupportedError</code> until full worker communication is implemented. Can be overridden per-site from the popup. Reload pages after changing.</p>
+  </div>
+  <label class="toggle">
+    <input type="checkbox" id="workerPolyfillEnabled">
+    <span class="slider"></span>
+  </label>
+</div>
+<div class="setting">
+  <div class="setting-info">
     <h3>Log Level</h3>
     <p>Controls console output verbosity. Error = errors only, Warn = +warnings, Info = +info, Debug = +debug (includes performance timing). Reload pages after changing.</p>
   </div>

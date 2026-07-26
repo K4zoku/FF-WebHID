@@ -80,24 +80,117 @@
   }
   ensureWorkerBundle();
 
+  let workerPolyfillBundle = null;
+  let workerPolyfillBundlePromise = null;
+
+  async function ensureWorkerPolyfillBundle() {
+    if (workerPolyfillBundle) return workerPolyfillBundle;
+    if (workerPolyfillBundlePromise) return workerPolyfillBundlePromise;
+    const files = [
+      "js/utils/bootstrap.js",
+      "js/utils/logger.js",
+      "js/worker-polyfill.js",
+    ];
+    workerPolyfillBundlePromise = (async () => {
+      const texts = await Promise.all(
+        files.map((f) =>
+          fetch(browser.runtime.getURL(f)).then((r) => {
+            if (!r.ok) throw new Error("fetch " + f + " failed: " + r.status);
+            return r.text();
+          }),
+        ),
+      );
+      workerPolyfillBundle = texts.join("\n");
+      return workerPolyfillBundle;
+    })();
+    return workerPolyfillBundlePromise;
+  }
+  ensureWorkerPolyfillBundle();
+
+  const workerPolyfillSites = new Set();
+
+  async function refreshWorkerPolyfillSites() {
+    workerPolyfillSites.clear();
+    const all = await browser.storage.local.get(null);
+    for (const [key, val] of Object.entries(all)) {
+      if (key.startsWith("site:") && val && val.workerPolyfillEnabled) {
+        workerPolyfillSites.add(key.slice(5));
+      }
+    }
+  }
+  refreshWorkerPolyfillSites();
+  browser.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local") return;
+    let needRefresh = false;
+    for (const key of Object.keys(changes)) {
+      if (key.startsWith("site:")) { needRefresh = true; break; }
+    }
+    if (needRefresh) refreshWorkerPolyfillSites();
+  });
+
   browser.webRequest.onBeforeRequest.addListener(
     (details) => {
-      if (details.type !== "script" || details.url !== details.documentUrl)
-        return;
-      logger.info("StreamFilter: replacing body for", details.url);
+      if (details.type !== "script") return;
+      const isShadowUrl = details.url === details.documentUrl;
+      if (isShadowUrl) {
+        const filter = browser.webRequest.filterResponseData(details.requestId);
+        const enc = new TextEncoder();
+        filter.onstart = () => {
+          if (workerBundle) {
+            filter.write(enc.encode(workerBundle));
+          } else {
+            filter.write(
+              enc.encode(
+                "self.postMessage({ type: 'error', error: 'worker bundle not ready' });",
+              ),
+            );
+          }
+          filter.close();
+        };
+        return {};
+      }
+      let origin = null;
+      try { origin = new URL(details.url).origin; } catch {}
+      if (!settings.workerPolyfillEnabled && (!origin || !workerPolyfillSites.has(origin))) return;
+
       const filter = browser.webRequest.filterResponseData(details.requestId);
       const enc = new TextEncoder();
-      filter.onstart = () => {
-        if (workerBundle) {
-          filter.write(enc.encode(workerBundle));
-        } else {
-          filter.write(
-            enc.encode(
-              "self.postMessage({ type: 'error', error: 'worker bundle not ready' });",
-            ),
-          );
+      const dec = new TextDecoder();
+
+      let firstChunk = true;
+      let injectPromise = Promise.resolve();
+      filter.onstart = () => {};
+      filter.ondata = (event) => {
+        if (!firstChunk) {
+          injectPromise = injectPromise.then(() => filter.write(event.data));
+          return;
         }
-        filter.close();
+        firstChunk = false;
+        injectPromise = injectPromise.then(async () => {
+          const bundle = workerPolyfillBundle || await ensureWorkerPolyfillBundle();
+          if (!bundle) {
+            filter.write(event.data);
+            return;
+          }
+          const str = dec.decode(event.data, { stream: true });
+          const m = str.match(
+            /^(\s*(?:\/\/[^\n]*\n|\/\*[\s\S]*?\*\/\s*)*["']use strict["'];?\s*)/,
+          );
+          if (m) {
+            filter.write(enc.encode(m[1]));
+            filter.write(enc.encode(bundle));
+            filter.write(enc.encode(str.slice(m[0].length)));
+          } else {
+            filter.write(enc.encode(bundle));
+            filter.write(event.data);
+          }
+        });
+      };
+      filter.onstop = () => {
+        injectPromise.then(() => filter.close());
+      };
+      filter.onerror = () => {
+        try { filter.close(); } catch {}
       };
       return {};
     },

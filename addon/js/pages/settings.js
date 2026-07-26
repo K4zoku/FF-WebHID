@@ -3,7 +3,7 @@
   logger.initLogger("settings");
   const current = await browser.storage.local.get(GLOBAL_DEFAULTS);
 
-  for (const key of ["fireAndForget", "daemonAsNmHost"]) {
+  for (const key of ["fireAndForget", "daemonAsNmHost", "workerPolyfillEnabled"]) {
     document.getElementById(key).checked = current[key];
   }
 
@@ -24,7 +24,7 @@
     }, 1500);
   }
 
-  for (const key of ["fireAndForget", "daemonAsNmHost"]) {
+  for (const key of ["fireAndForget", "daemonAsNmHost", "workerPolyfillEnabled"]) {
     document.getElementById(key).addEventListener("change", async (e) => {
       await browser.storage.local.set({ [key]: e.target.checked });
       showStatus(`${key} = ${e.target.checked}`);

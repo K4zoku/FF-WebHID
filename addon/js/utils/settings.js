@@ -24,6 +24,7 @@
     logLevel: 1,
     daemonAsNmHost: false,
     devicePickerMode: "modal",
+    workerPolyfillEnabled: false,
   };
 
   function createSettingsStore(defaults) {

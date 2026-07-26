@@ -20,6 +20,9 @@ const PAGES = {
   '/iframe-child-with-allow': loadPage('iframe-child.html'),
   '/worker-check': loadPage('worker-check.html'),
   '/worker.js': loadPage('worker.js'),
+  '/worker-polyfill-check': loadPage('worker-polyfill-check.html'),
+  '/worker-polyfill.js': loadPage('worker-polyfill.js'),
+  '/worker-strict.js': loadPage('worker-strict.js'),
 };
 
 const HEADERS = {
