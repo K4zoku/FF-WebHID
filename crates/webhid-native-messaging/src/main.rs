@@ -104,12 +104,47 @@ const DEFAULT_SOCKET: &str = "/run/webhid/webhid.sock";
 #[cfg(target_os = "macos")]
 const DEFAULT_SOCKET: &str = "/tmp/webhid.sock";
 
+#[cfg(target_os = "linux")]
+async fn connect_abstract(name: &str) -> std::io::Result<tokio::net::UnixStream> {
+    use std::os::linux::net::SocketAddrExt;
+    use std::os::unix::net::SocketAddr;
+    let name = name.to_string();
+    tokio::task::spawn_blocking(move || {
+        let addr = SocketAddr::from_abstract_name(name.as_bytes())?;
+        let stream = std::os::unix::net::UnixStream::connect_addr(&addr)?;
+        stream.set_nonblocking(true)?;
+        tokio::net::UnixStream::from_std(stream)
+    })
+    .await?
+}
+
+#[cfg(unix)]
+async fn connect_to_path(path: &str) -> std::io::Result<tokio::net::UnixStream> {
+    if let Some(rest) = path.strip_prefix('@') {
+        #[cfg(target_os = "linux")]
+        {
+            connect_abstract(rest).await
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "abstract sockets not supported on this platform",
+            ))
+        }
+    } else {
+        tokio::net::UnixStream::connect(path).await
+    }
+}
+
 #[cfg(unix)]
 fn candidate_sockets() -> Vec<String> {
     if let Ok(path) = std::env::var("WEBHID_SOCKET") {
         return vec![path];
     }
     let mut candidates = Vec::new();
+    #[cfg(target_os = "linux")]
+    candidates.push("@webhid".to_string());
     #[cfg(target_os = "linux")]
     {
         let xdg = std::env::var("XDG_RUNTIME_DIR")
@@ -148,7 +183,6 @@ async fn main() -> anyhow::Result<()> {
 
     #[cfg(unix)]
     let daemon = {
-        use tokio::net::UnixStream;
         let candidates = candidate_sockets();
         let mut delay = 100u64;
         let mut total_waited = 0u64;
@@ -156,7 +190,7 @@ async fn main() -> anyhow::Result<()> {
             let mut last_err = None;
             let matched = 'candidates: {
                 for path in &candidates {
-                    match UnixStream::connect(path).await {
+                    match connect_to_path(path).await {
                         Ok(s) => break 'candidates Some((s, path.clone())),
                         Err(e) => last_err = Some(e),
                     }

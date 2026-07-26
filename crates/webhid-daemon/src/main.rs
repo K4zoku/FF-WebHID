@@ -18,8 +18,6 @@ use device_mgr::DeviceManager;
 const DEFAULT_WS_PORT: u16 = 0;
 const EVENT_CAPACITY: usize = 8192;
 
-#[cfg(target_os = "linux")]
-const DEFAULT_SOCKET: &str = "/run/webhid/webhid.sock";
 #[cfg(target_os = "macos")]
 const DEFAULT_SOCKET: &str = "/tmp/webhid.sock";
 
@@ -29,7 +27,12 @@ fn resolve_socket_path() -> String {
         return path;
     }
     #[cfg(target_os = "linux")]
-    if unsafe { libc::geteuid() } != 0 {
+    {
+        if unsafe { libc::geteuid() } == 0 {
+            // Root/system daemon: abstract socket (no filesystem entry → no symlink attack)
+            return "@webhid".to_string();
+        }
+        // User-mode: filesystem socket (parent dir is 0700, no cross-user symlink risk)
         if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
             if !dir.is_empty() {
                 return format!("{dir}/webhid/webhid.sock");
@@ -37,9 +40,8 @@ fn resolve_socket_path() -> String {
         }
         let uid = unsafe { libc::getuid() };
         return format!("/run/user/{uid}/webhid/webhid.sock");
-    } else {
-        log::warn!("Running as root is not recommended. Consider adding a udev rule to grant device permissions instead.");
     }
+    #[cfg(not(target_os = "linux"))]
     DEFAULT_SOCKET.to_string()
 }
 
@@ -135,22 +137,41 @@ async fn main() -> anyhow::Result<()> {
         use tokio::net::UnixListener;
         let socket_path = resolve_socket_path();
 
-        if let Some(parent) = std::path::Path::new(&socket_path).parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("create socket dir '{}'", parent.display()))?;
-        }
-        let _ = std::fs::remove_file(&socket_path);
-        let listener =
-            UnixListener::bind(&socket_path).with_context(|| format!("bind '{socket_path}'"))?;
-
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(
-                &socket_path,
-                std::fs::Permissions::from_mode(socket_mode(&socket_path)),
-            )
-            .context("set socket permissions")?;
-        }
+        let listener = if socket_path.starts_with('@') {
+            #[cfg(target_os = "linux")]
+            {
+                use std::os::linux::net::SocketAddrExt;
+                use std::os::unix::net::SocketAddr;
+                let name = socket_path[1..].as_bytes();
+                let addr = SocketAddr::from_abstract_name(name)
+                    .with_context(|| format!("invalid abstract socket name '{}'", &socket_path[1..]))?;
+                let std_listener = std::os::unix::net::UnixListener::bind_addr(&addr)
+                    .with_context(|| format!("bind abstract socket '{socket_path}'"))?;
+                std_listener.set_nonblocking(true)?;
+                UnixListener::from_std(std_listener)?
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                anyhow::bail!("abstract sockets are not supported on this platform");
+            }
+        } else {
+            if let Some(parent) = std::path::Path::new(&socket_path).parent() {
+                std::fs::create_dir_all(parent)
+                    .with_context(|| format!("create socket dir '{}'", parent.display()))?;
+            }
+            let _ = std::fs::remove_file(&socket_path);
+            let listener = UnixListener::bind(&socket_path)
+                .with_context(|| format!("bind '{socket_path}'"))?;
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(
+                    &socket_path,
+                    std::fs::Permissions::from_mode(socket_mode(&socket_path)),
+                )
+                .context("set socket permissions")?;
+            }
+            listener
+        };
 
         log::info!("webhid-daemon listening on {socket_path}");
         log::info!("WebSocket server on port {actual_ws_port}");
