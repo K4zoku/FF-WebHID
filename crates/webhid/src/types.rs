@@ -12,7 +12,7 @@ pub struct DeviceInfo {
     pub vendor_id: u16,
     pub product_id: u16,
     #[serde(default)]
-    pub product_name: Option<String>,
+    pub product_name: String,
     #[serde(default)]
     pub manufacturer: Option<String>,
     #[serde(default)]
@@ -61,8 +61,8 @@ pub struct Report {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Field {
-    #[serde(default)]
-    pub usages: Vec<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usages: Option<Vec<u32>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage_minimum: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -115,6 +115,8 @@ pub struct Field {
     pub has_preferred_state: bool,
     #[serde(default)]
     pub wrap: bool,
+    #[serde(default)]
+    pub strings: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -716,7 +718,7 @@ mod tests {
         let dev = DeviceInfo {
             vendor_id: 0x1234,
             product_id: 0x5678,
-            product_name: Some("Test".into()),
+            product_name: "Test".into(),
             manufacturer: None,
             serial_number: None,
             usage_page: None,
@@ -830,7 +832,7 @@ mod tests {
         let dev = DeviceInfo {
             vendor_id: 0x1234,
             product_id: 0x5678,
-            product_name: None,
+            product_name: String::new(),
             manufacturer: None,
             serial_number: None,
             usage_page: None,

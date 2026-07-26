@@ -292,11 +292,10 @@
             state.opened = true;
             logger.info("open deviceId=" + state.deviceId);
             this.dispatchEvent(new Event("open"));
-            return true;
           }
           throw new Error("Open failed: " + http.name(response.s || 0));
         } catch (error) {
-          throw new DOMException(error.message, "InvalidStateError");
+          throw new DOMException(error.message, "NetworkError");
         } finally {
           state.opening = false;
         }

@@ -107,7 +107,7 @@ fn info_from_hidapi_pub_with_desc(info: &HidDeviceInfo, desc: Vec<u8>) -> Option
     Some(DeviceInfo {
         vendor_id: info.vendor_id(),
         product_id: info.product_id(),
-        product_name: info.product_string().map(String::from),
+        product_name: info.product_string().map(String::from).unwrap_or_default(),
         manufacturer: info.manufacturer_string().map(String::from),
         serial_number: info.serial_number().map(String::from),
         usage_page: Some(info.usage_page()),

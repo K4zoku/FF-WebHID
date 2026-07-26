@@ -243,7 +243,7 @@ mod tests {
         DeviceInfo {
             vendor_id: 0x1234,
             product_id: 0x5678,
-            product_name: Some("Test".into()),
+            product_name: "Test".into(),
             manufacturer: None,
             serial_number: None,
             usage_page: None,

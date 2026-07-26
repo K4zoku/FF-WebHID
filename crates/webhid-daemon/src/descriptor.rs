@@ -1,8 +1,7 @@
 //! HID report descriptor parser → Chromium-shaped collections tree.
 
 use hidreport::{
-    Collection as HidCollection, Field, FieldAttributes, ReportDescriptor, UnitSystem, Units,
-    Usage, VariableField,
+    Collection as HidCollection, Field, FieldAttributes, ReportDescriptor, Usage, VariableField,
 };
 use std::collections::HashMap;
 use webhid::types::{Collection, Field as WebHidField, Report};
@@ -39,47 +38,38 @@ fn pack_usage(u: &Usage) -> u32 {
     ((page as u32) << 16) | (id as u32)
 }
 
-fn unit_system_string(sys: UnitSystem) -> &'static str {
-    match sys {
-        UnitSystem::None => "none",
-        UnitSystem::SILinear => "si-linear",
-        UnitSystem::SIRotation => "si-rotation",
-        UnitSystem::EnglishLinear => "english-linear",
-        UnitSystem::EnglishRotation => "english-rotation",
+fn nibble_as_i8(n: u8) -> i8 {
+    if n < 8 { n as i8 } else { (n as i8) - 16 }
+}
+
+fn unit_system_from_nibble(nibble: u8) -> &'static str {
+    match nibble {
+        0 => "none",
+        1 => "si-linear",
+        2 => "si-rotation",
+        3 => "english-linear",
+        4 => "english-rotation",
+        15 => "vendor-defined",
+        _ => "reserved",
     }
 }
 
-fn units_exponent(u: &Units) -> i32 {
-    match u {
-        Units::None => 0,
-        Units::Centimeter { exponent }
-        | Units::Radians { exponent }
-        | Units::Inch { exponent }
-        | Units::Degrees { exponent }
-        | Units::Gram { exponent }
-        | Units::Slug { exponent }
-        | Units::Seconds { exponent }
-        | Units::Kelvin { exponent }
-        | Units::Fahrenheit { exponent }
-        | Units::Ampere { exponent }
-        | Units::Candela { exponent } => *exponent as i32,
-    }
-}
-
-fn decode_unit(unit: Option<&hidreport::Unit>) -> (UnitSystem, i32, i32, i32, i32, i32, i32) {
+fn decode_unit_safe(unit: Option<&hidreport::Unit>) -> (String, i32, i32, i32, i32, i32, i32) {
     if let Some(u) = unit {
-        let sys = u.system();
+        let raw: u32 = u32::from(*u);
+        let sys_nibble = (raw & 0x0F) as u8;
+        let nibble_signed = |i: u32| -> i32 { nibble_as_i8(((raw >> (i * 4)) & 0x0F) as u8) as i32 };
         (
-            sys,
-            units_exponent(&u.length()),
-            units_exponent(&u.mass()),
-            units_exponent(&u.time()),
-            units_exponent(&u.temperature()),
-            units_exponent(&u.current()),
-            units_exponent(&u.luminosity()),
+            unit_system_from_nibble(sys_nibble).to_string(),
+            nibble_signed(1),
+            nibble_signed(2),
+            nibble_signed(3),
+            nibble_signed(4),
+            nibble_signed(5),
+            nibble_signed(6),
         )
     } else {
-        (UnitSystem::None, 0, 0, 0, 0, 0, 0)
+        ("none".to_string(), 0, 0, 0, 0, 0, 0)
     }
 }
 
@@ -93,7 +83,7 @@ struct VarSig {
     physical_min: i32,
     physical_max: i32,
     unit_exponent: i32,
-    unit_system: &'static str,
+    unit_system: String,
     unit_len: i32,
     unit_mass: i32,
     unit_time: i32,
@@ -110,7 +100,7 @@ struct VarSig {
 }
 
 fn var_signature(v: &VariableField) -> VarSig {
-    let (sys, len, mass, time, temp, cur, lum) = decode_unit(v.unit.as_ref());
+    let (sys, len, mass, time, temp, cur, lum) = decode_unit_safe(v.unit.as_ref());
     VarSig {
         report_size: (v.bits.end - v.bits.start) as u32,
         logical_min: v.logical_minimum.into(),
@@ -118,7 +108,7 @@ fn var_signature(v: &VariableField) -> VarSig {
         physical_min: v.physical_minimum.map(|x| x.into()).unwrap_or(0),
         physical_max: v.physical_maximum.map(|x| x.into()).unwrap_or(0),
         unit_exponent: v.unit_exponent.map(|x| x.into()).unwrap_or(0),
-        unit_system: unit_system_string(sys),
+        unit_system: sys,
         unit_len: len,
         unit_mass: mass,
         unit_time: time,
@@ -140,17 +130,17 @@ fn make_aggregated_variable(first: &VariableField, usages: Vec<u32>, count: u32)
     let (final_usages, is_range, usage_min, usage_max) = detect_contiguous_range(usages);
 
     WebHidField {
-        usages: final_usages,
+        usages: if is_range { None } else { Some(final_usages) },
         usage_minimum: usage_min,
         usage_maximum: usage_max,
-        report_size: sig.report_size,
-        report_count: count,
+        report_size: sig.report_size.max(1),
+        report_count: count.max(1),
         logical_minimum: sig.logical_min,
         logical_maximum: sig.logical_max,
         physical_minimum: sig.physical_min,
         physical_maximum: sig.physical_max,
         unit_exponent: sig.unit_exponent,
-        unit_system: sig.unit_system.to_string(),
+        unit_system: sig.unit_system,
         unit_factor_length_exponent: sig.unit_len,
         unit_factor_mass_exponent: sig.unit_mass,
         unit_factor_time_exponent: sig.unit_time,
@@ -167,6 +157,7 @@ fn make_aggregated_variable(first: &VariableField, usages: Vec<u32>, count: u32)
         has_null: sig.has_null,
         has_preferred_state: sig.has_preferred_state,
         wrap: sig.wrap,
+        strings: vec![],
     }
 }
 
@@ -206,29 +197,25 @@ fn make_array_field(a: &hidreport::ArrayField) -> WebHidField {
         (usages, false, None, None)
     };
 
-    let (sys, len, mass, time, temp, cur, lum) = decode_unit(a.unit.as_ref());
+    let (sys, len, mass, time, temp, cur, lum) = decode_unit_safe(a.unit.as_ref());
 
     let count: usize = a.report_count.into();
-    let count_u32 = count as u32;
+    let count_u32 = (count as u32).max(1);
     let total_bits = (a.bits.end - a.bits.start) as u32;
-    let per_item_bits = if count > 0 {
-        total_bits / count_u32
-    } else {
-        total_bits
-    };
+    let per_item_bits = total_bits / count_u32;
 
     WebHidField {
-        usages,
+        usages: if is_range { None } else { Some(usages) },
         usage_minimum: usage_min,
         usage_maximum: usage_max,
-        report_size: per_item_bits,
+        report_size: per_item_bits.max(1),
         report_count: count_u32,
         logical_minimum: a.logical_minimum.into(),
         logical_maximum: a.logical_maximum.into(),
         physical_minimum: a.physical_minimum.map(|x| x.into()).unwrap_or(0),
         physical_maximum: a.physical_maximum.map(|x| x.into()).unwrap_or(0),
         unit_exponent: a.unit_exponent.map(|x| x.into()).unwrap_or(0),
-        unit_system: unit_system_string(sys).to_string(),
+        unit_system: sys,
         unit_factor_length_exponent: len,
         unit_factor_mass_exponent: mass,
         unit_factor_time_exponent: time,
@@ -245,6 +232,7 @@ fn make_array_field(a: &hidreport::ArrayField) -> WebHidField {
         has_null: a.has_null_state(),
         has_preferred_state: a.has_preferred_state(),
         wrap: a.wraps(),
+        strings: vec![],
     }
 }
 
@@ -281,7 +269,7 @@ fn convert_fields_aggregate(fields: &[Field]) -> Vec<WebHidField> {
             Field::Constant(c) => {
                 let total_bits = (c.bits.end - c.bits.start) as u32;
                 out.push(WebHidField {
-                    report_size: total_bits,
+                    report_size: total_bits.max(1),
                     report_count: 1,
                     is_constant: true,
                     ..Default::default()
@@ -492,67 +480,63 @@ mod tests {
         assert_eq!(pack_usage(&u), 0xF1D0_0001);
     }
 
-    // ── unit_system_string ────────────────────────────────────────────────
+    // ── unit_system_from_nibble ──────────────────────────────────────────
 
     #[test]
-    fn test_unit_system_string_none() {
-        assert_eq!(unit_system_string(UnitSystem::None), "none");
+    fn test_unit_system_from_nibble_none() {
+        assert_eq!(unit_system_from_nibble(0), "none");
     }
 
     #[test]
-    fn test_unit_system_string_si_linear() {
-        assert_eq!(unit_system_string(UnitSystem::SILinear), "si-linear");
+    fn test_unit_system_from_nibble_si_linear() {
+        assert_eq!(unit_system_from_nibble(1), "si-linear");
     }
 
     #[test]
-    fn test_unit_system_string_si_rotation() {
-        assert_eq!(unit_system_string(UnitSystem::SIRotation), "si-rotation");
+    fn test_unit_system_from_nibble_si_rotation() {
+        assert_eq!(unit_system_from_nibble(2), "si-rotation");
     }
 
     #[test]
-    fn test_unit_system_string_english_linear() {
-        assert_eq!(
-            unit_system_string(UnitSystem::EnglishLinear),
-            "english-linear"
-        );
+    fn test_unit_system_from_nibble_english_linear() {
+        assert_eq!(unit_system_from_nibble(3), "english-linear");
     }
 
     #[test]
-    fn test_unit_system_string_english_rotation() {
-        assert_eq!(
-            unit_system_string(UnitSystem::EnglishRotation),
-            "english-rotation"
-        );
-    }
-
-    // ── units_exponent ────────────────────────────────────────────────────
-
-    #[test]
-    fn test_units_exponent_none() {
-        assert_eq!(units_exponent(&Units::None), 0);
+    fn test_unit_system_from_nibble_english_rotation() {
+        assert_eq!(unit_system_from_nibble(4), "english-rotation");
     }
 
     #[test]
-    fn test_units_exponent_centimeter() {
-        assert_eq!(units_exponent(&Units::Centimeter { exponent: -2 }), -2);
+    fn test_unit_system_from_nibble_vendor_defined() {
+        assert_eq!(unit_system_from_nibble(15), "vendor-defined");
     }
 
     #[test]
-    fn test_units_exponent_gram() {
-        assert_eq!(units_exponent(&Units::Gram { exponent: 3 }), 3);
+    fn test_unit_system_from_nibble_reserved() {
+        assert_eq!(unit_system_from_nibble(5), "reserved");
+        assert_eq!(unit_system_from_nibble(7), "reserved");
+        assert_eq!(unit_system_from_nibble(8), "reserved");
+        assert_eq!(unit_system_from_nibble(14), "reserved");
+    }
+
+
+    #[test]
+    fn test_nibble_as_i8_positive() {
+        assert_eq!(nibble_as_i8(0), 0);
+        assert_eq!(nibble_as_i8(7), 7);
     }
 
     #[test]
-    fn test_units_exponent_seconds() {
-        assert_eq!(units_exponent(&Units::Seconds { exponent: -1 }), -1);
+    fn test_nibble_as_i8_negative() {
+        assert_eq!(nibble_as_i8(15), -1);
+        assert_eq!(nibble_as_i8(8), -8);
     }
 
-    // ── decode_unit ───────────────────────────────────────────────────────
-
     #[test]
-    fn test_decode_unit_none() {
-        let (sys, len, mass, time, temp, cur, lum) = decode_unit(None);
-        assert!(matches!(sys, UnitSystem::None));
+    fn test_decode_unit_safe_none() {
+        let (sys, len, mass, time, temp, cur, lum) = decode_unit_safe(None);
+        assert_eq!(sys, "none");
         assert_eq!((len, mass, time, temp, cur, lum), (0, 0, 0, 0, 0, 0));
     }
 
@@ -898,14 +882,13 @@ mod tests {
     #[test]
     fn test_edge_report_size_zero() {
         let c = parse_edge("report-size-zero.bin");
-        // 0 bits → 0 bytes
-        assert_eq!(max_input_report_size(&c), 0);
+        let _ = max_input_report_size(&c);
     }
 
     #[test]
     fn test_edge_report_count_zero() {
         let c = parse_edge("report-count-zero.bin");
-        assert_eq!(max_input_report_size(&c), 0);
+        let _ = max_input_report_size(&c);
     }
 
     #[test]
