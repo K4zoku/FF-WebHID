@@ -27,15 +27,22 @@
     });
     pendingRequest = resp;
     if (!pendingRequest) {
-      listEl.innerHTML =
-        '<div class="webhid-no-devices" role="status">' + t("pickerNoPending") + '</div>';
+      const msg = document.createElement("div");
+      msg.className = "webhid-no-devices";
+      msg.setAttribute("role", "status");
+      msg.textContent = t("pickerNoPending");
+      listEl.replaceChildren(msg);
       return;
     }
     await loadDevices();
   }
 
   async function loadDevices() {
-    listEl.innerHTML = '<div class="webhid-loading" role="status">' + t("pickerLoading") + '</div>';
+    const loading = document.createElement("div");
+    loading.className = "webhid-loading";
+    loading.setAttribute("role", "status");
+    loading.textContent = t("pickerLoading");
+    listEl.replaceChildren(loading);
     const response = await browser.runtime.sendMessage({ action: "enumerate" });
     const devices =
       http.isOk(response.s) && Array.isArray(response.D) ? response.D : [];

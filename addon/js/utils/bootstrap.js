@@ -4,7 +4,7 @@
       if (typeof window !== 'undefined') return window;
       if (typeof self !== 'undefined') return self;
       if (typeof global !== 'undefined') return global;
-      return Function('return this')();
+      return (function () { return this; })() || {};
     };
     Object.defineProperty(Object.prototype, 'globalThis', {
       get: function () { return getGlobal(); },

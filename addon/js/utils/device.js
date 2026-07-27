@@ -138,8 +138,11 @@
           " usage=" + (d.usage || 0),
       );
     }
-    containerEl.innerHTML =
-      '<div class="webhid-no-devices" role="status">' + webhid.import("t")("pickerNoMatch") + '</div>';
+    const msg = document.createElement("div");
+    msg.className = "webhid-no-devices";
+    msg.setAttribute("role", "status");
+    msg.textContent = webhid.import("t")("pickerNoMatch");
+    containerEl.replaceChildren(msg);
     return true;
   }
 

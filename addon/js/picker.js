@@ -184,8 +184,11 @@
       deviceList.innerHTML = "";
 
       if (this.devices.length === 0) {
-        deviceList.innerHTML =
-          '<div class="webhid-no-devices" role="status">' + t("pickerNoDevices") + '</div>';
+        const msg = document.createElement("div");
+        msg.className = "webhid-no-devices";
+        msg.setAttribute("role", "status");
+        msg.textContent = t("pickerNoDevices");
+        deviceList.replaceChildren(msg);
         return;
       }
 
