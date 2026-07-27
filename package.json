@@ -8,7 +8,7 @@
     "format": "npx prettier addon/**/*.js -w"
   },
   "devDependencies": {
-    "addons-linter": "^10.8.1",
+    "addons-linter": "^10.9.0",
     "commit-and-tag-version": "^12.7.3",
     "prettier": "^3.9.5"
   }
