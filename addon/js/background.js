@@ -14,7 +14,7 @@
       await browser.storage.local.set({
         [`deviceInfo:${device.deviceId}`]: device,
       });
-    } catch {}
+    } catch (e) { logger.debug("saveDeviceInfo failed", e); }
   }
 
   async function saveDeviceInfoBatch(devices) {
@@ -25,7 +25,7 @@
     }
     try {
       await browser.storage.local.set(entries);
-    } catch {}
+    } catch (e) { logger.debug("saveDeviceInfoBatch failed", e); }
   }
 
   async function getDeviceInfo(deviceId) {
@@ -44,7 +44,7 @@
     if (!deviceId) return;
     try {
       await browser.storage.local.remove(`deviceInfo:${deviceId}`);
-    } catch {}
+    } catch (e) { logger.debug("removeDeviceInfo failed", e); }
   }
 
   const deviceTabMap = new Map();
@@ -150,7 +150,7 @@
         return {};
       }
       let origin = null;
-      try { origin = new URL(details.url).origin; } catch {}
+      try { origin = new URL(details.url).origin; } catch (e) { logger.debug("URL parse failed", e); }
       if (!settings.workerPolyfillEnabled && (!origin || !workerPolyfillSites.has(origin))) return;
 
       const filter = browser.webRequest.filterResponseData(details.requestId);
@@ -190,7 +190,7 @@
         injectPromise.then(() => filter.close());
       };
       filter.onerror = () => {
-        try { filter.close(); } catch {}
+        try { filter.close(); } catch (e) { logger.debug("filter close failed", e); }
       };
       return {};
     },
@@ -269,7 +269,7 @@
     for (const [deviceId, tabs] of deviceTabMap) {
       if (tabs.delete(tabId) && tabs.size === 0) {
         deviceTabMap.delete(deviceId);
-        NativeMessaging.closeDevice(deviceId).catch(() => {});
+        NativeMessaging.closeDevice(deviceId).catch((e) => logger.debug("closeDevice failed", e));
       }
     }
   }
@@ -318,15 +318,16 @@
           if (!tab.url) continue;
           try {
             new URL(tab.url);
-          } catch {
+          } catch (e) {
+            logger.debug("tab URL parse failed", e);
             continue;
           }
           browser.tabs
             .sendMessage(tab.id, { action: "globalReset" })
-            .catch(() => {});
+            .catch((e) => logger.debug("globalReset send to tab failed", e));
         }
       })
-      .catch(() => {});
+      .catch((e) => logger.debug("broadcastGlobalReset failed", e));
   }
 
   const NM_HOST_FORWARDER = "webhid.forwarder_nm_host";
@@ -444,7 +445,7 @@
       if (this.port) {
         try {
           this.port.disconnect();
-        } catch {}
+        } catch (e) { logger.debug("port disconnect failed", e); }
         this.port = null;
       }
       if (this.reconnectTimer) {
@@ -452,7 +453,7 @@
         this.reconnectTimer = null;
       }
       this.reconnectDelay = 1000;
-      this.connect().catch(() => {});
+      this.connect().catch((e) => logger.debug("speculative reconnect failed", e));
     },
 
     scheduleReconnect() {
@@ -460,7 +461,7 @@
       this.reconnectTimer = setTimeout(() => {
         this.reconnectTimer = null;
         logger.debug("reconnecting...");
-        this.connect().catch(() => {});
+        this.connect().catch((e) => logger.debug("speculative reconnect failed", e));
       }, this.reconnectDelay);
       this.reconnectDelay = Math.min(this.reconnectDelay * 2, 10000);
     },
@@ -468,7 +469,7 @@
     sendRequest(request) {
       return new Promise((resolve, reject) => {
         if (!this.port) {
-          this.connect().catch(() => {});
+          this.connect().catch((e) => logger.debug("speculative reconnect failed", e));
           reject(new Error("NM disconnected, reconnecting; please retry"));
           return;
         }
@@ -487,7 +488,7 @@
     sendPacked(buildPackedFn) {
       return new Promise((resolve, reject) => {
         if (!this.port) {
-          this.connect().catch(() => {});
+          this.connect().catch((e) => logger.debug("speculative reconnect failed", e));
           reject(new Error("NM disconnected, reconnecting; please retry"));
           return;
         }
@@ -576,7 +577,7 @@
         for (const tabId of targets) {
           browser.tabs
             .sendMessage(tabId, { action: "webhidDeviceEvent", event })
-            .catch(() => {});
+            .catch((e) => logger.debug("event forward to tab failed", e));
         }
       } catch (e) {
         logger.warn("onPackedData: malformed frame dropped:", e.message);
@@ -599,7 +600,7 @@
             .then((resp) => {
               if (http.isOk(resp.s) && resp.D) deviceCache = resp.D;
             })
-            .catch(() => {});
+            .catch((e) => logger.debug("enumerateDevices failed", e));
         }
         const normalized = {
           eventType: message.e === EVT_CONNECT ? "connect" : "disconnect",
@@ -608,7 +609,7 @@
         };
         browser.runtime
           .sendMessage({ action: "webhidDeviceEvent", event: normalized })
-          .catch(() => {});
+          .catch((e) => logger.debug("event forward to runtime failed", e));
         browser.tabs
           .query({})
           .then((tabs) => {
@@ -624,10 +625,10 @@
                   action: "webhidDeviceEvent",
                   event: normalized,
                 })
-                .catch(() => {});
+                .catch((e) => logger.debug("event forward to all tabs failed", e));
             }
           })
-          .catch(() => {});
+          .catch((e) => logger.debug("tabs.query failed", e));
         return;
       }
       const targets = tabsForEvent(message);
@@ -638,7 +639,7 @@
               action: "webhidDeviceEvent",
               event: message,
             })
-            .catch(() => {});
+            .catch((e) => logger.debug("event forward to target tab failed", e));
         }
       }
     },
@@ -669,9 +670,9 @@
         if (first.done) return;
         var tabId = first.value[0];
         var req = first.value[1];
-        browser.tabs.update(tabId, { active: true }).catch(function () {});
-        if (browser.pageAction.openPopup) browser.pageAction.openPopup().catch(function () {});
-        notificationsApi.clear("webhid-picker").catch(function () {});
+        browser.tabs.update(tabId, { active: true }).catch((e) => logger.debug("tabs.update failed", e));
+        if (browser.pageAction.openPopup) browser.pageAction.openPopup().catch((e) => logger.debug("openPopup failed", e));
+        notificationsApi.clear("webhid-picker").catch((e) => logger.debug("notifications.clear failed", e));
       }
     });
   }
@@ -756,7 +757,7 @@
             hashes = hashes.filter((h) => h !== request.deviceId);
             await browser.storage.local.set({ [storageKey]: hashes });
             removeDeviceInfo(request.deviceId);
-            await NativeMessaging.closeDevice(request.deviceId).catch(() => {});
+            await NativeMessaging.closeDevice(request.deviceId).catch((e) => logger.debug("revoke closeDevice failed", e));
             const tabs = await browser.tabs.query({});
             for (const tab of tabs) {
               if (!tab.url) continue;
@@ -773,7 +774,7 @@
                   action: "webhidDeviceEvent",
                   event: { eventType: "revoked", deviceId: request.deviceId },
                 })
-                .catch(() => {});
+                .catch((e) => logger.debug("revoke notify tab failed", e));
             }
             sendResponse({ success: true, hashes });
           } catch (e) {
@@ -997,7 +998,7 @@
               left,
               top,
             })
-            .catch(() => {});
+            .catch((e) => logger.debug("picker window create failed", e));
         } else {
           browser.pageAction.setIcon({
             tabId,
@@ -1007,7 +1008,7 @@
             tabId,
             popup: "html/picker.html",
           });
-          if (browser.pageAction.openPopup) browser.pageAction.openPopup().catch(function () {});
+          if (browser.pageAction.openPopup) browser.pageAction.openPopup().catch((e) => logger.debug("openPopup failed", e));
           browser.tabs
             .query({ active: true, currentWindow: true })
             .then((tabs) => {
@@ -1021,7 +1022,7 @@
                 });
               }
             })
-            .catch(() => {});
+            .catch((e) => logger.debug("tabs.query for notification failed", e));
         }
         sendResponse({ ok: true });
         return false;
@@ -1101,10 +1102,10 @@
         if (reqMode === "pageAction") {
           browser.pageAction.setIcon({ tabId, path: "icons/gamepad.svg" });
           browser.pageAction.setPopup({ tabId, popup: "html/popup.html" });
-          if (browser.notifications) browser.notifications.clear("webhid-picker").catch(function () {});
+          if (browser.notifications) browser.notifications.clear("webhid-picker").catch((e) => logger.debug("clear notification failed", e));
         }
         if (request.windowId != null) {
-          browser.windows.remove(request.windowId).catch(() => {});
+          browser.windows.remove(request.windowId).catch((e) => logger.debug("remove picker window failed", e));
         }
         if (tabId != null) {
           browser.tabs
@@ -1114,7 +1115,7 @@
               selected,
               devices: selected ? devices : null,
             })
-            .catch(() => {});
+            .catch((e) => logger.debug("pickerResult send to tab failed", e));
         }
         sendResponse({ ok: true });
         return false;

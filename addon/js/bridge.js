@@ -71,7 +71,7 @@
       if (port && keepPort) {
         try {
           worker.postMessage({ type: "unsetPort" });
-        } catch {}
+        } catch (e) { logger.debug("unsetPort failed (keepPort)", e); }
         const returned = await new Promise((resolve) => {
           let done = false;
           const onMsg = (event) => {
@@ -99,11 +99,11 @@
         dataPorts.delete(deviceId);
         try {
           worker.postMessage({ type: "unsetPort" });
-        } catch {}
+        } catch (e) { logger.debug("unsetPort failed (port path)", e); }
         try {
           port.onmessage = null;
           port.close();
-        } catch {}
+        } catch (e) { logger.debug("port cleanup failed (port path)", e); }
       }
       worker.terminate();
       workers.delete(deviceId);
@@ -113,7 +113,7 @@
         try {
           port.onmessage = null;
           port.close();
-        } catch {}
+        } catch (e) { logger.debug("port cleanup failed (no worker)", e); }
         dataPorts.delete(deviceId);
       }
     }
@@ -344,7 +344,7 @@
           deviceId: deviceId,
           mode: "nm",
         })
-        .catch(() => {});
+        .catch((e) => logger.debug("setDataPlane NM fallback failed", e));
     }
   }
 
@@ -387,7 +387,7 @@
           action: "setFrameAllow",
           url: src,
           frameId: -1,
-        }).catch(() => {});
+        }).catch((e) => logger.debug("setFrameAllow failed", e));
       }
     }
     reportIframes();
@@ -465,7 +465,7 @@
         );
         try {
           port.close();
-        } catch {}
+        } catch (e) { logger.debug("unauthorized port close failed", e); }
         return;
       }
       dataPorts.set(deviceId, port);
@@ -676,7 +676,7 @@
             origin: getRequestOrigin(data),
             mode: settings.devicePickerMode,
           })
-          .catch(() => {});
+          .catch((e) => logger.debug("showPicker send failed", e));
         const pickerTimeout = setTimeout(() => {
           replyToPage({
             type: "response",
@@ -745,7 +745,7 @@
             action: "deviceCountChanged",
             count: openDevices.size,
           })
-          .catch(() => {});
+          .catch((e) => logger.debug("deviceCountChanged (open) failed", e));
         logger.debug("open ok deviceId=" + deviceId + " wsPort=" + response.w);
 
         const dataPlane = settings.dataPlane;
@@ -764,7 +764,7 @@
             action: "deviceCountChanged",
             count: openDevices.size,
           })
-          .catch(() => {});
+          .catch((e) => logger.debug("deviceCountChanged (close) failed", e));
         despawnDataPlane(deviceId);
       }
 
@@ -797,7 +797,7 @@
     }
     browser.runtime
       .sendMessage({ action: "deviceCountChanged", count: 0 })
-      .catch(() => {});
+      .catch((e) => logger.debug("deviceCountChanged (reset) failed", e));
   }
 
   browser.runtime.onMessage.addListener((message) => {
@@ -821,7 +821,7 @@
               },
               buffer ? [buffer] : [],
             );
-          } catch {}
+          } catch (e) { logger.debug("forward inputReport to page failed", e); }
           return;
         }
       }
@@ -830,7 +830,7 @@
         if (port) {
           try {
             port.postMessage({ type: "disconnect" });
-          } catch {}
+          } catch (e) { logger.debug("forward disconnect to page failed", e); }
         }
       }
       if (
@@ -867,20 +867,20 @@
         const status = response ? response.s : 500;
         if (msg.type === "receiveFeature") {
           if (status === 403) {
-            try { port.postMessage({ type: "featureResult", reqId: msg.reqId, error: "blocked" }); } catch {}
+            try { port.postMessage({ type: "featureResult", reqId: msg.reqId, error: "blocked" }); } catch (e) { logger.debug("postMessage featureResult blocked failed", e); }
             return;
           }
           const data = http.isOk(status) && response.d ? response.d : null;
           try {
             port.postMessage({ type: "featureResult", reqId: msg.reqId, data: data || null });
-          } catch {}
+          } catch (e) { logger.debug("postMessage featureResult data failed", e); }
         } else {
           let error = null;
           if (status === 403) error = "blocked";
           else if (!http.isOk(status)) error = "send failed";
           try {
             port.postMessage({ type: msg.type === "send" ? "sendResult" : "featureResult", reqId: msg.reqId, error });
-          } catch {}
+          } catch (e) { logger.debug("postMessage sendResult failed", e); }
         }
       };
       const m = Object.assign({ action }, payload);
@@ -918,7 +918,7 @@
           deviceId: id,
           mode: dp,
         })
-        .catch(() => {});
+        .catch((e) => logger.debug("applyDataPlane failed for device", id, e));
     }
     logger.info("data plane changed:", dp, "open devices:", openDevices.size);
   }

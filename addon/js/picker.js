@@ -6,7 +6,8 @@
   const guessDeviceType = globalThis.webhid.import("guessDeviceType");
   const applyFilters = globalThis.webhid.import("applyFilters");
   const groupDevices = globalThis.webhid.import("groupDevices");
-  const fetchDeviceIcon = globalThis.webhid.import("fetchDeviceIcon");
+  const logExcludedDevices = globalThis.webhid.import("logExcludedDevices");
+  const applyDeviceIcon = globalThis.webhid.import("applyDeviceIcon");
   logger.initLogger("picker");
 
   class WebHidDevicePicker {
@@ -190,36 +191,7 @@
         this.filters,
         this.exclusionFilters,
       );
-      if (filteredDevices.length === 0) {
-        logger.warn(
-          "picker: 0/" +
-            this.devices.length +
-            " devices matched filters=" +
-            JSON.stringify(this.filters || []),
-        );
-        for (const device of this.devices) {
-          const vidHex = "0x" + (device.vendorId || 0).toString(16).padStart(4, "0");
-          const pidHex =
-            "0x" + (device.productId || 0).toString(16).padStart(4, "0");
-          const upHex =
-            "0x" + (device.usagePage || 0).toString(16).padStart(4, "0");
-          logger.warn(
-            "  excluded: " +
-              (device.productName || "(unnamed)") +
-              " VID=" +
-              vidHex +
-              " PID=" +
-              pidHex +
-              " usagePage=" +
-              upHex +
-              " usage=" +
-              (device.usage || 0),
-          );
-        }
-        deviceList.innerHTML =
-          '<div class="webhid-no-devices">No devices match the specified filters</div>';
-        return;
-      }
+      if (logExcludedDevices(this.devices, filteredDevices.length, this.filters, deviceList)) return;
       logger.debug(
         "picker: " +
           filteredDevices.length +
@@ -264,17 +236,7 @@
         item.classList.toggle("webhid-device-paired", isPaired);
         item.dataset.deviceId = groupId;
 
-        const iconSpan = clone.querySelector(".webhid-device-icon");
-        fetchDeviceIcon(type).then((svg) => {
-          if (svg) {
-            const svgDoc = new DOMParser().parseFromString(
-              svg,
-              "image/svg+xml",
-            );
-            const svgEl = svgDoc.documentElement;
-            if (svgEl) iconSpan.replaceChildren(svgEl.cloneNode(true));
-          }
-        });
+        applyDeviceIcon(clone.querySelector(".webhid-device-icon"), type);
 
         clone.querySelector(".webhid-device-name").textContent = name;
 
@@ -301,7 +263,7 @@
             if (!paired.includes(d.deviceId)) paired.push(d.deviceId);
           }
           this.pairedDevices = paired;
-        } catch {}
+        } catch (e) { logger.debug("getPairedDevices failed", e); }
       })();
       this.resolveShow?.({ devices: devicesArr });
       this.resolveShow = null;

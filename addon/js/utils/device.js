@@ -1,5 +1,6 @@
 (function () {
   const webhid = globalThis.webhid;
+  const logger = webhid.import("logger");
   const svgCache = {};
 
   function guessDeviceType(device) {
@@ -100,8 +101,7 @@
       );
       svgCache[type] = svg;
       return svg;
-    } catch {
-      return null;
+    } catch (e) { logger.debug("fetchDeviceIcon failed", e); return null;
     }
   }
 
@@ -117,9 +117,47 @@
     return true;
   }
 
+  function logExcludedDevices(allDevices, matchCount, filters, containerEl) {
+    if (matchCount > 0) return false;
+    logger.warn(
+      "picker: 0/" +
+        allDevices.length +
+        " devices matched filters=" +
+        JSON.stringify(filters || []),
+    );
+    for (const d of allDevices) {
+      const vidHex = "0x" + (d.vendorId || 0).toString(16).padStart(4, "0");
+      const pidHex = "0x" + (d.productId || 0).toString(16).padStart(4, "0");
+      const upHex = "0x" + (d.usagePage || 0).toString(16).padStart(4, "0");
+      logger.warn(
+        "  excluded: " +
+          (d.productName || "(unnamed)") +
+          " VID=" + vidHex +
+          " PID=" + pidHex +
+          " usagePage=" + upHex +
+          " usage=" + (d.usage || 0),
+      );
+    }
+    containerEl.innerHTML =
+      '<div class="webhid-no-devices">No devices match the specified filters</div>';
+    return true;
+  }
+
+  function applyDeviceIcon(iconSpan, type) {
+    fetchDeviceIcon(type).then((svg) => {
+      if (svg) {
+        const svgDoc = new DOMParser().parseFromString(svg, "image/svg+xml");
+        const svgEl = svgDoc.documentElement;
+        if (svgEl) iconSpan.replaceChildren(svgEl.cloneNode(true));
+      }
+    });
+  }
+
   webhid.export("guessDeviceType", guessDeviceType);
   webhid.export("applyFilters", applyFilters);
   webhid.export("groupDevices", groupDevices);
   webhid.export("fetchDeviceIcon", fetchDeviceIcon);
   webhid.export("isValidFilter", isValidFilter);
+  webhid.export("logExcludedDevices", logExcludedDevices);
+  webhid.export("applyDeviceIcon", applyDeviceIcon);
 })();

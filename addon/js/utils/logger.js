@@ -87,7 +87,7 @@
           applyLevel(parseLevel(changes.logLevel.newValue));
         }
       });
-    } catch {}
+    } catch (e) { console.debug("logger load failed", e); }
   }
 
   applyLevel(LEVEL_WARN);

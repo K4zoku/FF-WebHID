@@ -12,7 +12,7 @@
           return m[1];
         }
       }
-    } catch {}
+    } catch (e) { console.debug("stack trace extraction failed", e); }
     return location.href;
   }
   const webhid = globalThis.webhid;
@@ -595,7 +595,7 @@
     for (const [, entry] of state.dataPending) {
       try {
         entry.reject(error);
-      } catch {}
+      } catch (e) { logger.debug("reject pending report failed", e); }
     }
     state.dataPending.clear();
   }

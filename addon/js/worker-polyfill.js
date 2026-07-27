@@ -361,4 +361,5 @@
     configurable: true,
     enumerable: true,
   });
+  delete self.webhid;
 })();

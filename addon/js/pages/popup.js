@@ -11,7 +11,7 @@
       if (url.protocol === "http:" || url.protocol === "https:") {
         origin = url.origin;
       }
-    } catch {}
+    } catch (e) { logger.debug("URL parse failed", e); }
   }
 
   const siteLabel = document.getElementById("site-name");
@@ -68,7 +68,7 @@
         deviceId: hash,
         origin,
       });
-    } catch {}
+    } catch (e) { logger.debug("revokeDevice failed", e); }
     renderDevices();
   }
 
@@ -101,7 +101,7 @@
       });
       var rIds = r != null ? r.ids : undefined;
       if (rIds) openIds = new Set(rIds);
-    } catch {}
+    } catch (e) { logger.debug("getOpenDeviceIds failed", e); }
 
     if (token !== renderToken) return;
 
@@ -115,7 +115,7 @@
             deviceId: hash,
           });
           device = r != null ? (r.device != null ? r.device : null) : null;
-        } catch {}
+        } catch (e) { logger.debug("getDeviceInfo failed", e); }
       }
       if (token !== renderToken) return;
 
