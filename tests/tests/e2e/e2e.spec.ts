@@ -1,6 +1,6 @@
-import { test, expect } from "../helpers/fixtures.js";
-import { ensureDevicePaired } from "../helpers/devices.js";
-import { sendInput, waitForOutputReport } from "../helpers/process.js";
+import { test, expect } from "../../helpers/e2e.js";
+import { ensureDevicePaired } from "../../helpers/e2e-devices.js";
+import { sendInput, waitForOutputReport } from "../../helpers/e2e-process.js";
 
 // Nintendo Switch Pro Controller constants
 const VID = 0x16c0;

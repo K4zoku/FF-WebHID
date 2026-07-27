@@ -13,6 +13,7 @@ export async function getPermResult(page: Page) {
     queryHid: string;
     queryCamera: string;
     policySource: string;
+    getDevices: { ok: boolean; count?: number; name?: string; message?: string };
   } | null;
 }
 
@@ -55,8 +56,8 @@ export async function getPolicyFromGetDevices(page: Page) {
     try {
       const devices = await navigator.hid.getDevices();
       return { ok: true, count: devices.length };
-    } catch (e: any) {
-      return { ok: false, error: e.name, message: e.message };
+    } catch (e: unknown) {
+      return { ok: false, error: e instanceof Error ? e.name : String(e), message: e instanceof Error ? e.message : String(e) };
     }
   });
 }

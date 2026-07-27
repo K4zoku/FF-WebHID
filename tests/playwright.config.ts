@@ -5,10 +5,12 @@ import { dirname, resolve } from 'path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const projectRoot = resolve(__dirname, '..', '..');
+type PlaywrightUseOptions = Exclude<Parameters<typeof defineConfig>[0], undefined>['use'];
+type UseWithHarness = PlaywrightUseOptions & {
+  firefoxHarnessConfig: { extensionPath: string };
+};
 
 export default defineConfig({
-  testDir: './tests',
   timeout: 120000,
   expect: { timeout: 10000 },
   fullyParallel: false,
@@ -20,15 +22,19 @@ export default defineConfig({
     screenshot: 'only-on-failure',
     trace: 'retain-on-failure',
     firefoxHarnessConfig: {
-      extensionPath: resolve(__dirname, '..', '..', 'addon'),
+      extensionPath: resolve(__dirname, '..', 'addon'),
     },
-  },
+  } as UseWithHarness,
   projects: [
     {
-      name: 'firefox',
-      use: {
-        browserName: 'firefox',
-      },
+      name: 'firefox-browser',
+      testDir: './tests/browser',
+      use: { browserName: 'firefox' },
+    },
+    {
+      name: 'firefox-e2e',
+      testDir: './tests/e2e',
+      use: { browserName: 'firefox' },
     },
   ],
 });

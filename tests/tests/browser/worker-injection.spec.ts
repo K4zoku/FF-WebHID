@@ -1,4 +1,4 @@
-import { test, expect } from '../helpers/fixtures.js';
+import { test, expect } from '../../helpers/browser.js';
 
 test.describe('Worker injection', () => {
 

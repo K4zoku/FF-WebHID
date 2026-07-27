@@ -54,6 +54,27 @@ jobs:
       - name: Run tests
         run: cargo test --manifest-path crates/Cargo.toml
 
+  # browser:
+  #   name: Browser-only Tests
+  #   runs-on: ubuntu-24.04
+  #   steps:
+  #     - uses: actions/checkout@v7
+  #     - uses: Swatinem/rust-cache@v2
+  #       with:
+  #         workspaces: crates -> target
+  #     - name: Build addon
+  #       run: |
+  #         npm ci
+  #         make build-addon
+  #     - name: Install Playwright
+  #       working-directory: tests
+  #       run: |
+  #         npm ci --allow-git=all
+  #         npx playwright install firefox
+  #     - name: Run browser-only tests
+  #       working-directory: tests
+  #       run: npx playwright test --project=firefox-browser
+  #
   # e2e:
   #   name: E2E Tests
   #   needs: build
@@ -87,10 +108,10 @@ jobs:
   #         npm ci
   #         make build-addon
   #     - name: Install Playwright
-  #       working-directory: tests/e2e
+  #       working-directory: tests
   #       run: |
-  #         npm ci
+  #         npm ci --allow-git=all
   #         npx playwright install firefox
   #     - name: Run E2E tests
-  #       working-directory: tests/e2e
-  #       run: npx playwright test
+  #       working-directory: tests
+  #       run: npx playwright test --project=firefox-e2e

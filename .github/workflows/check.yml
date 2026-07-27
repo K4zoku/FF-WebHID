@@ -8,8 +8,8 @@ on:
       - '**/Cargo.lock'
       - 'package.json'
       - 'package-lock.json'
-      - 'tests/e2e/package.json'
-      - 'tests/e2e/package-lock.json'
+      - 'tests/package.json'
+      - 'tests/package-lock.json'
       - '.github/workflows/check.yml'
   pull_request:
     branches: [ main ]
@@ -18,8 +18,8 @@ on:
       - '**/Cargo.lock'
       - 'package.json'
       - 'package-lock.json'
-      - 'tests/e2e/package.json'
-      - 'tests/e2e/package-lock.json'
+      - 'tests/package.json'
+      - 'tests/package-lock.json'
       - '.github/workflows/check.yml'
   workflow_dispatch:
 

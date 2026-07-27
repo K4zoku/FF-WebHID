@@ -1,9 +1,11 @@
 {
-  "name": "ff-webhid-browser-only",
+  "name": "ff-webhid-tests",
   "private": true,
   "type": "module",
   "scripts": {
     "test": "playwright test",
+    "test:browser": "playwright test --project=firefox-browser",
+    "test:e2e": "playwright test --project=firefox-e2e",
     "test:headed": "playwright test --headed",
     "test:debug": "playwright test --debug"
   },
@@ -13,6 +15,7 @@
     "jszip": "^3.10.1"
   },
   "dependencies": {
-    "tslib": "^2.8.1"
+    "tslib": "^2.8.1",
+    "ws": "^8.21.1"
   }
 }

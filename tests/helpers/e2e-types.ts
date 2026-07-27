@@ -22,10 +22,17 @@ export interface InputReportEvent {
   };
 }
 
+export interface DeviceFilter {
+  vendorId?: number;
+  productId?: number;
+  usagePage?: number;
+  usage?: number;
+}
+
 export interface WebHidTestAPI {
   isPolyfillLoaded: () => Promise<boolean>;
   getDevices: () => Promise<DeviceInfo[]>;
-  requestDevice: (filters?: any[]) => Promise<DeviceInfo[]>;
+  requestDevice: (filters?: DeviceFilter[]) => Promise<DeviceInfo[]>;
   deviceInfo: (index: number) => Promise<DeviceInfo>;
   open: (index: number) => Promise<void>;
   close: (index: number) => Promise<void>;

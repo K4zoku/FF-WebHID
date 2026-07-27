@@ -1,5 +1,6 @@
-import { test, expect } from '../helpers/fixtures.js';
-import { waitForPermResult } from '../helpers/utils.js';
+import { test, expect } from '../../helpers/browser.js';
+import { waitForPermResult } from '../../helpers/browser-utils.js';
+import type { Page, Frame } from '@playwright/test';
 
 test.describe('Permissions Policy', () => {
 
@@ -50,17 +51,17 @@ test.describe('Permissions Policy', () => {
 
 test.describe('Cross-origin iframe', () => {
 
-  async function waitForFrame(page: any, urlSubstring: string, timeout = 10000) {
+  async function waitForFrame(page: Page, urlSubstring: string, timeout = 10000) {
     const deadline = Date.now() + timeout;
     while (Date.now() < deadline) {
-      const frame = page.frames().find((f: any) => f.url().includes(urlSubstring));
+      const frame = page.frames().find((f: Frame) => f.url().includes(urlSubstring));
       if (frame) return frame;
       await new Promise(r => setTimeout(r, 100));
     }
     throw new Error('Frame with URL containing "' + urlSubstring + '" not found');
   }
 
-  async function readIframeResult(page: any, urlSubstring: string) {
+  async function readIframeResult(page: Page, urlSubstring: string) {
     const childFrame = await waitForFrame(page, urlSubstring);
     await childFrame.locator('#__perm-result').waitFor({ state: 'attached', timeout: 10000 });
     const raw = await childFrame.evaluate(() => {
@@ -115,14 +116,19 @@ test.describe('Cross-origin iframe', () => {
     await noAllowFrame.locator('#__perm-result').waitFor({ state: 'attached', timeout: 10000 });
 
     // Check policyLog from BOTH frames to see if they share the same _policyLog
+    interface WindowWithPolicyLog extends Window {
+      __webhidPolicyLog?: () => unknown[];
+    }
     const logFromWith = await childFrame.evaluate(() => {
-      const f = typeof (window as any).__webhidPolicyLog === 'function'
-        ? (window as any).__webhidPolicyLog : () => [];
+      const w = window as WindowWithPolicyLog;
+      const f = typeof w.__webhidPolicyLog === 'function'
+        ? w.__webhidPolicyLog : () => [];
       return { url: location.href, log: f() };
     });
     const logFromNoAllow = await noAllowFrame.evaluate(() => {
-      const f = typeof (window as any).__webhidPolicyLog === 'function'
-        ? (window as any).__webhidPolicyLog : () => [];
+      const w = window as WindowWithPolicyLog;
+      const f = typeof w.__webhidPolicyLog === 'function'
+        ? w.__webhidPolicyLog : () => [];
       return { url: location.href, log: f() };
     });
     console.log('DEBUG logFromWith:', JSON.stringify(logFromWith));
