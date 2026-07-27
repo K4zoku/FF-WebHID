@@ -2,65 +2,61 @@
 
 ## Overview
 
-```
- Web page (MAIN world)
-   │  navigator.hid  (polyfilled by polyfill.js)
-   │  sendReport / sendFeatureReport / receiveFeatureReport / input reports
-   │  MessageChannel port (port1) for control; separate data MessageChannel per device
-   ▼
- addon/bridge.js (content script, isolated world)
-   │  ├── Control Plane: NM only (runtime.sendMessage → background → NM host → daemon)
-   │  │     enumerate / open / close / handshake / getPolicy / requestDevice / forget
-   │  ├── Data Plane: WS (data worker → binary WS → daemon → MessagePort direct to page)
-   │  │                or NM (runtime.sendMessage → background → NM host → daemon)
-   │  └── Handshake: NM (one-time, gets wsPort + wsNonce)
-   │
-   ├──► addon/worker.js (Web Worker, per-device data plane, spawned on open)
-   │      │ binary WebSocket (127.0.0.1:<port>, authenticated via SHA-256(sessionToken+wsNonce) subprotocol)
-   │      │ input reports forwarded via transferred MessagePort (direct worker → page, zero-copy)
-   │      │ sendReport / sendFeatureReport / receiveFeatureReport sent as binary WS frames
-   │      ▼
-   │    webhid-daemon (Rust)
-   │      │ hidapi → hidraw / IOHIDManager / Windows HID
-   │      ▼
-   │    HID device
-   │
-   ├──► addon/background.js (Extension background)
-   │      │ nativeMessaging (stdio, JSON + base64, packed binary TLVs)
-   │      │ worker bundle served via webRequest filterResponseData (shadow-URL redirect trick)
-   │      │ worker-polyfill bundle prefixed into page-created worker scripts (opt-in)
-   │      ▼
-   │    webhid.forwarder_nm_host or webhid.daemon_nm_host (Rust)
-   │      │ Unix socket / named pipe (forwarder mode), vectored I/O on all platforms
-   │      ▼
-   │    webhid-daemon (if forwarder mode)
-   │
+```mermaid
+graph TB
+    subgraph "Firefox tab"
+        Page["Web page (MAIN world)<br/>polyfill.js<br/>navigator.hid"]
+        Bridge["bridge.js<br/>(content script, isolated world)"]
+        Worker["worker.js<br/>(Web Worker, per-device)"]
+    end
+
+    subgraph "Firefox background"
+        BG["background.js<br/>(extension background)"]
+    end
+
+    subgraph "OS processes"
+        NM["NM host<br/>(forwarder or daemon-as-NM-host)"]
+        Daemon["webhid-daemon (Rust)"]
+        HID["HID device<br/>(hidraw / IOHIDManager / HidD_*)"]
+    end
+
+    Page -- "control: MessageChannel port" --> Bridge
+    Page -- "data: MessageChannel port (transferred)" --> Worker
+    Bridge -- "runtime.sendMessage" --> BG
+    BG -- "nativeMessaging (stdio)" --> NM
+    NM -- "Unix socket / named pipe" --> Daemon
+    Worker -- "binary WebSocket (loopback)" --> Daemon
+    Daemon -- "hidapi" --> HID
+
+    linkStyle 0 stroke:#4a90d9
+    linkStyle 1 stroke:#d94a4a
+    linkStyle 5 stroke:#d94a4a
 ```
 
 The project has a single switchable plane:
 
 - **Data Plane** (`sendReport`, input reports, feature reports): WS binary via per-device data worker (default) or NM. Controlled by the `dataPlane` setting (`ws` or `nm`).
 
-Control operations (`enumerate`, `open`, `close`, `handshake`) always go via NM.
+Control operations (`enumerate`, `open`, `close`, `handshake`, `getPolicy`, `requestDevice`, `forget`) always go via NM.
 
 ## Components
 
 | Component | What it does |
 |---|---|
-| `polyfill.js` | Polyfills `navigator.hid` in MAIN world; communicates with bridge via a MessageChannel port (port1); per-device data channel is a separate MessageChannel created on `open()` (port1 kept, port2 transferred to bridge then to worker); receives input reports via the data port (direct from worker, zero-copy); sendReport/sendFeatureReport resolve on ack from worker; zero-copy DataView on transferred ArrayBuffer for input reports |
-| `bridge.js` | Content script (ISOLATED world); routes control/data actions; spawns per-device data worker via `new Worker(location.href)` (redirect-interception trick served by background.js webRequest filtering); relays data MessagePort page↔worker; sends NM handshake on init to get wsPort + wsNonce; `SettingsStore` observer for live settings propagation; tracks open devices via `openDevices` Set |
+| `polyfill.js` | Polyfills `navigator.hid` in MAIN world; guards on `isSecureContext`; communicates with bridge via a MessageChannel port (port1) using a per-frame `frameNonce` for request origin tracking; per-device data channel is a separate MessageChannel created on `open()` (port1 kept, port2 transferred to bridge then to worker); receives input reports via the data port (direct from worker, zero-copy); sendReport/sendFeatureReport resolve on ack from worker; zero-copy DataView on transferred ArrayBuffer for input reports; `requestDevice` checks `navigator.userActivation.isActive` unless called from devtools console (`isCalledFromConsole`); wraps `navigator.permissions.query` for `hid` descriptor via `getPolicy` |
+| `bridge.js` | Content script (ISOLATED world); routes control/data actions; spawns per-device data worker via `new Worker(location.href)` (redirect-interception trick served by background.js webRequest filtering); relays data MessagePort page↔worker; sends NM handshake on init to get wsPort + wsNonce; computes WS auth hash via `crypto.subtle.digest("SHA-256", token + wsNonce)`; `SettingsStore` observer for live settings propagation; tracks open devices via `openDevices` Set; per-port origin tracking via `portOrigin` map (populated from browser-verified `MessageEvent.origin`); `getPolicy` checks iframe `allow="hid"` attribute for cross-origin frames; `globalReset` handler clears state on NM disconnect |
 | `worker.js` | Web Worker (per-device, WS data plane); binary WS to daemon via `createWsTransport`; input reports forwarded via transferred MessagePort (direct to page, zero-copy, no Xray); sendReport/sendFeatureReport sent as binary WS frames, resolved on WS ack (`handleControlResponse`); receiveFeatureReport via WS; auto-reconnect with exponential backoff; detects WS auth-failure close code 4401/4402 and triggers token refresh via bridge |
 | `worker-polyfill.js` | Not a worker. Stub WebHID API polyfill (HID, HIDDevice, HIDInputReportEvent, HIDConnectionEvent constructors) injected as a prefix into page-created Web Worker scripts by background.js webRequest filtering when `workerPolyfillEnabled` is true (global or per-site). All methods throw `NotSupportedError`. Exposes `navigator.hid` in worker scope. |
-| `background.js` | Extension background; owns NM port; handles `handshake` (returns wsPort + wsNonce); tab-targeted event delivery; `daemonAsNmHost` via `SettingsStore` (Windows defaults to true); NM error frame logging; packed TLV encode/decode for sendReport/sendFeatureReport/inputReport; serves worker bundle via webRequest `filterResponseData` on shadow-URL; injects worker-polyfill bundle into page worker scripts |
+| `background.js` | Extension background; owns NM port; handles `handshake` (returns wsPort + wsNonce); tab-targeted event delivery; `daemonAsNmHost` via `SettingsStore` (Windows defaults to true); NM error frame logging; packed TLV encode/decode for sendReport/sendFeatureReport/inputReport; serves worker bundle via webRequest `filterResponseData` on shadow-URL; injects worker-polyfill bundle into page worker scripts; `getPolicy` resolves Permissions-Policy (`hid` directive) from response headers + cross-origin iframe `allow` attr; broadcasts `globalReset` to all tabs on NM disconnect |
 | `picker.js` | `WebHidDevicePicker` class (ISOLATED world); closed-mode Shadow DOM (`attachShadow({mode:'closed'})`); three modes via `devicePickerMode` setting: `modal` (default, inline dialog), `pageAction` (url-bar popup), `window` (separate popup window) |
 | `settings.html` / `popup.html` | Settings UI: data plane (WS/NM), log level (global + per-site), daemon-as-NM-host, device picker mode, worker polyfill toggle |
 | `inject-main.js` | MV2-only MAIN-world injector. Fetches scripts via `runtime.sendMessage` `fetchResource`, injects as one `<script>`. Referenced only in `manifest.v2.json`. Not used in MV3 (content scripts use `"world": "MAIN"`). |
 | `utils/base64.js` | Polyfills `Uint8Array.fromBase64` + `Uint8Array.prototype.toBase64` if absent. Used by background.js for NM packed TLV base64. |
 | `utils/bootstrap.js` | Module registry: `globalThis.webhid` with `export(name, value)` / `import(name)` backed by a Map. Polyfills `globalThis` if absent. |
-| `utils/websocket.js` | `createWsTransport` factory: WS connect/reconnect/backoff/auth-failure-handling. Reconnect 500ms→5s exponential backoff. Close codes 4401/4402 → `onAuthFailed` (halts reconnect). Subprotocol `webhid.<token>` where token is the SHA-256 auth hash. |
+| `utils/websocket.js` | `createWsTransport` factory: WS connect/reconnect/backoff/auth-failure-handling. Reconnect 500ms→5s exponential backoff. Close codes 4401/4402 → `onAuthFailed` (halts reconnect). Subprotocol `webhid.<hash>` where hash is `SHA-256(sessionToken + wsNonce)`. |
 | `webhid.forwarder_nm_host` | Thin byte-pipe NM host (forwarder mode): stdin ↔ Unix socket/named pipe via vectored I/O (`write_vectored`) on all platforms |
 | `webhid.daemon_nm_host` | Daemon-as-NM-host mode: daemon speaks NM directly on stdin/stdout (auto-detected via Firefox's 2 positional args) |
-| `webhid-daemon` | Long-running service; hidapi device handles; WS server (data only, loopback-only); adaptive batching (25µs coalesce); Arc<[u8]> broadcast; per-device dataplane_mode; udev hot-plug; FIDO/U2F + mouse/keyboard/keypad blocklist |
+| `webhid-daemon` | Long-running service; hidapi device handles; WS server (data only, loopback-only, port 0 by default); adaptive batching (25µs coalesce); Arc<[u8]> broadcast; per-device dataplane_mode; udev hot-plug; FIDO/U2F per-product blocklist (`hid.rs`) + collection/report-level blocklist (`blocklist.rs`: mouse/keyboard/keypad/System Control/Jabra/OnlyKey); report-level blocking via `is_report_blocked` on send/feature paths; abstract socket `@webhid` (Linux root); SO_PEERCRED + webhid group check; seccomp BPF + prctl hardening (Linux, release-only) |
 | `crates/webhid` | Shared Rust library: message types (NmRequest, NmResponse, IpcRequest, IpcResponse), protocol framing, base64 serde, FNV-1a device ID hash. NM wire uses single-char field names + HTTP status codes; packed binary TLVs for hot-path messages. |
 
 ## Control plane (NM only)
@@ -215,55 +211,172 @@ When `workerPolyfillEnabled` is true (globally or per-site), background.js prefi
 
 ### `navigator.hid.getDevices()`
 
-```
-page                  bridge.js         background.js     NM host      daemon
- │──port.postMessage(enumerate)►│            │              │           │
- │                              │──sendMessage►│              │           │
- │                              │              │──NM write────►│           │
- │                              │              │              │──socket──►│
- │                              │              │              │           │ hidapi
- │                              │              │              │◄──socket──│
- │                              │              │◄──NM read────│           │
- │                              │◄──sendResponse│              │           │
- │◄──port.postMessage(res)──────│              │              │           │
+```mermaid
+sequenceDiagram
+    participant P as page
+    participant B as bridge.js
+    participant G as background.js
+    participant N as NM host
+    participant D as daemon
+
+    P->>B: port.postMessage(enumerate)
+    B->>G: runtime.sendMessage
+    G->>N: NM write
+    N->>D: socket
+    D->>D: hidapi enumerate
+    D-->>N: socket response
+    N-->>G: NM read
+    G-->>B: sendResponse
+    B-->>P: port.postMessage(res)
 ```
 
 ### `sendReport()` WS (ack-wait)
 
-```
-page                  bridge.js         worker.js          daemon
- │──dataPort.postMsg(send)──►│            │                   │
- │  (pending in dataPending) │──postMsg──►│                   │
- │                           │  (transfer) │──ws.send(binary)►│
- │                           │             │                  │ hidraw write
- │                           │             │◄──ws ack──────────│
- │                           │◄──sendResult─│                   │
- │◄──dataPort.onmessage(res)─│            │                   │
- │  (Promise resolves)       │             │                   │
+```mermaid
+sequenceDiagram
+    participant P as page
+    participant B as bridge.js
+    participant W as worker.js
+    participant D as daemon
+
+    P->>P: dataPending.set(reqId, promise)
+    P->>B: dataPort.postMessage(send, [buffer])
+    B->>W: postMessage (transfer)
+    W->>D: ws.send(binary frame)
+    D->>D: hidraw write
+    D-->>W: ws ack
+    W-->>B: sendResult
+    B-->>P: dataPort.onmessage(res)
+    P->>P: Promise resolves
 ```
 
 ### Input report via MessagePort (WS data plane)
 
-```
-daemon                worker.js              page (port1)
- │──WS binary batch────►│                     │
- │                       │ parse batch         │
- │                       │──port.postMessage──►│ (zero-copy transfer, no Xray)
- │                       │  (per report)       │ DataView on transferred ArrayBuffer
- │                       │                     │ HIDInputReportEvent dispatched
+```mermaid
+sequenceDiagram
+    participant D as daemon
+    participant W as worker.js
+    participant P as page (port1)
+
+    D->>W: WS binary batch
+    W->>W: parse batch into reports
+    W->>P: port.postMessage(inputReport, [buffer])
+    Note over W,P: zero-copy transfer, no Xray unwrap
+    P->>P: DataView on transferred ArrayBuffer
+    P->>P: dispatch HIDInputReportEvent
 ```
 
 ### `sendReport()` NM (ack-wait)
 
+```mermaid
+sequenceDiagram
+    participant P as page
+    participant B as bridge.js
+    participant G as background.js
+    participant N as NM host
+    participant D as daemon
+
+    P->>P: pending in polyfill
+    P->>B: port.postMessage
+    B->>G: runtime.sendMessage
+    G->>N: NM write (packed TLV)
+    N->>D: socket
+    D->>D: hidraw write
+    D-->>N: socket response
+    N-->>G: NM read
+    G-->>B: sendResponse
+    B-->>P: port.postMessage(res)
 ```
-page                  bridge.js         background.js     NM host      daemon
- │──port.postMessage────►│                │                │           │
- │  (pending in polyfill) │──sendMessage──►│                │           │
- │                        │                │──NM write─────►│           │
- │                        │                │                │──socket──►│
- │                        │                │                │           │ hidraw write
- │                        │                │                │◄──socket──│
- │                        │                │◄──NM read──────│           │
- │                        │◄──sendResponse─│                │           │
- │◄──port.postMessage(res)│                │                │           │
+
+### `open()` (NM control + WS data plane setup)
+
+```mermaid
+sequenceDiagram
+    participant P as page
+    participant B as bridge.js
+    participant G as background.js
+    participant N as NM host
+    participant D as daemon
+    participant W as worker.js
+
+    P->>B: port.postMessage(open)
+    B->>G: runtime.sendMessage
+    G->>N: NM write
+    N->>D: socket
+    D->>D: hidapi open + reader thread
+    D-->>N: socket response (sessionToken + wsPort)
+    N-->>G: NM read
+    G-->>B: sendResponse
+    B->>B: computeWsAuthHash(SHA-256(token + wsNonce))
+    B->>W: spawn worker (redirect-interception)
+    P->>B: dataPort transfer (MessageChannel port2)
+    B->>W: setPort (transfer port to worker)
+    W->>D: WS connect (subprotocol: webhid.<hash>)
+    D-->>W: WS open
+    B-->>P: port.postMessage(res)
+    Note over P,W: data port now direct W→P for input reports
+```
+
+### `requestDevice()` (picker UI + pairing)
+
+```mermaid
+sequenceDiagram
+    participant P as page
+    participant B as bridge.js
+    participant Picker as picker.js
+    participant G as background.js
+    participant N as NM host
+    participant D as daemon
+
+    P->>B: port.postMessage(requestDevice)
+    B->>Picker: devicePicker.show(filters)
+    Picker->>G: runtime.sendMessage(enumerate)
+    G->>N: NM write
+    N->>D: socket
+    D-->>N: device list
+    N-->>G: NM read
+    G-->>Picker: sendResponse(devices)
+    Picker->>Picker: applyFilters + render list
+    Note over Picker: user selects device, clicks Connect
+    Picker-->>B: webhid-device-selected event
+    B-->>P: port.postMessage(res, devices)
+    P->>B: pairDevice (async)
+    B->>G: runtime.sendMessage(pairDevice)
+    G->>G: storage.local.set(origin → deviceId)
+```
+
+### `handshake()` (NM, one-time on bridge init)
+
+```mermaid
+sequenceDiagram
+    participant B as bridge.js
+    participant G as background.js
+    participant N as NM host
+    participant D as daemon
+
+    B->>G: runtime.sendMessage(handshake)
+    G->>N: NM write
+    N->>D: socket
+    D->>D: generate wsNonce (once per instance)
+    D-->>N: socket response (wsPort + wsNonce)
+    N-->>G: NM read
+    G-->>B: sendResponse
+    B->>B: store wsPort + wsNonce for WS auth hash derivation
+```
+
+### NM disconnect → global reset
+
+```mermaid
+sequenceDiagram
+    participant G as background.js
+    participant B as bridge.js
+    participant P as page
+
+    G->>G: NM port disconnect detected
+    G->>G: resolve all pending with {s:503}
+    G->>B: broadcast globalReset (tabs.sendMessage)
+    B->>B: clear openDevices + sessionTokens
+    B->>B: despawn all data workers
+    B-->>P: event: disconnect (per device)
+    P->>P: dispatch HIDConnectionEvent("disconnect")
 ```

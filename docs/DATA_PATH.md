@@ -55,6 +55,8 @@ Control ops (enumerate/open/close/handshake) are NM-only, handled by bridge→ba
 | P | `getDevices` | NM | P→B→G→storage + enumerate (or cache hit) |
 | Q | `handshake` (NM) | NM | B→G→NM→D→NM→G→B (returns wsPort + wsNonce) |
 | R | `connect`/`disconnect` event | NM | D→NM→G→B→P (tab-targeted) |
+| S | `getPolicy` | NM | P→B→G (Permissions-Policy header cache + iframe `allow` attr check) |
+| T | `globalReset` | NM→G→B | G broadcasts to all tabs on NM disconnect: B clears state, emits disconnect per device |
 
 All send/sendFeature paths are ack-wait (resolve on daemon response).
 
@@ -245,3 +247,286 @@ Bridge sends `handshake` on init. The response contains `wsPort` (the daemon's W
 7. **WS data frame header is 6 bytes** (no device ID): `[type:u8][reqId:u32 LE][reportId:u8][payload]`. The WS connection is per-device, so the device ID is implicit. NM packed TLVs include a device ID (12-byte header) because the NM connection is shared across all devices.
 
 8. **Control ops are NM-only.** enumerate/open/close/handshake always go via NM.
+
+---
+
+## 8. Mermaid Sequence Diagrams
+
+### Path A: `sendReport` WS (ack-wait)
+
+```mermaid
+sequenceDiagram
+    participant P as Page (P)
+    participant B as Bridge (B)
+    participant W as Worker (W)
+    participant D as Daemon (D)
+
+    P->>P: view.slice() own-buffer copy
+    P->>B: dataPort.postMessage(send, [buffer])
+    B->>W: postMessage (transfer)
+    W->>W: frame = new Uint8Array(6+len)
+    W->>D: ws.send(binary frame)
+    D->>D: Arc::from(&frame[6..]) spawn_blocking
+    D->>D: hidraw write
+    D-->>W: ws ack frame
+    W-->>B: sendResult
+    B-->>P: dataPort.onmessage(res)
+    P->>P: Promise resolves
+```
+
+### Path C: `sendReport` NM (ack-wait)
+
+```mermaid
+sequenceDiagram
+    participant P as Page (P)
+    participant B as Bridge (B)
+    participant G as Background (G)
+    participant N as NM host (N)
+    participant D as Daemon (D)
+
+    P->>P: view.slice() own-buffer copy
+    P->>B: bridgePort.postMessage
+    B->>G: runtime.sendMessage
+    G->>G: buildPackedSend (base64 TLV)
+    G->>N: port.postMessage({d:b64})
+    N->>D: socket write
+    D->>D: JSON parse + b64 decode
+    D->>D: hidraw write
+    D-->>N: socket response
+    N-->>G: NM read
+    G-->>B: sendResponse
+    B-->>P: port.postMessage(res)
+    P->>P: Promise resolves
+```
+
+### Path I: Input report WS + MessagePort (adaptive batching)
+
+```mermaid
+sequenceDiagram
+    participant D as Daemon (D)
+    participant W as Worker (W)
+    participant P as Page (P)
+
+    D->>D: dev.read_timeout → Arc::from(&buf[1..])
+    D->>D: tx.send(InputReport) broadcast
+    D->>D: batch.push (25µs coalesce)
+    D->>W: ws.send(batch frame)
+    W->>W: parse batch into reports
+    loop per report
+        W->>P: dataPort.postMessage(inputReport, [buf])
+        Note over W,P: zero-copy transfer, direct W→P
+        P->>P: DataView on transferred ArrayBuffer
+        P->>P: dispatch HIDInputReportEvent
+    end
+```
+
+### Path J: Input report WS port fallback
+
+```mermaid
+sequenceDiagram
+    participant D as Daemon (D)
+    participant W as Worker (W)
+    participant B as Bridge (B)
+    participant P as Page (P)
+
+    D->>W: ws.send(batch frame)
+    W->>B: postMessage (port transfer failed)
+    B->>B: onDataPortMessage
+    B->>P: replyToPage or data port forward
+    P->>P: dispatch HIDInputReportEvent
+```
+
+### Path K: Input report NM
+
+```mermaid
+sequenceDiagram
+    participant D as Daemon (D)
+    participant N as NM host (N)
+    participant G as Background (G)
+    participant B as Bridge (B)
+    participant P as Page (P)
+
+    D->>D: dev.read_timeout → Arc
+    D->>D: ipc_event_to_nm → data.to_vec()
+    D->>N: socket write (JSON + base64)
+    N-->>G: NM read (JSON parse + b64 decode)
+    G->>B: tabs.sendMessage (Uint8Array)
+    B->>P: port.postMessage or data port
+    P->>P: DataView on buffer
+    P->>P: dispatch HIDInputReportEvent
+```
+
+### Path L: `enumerate` (NM)
+
+```mermaid
+sequenceDiagram
+    participant P as Page (P)
+    participant B as Bridge (B)
+    participant G as Background (G)
+    participant N as NM host (N)
+    participant D as Daemon (D)
+
+    P->>B: sendRequest("enumerate")
+    B->>G: runtime.sendMessage
+    G->>N: port.postMessage({a:1})
+    N->>D: socket write
+    D->>D: hidapi enumerate
+    D-->>N: socket response (device list)
+    N-->>G: NM read
+    G-->>B: sendResponse
+    B-->>P: port.postMessage(res)
+```
+
+### Path M: `open` (NM + WS data plane setup)
+
+```mermaid
+sequenceDiagram
+    participant P as Page (P)
+    participant B as Bridge (B)
+    participant G as Background (G)
+    participant N as NM host (N)
+    participant D as Daemon (D)
+    participant W as Worker (W)
+
+    P->>B: sendRequest("open")
+    B->>G: runtime.sendMessage
+    G->>N: port.postMessage({a:2})
+    N->>D: socket write
+    D->>D: hidapi open + reader thread
+    D-->>N: socket response (sessionToken + wsPort)
+    N-->>G: NM read
+    G-->>B: sendResponse
+    B->>B: computeWsAuthHash(SHA-256(token + wsNonce))
+    B->>W: spawn worker (redirect-interception)
+    P->>B: dataPort transfer (port2)
+    B->>W: setPort (transfer port to worker)
+    W->>D: WS connect (subprotocol: webhid.<hash>)
+    D-->>W: WS open
+    B-->>P: port.postMessage(res)
+```
+
+### Path N: `close` (NM + worker terminate)
+
+```mermaid
+sequenceDiagram
+    participant P as Page (P)
+    participant B as Bridge (B)
+    participant G as Background (G)
+    participant N as NM host (N)
+    participant D as Daemon (D)
+    participant W as Worker (W)
+
+    P->>B: sendRequest("close")
+    B->>G: runtime.sendMessage
+    G->>N: port.postMessage({a:3})
+    N->>D: socket write
+    D->>D: close hidraw + stop reader
+    D-->>N: socket response
+    N-->>G: NM read
+    G-->>B: sendResponse
+    B->>W: terminate worker
+    B->>P: port.postMessage(res)
+    P->>P: dispatch "close" event
+```
+
+### Path O: `requestDevice` (picker UI + pairing)
+
+```mermaid
+sequenceDiagram
+    participant P as Page (P)
+    participant B as Bridge (B)
+    participant Picker as Picker (B)
+    participant G as Background (G)
+    participant D as Daemon (D)
+
+    P->>B: sendRequest("requestDevice")
+    B->>Picker: devicePicker.show(filters)
+    Picker->>G: runtime.sendMessage(enumerate)
+    G->>D: NM → socket
+    D-->>G: device list
+    G-->>Picker: sendResponse
+    Picker->>Picker: applyFilters + render
+    Note over Picker: user selects, clicks Connect
+    Picker-->>B: webhid-device-selected
+    B-->>P: port.postMessage(devices)
+    P->>B: pairDevice (async)
+    B->>G: runtime.sendMessage(pairDevice)
+    G->>G: storage.local.set
+```
+
+### Path Q: `handshake` (NM, one-time)
+
+```mermaid
+sequenceDiagram
+    participant B as Bridge (B)
+    participant G as Background (G)
+    participant N as NM host (N)
+    participant D as Daemon (D)
+
+    B->>G: runtime.sendMessage(handshake)
+    G->>N: port.postMessage({a:8})
+    N->>D: socket write
+    D->>D: generate wsNonce (once per instance)
+    D-->>N: socket response (wsPort + wsNonce)
+    N-->>G: NM read
+    G-->>B: sendResponse
+    B->>B: store wsPort + wsNonce
+```
+
+### Path R: `connect`/`disconnect` event (NM, tab-targeted)
+
+```mermaid
+sequenceDiagram
+    participant D as Daemon (D)
+    participant N as NM host (N)
+    participant G as Background (G)
+    participant B as Bridge (B)
+    participant P as Page (P)
+
+    D->>D: hotplug detect (udev/IOHID/WM_DEVICECHANGE)
+    D-->>N: socket event
+    N-->>G: NM read (event frame)
+    G->>B: tabs.sendMessage (tab-targeted)
+    B->>P: port.postMessage(event)
+    P->>P: dispatch HIDConnectionEvent
+```
+
+### Path S: `getPolicy` (Permissions-Policy check)
+
+```mermaid
+sequenceDiagram
+    participant P as Page (P)
+    participant B as Bridge (B)
+    participant G as Background (G)
+
+    P->>B: sendRequest("getPolicy")
+    B->>B: check iframe allow="hid" attr
+    B->>G: runtime.sendMessage(getPolicy)
+    G->>G: lookup Permissions-Policy cache
+    alt policy = "none"
+        G-->>B: {policy: {hid: "none"}}
+    else allowed
+        G-->>B: {policy: {hid: "allowed"}}
+    end
+    B-->>P: port.postMessage(result)
+```
+
+### Path T: `globalReset` (NM disconnect recovery)
+
+```mermaid
+sequenceDiagram
+    participant G as Background (G)
+    participant B as Bridge (B)
+    participant P as Page (P)
+
+    G->>G: NM port disconnect detected
+    G->>G: resolve all pending with {s:503}
+    G->>B: broadcast globalReset (tabs.sendMessage)
+    B->>B: clear openDevices + sessionTokens
+    B->>B: despawn all data workers
+    loop per open device
+        B-->>P: event: disconnect
+        P->>P: dispatch HIDConnectionEvent("disconnect")
+    end
+```
+

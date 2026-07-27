@@ -99,7 +99,7 @@ Restart browser after writing these files. Paths must be absolute.
 | `WEBHID_WS_BATCH_MS` | `0` | Input report flush policy. `0` = adaptive (drain + burst coalescing with 25µs window). `1`+ = fixed N ms timer. |
 | `RUST_LOG` | `info` | Log level |
 
-Note: the user systemd unit (`manifests/webhid-daemon.user.service`) hardcodes `WEBHID_WS_PORT=31337`. The daemon itself defaults to port 0 (random) when not set.
+Note: the user systemd unit (`manifests/webhid-daemon.user.service`) hardcodes `WEBHID_WS_PORT=31337` for backwards compatibility. The system unit and daemon default use port 0 (random, OS-assigned).
 
 ### Addon settings
 
@@ -207,7 +207,7 @@ FF-WebHID/
 │   ├── webhid.forwarder_nm_host.json   Forwarder NM manifest ({{NM_BIN}})
 │   ├── webhid.daemon_nm_host.json      Daemon-as-NM-host manifest ({{DAEMON_BIN}})
 │   ├── webhid-daemon.service           System systemd unit (root, {{DAEMON_BIN}}, Group=webhid)
-│   ├── webhid-daemon.user.service      User systemd unit (hardcodes WEBHID_WS_PORT=31337)
+│   ├── webhid-daemon.user.service      User systemd unit (hardcodes WEBHID_WS_PORT=31337 for backwards compat)
 │   └── 99-webhid.rules                 udev rule (uaccess + FIDO blocklist exclusions)
 ├── packaging/               Platform packaging
 │   ├── linux/archlinux/     Arch PKGBUILDs (webhid daemon + webhid-addon)
