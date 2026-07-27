@@ -331,15 +331,12 @@
               },
               [dataChannel.port2],
             );
-            // S3: Flip `opened` only after the data channel is fully wired.
-            // Previously `state.opened = true` was set before the port was set
-            // up, leaving a partial-state window where sendReport would
-            // throw "data port not connected" despite opened === true.
             state.opened = true;
             logger.info("open deviceId=" + state.deviceId);
             this.dispatchEvent(new Event("open"));
+          } else {
+            throw new Error("Open failed: " + http.name(response.s || 0));
           }
-          throw new Error("Open failed: " + http.name(response.s || 0));
         } catch (error) {
           throw new DOMException(error.message, "NetworkError");
         } finally {
