@@ -5,11 +5,17 @@
   "scripts": {
     "release": "npx commit-and-tag-version",
     "lint": "npx addons-linter addon",
-    "format": "npx prettier addon/**/*.js -w"
+    "format": "npx prettier addon/**/*.js -w",
+    "build": "node scripts/build.mjs"
   },
   "devDependencies": {
     "addons-linter": "^10.9.0",
-    "commit-and-tag-version": "^12.7.3",
-    "prettier": "^3.9.5"
+    "commit-and-tag-version": "^13.1.0",
+    "prettier": "^3.9.6",
+    "terser": "^5.49.0"
+  },
+  "allowScripts": {
+    "core-js@2.6.12": true,
+    "es5-ext@0.10.64": true
   }
 }
