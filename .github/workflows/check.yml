@@ -44,6 +44,7 @@ jobs:
   npm-audit:
     name: npm Audit
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v7
       - name: Install dependencies

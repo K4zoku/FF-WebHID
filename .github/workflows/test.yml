@@ -5,41 +5,19 @@ on:
     branches: [ main ]
     paths:
       - 'crates/**'
-      # - 'addon/**'
+      - 'addon/**'
       - 'tests/**'
       - '.github/workflows/test.yml'
   pull_request:
     branches: [ main ]
     paths:
       - 'crates/**'
-      # - 'addon/**'
+      - 'addon/**'
       - 'tests/**'
       - '.github/workflows/test.yml'
   workflow_dispatch:
 
 jobs:
-  # build:
-  #   name: Build (debug)
-  #   runs-on: ubuntu-24.04
-  #   steps:
-  #     - uses: actions/checkout@v7
-  #     - uses: dtolnay/rust-toolchain@stable
-  #     - uses: Swatinem/rust-cache@v2
-  #       with:
-  #         workspaces: crates -> target
-  #     - name: Install dependencies
-  #       run: sudo apt-get update && sudo apt-get install -y libudev-dev
-  #     - name: Build binaries
-  #       run: cargo build --manifest-path crates/Cargo.toml
-  #     - name: Upload binaries
-  #       uses: actions/upload-artifact@v7
-  #       with:
-  #         name: debug-binaries
-  #         path: |
-  #           crates/target/debug/webhid-daemon
-  #           crates/target/debug/webhid-native-messaging
-  #           crates/target/debug/uhid-mock
-
   unit:
     name: Unit Tests
     runs-on: ubuntu-24.04
@@ -54,30 +32,26 @@ jobs:
       - name: Run tests
         run: cargo test --manifest-path crates/Cargo.toml
 
-  # browser:
-  #   name: Browser-only Tests
-  #   runs-on: ubuntu-24.04
-  #   steps:
-  #     - uses: actions/checkout@v7
-  #     - uses: Swatinem/rust-cache@v2
-  #       with:
-  #         workspaces: crates -> target
-  #     - name: Build addon
-  #       run: |
-  #         npm ci
-  #         make build-addon
-  #     - name: Install Playwright
-  #       working-directory: tests
-  #       run: |
-  #         npm ci --allow-git=all
-  #         npx playwright install firefox
-  #     - name: Run browser-only tests
-  #       working-directory: tests
-  #       run: npx playwright test --project=firefox-browser
-  #
+  test-browser:
+    name: Browser-only Tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build addon
+        run: |
+          npm ci
+          make build-addon
+      - name: Install Playwright
+        working-directory: tests
+        run: |
+          npm ci
+          npx playwright install firefox --with-deps
+      - name: Run browser-only tests
+        working-directory: tests
+        run: npx playwright test --project=firefox-browser
+
   # e2e:
   #   name: E2E Tests
-  #   needs: build
   #   runs-on: ubuntu-24.04
   #   steps:
   #     - uses: actions/checkout@v7
@@ -87,13 +61,8 @@ jobs:
   #         workspaces: crates -> target
   #     - name: Install dependencies
   #       run: sudo apt-get update && sudo apt-get install -y libudev-dev
-  #     - name: Download binaries
-  #       uses: actions/download-artifact@v8
-  #       with:
-  #         name: debug-binaries
-  #         path: crates/target/debug/
-  #     - name: Fix permissions
-  #       run: chmod +x crates/target/debug/webhid-daemon crates/target/debug/webhid-native-messaging crates/target/debug/uhid-mock
+  #     - name: Build Rust binaries
+  #       run: cargo build --manifest-path crates/Cargo.toml
   #     - name: Setup uhid + udev rules
   #       run: |
   #         sudo modprobe uhid
@@ -110,8 +79,8 @@ jobs:
   #     - name: Install Playwright
   #       working-directory: tests
   #       run: |
-  #         npm ci --allow-git=all
-  #         npx playwright install firefox
+  #         npm ci
+  #         npx playwright install firefox --with-deps
   #     - name: Run E2E tests
   #       working-directory: tests
   #       run: npx playwright test --project=firefox-e2e
