@@ -1,10 +1,7 @@
-import { test as base, type Page, type BrowserContext, firefox, expect } from '@playwright/test';
-import { withExtension } from 'playwright-webextext';
-import { mkdtempSync } from 'fs';
-import { rm } from 'fs/promises';
-import { join, resolve, dirname } from 'path';
+import { test as base, type Page, expect } from '@playwright/test';
+import { createRequire } from 'module';
+import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import os from 'os';
 import { startServer } from './serve.mjs';
 import {
   startDaemon, stopDaemon,
@@ -14,9 +11,11 @@ import {
 } from './process.js';
 import type { WebHidTestAPI } from './types.js';
 
+const require = createRequire(import.meta.url);
+const { applyFirefoxHarness } = require('firefox-webext-playwright-harness');
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const ADDON_PATH = resolve(__dirname, '..', '..', '..', 'addon');
 
 function createTestApi(page: Page): WebHidTestAPI {
   return {
@@ -45,11 +44,14 @@ function createTestApi(page: Page): WebHidTestAPI {
   };
 }
 
-export const test = base.extend<{
+const harnessTest = applyFirefoxHarness(base, {
+  defaultRouteHandler: (route: any) => route.continue(),
+});
+
+export const test = harnessTest.extend<{
   daemon: DaemonProcess;
   uhidMock: UhidMockProcess;
   httpPort: number;
-  browserCtx: BrowserContext;
   sharedPage: Page;
   testApi: WebHidTestAPI;
 }>({
@@ -72,20 +74,13 @@ export const test = base.extend<{
     server.close();
   }, { scope: 'worker', auto: true }],
 
-  browserCtx: [async ({}, use) => {
+  nmManifest: [async ({}, use) => {
     await installNmManifest(DEFAULT_SOCKET);
-    const profileDir = mkdtempSync(join(os.tmpdir(), 'webhid-e2e-'));
-    const browserType = withExtension(firefox, ADDON_PATH);
-    const ctx = await browserType.launchPersistentContext(profileDir, { headless: false });
-    await use(ctx);
-    await ctx.close();
-    try { await rm(profileDir, { recursive: true, force: true }); } catch {}
+    await use();
     uninstallNmManifest();
-  }, { scope: 'worker' }],
+  }, { scope: 'worker', auto: true }],
 
-  sharedPage: [async ({ browserCtx, httpPort }, use) => {
-    const pages = browserCtx.pages();
-    const page = (pages.length == 0) ? await browserCtx.newPage() : pages[0];
+  sharedPage: [async ({ page, httpPort }, use) => {
     const url = `http://localhost:${httpPort}/tests/e2e/test-page.html`;
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
     await page.waitForFunction(
@@ -93,15 +88,15 @@ export const test = base.extend<{
       { timeout: 15000 },
     );
     await use(page);
-  }, { scope: 'worker' }],
+  }, { scope: 'test' }],
 
   testApi: [async ({ sharedPage }, use) => {
     await use(createTestApi(sharedPage));
-  }, { scope: 'worker' }],
+  }, { scope: 'test' }],
 
   beforeEach: [async ({ testApi }, use) => {
     await use();
-  }, { scope: 'worker', auto: true }],
+  }, { scope: 'test', auto: true }],
 });
 
 export { expect };

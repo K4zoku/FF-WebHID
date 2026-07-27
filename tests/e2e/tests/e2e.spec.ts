@@ -1,8 +1,5 @@
 import { test, expect } from "../helpers/fixtures.js";
-import {
-  grantDevicePermission,
-  ensureDevicePaired,
-} from "../helpers/devices.js";
+import { ensureDevicePaired } from "../helpers/devices.js";
 import { sendInput, waitForOutputReport } from "../helpers/process.js";
 
 // Nintendo Switch Pro Controller constants
@@ -20,17 +17,17 @@ const PID = 0x0001;
 const PACKET_SIZE = 64;
 
 test.describe.serial("Switch Pro Gamepad E2E", () => {
-  test.beforeEach(async ({ testApi }) => {
+  test.beforeEach(async ({ sharedPage, testApi }) => {
     await testApi.resetDeviceState();
-    await testApi.getDevices();
+    await ensureDevicePaired(sharedPage, testApi);
   });
 
   test("navigator.hid is polyfilled", async ({ testApi }) => {
     expect(await testApi.isPolyfillLoaded()).toBe(true);
   });
 
-  test("grant permission and verify VID/PID, collections", async ({ sharedPage }) => {
-    const devices = await grantDevicePermission(sharedPage);
+  test("grant permission and verify VID/PID, collections", async ({ sharedPage, testApi }) => {
+    const devices = await ensureDevicePaired(sharedPage, testApi);
     expect(devices.length).toBe(1);
     const device = devices[0];
     expect(device.vendorId).toBe(VID);

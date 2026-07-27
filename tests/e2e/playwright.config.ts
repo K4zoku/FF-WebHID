@@ -5,7 +5,6 @@ import { dirname, resolve } from 'path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Serve from project root so test-page.html is at /tests/e2e/test-page.html
 const projectRoot = resolve(__dirname, '..', '..');
 
 export default defineConfig({
@@ -15,16 +14,15 @@ export default defineConfig({
   fullyParallel: false,
   retries: 0,
   workers: 1,
-
-
-
+  globalSetup: 'firefox-webext-playwright-harness/globalSetup',
   use: {
-    baseURL: 'http://localhost:8080',
     headless: true,
     screenshot: 'only-on-failure',
     trace: 'retain-on-failure',
+    firefoxHarnessConfig: {
+      extensionPath: resolve(__dirname, '..', '..', 'addon'),
+    },
   },
-
   projects: [
     {
       name: 'firefox',
