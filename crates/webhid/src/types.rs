@@ -236,10 +236,7 @@ impl IpcResponse {
     }
 }
 
-// ---------------------------------------------------------------------------
-// NM action codes (numeric)
-// ---------------------------------------------------------------------------
-
+// NM action codes (numeric, used in the "a" field)
 pub const ACT_ENUM: u8 = 1;
 pub const ACT_OPEN: u8 = 2;
 pub const ACT_CLOSE: u8 = 3;

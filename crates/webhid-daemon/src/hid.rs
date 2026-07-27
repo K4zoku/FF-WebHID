@@ -313,7 +313,6 @@ pub fn uses_numbered_reports(buf: &[u8]) -> bool {
 }
 
 /// Block until a HID input report is available (or `timeout_ms` expires).
-/// hidapi's `read_timeout` handles polling internally.
 pub fn read_with_timeout(
     dev: &HidDevice,
     timeout_ms: i32,

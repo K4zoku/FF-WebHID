@@ -76,7 +76,10 @@ pub async fn start_server(
         .await
         .with_context(|| format!("bind WebSocket server on {addr}"))?;
 
-    let actual_port = listener.local_addr().unwrap().port();
+    let actual_port = listener
+        .local_addr()
+        .with_context(|| "get WS listener local addr")?
+        .port();
     log::info!("WebSocket server listening on 127.0.0.1:{actual_port}");
 
     if let Some(tx) = port_callback {
@@ -129,7 +132,7 @@ async fn handle_websocket(
                 let resp = Response::builder()
                     .status(StatusCode::FORBIDDEN)
                     .body(Some("Access denied".into()))
-                    .unwrap();
+                    .expect("static 403 response should build");
                 return Err(resp);
             }
             let hash = req

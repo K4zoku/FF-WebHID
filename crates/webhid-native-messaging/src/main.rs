@@ -87,9 +87,7 @@ const NM_SYSCALLS: &[libc::c_long] = &[
 #[cfg(not(all(target_os = "linux", not(debug_assertions))))]
 const NM_SYSCALLS: &[()] = &[];
 
-/// Write a JSON error frame to the NM host's stdout (→ addon).
-/// Format: `{"s":503,"E":"<msg>"}`: addon's `port.onMessage` receives it,
-/// logs the error, and the pending request (if any) gets rejected.
+/// Write a JSON error frame to the NM host's stdout (→ addon). Format: `{"s":503,"E":"<msg>"}`.
 async fn write_error_frame<W: AsyncWrite + Unpin>(w: &mut W, msg: &str) {
     let frame = serde_json::json!({"s": 503, "E": msg});
     let json = serde_json::to_vec(&frame).unwrap_or_default();
@@ -200,7 +198,7 @@ async fn main() -> anyhow::Result<()> {
             if let Some((s, p)) = matched {
                 break (s, p);
             }
-            let last_err = last_err.unwrap();
+            let last_err = last_err.expect("candidate_sockets returned zero entries");
             if total_waited >= CONNECT_TIMEOUT_MS {
                 let msg = format!(
                     "cannot connect to webhid-daemon (tried {}): {last_err}\n\

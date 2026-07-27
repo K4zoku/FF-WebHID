@@ -29,27 +29,19 @@ struct Entry {
 
 const HEX_CHARS: &[u8; 16] = b"0123456789abcdef";
 
-fn generate_session_token() -> Result<String, getrandom::Error> {
-    let mut buf = [0u8; 16];
-    getrandom::fill(&mut buf)?;
-    let mut out = String::with_capacity(32);
-    for b in buf {
+fn hex_encode(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for &b in bytes {
         out.push(HEX_CHARS[(b >> 4) as usize] as char);
         out.push(HEX_CHARS[(b & 0x0f) as usize] as char);
     }
-    Ok(out)
+    out
 }
 
-/// Generate a per-daemon-instance nonce (16 bytes → 32 hex chars).
-fn generate_ws_nonce() -> Result<String, getrandom::Error> {
-    let mut buf = [0u8; 16];
+fn random_hex_token(n: usize) -> Result<String, getrandom::Error> {
+    let mut buf = vec![0u8; n];
     getrandom::fill(&mut buf)?;
-    let mut out = String::with_capacity(32);
-    for b in buf {
-        out.push(HEX_CHARS[(b >> 4) as usize] as char);
-        out.push(HEX_CHARS[(b & 0x0f) as usize] as char);
-    }
-    Ok(out)
+    Ok(hex_encode(&buf))
 }
 
 fn build_report_collection_map(
@@ -105,20 +97,11 @@ fn compute_ws_auth_hash(token: &str, nonce: &str) -> String {
     hasher.update(token.as_bytes());
     hasher.update(nonce.as_bytes());
     let digest = hasher.finalize();
-    let mut out = String::with_capacity(64);
-    for b in digest {
-        out.push(HEX_CHARS[(b >> 4) as usize] as char);
-        out.push(HEX_CHARS[(b & 0x0f) as usize] as char);
-    }
-    out
+    hex_encode(&digest)
 }
 
 pub struct DeviceManager {
     devices: Arc<Mutex<HashMap<u32, Entry>>>,
-    /// Map: session token → device_id. Used only for size accounting;
-    /// WS auth goes through `ws_auth_hashes` instead.
-    #[allow(dead_code)]
-    tokens: Arc<Mutex<HashMap<String, u32>>>,
     ws_auth_hashes: Arc<Mutex<HashMap<String, u32>>>,
     ws_nonce: String,
     event_tx: broadcast::Sender<IpcResponse>,
@@ -126,11 +109,10 @@ pub struct DeviceManager {
 
 impl DeviceManager {
     pub fn new(event_tx: broadcast::Sender<IpcResponse>) -> Self {
-        let ws_nonce = generate_ws_nonce()
+        let ws_nonce = random_hex_token(16)
             .unwrap_or_else(|_| "00000000000000000000000000000000".to_string());
         Self {
             devices: Mutex::new(HashMap::new()).into(),
-            tokens: Mutex::new(HashMap::new()).into(),
             ws_auth_hashes: Mutex::new(HashMap::new()).into(),
             ws_nonce,
             event_tx,
@@ -146,7 +128,7 @@ impl DeviceManager {
     }
 
     pub fn open(&self, device_id: u32) -> anyhow::Result<(u32, Option<String>)> {
-        let session_token = generate_session_token()?;
+        let session_token = random_hex_token(16)?;
         let ws_auth_hash = compute_ws_auth_hash(&session_token, &self.ws_nonce);
 
         {
@@ -155,10 +137,6 @@ impl DeviceManager {
                 entry.refcount += 1;
                 let rc = entry.refcount;
                 drop(map);
-                self.tokens
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .insert(session_token.clone(), device_id);
                 self.ws_auth_hashes
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
@@ -190,10 +168,6 @@ impl DeviceManager {
             entry.refcount += 1;
             let rc = entry.refcount;
             drop(map);
-            self.tokens
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .insert(session_token.clone(), id);
             self.ws_auth_hashes
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
@@ -215,10 +189,6 @@ impl DeviceManager {
         };
 
         map.insert(id, entry);
-        self.tokens
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(session_token.clone(), id);
         self.ws_auth_hashes
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -321,9 +291,6 @@ impl DeviceManager {
         }
         drop(map);
 
-        let mut tokens = self.tokens.lock().unwrap_or_else(|e| e.into_inner());
-        tokens.retain(|_, &mut v| v != device_id);
-        drop(tokens);
         let mut hashes = self.ws_auth_hashes.lock().unwrap_or_else(|e| e.into_inner());
         hashes.retain(|_, &mut v| v != device_id);
         log::info!("[device_mgr] {device_id:#x} closed (refcount → 0)");
@@ -397,7 +364,6 @@ impl DeviceManager {
             }
         }
         drop(map);
-        self.tokens.lock().unwrap_or_else(|e| e.into_inner()).clear();
         self.ws_auth_hashes
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -414,9 +380,6 @@ impl DeviceManager {
             handle.abort();
         }
         drop(map);
-        let mut tokens = self.tokens.lock().unwrap_or_else(|e| e.into_inner());
-        tokens.retain(|_, &mut v| v != device_id);
-        drop(tokens);
         let mut hashes = self.ws_auth_hashes.lock().unwrap_or_else(|e| e.into_inner());
         hashes.retain(|_, &mut v| v != device_id);
         log::info!("[device_mgr] {device_id:#x} force-closed (hotplug removal)");

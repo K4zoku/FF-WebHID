@@ -1,4 +1,4 @@
-// Shared WebSocket transport for worker.js and control.js.
+// Shared WebSocket transport for worker.js.
 // Provides connect/reconnect/backoff/auth-failure-handling logic so both
 // workers don't duplicate ~50 lines of boilerplate.
 //

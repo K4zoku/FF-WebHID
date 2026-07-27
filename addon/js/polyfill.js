@@ -590,7 +590,6 @@
     }
   }
 
-  /** Rejects and clears any pending sendReport/sendFeatureReport/receiveFeatureReport promises for a device. */
   function rejectPendingReports(state, error) {
     if (!state.dataPending || !state.dataPending.size) return;
     for (const [, entry] of state.dataPending) {
@@ -601,7 +600,6 @@
     state.dataPending.clear();
   }
 
-  /** Returns whether any report in a collection (or its children) declares a non-zero report ID. */
   function collectionUsesReportIds(collection) {
     const reports = [
       ...(collection.inputReports || []),
@@ -612,7 +610,6 @@
     return (collection.children || []).some(collectionUsesReportIds);
   }
 
-  /** Returns whether a device's HID interface uses report IDs. */
   function deviceUsesReportIds(collections) {
     return (collections || []).some(collectionUsesReportIds);
   }
@@ -725,7 +722,6 @@
     }
   }
 
-  /** Recursively freezes an object and all of its own properties in place. */
   function deepFreeze(object) {
     const propNames = Reflect.ownKeys(object);
 

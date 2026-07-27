@@ -26,15 +26,8 @@ pub fn apply_prctl_hardening() {
 #[cfg(not(all(target_os = "linux", not(debug_assertions))))]
 pub fn apply_seccomp_filter<T>(_syscalls: &[T]) {}
 
-/// Apply a strict seccomp BPF filter (Linux, release-only).
-///
-/// Uses an allow-list approach: only the given `syscalls` are permitted;
-/// everything else kills the process.  The filter is applied to all current
-/// and future threads (via `SECCOMP_FILTER_FLAG_TSYNC`).
-///
-/// # Panics
-/// Calls `std::process::exit(1)` if the filter cannot be installed, since
-/// failing to seccomp is a security-critical failure.
+/// Apply a strict seccomp BPF allow-list filter (Linux, release-only).
+/// Panics via `exit(1)` if installation fails (security-critical).
 #[cfg(all(target_os = "linux", not(debug_assertions)))]
 pub fn apply_seccomp_filter(syscalls: &[libc::c_long]) {
     let filter = build_filter(syscalls);

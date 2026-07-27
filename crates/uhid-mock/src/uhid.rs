@@ -342,8 +342,7 @@ pub fn build_input_event(data: &[u8]) -> anyhow::Result<UhidEvent> {
     })
 }
 
-/// Build a `UHID_DESTROY` event. The kernel will tear down the virtual
-/// device and emit a final `UHID_STOP` event back to userspace.
+/// Build a `UHID_DESTROY` event.
 pub fn build_destroy_event() -> UhidEvent {
     // For UHID_DESTROY the kernel doesn't read any union field, so we
     // initialize with the smallest arm (input2) and zero it.

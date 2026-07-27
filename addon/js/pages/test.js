@@ -75,7 +75,6 @@ function isDeviceSelected(dev) {
 function updateUIForSelected() {
   const primary =
     selectedDevices.length > 0 ? selectedDevices[0] : selectedDevice;
-  // badge shows primary or count
   if (selectedDevices.length > 1) {
     setBadge(
       "badge-dev",
@@ -104,7 +103,6 @@ function updateUIForSelected() {
   document.getElementById("btn-open").disabled = !anyClosed; // enable if any device is closed
   document.getElementById("btn-close").disabled = !anyOpened;
 
-  // Standard I/O buttons
   document.getElementById("btn-listen").disabled = !anyOpened;
   document.getElementById("btn-send-report").disabled = !anyOpened;
   document.getElementById("btn-send-feature").disabled = !anyOpened;
@@ -161,10 +159,8 @@ document.getElementById("btn-enumerate").addEventListener("click", async () => {
 document.getElementById("btn-request").addEventListener("click", async () => {
   log("Requesting device (picker will open)…");
   try {
-    // The API now returns an array of selected devices (even for single selections)
     const devices = await navigator.hid.requestDevice({ filters: [] });
     if (Array.isArray(devices) && devices.length > 0) {
-      // Remember full returned array and pick the first as the primary for UI actions
       selectedDevices = devices;
       const device = devices[0];
       if (devices.length === 1) {
@@ -174,11 +170,8 @@ document.getElementById("btn-request").addEventListener("click", async () => {
           `Selected ${devices.length} devices, primary: ${deviceLabel(device)}`,
         );
       }
-      // Update UI selection to the primary device (selectDevice sets selectedDevices to [dev])
       selectedDevice = device;
-      // Keep selectedDevices as the full array
       updateUIForSelected();
-      // Re-render device list highlight
       navigator.hid
         .getDevices()
         .then(renderDeviceList)
@@ -286,7 +279,6 @@ document.getElementById("btn-close").addEventListener("click", async () => {
         try {
           if (d.opened) await d.close();
         } catch (e) {
-          /* ignore per-device errors */
         }
       }),
     );

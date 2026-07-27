@@ -547,7 +547,6 @@
             : "workerReceiveFeature";
     }
 
-    // Hot-path actions: use worker WS → NM (priority order).
     if (
       action === "workerSend" ||
       action === "workerSendFeature" ||
@@ -555,7 +554,6 @@
     ) {
       const deviceId = payload.deviceId;
 
-      // Worker WS data plane.
       const worker = workers.get(deviceId);
       if (worker && workerReady.has(deviceId)) {
         const workerType =
@@ -572,7 +570,7 @@
         if (action === "workerSend" || action === "workerSendFeature")
           workerMsg.data = payload.data;
 
-        if (!isFireAndForget || action === "workerReceiveFeature") {
+        {
           let callbackMap = workerCallbacks.get(deviceId);
           if (!callbackMap) {
             callbackMap = new Map();
@@ -611,7 +609,7 @@
         if (action === "workerSend" || action === "workerSendFeature")
           workerMsg.data = payload.data;
 
-        if (!isFireAndForget || action === "workerReceiveFeature") {
+        {
           let callbackMap = workerCallbacks.get(deviceId);
           if (!callbackMap) {
             callbackMap = new Map();
@@ -646,10 +644,6 @@
             : "receiveFeatureReport";
       try {
         const msg = Object.assign({ action: fallbackAction }, payload || {});
-        if (isFireAndForget && action !== "workerReceiveFeature") {
-          browser.runtime.sendMessage(msg).catch(() => {});
-          return;
-        }
         const response = await browser.runtime.sendMessage(msg);
         const transfers =
           response && response.d instanceof Uint8Array

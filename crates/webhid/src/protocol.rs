@@ -77,36 +77,36 @@ pub async fn read_nm_request<R: AsyncRead + Unpin>(reader: &mut R) -> io::Result
         as u8;
     let id = v.get("n").and_then(|x| x.as_u64()).map(|n| n as u32);
     Ok(match action {
-        1 => NmRequest::Enumerate { id },
-        2 => NmRequest::Open {
+        crate::ACT_ENUM => NmRequest::Enumerate { id },
+        crate::ACT_OPEN => NmRequest::Open {
             id,
             device_id: get_u32(&v, "i")?,
         },
-        3 => NmRequest::Close {
+        crate::ACT_CLOSE => NmRequest::Close {
             id,
             device_id: get_u32(&v, "i")?,
         },
-        4 => NmRequest::SendReport {
+        crate::ACT_SEND_REPORT => NmRequest::SendReport {
             id,
             packed: get_b64(&v, "d")?,
         },
-        5 => NmRequest::ReceiveFeatureReport {
+        crate::ACT_RECV_FEATURE => NmRequest::ReceiveFeatureReport {
             id,
             device_id: get_u32(&v, "i")?,
             report_id: get_u8(&v, "r")?,
         },
-        6 => NmRequest::SendFeatureReport {
+        crate::ACT_SEND_FEATURE => NmRequest::SendFeatureReport {
             id,
             device_id: get_u32(&v, "i")?,
             report_id: get_u8(&v, "r")?,
             data: get_b64(&v, "d")?,
         },
-        7 => NmRequest::SetDataPlane {
+        crate::ACT_SET_DATA_PLANE => NmRequest::SetDataPlane {
             id,
             device_id: get_u32(&v, "i")?,
             mode: get_str(&v, "m")?,
         },
-        8 => NmRequest::Handshake { id },
+        crate::ACT_HANDSHAKE => NmRequest::Handshake { id },
         _ => {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -233,7 +233,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_read_nm_request_numeric_action() {
-        use crate::NmRequest;
+use crate::NmRequest;
         // Enumerate: {"a":1}
         let mut buf = Vec::new();
         write_message(&mut buf, &serde_json::json!({"a": 1}))

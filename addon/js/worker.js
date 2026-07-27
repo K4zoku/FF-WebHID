@@ -145,9 +145,7 @@ function handleSend(msg, msgType) {
         error: String(e.message || e),
       }),
   });
-  // E2: If the WS dropped between the isOpen() check above and send(),
-  // reject the pending entry immediately so the caller's Promise resolves
-  // instead of hanging until the worker is torn down.
+  // Reject pending promise if WS closed between check and send.
   if (!transport.send(frame)) {
     const entry = pending.get(reqId);
     if (entry) {
