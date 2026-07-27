@@ -193,8 +193,6 @@ function handleReceiveFeature(msg) {
         error: String(e.message || e),
       }),
   });
-  // E2: Same race protection as handleSend — reject immediately if the WS
-  // transport refused the frame, otherwise the feature-read Promise hangs.
   if (!transport.send(frame)) {
     const entry = pending.get(reqId);
     if (entry) {

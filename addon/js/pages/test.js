@@ -233,10 +233,8 @@ function renderDeviceList(devices) {
 
 function selectDevice(dev) {
   selectedDevice = dev;
-  // When a device is selected from the list by the user, treat it as the sole selected device
   selectedDevices = [dev];
   log(`Selected: ${dev.productName}`);
-  // Re-render to show selection highlight
   navigator.hid
     .getDevices()
     .then(renderDeviceList)
@@ -246,7 +244,6 @@ function selectDevice(dev) {
 
 // ── Open ──────────────────────────────────────────────────────────────────────
 document.getElementById("btn-open").addEventListener("click", async () => {
-  // Open all selected devices
   const toOpen =
     Array.isArray(selectedDevices) && selectedDevices.length > 0
       ? selectedDevices
@@ -280,7 +277,6 @@ document.getElementById("btn-close").addEventListener("click", async () => {
     return;
   stopListening();
   try {
-    // Close all selected devices (the API may have returned multiple interfaces)
     const toClose =
       Array.isArray(selectedDevices) && selectedDevices.length > 0
         ? selectedDevices

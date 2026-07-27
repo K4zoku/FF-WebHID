@@ -310,10 +310,6 @@
     return (result[key] || []).includes(deviceId);
   }
 
-  // E4: Fan out a global-reset message to every content-script bridge
-  // currently loaded in any tab. The bridge clears its _sessionTokens /
-  // _openDevices maps and emits disconnect events to the page. Used when
-  // the NM host / daemon disappears so callers stop using stale tokens.
   function broadcastGlobalReset() {
     browser.tabs
       .query({})
@@ -432,12 +428,6 @@
           this.port = null;
           for (const [id, p] of this.pending) p.resolve({ s: 503 });
           this.pending.clear();
-          // E4: Broadcast a global-reset to every content-script bridge so
-          // they drop stale _sessionTokens / _openDevices state. Daemon
-          // restart invalidates every session token; without this, the
-          // bridge would happily keep routing sendReport using tokens the
-          // daemon no longer recognizes, leaving pages in a half-broken
-          // state until they explicitly close + reopen.
           broadcastGlobalReset();
           this.scheduleReconnect();
         });
@@ -557,10 +547,6 @@
     },
 
     onPackedData(b64) {
-      // E8: Wrap the whole handler in try/catch. A malformed b64 string or
-      // truncated payload used to throw out of the NM onMessage listener,
-      // which kills the NM connection and forces a reconnect. Now we just
-      // log and drop the bad frame, keeping the NM stream alive.
       let bin;
       try {
         bin = Uint8Array.fromBase64(b64);
