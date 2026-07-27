@@ -1,0 +1,134 @@
+{
+  "extensionName": {
+    "message": "WebHID"
+  },
+  "extensionDescription": {
+    "message": "WebHID API triển khai cho Firefox"
+  },
+  "popupTitle": {
+    "message": "WebHID"
+  },
+  "popupPairedDevices": {
+    "message": "Thiết bị đã ghép"
+  },
+  "popupNoDevices": {
+    "message": "Không có thiết bị nào được ghép cho trang này."
+  },
+  "popupSettings": {
+    "message": "Cài đặt"
+  },
+  "popupDataPlane": {
+    "message": "Kênh dữ liệu"
+  },
+  "popupDataPlaneDesc": {
+    "message": "WebSocket (Worker) hoặc Native Messaging"
+  },
+  "popupDataPlaneWs": {
+    "message": "WebSocket (Worker)"
+  },
+  "popupDataPlaneNm": {
+    "message": "Native Messaging"
+  },
+  "popupWorkerPolyfill": {
+    "message": "Worker Polyfill"
+  },
+  "popupWorkerPolyfillDesc": {
+    "message": "Tiêm WebHID stub vào Worker scripts trên trang này"
+  },
+  "popupLogLevel": {
+    "message": "Mức log"
+  },
+  "popupLogLevelDesc": {
+    "message": "Độ chi tiết console output cho trang này"
+  },
+  "logLevelError": {
+    "message": "Lỗi"
+  },
+  "logLevelWarn": {
+    "message": "Cảnh báo"
+  },
+  "logLevelInfo": {
+    "message": "Thông tin"
+  },
+  "logLevelDebug": {
+    "message": "Gỡ lỗi"
+  },
+  "popupDefaultNote": {
+    "message": "Thay đổi ở đây ghi đè mặc định cho trang này."
+  },
+  "popupGlobalSettings": {
+    "message": "Cài đặt chung →"
+  },
+  "popupNoSite": {
+    "message": "(không có trang)"
+  },
+  "popupUnknown": {
+    "message": "Không rõ"
+  },
+  "popupPairedDevice": {
+    "message": "Thiết bị đã ghép"
+  },
+  "popupRevoke": {
+    "message": "Thu hồi"
+  },
+  "popupDeviceCount": {
+    "message": "($1/$2)"
+  },
+  "settingsTitle": {
+    "message": "Cài đặt WebHID"
+  },
+  "settingsDaemonAsNmHost": {
+    "message": "Daemon làm NM host"
+  },
+  "settingsDataPlane": {
+    "message": "Kênh dữ liệu"
+  },
+  "settingsDataPlaneWs": {
+    "message": "WebSocket (Worker)"
+  },
+  "settingsDataPlaneNm": {
+    "message": "Native Messaging (qua bridge)"
+  },
+  "settingsDevicePickerMode": {
+    "message": "Chế độ chọn thiết bị"
+  },
+  "settingsDevicePickerModal": {
+    "message": "Modal (overlay)"
+  },
+  "settingsDevicePickerPageAction": {
+    "message": "Page Action (popup thanh url)"
+  },
+  "settingsDevicePickerWindow": {
+    "message": "Cửa sổ (popup riêng)"
+  },
+  "settingsWorkerPolyfill": {
+    "message": "Worker Polyfill"
+  },
+  "settingsLogLevel": {
+    "message": "Mức log"
+  },
+  "pickerTitle": {
+    "message": "Chọn thiết bị HID"
+  },
+  "pickerCancel": {
+    "message": "Hủy"
+  },
+  "pickerConnect": {
+    "message": "Kết nối"
+  },
+  "pickerNoDevices": {
+    "message": "Không tìm thấy thiết bị HID"
+  },
+  "pickerNoMatch": {
+    "message": "Không có thiết bị khớp với bộ lọc"
+  },
+  "pickerNoPending": {
+    "message": "Không có yêu cầu thiết bị đang chờ"
+  },
+  "pickerLoading": {
+    "message": "Đang tải thiết bị..."
+  },
+  "pickerInterfaces": {
+    "message": "$1 giao diện"
+  }
+}

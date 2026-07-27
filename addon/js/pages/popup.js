@@ -1,8 +1,13 @@
 (async () => {
   const logger = webhid.import("logger");
   const guessDeviceType = webhid.import("guessDeviceType");
+  const t = webhid.import("t");
+  const localizeHTML = webhid.import("localizeHTML");
   const GLOBAL_DEFAULTS = webhid.import("GLOBAL_DEFAULTS");
   logger.initLogger("popup");
+
+  localizeHTML(document);
+
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
   let origin = "";
   if (tab && tab.url) {
@@ -15,7 +20,7 @@
   }
 
   const siteLabel = document.getElementById("site-name");
-  siteLabel.textContent = origin || "(no site)";
+  siteLabel.textContent = origin || t("popupNoSite");
 
   const siteKey = origin ? `site:${origin}` : null;
   const siteDevicesKey = origin ? encodeURIComponent(origin) : null;
@@ -120,7 +125,7 @@
       if (token !== renderToken) return;
 
       const isDisconnected = !cache.some((d) => d.deviceId === hash);
-      const name = device ? device.productName || "Unknown" : "Paired device";
+      const name = device ? device.productName || t("popupUnknown") : t("popupPairedDevice");
       const type = guessDeviceType(device || { productName: name });
       const vid = device ? device.vendorId || 0 : 0;
       const pid = device ? device.productId || 0 : 0;
@@ -128,6 +133,7 @@
 
       const card = document.createElement("div");
       card.className = "device-card";
+      card.setAttribute("role", "listitem");
       if (isDisconnected) card.classList.add("disconnected");
       if (device && !isDisconnected && openIds.has(device.deviceId))
         card.classList.add("open");
@@ -162,7 +168,8 @@
 
       const btn = document.createElement("button");
       btn.className = "btn-revoke";
-      btn.textContent = "Revoke";
+      btn.textContent = t("popupRevoke");
+      btn.setAttribute("aria-label", t("popupRevoke") + ": " + name);
       btn.onclick = () => removeDevice(hash);
       card.appendChild(btn);
 
@@ -170,7 +177,7 @@
       if (device && !isDisconnected && openIds.has(device.deviceId)) openCount++;
     }
     document.getElementById("device-count").textContent =
-      `(${openCount}/${hashes.length})`;
+      t("popupDeviceCount", [String(openCount), String(hashes.length)]);
   }
 
   await renderDevices();

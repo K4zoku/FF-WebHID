@@ -1,6 +1,11 @@
 (async () => {
   const { logger, GLOBAL_DEFAULTS } = webhid;
+  const t = webhid.import("t");
+  const localizeHTML = webhid.import("localizeHTML");
   logger.initLogger("settings");
+
+  localizeHTML(document);
+
   const current = await browser.storage.local.get(GLOBAL_DEFAULTS);
 
   for (const key of ["daemonAsNmHost", "workerPolyfillEnabled"]) {

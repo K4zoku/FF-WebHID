@@ -17,6 +17,7 @@
   "background": {
     "scripts": [
       "js/utils/bootstrap.js",
+      "js/utils/i18n.js",
       "js/utils/resource.js",
       "js/utils/http.js",
       "js/utils/logger.js",
@@ -47,6 +48,7 @@
         "<all_urls>"
       ],
       "js": [
+        "js/utils/i18n.js",
         "js/inject-main.js"
       ],
       "run_at": "document_start",
@@ -58,6 +60,7 @@
       ],
       "js": [
         "js/utils/bootstrap.js",
+        "js/utils/i18n.js",
         "js/utils/resource.js",
         "js/utils/http.js",
         "js/utils/logger.js",
@@ -74,5 +77,6 @@
     "gecko": {
       "id": "webhid@k4zoku.dev"
     }
-  }
+  },
+  "default_locale": "en"
 }

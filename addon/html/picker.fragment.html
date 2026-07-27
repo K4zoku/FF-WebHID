@@ -261,17 +261,17 @@
     color: var(--danger, #f88);
   }
 </style>
-<dialog class="webhid-modal">
+<dialog class="webhid-modal" role="dialog" aria-modal="true" aria-labelledby="webhidModalTitle">
   <form method="dialog" class="webhid-modal-form">
     <div class="webhid-modal-header">
-      <h2>Select a HID Device</h2>
+      <h2 id="webhidModalTitle" data-i18n="pickerTitle">Select a HID Device</h2>
     </div>
     <div class="webhid-modal-content">
-      <div class="webhid-device-list" id="webhidDeviceList"></div>
+      <div class="webhid-device-list" id="webhidDeviceList" role="list" aria-live="polite"></div>
       <template id="webhid-device-template">
-        <label class="webhid-device-item" tabindex="0">
+        <label class="webhid-device-item" tabindex="0" role="option">
           <input type="radio" name="webhid-device" class="webhid-device-radio">
-          <span class="webhid-device-icon"></span>
+          <span class="webhid-device-icon" aria-hidden="true"></span>
           <div class="webhid-device-body">
             <div class="webhid-device-name"></div>
             <div class="webhid-device-vendor"></div>
@@ -281,8 +281,8 @@
       </template>
     </div>
     <div class="webhid-modal-footer">
-      <button type="submit" class="webhid-cancel-button" id="webhidCancelBtn" value="cancel">Cancel</button>
-      <button type="submit" class="webhid-connect-button" id="webhidConnectBtn" value="selected" disabled>Connect</button>
+      <button type="submit" class="webhid-cancel-button" id="webhidCancelBtn" value="cancel" data-i18n="pickerCancel">Cancel</button>
+      <button type="submit" class="webhid-connect-button" id="webhidConnectBtn" value="selected" disabled data-i18n="pickerConnect">Connect</button>
     </div>
   </form>
 </dialog>

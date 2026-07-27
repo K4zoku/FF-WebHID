@@ -20,6 +20,7 @@
   "background": {
     "scripts": [
       "js/utils/bootstrap.js",
+      "js/utils/i18n.js",
       "js/utils/resource.js",
       "js/utils/http.js",
       "js/utils/logger.js",
@@ -51,6 +52,7 @@
       ],
       "js": [
         "js/utils/bootstrap.js",
+        "js/utils/i18n.js",
         "js/utils/resource.js",
         "js/utils/http.js",
         "js/utils/logger.js",
@@ -68,6 +70,7 @@
       ],
       "js": [
         "js/utils/bootstrap.js",
+        "js/utils/i18n.js",
         "js/utils/resource.js",
         "js/utils/http.js",
         "js/utils/logger.js",
@@ -91,5 +94,6 @@
         "optional": []
       }
     }
-  }
+  },
+  "default_locale": "en"
 }

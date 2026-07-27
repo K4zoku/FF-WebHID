@@ -139,7 +139,7 @@
       );
     }
     containerEl.innerHTML =
-      '<div class="webhid-no-devices">No devices match the specified filters</div>';
+      '<div class="webhid-no-devices" role="status">' + webhid.import("t")("pickerNoMatch") + '</div>';
     return true;
   }
 

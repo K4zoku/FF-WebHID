@@ -3,6 +3,8 @@
   const logger = globalThis.webhid.import("logger");
   const fetchResource = globalThis.webhid.import("fetchResource");
   const http = globalThis.webhid.import("http");
+  const t = globalThis.webhid.import("t");
+  const localizeHTML = globalThis.webhid.import("localizeHTML");
   const guessDeviceType = globalThis.webhid.import("guessDeviceType");
   const applyFilters = globalThis.webhid.import("applyFilters");
   const groupDevices = globalThis.webhid.import("groupDevices");
@@ -38,6 +40,7 @@
       const templateDoc = new DOMParser().parseFromString(html, "text/html");
       const template = templateDoc.querySelector("#webhid-picker-template");
       this.shadow.appendChild(template.content.cloneNode(true));
+      localizeHTML(this.shadow);
 
       this.dialog = this.shadow.querySelector(".webhid-modal");
 
@@ -182,7 +185,7 @@
 
       if (this.devices.length === 0) {
         deviceList.innerHTML =
-          '<div class="webhid-no-devices">No HID devices found</div>';
+          '<div class="webhid-no-devices" role="status">' + t("pickerNoDevices") + '</div>';
         return;
       }
 
@@ -247,7 +250,7 @@
 
         const iface = clone.querySelector(".webhid-device-iface");
         devices.length > 1
-          ? (iface.textContent = `${devices.length} interfaces`)
+          ? (iface.textContent = t("pickerInterfaces", [String(devices.length)]))
           : iface.remove();
 
         deviceList.appendChild(clone);

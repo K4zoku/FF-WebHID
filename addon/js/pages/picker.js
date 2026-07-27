@@ -2,12 +2,16 @@
   const logger = webhid.import("logger");
   const http = webhid.import("http");
   const guessDeviceType = webhid.import("guessDeviceType");
+  const t = webhid.import("t");
+  const localizeHTML = webhid.import("localizeHTML");
   const GLOBAL_DEFAULTS = webhid.import("GLOBAL_DEFAULTS");
   const applyFilters = webhid.import("applyFilters");
   const groupDevices = webhid.import("groupDevices");
   const logExcludedDevices = webhid.import("logExcludedDevices");
   const applyDeviceIcon = webhid.import("applyDeviceIcon");
   logger.initLogger("picker-popup");
+
+  localizeHTML(document);
 
   const listEl = document.getElementById("picker-list");
   const cancelBtn = document.getElementById("picker-cancel");
@@ -24,14 +28,14 @@
     pendingRequest = resp;
     if (!pendingRequest) {
       listEl.innerHTML =
-        '<div class="webhid-no-devices">No pending device request</div>';
+        '<div class="webhid-no-devices" role="status">' + t("pickerNoPending") + '</div>';
       return;
     }
     await loadDevices();
   }
 
   async function loadDevices() {
-    listEl.innerHTML = '<div class="webhid-loading">Loading devices...</div>';
+    listEl.innerHTML = '<div class="webhid-loading" role="status">' + t("pickerLoading") + '</div>';
     const response = await browser.runtime.sendMessage({ action: "enumerate" });
     const devices =
       http.isOk(response.s) && Array.isArray(response.D) ? response.D : [];
@@ -62,6 +66,7 @@
       const item = document.createElement("label");
       item.className = "webhid-device-item";
       item.tabIndex = 0;
+      item.setAttribute("role", "option");
       item.dataset.deviceId = groupId;
 
       const radio = document.createElement("input");
@@ -91,7 +96,7 @@
       if (devs.length > 1) {
         const ifaceEl = document.createElement("div");
         ifaceEl.className = "webhid-device-iface";
-        ifaceEl.textContent = `${devs.length} interfaces`;
+        ifaceEl.textContent = t("pickerInterfaces", [String(devs.length)]);
         body.appendChild(ifaceEl);
       }
 

@@ -1,0 +1,134 @@
+{
+  "extensionName": {
+    "message": "WebHID"
+  },
+  "extensionDescription": {
+    "message": "WebHID API implementation for Firefox"
+  },
+  "popupTitle": {
+    "message": "WebHID"
+  },
+  "popupPairedDevices": {
+    "message": "Paired Devices"
+  },
+  "popupNoDevices": {
+    "message": "No devices paired for this site."
+  },
+  "popupSettings": {
+    "message": "Settings"
+  },
+  "popupDataPlane": {
+    "message": "Data Plane"
+  },
+  "popupDataPlaneDesc": {
+    "message": "WebSocket (Worker) or Native Messaging"
+  },
+  "popupDataPlaneWs": {
+    "message": "WebSocket (Worker)"
+  },
+  "popupDataPlaneNm": {
+    "message": "Native Messaging"
+  },
+  "popupWorkerPolyfill": {
+    "message": "Worker Polyfill"
+  },
+  "popupWorkerPolyfillDesc": {
+    "message": "Inject WebHID stubs into Worker scripts on this site"
+  },
+  "popupLogLevel": {
+    "message": "Log Level"
+  },
+  "popupLogLevelDesc": {
+    "message": "Console output verbosity for this site"
+  },
+  "logLevelError": {
+    "message": "Error"
+  },
+  "logLevelWarn": {
+    "message": "Warn"
+  },
+  "logLevelInfo": {
+    "message": "Info"
+  },
+  "logLevelDebug": {
+    "message": "Debug"
+  },
+  "popupDefaultNote": {
+    "message": "Changes here override defaults for this site."
+  },
+  "popupGlobalSettings": {
+    "message": "Global settings →"
+  },
+  "popupNoSite": {
+    "message": "(no site)"
+  },
+  "popupUnknown": {
+    "message": "Unknown"
+  },
+  "popupPairedDevice": {
+    "message": "Paired device"
+  },
+  "popupRevoke": {
+    "message": "Revoke"
+  },
+  "popupDeviceCount": {
+    "message": "($1/$2)"
+  },
+  "settingsTitle": {
+    "message": "WebHID Settings"
+  },
+  "settingsDaemonAsNmHost": {
+    "message": "Daemon as NM host"
+  },
+  "settingsDataPlane": {
+    "message": "Data Plane"
+  },
+  "settingsDataPlaneWs": {
+    "message": "WebSocket (Worker)"
+  },
+  "settingsDataPlaneNm": {
+    "message": "Native Messaging (via bridge)"
+  },
+  "settingsDevicePickerMode": {
+    "message": "Device Picker Mode"
+  },
+  "settingsDevicePickerModal": {
+    "message": "Modal (overlay)"
+  },
+  "settingsDevicePickerPageAction": {
+    "message": "Page Action (url bar popup)"
+  },
+  "settingsDevicePickerWindow": {
+    "message": "Window (separate popup window)"
+  },
+  "settingsWorkerPolyfill": {
+    "message": "Worker Polyfill"
+  },
+  "settingsLogLevel": {
+    "message": "Log Level"
+  },
+  "pickerTitle": {
+    "message": "Select a HID Device"
+  },
+  "pickerCancel": {
+    "message": "Cancel"
+  },
+  "pickerConnect": {
+    "message": "Connect"
+  },
+  "pickerNoDevices": {
+    "message": "No HID devices found"
+  },
+  "pickerNoMatch": {
+    "message": "No devices match the specified filters"
+  },
+  "pickerNoPending": {
+    "message": "No pending device request"
+  },
+  "pickerLoading": {
+    "message": "Loading devices..."
+  },
+  "pickerInterfaces": {
+    "message": "$1 interfaces"
+  }
+}
