@@ -157,22 +157,7 @@
     });
   }
 
-  function sendFireAndForget(action, payload) {
-    const msg = {
-      id: 0,
-      action,
-      payload: payload || {},
-      fireAndForget: true,
-    };
-    const transfers = [];
-    if (payload && payload.data instanceof Uint8Array) {
-      transfers.push(payload.data.buffer);
-    }
-    bridgePort.postMessage(msg, transfers.length ? transfers : undefined);
-  }
-
   settings.on("dataPlane", (v) => logger.info("data plane changed: " + v));
-  settings.on("fireAndForget", (v) => logger.info("fire-and-forget: " + v));
   settings.on("logLevel", (v) => {
     if (logger.applyLevel) logger.applyLevel(v);
   });
@@ -180,13 +165,7 @@
   sendRequest("getSettings", {}).then((result) => {
     if (!result) return;
     settings.set(result);
-    logger.info(
-      "data plane: " +
-        settings.dataPlane +
-        " (fire-and-forget: " +
-        settings.fireAndForget +
-        ")",
-    );
+    logger.info("data plane: " + settings.dataPlane);
   });
 
   function getPolicyContext() {
@@ -401,16 +380,17 @@
           if (!state.dataPort) throw new Error("data port not connected");
           const reqId = ++nextReqId;
           const msg = { type: "send", reqId, reportId, data: buffer };
-          if (settings.fireAndForget) {
-            state.dataPort.postMessage(msg, [buffer.buffer]);
-            return;
-          }
           return new Promise((resolve, reject) => {
             state.dataPending = state.dataPending || new Map();
             state.dataPending.set(reqId, {
               resolve: () => resolve(),
-              reject: (e) =>
-                reject(new DOMException(e.message || e, "NetworkError")),
+              reject: (e) => {
+                if (e && e.blocked) {
+                  reject(new DOMException("Report is blocked", "NotAllowedError"));
+                } else {
+                  reject(new DOMException(e && e.message || e || "send failed", "NetworkError"));
+                }
+              },
             });
             state.dataPort.postMessage(msg, [buffer.buffer]);
           });
@@ -448,8 +428,13 @@
                   ),
                 );
               },
-              reject: (e) =>
-                reject(new DOMException(e.message || e, "NetworkError")),
+              reject: (e) => {
+                if (e && e.blocked) {
+                  reject(new DOMException("Report is blocked", "NotAllowedError"));
+                } else {
+                  reject(new DOMException(e && e.message || e || "receive failed", "NetworkError"));
+                }
+              },
             });
             state.dataPort.postMessage({
               type: "receiveFeature",
@@ -485,16 +470,17 @@
           if (!state.dataPort) throw new Error("data port not connected");
           const reqId = ++nextReqId;
           const msg = { type: "sendFeature", reqId, reportId, data: buffer };
-          if (settings.fireAndForget) {
-            state.dataPort.postMessage(msg, [buffer.buffer]);
-            return undefined;
-          }
           return new Promise((resolve, reject) => {
             state.dataPending = state.dataPending || new Map();
             state.dataPending.set(reqId, {
               resolve: () => resolve(undefined),
-              reject: (e) =>
-                reject(new DOMException(e.message || e, "NetworkError")),
+              reject: (e) => {
+                if (e && e.blocked) {
+                  reject(new DOMException("Report is blocked", "NotAllowedError"));
+                } else {
+                  reject(new DOMException(e && e.message || e || "send failed", "NetworkError"));
+                }
+              },
             });
             state.dataPort.postMessage(msg, [buffer.buffer]);
           });

@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use tokio::io::{AsyncRead, BufReader};
 use tokio::sync::{broadcast, mpsc};
+use crate::blocklist::ReportType;
 use webhid::{IpcResponse, NmMessage, NmRequest, NmResponse, parse_packed_send, protocol};
 
 use crate::{device_mgr::DeviceManager, hid};
@@ -125,23 +126,27 @@ async fn dispatch(device_mgr: &DeviceManager, req: NmRequest, ws_port: u16) -> N
 
         NmRequest::SendReport { packed, .. } => match parse_packed_send(&packed) {
             Ok((req_id, device_id, report_id, data)) => {
-                let result_resp = match device_mgr.get_file(device_id) {
-                    Err(_) => NmResponse::err(404),
-                    Ok(dev_arc) => {
-                        let data_owned = data.to_vec();
-                        let result = tokio::task::spawn_blocking(move || {
-                            let dev = dev_arc.lock().unwrap_or_else(|e| e.into_inner());
-                            hid::write_report(&dev, report_id, &data_owned)
-                        })
-                        .await;
-                        match result {
-                            Ok(Ok(())) => NmResponse::ok(),
-                            Ok(Err(_)) => NmResponse::err(500),
-                            Err(_) => NmResponse::err(500),
+                let mut r = if device_mgr.is_report_blocked(device_id, report_id, ReportType::Output)
+                {
+                    NmResponse::err(403)
+                } else {
+                    match device_mgr.get_file(device_id) {
+                        Err(_) => NmResponse::err(404),
+                        Ok(dev_arc) => {
+                            let data_owned = data.to_vec();
+                            let result = tokio::task::spawn_blocking(move || {
+                                let dev = dev_arc.lock().unwrap_or_else(|e| e.into_inner());
+                                hid::write_report(&dev, report_id, &data_owned)
+                            })
+                            .await;
+                            match result {
+                                Ok(Ok(())) => NmResponse::ok(),
+                                Ok(Err(_)) => NmResponse::err(500),
+                                Err(_) => NmResponse::err(500),
+                            }
                         }
                     }
                 };
-                let mut r = result_resp;
                 r.id = Some(req_id);
                 r
             }
@@ -152,42 +157,54 @@ async fn dispatch(device_mgr: &DeviceManager, req: NmRequest, ws_port: u16) -> N
             device_id,
             report_id,
             ..
-        } => match device_mgr.get_file(device_id) {
-            Err(_) => NmResponse::err(404),
-            Ok(dev_arc) => {
-                let result = tokio::task::spawn_blocking(move || {
-                    let dev = dev_arc.lock().unwrap_or_else(|e| e.into_inner());
-                    hid::read_feature_report(&dev, report_id)
-                })
-                .await;
-                match result {
-                    Ok(Ok(data)) => NmResponse::ok_with_data(data),
-                    Ok(Err(_)) => NmResponse::err(500),
-                    Err(_) => NmResponse::err(500),
+        } => {
+            if device_mgr.is_report_blocked(device_id, report_id, ReportType::Feature) {
+                NmResponse::err(403)
+            } else {
+                match device_mgr.get_file(device_id) {
+                    Err(_) => NmResponse::err(404),
+                    Ok(dev_arc) => {
+                        let result = tokio::task::spawn_blocking(move || {
+                            let dev = dev_arc.lock().unwrap_or_else(|e| e.into_inner());
+                            hid::read_feature_report(&dev, report_id)
+                        })
+                        .await;
+                        match result {
+                            Ok(Ok(data)) => NmResponse::ok_with_data(data),
+                            Ok(Err(_)) => NmResponse::err(500),
+                            Err(_) => NmResponse::err(500),
+                        }
+                    }
                 }
             }
-        },
+        }
 
         NmRequest::SendFeatureReport {
             device_id,
             report_id,
             data,
             ..
-        } => match device_mgr.get_file(device_id) {
-            Err(_) => NmResponse::err(404),
-            Ok(dev_arc) => {
-                let result = tokio::task::spawn_blocking(move || {
-                    let dev = dev_arc.lock().unwrap_or_else(|e| e.into_inner());
-                    hid::write_feature_report(&dev, report_id, &data)
-                })
-                .await;
-                match result {
-                    Ok(Ok(())) => NmResponse::ok(),
-                    Ok(Err(_)) => NmResponse::err(500),
-                    Err(_) => NmResponse::err(500),
+        } => {
+            if device_mgr.is_report_blocked(device_id, report_id, ReportType::Feature) {
+                NmResponse::err(403)
+            } else {
+                match device_mgr.get_file(device_id) {
+                    Err(_) => NmResponse::err(404),
+                    Ok(dev_arc) => {
+                        let result = tokio::task::spawn_blocking(move || {
+                            let dev = dev_arc.lock().unwrap_or_else(|e| e.into_inner());
+                            hid::write_feature_report(&dev, report_id, &data)
+                        })
+                        .await;
+                        match result {
+                            Ok(Ok(())) => NmResponse::ok(),
+                            Ok(Err(_)) => NmResponse::err(500),
+                            Err(_) => NmResponse::err(500),
+                        }
+                    }
                 }
             }
-        },
+        }
 
         NmRequest::SetDataPlane {
             device_id, mode, ..

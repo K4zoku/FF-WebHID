@@ -39,7 +39,6 @@
 
   const dataPlaneSelect = document.getElementById("dataPlane");
   dataPlaneSelect.value = settings.dataPlane;
-  document.getElementById("fireAndForget").checked = settings.fireAndForget;
   document.getElementById("workerPolyfillEnabled").checked = settings.workerPolyfillEnabled || false;
 
   const logLevelSelect = document.getElementById("logLevel");
@@ -47,9 +46,6 @@
 
   dataPlaneSelect.addEventListener("change", (e) => {
     saveSetting("dataPlane", e.target.value);
-  });
-  document.getElementById("fireAndForget").addEventListener("change", (e) => {
-    saveSetting("fireAndForget", e.target.checked);
   });
   document.getElementById("workerPolyfillEnabled").addEventListener("change", (e) => {
     saveSetting("workerPolyfillEnabled", e.target.checked);

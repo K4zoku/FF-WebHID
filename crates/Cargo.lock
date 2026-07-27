@@ -754,7 +754,7 @@ dependencies = [
  "hidreport",
  "libc",
  "log",
- "serde_json",
+ "serde",
  "sha2",
  "subtle",
  "tokio",

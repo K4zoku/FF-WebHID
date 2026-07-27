@@ -16,6 +16,7 @@ use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 const WS_CLOSE_UNKNOWN_TOKEN: u16 = 4401;
 const WS_CLOSE_BAD_TOKEN: u16 = 4402;
 
+use crate::blocklist::ReportType;
 use crate::device_mgr::DeviceManager;
 use crate::hid;
 
@@ -457,6 +458,20 @@ async fn handle_client_binary(
                 return;
             }
             let report_id = frame[5];
+            let report_type = if msg_type == MSG_SEND_REPORT {
+                ReportType::Output
+            } else {
+                ReportType::Feature
+            };
+            if device_mgr.is_report_blocked(device_id, report_id, report_type) {
+                let resp_type = if msg_type == MSG_SEND_REPORT {
+                    RESP_SEND_REPORT
+                } else {
+                    RESP_SEND_FEATURE_REPORT
+                };
+                let _ = tx.send(make_status_resp(resp_type, req_id, 2));
+                return;
+            }
             let payload: Arc<[u8]> = Arc::from(&frame[6..]);
 
             let dev_arc = match device_mgr.get_file(device_id) {
@@ -502,6 +517,10 @@ async fn handle_client_binary(
                 return;
             }
             let report_id = frame[5];
+            if device_mgr.is_report_blocked(device_id, report_id, ReportType::Feature) {
+                let _ = tx.send(make_feature_read_resp(req_id, 2, &[]));
+                return;
+            }
 
             let dev_arc = match device_mgr.get_file(device_id) {
                 Ok(f) => f,

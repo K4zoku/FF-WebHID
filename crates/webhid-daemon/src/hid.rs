@@ -82,6 +82,9 @@ pub fn enumerate() -> anyhow::Result<Vec<DeviceInfo>> {
                 continue;
             }
             if let Some(d) = info_from_hidapi_pub_with_desc(info, desc) {
+                if is_blocked_by_collections(&d) {
+                    continue;
+                }
                 devices.push(d);
             }
         }
@@ -233,6 +236,22 @@ pub fn is_blocked_pub(info: &HidDeviceInfo) -> bool {
     false
 }
 
+/// Collection-level blocking check: parsed report descriptor is available.
+pub fn is_blocked_by_collections(info: &webhid::DeviceInfo) -> bool {
+    let rules = crate::blocklist::blocklist_rules();
+    let top_level: Vec<(Option<u16>, Option<u16>)> = info
+        .collections
+        .iter()
+        .map(|c| (c.usage_page, c.usage))
+        .collect();
+    crate::blocklist::device_is_blocked(
+        rules,
+        info.vendor_id,
+        info.product_id,
+        &top_level,
+    )
+}
+
 // ---------------------------------------------------------------------------
 // Open
 // ---------------------------------------------------------------------------
@@ -249,6 +268,9 @@ pub fn open_by_device_id(device_id: u32) -> anyhow::Result<(DeviceInfo, bool, Hi
             let desc = read_raw_report_descriptor_with_api(&api, info);
             let device_info = info_from_hidapi_pub_with_desc(info, desc.clone())
                 .ok_or_else(|| anyhow::anyhow!("failed to build DeviceInfo"))?;
+            if is_blocked_by_collections(&device_info) {
+                continue;
+            }
             let numbered = uses_numbered_reports(&desc);
             let dev = api.open_path(info.path())?;
             return Ok((device_info, numbered, dev));
@@ -371,7 +393,13 @@ pub fn info_by_raw_path(raw_path: &str) -> Option<DeviceInfo> {
             if is_blocked_pub(info) {
                 return None;
             }
-            return info_from_hidapi_pub(info);
+            if let Some(d) = info_from_hidapi_pub(info) {
+                if is_blocked_by_collections(&d) {
+                    return None;
+                }
+                return Some(d);
+            }
+            return None;
         }
     }
     None

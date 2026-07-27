@@ -1,3 +1,4 @@
+mod blocklist;
 mod client;
 mod descriptor;
 mod device_mgr;

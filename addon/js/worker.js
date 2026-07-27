@@ -132,14 +132,6 @@ function handleSend(msg, msgType) {
   frame[5] = msg.reportId;
   frame.set(payload, 6);
   const isFeature = msgType !== MSG_SEND_REPORT;
-  if (settings.fireAndForget) {
-    transport.send(frame);
-    replyData({
-      type: isFeature ? "featureResult" : "sendResult",
-      reqId: msg.reqId,
-    });
-    return;
-  }
   pending.set(reqId, {
     resolve: () =>
       replyData({
@@ -220,6 +212,7 @@ function handleControlResponse(batch) {
   if (!entry) return;
   pending.delete(reqId);
   if (respType === RESP_RECEIVE_FEATURE_REPORT) {
+    if (status === 2) return entry.reject({ blocked: true });
     if (status !== 0) return entry.reject(new Error("feature read failed"));
     if (batch.length < 8) return entry.reject(new Error("short feature resp"));
     const len = dataView.getUint16(6, true);
@@ -228,5 +221,6 @@ function handleControlResponse(batch) {
     return entry.resolve(out);
   }
   if (status === 0) entry.resolve();
+  else if (status === 2) entry.reject({ blocked: true });
   else entry.reject(new Error("write failed status=" + status));
 }

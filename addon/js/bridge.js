@@ -239,7 +239,6 @@
           worker.postMessage({
             type: "settings",
             dataPlane: settings.dataPlane,
-            fireAndForget: settings.fireAndForget,
             logLevel: settings.logLevel,
           });
           resolveSpawn(true);
@@ -446,10 +445,7 @@
 
     const { id, action: reqAction, payload } = data;
     let action = reqAction;
-    const isFireAndForget = data.fireAndForget === true;
-    logger.debug(
-      "req action=" + action + " id=" + id + (isFireAndForget ? " (faf)" : ""),
-    );
+    logger.debug("req action=" + action + " id=" + id);
 
     if (action === "dataPort") {
       const deviceId = payload.deviceId;
@@ -874,25 +870,22 @@
       const port = dataPorts.get(deviceId);
       const callback = (response) => {
         if (!port) return;
+        const status = response ? response.s : 500;
         if (msg.type === "receiveFeature") {
-          const data =
-            response && http.isOk(response.s) && response.d ? response.d : null;
+          if (status === 403) {
+            try { port.postMessage({ type: "featureResult", reqId: msg.reqId, error: "blocked" }); } catch {}
+            return;
+          }
+          const data = http.isOk(status) && response.d ? response.d : null;
           try {
-            port.postMessage({
-              type: "featureResult",
-              reqId: msg.reqId,
-              data: data || null,
-            });
+            port.postMessage({ type: "featureResult", reqId: msg.reqId, data: data || null });
           } catch {}
         } else {
-          const error =
-            response && !http.isOk(response.s) ? "send failed" : null;
+          let error = null;
+          if (status === 403) error = "blocked";
+          else if (!http.isOk(status)) error = "send failed";
           try {
-            port.postMessage({
-              type: msg.type === "send" ? "sendResult" : "featureResult",
-              reqId: msg.reqId,
-              error: error,
-            });
+            port.postMessage({ type: msg.type === "send" ? "sendResult" : "featureResult", reqId: msg.reqId, error });
           } catch {}
         }
       };
@@ -938,10 +931,10 @@
 
   settings.on("dataPlane", (dp) => applyDataPlane(dp));
 
-  settings.on(["dataPlane", "fireAndForget", "logLevel"], () => {
+  settings.on(["dataPlane", "logLevel"], () => {
     const all = settings.getAll();
     const patch = {};
-    for (const k of ["dataPlane", "fireAndForget", "logLevel"]) {
+    for (const k of ["dataPlane", "logLevel"]) {
       patch[k] = all[k];
     }
     replyToPage({ type: "settings", settings: patch });

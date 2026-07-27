@@ -19,7 +19,6 @@
 (function () {
   const webhid = globalThis.webhid;
   const GLOBAL_DEFAULTS = {
-    fireAndForget: true,
     dataPlane: "ws",
     logLevel: 1,
     daemonAsNmHost: false,

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -12,6 +12,7 @@ use tokio::task::JoinHandle;
 use anyhow::anyhow;
 use webhid::{DeviceInfo, IpcResponse};
 
+use crate::blocklist::{self, ReportType};
 use crate::hid;
 
 struct Entry {
@@ -21,6 +22,9 @@ struct Entry {
     refcount: u32,
     dataplane_mode: Mutex<String>,
     ws_generation: AtomicU64,
+    vendor_id: u16,
+    product_id: u16,
+    report_to_collection: Arc<HashMap<(u8, u8), (Option<u16>, Option<u16>)>>,
 }
 
 const HEX_CHARS: &[u8; 16] = b"0123456789abcdef";
@@ -46,6 +50,54 @@ fn generate_ws_nonce() -> Result<String, getrandom::Error> {
         out.push(HEX_CHARS[(b & 0x0f) as usize] as char);
     }
     Ok(out)
+}
+
+fn build_report_collection_map(
+    info: &DeviceInfo,
+) -> HashMap<(u8, u8), (Option<u16>, Option<u16>)> {
+    let mut map = HashMap::new();
+    for col in &info.collections {
+        let up = col.usage_page;
+        let u = col.usage;
+        for r in &col.input_reports {
+            map.insert((r.report_id, 0), (up, u));
+        }
+        for r in &col.output_reports {
+            map.insert((r.report_id, 1), (up, u));
+        }
+        for r in &col.feature_reports {
+            map.insert((r.report_id, 2), (up, u));
+        }
+    }
+    map
+}
+
+fn compute_blocked_input_ids(
+    info: &DeviceInfo,
+    report_map: &HashMap<(u8, u8), (Option<u16>, Option<u16>)>,
+) -> HashSet<u8> {
+    let rules = blocklist::blocklist_rules();
+    let mut ids = HashSet::new();
+    for col in &info.collections {
+        for r in &col.input_reports {
+            let (up, u) = report_map
+                .get(&(r.report_id, 0))
+                .copied()
+                .unwrap_or((col.usage_page, col.usage));
+            if blocklist::is_report_blocked(
+                rules,
+                info.vendor_id,
+                info.product_id,
+                up,
+                u,
+                r.report_id,
+                ReportType::Input,
+            ) {
+                ids.insert(r.report_id);
+            }
+        }
+    }
+    ids
 }
 
 fn compute_ws_auth_hash(token: &str, nonce: &str) -> String {
@@ -119,6 +171,9 @@ impl DeviceManager {
         let (info, uses_numbered_reports, device) = hid::open_by_device_id(device_id)?;
         let id = info.device_id;
 
+        let report_map = Arc::new(build_report_collection_map(&info));
+        let blocked_input_ids = Arc::new(compute_blocked_input_ids(&info, &report_map));
+
         let stop_flag = Arc::new(AtomicBool::new(false));
 
         let reader_device = match hid::open_by_device_id(id) {
@@ -154,6 +209,9 @@ impl DeviceManager {
             refcount: 1,
             ws_generation: AtomicU64::new(0),
             dataplane_mode: Mutex::new("nm".to_string()),
+            vendor_id: info.vendor_id,
+            product_id: info.product_id,
+            report_to_collection: Arc::clone(&report_map),
         };
 
         map.insert(id, entry);
@@ -169,6 +227,7 @@ impl DeviceManager {
         let dev_id = id;
         let dev_for_task = Arc::clone(&reader_arc);
         let stop_for_task = Arc::clone(&stop_flag);
+        let blocked_for_task = Arc::clone(&blocked_input_ids);
         let tx = self.event_tx.clone();
         let read_buf_size = info.max_input_report_size as usize + 1;
 
@@ -204,6 +263,12 @@ impl DeviceManager {
                         } else {
                             (0u8, Bytes::from(buf))
                         };
+                        if blocked_for_task.contains(&report_id) {
+                            log::debug!(
+                                "[reader {dev_id:#x}] dropping blocked input report_id={report_id}"
+                            );
+                            continue;
+                        }
                         let _ = tx.send(IpcResponse::InputReport {
                             id: 0,
                             device_id: dev_id,
@@ -355,6 +420,38 @@ impl DeviceManager {
         let mut hashes = self.ws_auth_hashes.lock().unwrap_or_else(|e| e.into_inner());
         hashes.retain(|_, &mut v| v != device_id);
         log::info!("[device_mgr] {device_id:#x} force-closed (hotplug removal)");
+    }
+
+    pub fn is_report_blocked(
+        &self,
+        device_id: u32,
+        report_id: u8,
+        report_type: ReportType,
+    ) -> bool {
+        let map = self.devices.lock().unwrap_or_else(|e| e.into_inner());
+        let entry = match map.get(&device_id) {
+            Some(e) => e,
+            None => return false,
+        };
+        let rt_byte = match report_type {
+            ReportType::Input => 0,
+            ReportType::Output => 1,
+            ReportType::Feature => 2,
+        };
+        let (up, u) = match entry.report_to_collection.get(&(report_id, rt_byte)) {
+            Some(v) => *v,
+            None => return false,
+        };
+        let rules = blocklist::blocklist_rules();
+        blocklist::is_report_blocked(
+            rules,
+            entry.vendor_id,
+            entry.product_id,
+            up,
+            u,
+            report_id,
+            report_type,
+        )
     }
 
     pub fn get_device_by_ws_auth(&self, hash: &str) -> Option<u32> {
