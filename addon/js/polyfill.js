@@ -1,20 +1,9 @@
 (function () {
-  if (typeof window === 'undefined' || !(window instanceof Window && window.isSecureContext)) return;
-
-  function getCallerFrameUrl() {
-    try {
-      const stack = new Error().stack;
-      if (!stack) return location.href;
-      const lines = stack.split('\n');
-      for (let i = lines.length - 1; i >= 0; i--) {
-        const m = lines[i].match(/@(.*?):\d+:\d+/);
-        if (m && m[1].startsWith('http')) {
-          return m[1];
-        }
-      }
-    } catch (e) { console.debug("stack trace extraction failed", e); }
-    return location.href;
+  if (typeof window === 'undefined' || !(window instanceof Window && window.isSecureContext)) {
+    console.debug("NO POLYFILL")
+    return;
   }
+
   const webhid = globalThis.webhid;
   const logger = webhid.import("logger");
   const http = webhid.import("http");
@@ -22,6 +11,8 @@
   const createSettingsStore = webhid.import("createSettingsStore");
   const isValidFilter = webhid.import("isValidFilter");
   delete globalThis.webhid;
+
+  logger.initLogger("polyfill");
 
   const OriginalError = window.Error;
   const stackDescriptor = Object.getOwnPropertyDescriptor(OriginalError.prototype, 'stack');
@@ -40,7 +31,20 @@
     }
   }
 
-  logger.initLogger("polyfill");
+  function getCallerFrameUrl() {
+    try {
+      const stack = new Error().stack;
+      if (!stack) return location.href;
+      const lines = stack.split('\n');
+      for (let i = lines.length - 1; i >= 0; i--) {
+        const m = lines[i].match(/@(.*?):\d+:\d+/);
+        if (m && m[1].startsWith('http')) {
+          return m[1];
+        }
+      }
+    } catch (e) { console.debug("stack trace extraction failed", e); }
+    return location.href;
+  }
 
   let nextReqId = 0;
   const pending = {};
