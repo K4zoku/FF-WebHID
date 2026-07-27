@@ -1,5 +1,5 @@
 (function () {
-  if (window.navigator == null) return;
+  if (typeof window === 'undefined' || !(window instanceof Window && window.isSecureContext)) return;
 
   function getCallerFrameUrl() {
     try {
@@ -22,6 +22,24 @@
   const createSettingsStore = webhid.import("createSettingsStore");
   const isValidFilter = webhid.import("isValidFilter");
   delete globalThis.webhid;
+
+  const OriginalError = window.Error;
+  const stackDescriptor = Object.getOwnPropertyDescriptor(OriginalError.prototype, 'stack');
+  const getOriginalStack = stackDescriptor && stackDescriptor.get;
+
+  function isCalledFromConsole() {
+    try {
+      throw new OriginalError();
+    } catch (e) {
+      const stack = getOriginalStack ? getOriginalStack.call(e) : e.stack;
+      if (typeof stack !== 'string') return false;
+
+      const lines = stack.split('\n');
+      const callerFrame = lines.at(2) || '';
+      return callerFrame.includes('debugger eval code');
+    }
+  }
+
   logger.initLogger("polyfill");
 
   let nextReqId = 0;
@@ -74,11 +92,6 @@
         pairedDevices = result.hashes || [];
         deviceInfoCache = null;
       } else {
-        // S5: Surface pairing failures to the log so they aren't silently
-        // swallowed. requestDevice() already resolved with the device, but
-        // the user should be able to see (via the addon's debug log) that
-        // the pairDevice round-trip failed; subsequent getDevices() calls
-        // will not return this device.
         logger.warn(
           "pairDevice returned non-success for deviceId=" +
             deviceInfo.deviceId +
@@ -87,9 +100,6 @@
         );
       }
     } catch (e) {
-      // S5: Log the underlying error too. Previously this was a bare
-      // `catch {}` which made pairing failures invisible to anyone trying
-      // to debug "I picked a device but getDevices() is empty".
       logger.warn("pairDevice error:", e != null ? (e.message != null ? e.message : e) : e);
     }
   }
@@ -119,12 +129,6 @@
   function sendRequest(action, payload, opts = {}) {
     return new Promise((resolve) => {
       const id = frameNonce + ':' + (++nextReqId);
-      // S4: Default 30s timeout so a request whose response never comes
-      // back (bridge died, content-script context invalidated, page
-      // navigated) does not leave the caller hanging forever. Callers
-      // can override via opts.timeoutMs; pass 0 to disable. On timeout
-      // we resolve with { s: 504 } so existing status-checking code
-      // (http.isOk) treats it as a failure rather than a crash.
       const timeoutMs = opts.timeoutMs != null ? opts.timeoutMs : 30000;
       let settled = false;
       let timer = null;
@@ -220,10 +224,6 @@
   const evtState = new WeakMap();
   const irState = Symbol("webhid_ir");
   const deviceRegistry = new Map();
-  // S1: Hold the singleton HID instance so that connect/disconnect events
-  // can be dispatched on `navigator.hid` (spec-compliant) rather than on the
-  // HIDDevice itself. Per the WebHID spec, `navigator.hid.onconnect` and
-  // `navigator.hid.ondisconnect` must fire for device hot-plug events.
   let hidInstance = null;
 
   function HIDDevice() {
@@ -306,10 +306,6 @@
           );
         if (state.opened)
           throw new DOMException("Device is already open", "InvalidStateError");
-        // S4: Reject concurrent open() calls without exposing the opening
-        // flag on the device surface (spec only defines `opened`). This
-        // closes the await-gap race where two calls could both pass the
-        // `state.opened` guard and both flip `opened` to true.
         if (state.opening)
           throw new DOMException("Device is already open", "InvalidStateError");
         state.opening = true;
@@ -771,10 +767,6 @@
       productName: deviceInfo.productName,
       collections: deepFreeze(deviceInfo.collections || []),
       opened: false,
-      // S4: internal "opening" flag — NOT exposed on the HIDDevice surface
-      // (spec only defines `opened`). Used to guard against concurrent
-      // open() calls racing through the `await sendRequest("open", ...)`
-      // gap and both flipping `opened` to true.
       opening: false,
       dataPort: null,
       dataPending: null,
@@ -905,7 +897,7 @@
         if (policy && policy.hid === "none") {
           throw new DOMException("Access to HID is blocked by Permissions Policy", "SecurityError");
         }
-        if (navigator.userActivation && !navigator.userActivation.isActive) {
+        if (!isCalledFromConsole() && navigator.userActivation && !navigator.userActivation.isActive) {
           throw new DOMException(
             "Must be handling a user gesture to perform a hid.requestDevice() call.",
             "SecurityError",
