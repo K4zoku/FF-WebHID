@@ -58,7 +58,7 @@ Example: a udev rule scoped to a specific vendor/product ID is preferred over a 
 
 ### 8. When a tradeoff has no universally correct answer, expose it as a setting
 
-Some decisions genuinely depend on the user's workload and can't be resolved by more analysis: fire-and-forget vs. ack-wait, WS vs. NM for data plane, adaptive batching on/off. When two approaches are each better under different conditions, don't guess a single hardcoded answer. Add a toggle and let the user pick for their actual use case.
+Some decisions genuinely depend on the user's workload and can't be resolved by more analysis: WS vs. NM for data plane, device picker mode, adaptive batching on/off. When two approaches are each better under different conditions, don't guess a single hardcoded answer. Add a toggle and let the user pick for their actual use case.
 
 ### 9. Code should carry no explanatory comments beyond docstrings
 

@@ -28,7 +28,12 @@ The AUR packages install the daemon as a systemd system service (runs as root). 
 sudo systemctl enable --now webhid-daemon
 ```
 
-Root daemon has access to all hidraw devices; no udev rule needed.
+Root daemon has access to all hidraw devices; no udev rule needed. The root daemon uses an abstract socket `@webhid`; users must be in the `webhid` group to connect via the thin forwarder:
+
+```sh
+sudo usermod -aG webhid $USER
+# log out + log back in for group change to take effect
+```
 
 **Non-root daemon (optional):** If you prefer the daemon to run as your user:
 
@@ -46,7 +51,7 @@ systemctl --user enable --now webhid-daemon
 Download the `.deb` from [GitHub Releases](https://github.com/K4zoku/FF-WebHID/releases), then:
 
 ```sh
-sudo dpkg -i webhid_<version>_<arch>.deb
+sudo dpkg -i webhid-<version>-<arch>.deb
 sudo apt-get install -f    # fix any missing dependencies
 ```
 
@@ -111,7 +116,7 @@ systemctl --user enable --now webhid-daemon
 
 Install paths are configurable: `make install-system PREFIX=/usr` or `make install-user USER_PREFIX=$HOME/.local`.
 
-> **udev rule**: The `99-webhid.rules` file grants console users access to `hidraw*` devices via `uaccess`. This is only needed for non-root daemons. Root daemons already have full access.
+> **udev rule**: The `99-webhid.rules` file grants console users access to `hidraw*` devices via `uaccess`, with explicit exclusions for known FIDO/U2F security keys (matching Chromium's `hid_blocklist.cc`). This is only needed for non-root daemons. Root daemons already have full access.
 
 ### Daemon-as-NM-host mode (Linux/macOS, advanced)
 
@@ -169,9 +174,11 @@ Download the `.msi` from [GitHub Releases](https://github.com/K4zoku/FF-WebHID/r
 The installer:
 - Installs binaries to `C:\Program Files\WebHID\`
 - Registers the native messaging host in the Windows registry (Firefox auto-detects)
-
+- Registers both `webhid.forwarder_nm_host` and `webhid.daemon_nm_host` manifests
 
 Install and restart Firefox. Start the daemon manually: run webhid-daemon.exe from the install directory.
+
+On Windows, `daemonAsNmHost` defaults to `true` (the daemon speaks NM directly, no forwarder process needed). Windows has no special HID permission setup.
 
 ### Portable/Manual
 
@@ -223,6 +230,8 @@ brew services start webhid
 ```
 
 Homebrew installs the daemon as a background service (via `brew services`). The NM manifest is installed to `/usr/local/lib/mozilla/native-messaging-hosts/` (Homebrew prefix).
+
+> **Note:** macOS requires Input Monitoring (TCC) permission for `IOHIDManager` access. There is no way to prompt for it programmatically; grant it manually in System Settings → Privacy & Security → Input Monitoring.
 
 ### Manual
 
@@ -303,9 +312,9 @@ Then install the [browser extension](https://addons.mozilla.org/en-US/firefox/ad
 - **NM host silent failure** (addon paralyzed, no logs): fixed in current version: NM host now writes `{"s":503,"E":"..."}` error frame to stdout before exiting, addon logs `[nm] host error: <reason>`.
 - **Device picker shows "No HID devices found"**: daemon running but no HID devices detected. Check `hidapi` can enumerate: `ls /dev/hidraw*` (Linux).
 - **Badge counter not showing**: ensure the device is opened via `navigator.hid.requestDevice()`, the counter tracks open devices, not paired ones.
-- **NM data plane is slow**: enable Fire-and-forget in settings. If still slow, switch Data Plane to WebSocket.
-- **Daemon restart causes input report freeze**: fixed: workers detect WS close code 4401 (unknown token) and trigger token refresh via bridge (re-handshake for control, re-open for data).
-- **Settings change doesn't take effect**: fixed: `SettingsStore` Proxy observer fires listeners only on actual value change, replacing the old `get()`-based diff that broke after storage commit.
+- **NM data plane is slow**: switch Data Plane to WebSocket in settings.
+- **Daemon restart causes input report freeze**: fixed: workers detect WS close code 4401 (unknown token) and trigger token refresh via bridge (re-open for data).
+- **Settings change doesn't take effect**: fixed: `SettingsStore` Proxy observer fires listeners only on actual value change.
 
 ## Recommended Settings per Platform
 
@@ -314,9 +323,8 @@ Then install the [browser extension](https://addons.mozilla.org/en-US/firefox/ad
 | Setting | Recommended | Reason |
 |---------|------------|--------|
 | Daemon as NM host | ON (if user has direct hidraw access) or OFF (if using root daemon + webhid group) | Eliminates forwarder process + Unix socket. Skips group membership requirement. |
-| Control Plane | WS | After NM handshake, control ops via WS text frames through control worker (5 to 15ms vs 15 to 40ms) |
-| Data Plane | WS (default) | Binary WS via worker with MessageChannel for max performance. Switch to NM if WS is blocked. |
-| Fire-and-forget | ON | Page latency <0.1ms for sendReport |
+| Data Plane | WS (default) | Binary WS via worker with MessagePort for max performance. Switch to NM if WS is blocked. |
+| Device Picker Mode | modal (default) | Inline dialog, least friction. pageAction/window available for single-device sites. |
 
 **Setup**: Install daemon (system package or `make install-system`). If using root daemon with thin forwarder, add your user to the `webhid` group: `sudo usermod -aG webhid $USER` (log out + back in). If using daemon-as-NM-host (recommended for users with direct hidraw access via udev `uaccess` rule), install `webhid.daemon_nm_host` manifest via `make install-daemon-nm-host-user`: no group membership needed.
 
@@ -324,29 +332,23 @@ Then install the [browser extension](https://addons.mozilla.org/en-US/firefox/ad
 
 | Setting | Recommended | Reason |
 |---------|------------|--------|
-| Daemon as NM host | ON | Windows has no permission setup needed, just point NM manifest path to `webhid-daemon.exe`. Daemon auto-detects NM mode via Firefox's 2 positional args |
-| Control Plane | WS | Control ops via WS after handshake through control worker |
-| Data Plane | WS (default) | Binary WS via worker with MessageChannel for performance |
-| Fire-and-forget | ON | Page latency <0.1ms |
+| Daemon as NM host | ON (default) | Windows has no permission setup needed, just point NM manifest path to `webhid-daemon.exe`. Daemon auto-detects NM mode via Firefox's 2 positional args |
+| Data Plane | WS (default) | Binary WS via worker with MessagePort for performance |
 
-**Setup**: Install MSI or portable zip. For daemon-as-NM-host, register `webhid.daemon_nm_host.json` with `path` pointing to `webhid-daemon.exe`, no wrapper script needed, daemon auto-detects NM mode.
+**Setup**: Install MSI or portable zip. `daemonAsNmHost` defaults to `true` on Windows (auto-detected). For forwarder mode, register `webhid.forwarder_nm_host.json` with `path` pointing to `webhid-native-messaging.exe`.
 
 ### macOS
 
 | Setting | Recommended | Reason |
 |---------|------------|--------|
 | Daemon as NM host | ON (if user daemon) | Eliminates forwarder + Unix socket |
-| Control Plane | WS | Control ops via WS after handshake through control worker |
-| Data Plane | WS (default) | WS worker + MessageChannel works well on macOS |
-| Fire-and-forget | ON | Page latency <0.1ms |
+| Data Plane | WS (default) | WS worker + MessagePort works well on macOS |
 
-**Setup**: Install via Homebrew (`brew install webhid`) or manual. Grant HID permissions in System Settings → Privacy & Security if prompted.
+**Setup**: Install via Homebrew (`brew install webhid`) or manual. Grant HID permissions in System Settings → Privacy & Security → Input Monitoring if prompted.
 
 ### Benchmarking / Debugging
 
 | Setting | Recommended | Reason |
 |---------|------------|--------|
 | Data Plane | NM | Isolates NM path performance (no worker/WS overhead) |
-| Control Plane | NM | Isolates NM control path |
-| Fire-and-forget | OFF | Measure actual NM roundtrip latency |
 | Log Level | Debug | See all message timings + settings change logs |

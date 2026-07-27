@@ -1,6 +1,8 @@
 # FF-WebHID Benchmark Report
 
 ## Methodology
+> **Note**: This benchmark was recorded against a codebase that still had the WS control plane (control worker + controlToken + text-frame enumerate/close). The control plane was removed in 2.2.0; control ops are now NM-only. The data-plane comparison (NM Data vs Worker WS) remains valid and unaffected. The "SendQuery (WS control)" rows below reflect the old control-plane path and are historical.
+
 
 **Test scenario**: Open sayodevice.com → open device → switch to Image tab → wait for full gallery load (8 images).
 
@@ -168,8 +170,7 @@ Runs 1-2 had GCMajor OUT-of-window (fires `CC_FINISHED` after benchmark, post-re
 ### Data Plane JS CPU Time
 
 | Metric | Run 1 | Run 2 |
-|--------|-------|-------|
-| SendQuery (WS control: bridge → background) | 171 calls, 82.1 msg/s, avg 12.26ms | 171 calls, 94.8 msg/s, avg 10.61ms |
+| SendQuery (NM control: bridge → background, historical WS-control label) | 171 calls, 82.1 msg/s, avg 12.26ms | 171 calls, 94.8 msg/s, avg 10.61ms |
 | Worker.postMessage on parent (T0) | 680 (NM subprocess) | 677 (NM subprocess) |
 | WebHID extension JS on content thread | 0 samples (< 1ms) | 0 samples (< 1ms) |
 | DOM Worker (NM subprocess) busy samples | 141/2258 (6.2%) | 131/2013 (6.5%) |
@@ -318,7 +319,7 @@ The -359ms Worker WS advantage comes from three sources:
 
 The ~239ms "native" difference is the dominant factor. Call-stack walks show >90% of Firefox's unsymbolized native is libxul C++ (layout/paint/style/WebGL), not lost WASM attribution. The difference is most likely:
 1. **SpiderMonkey/libxul slower than V8/Blink** on layout/paint/WebGL for this workload
-2. **Bridge-mediated data plane overhead**. even Worker WS goes through bridge (worker → bridge → page), adding some scheduling overhead vs Chromium's direct main-thread WebHID
+2. **Bridge-mediated data plane overhead** (historical). At benchmark time, even Worker WS went through bridge (worker → bridge → page), adding scheduling overhead vs Chromium's direct main-thread WebHID. The current architecture bypasses the bridge for input reports (worker → page via MessagePort), so this overhead is reduced.
 
 ### Cold-start consistency
 
@@ -350,7 +351,7 @@ All 6 Firefox profiles are cold-start (browser + daemon restarted before each ru
   - What % is genuinely heavier layout/paint?
   - What % is WebGL/Mesa driver?
   - What % is SpiderMonkey JS execution slower?
-  - What % is bridge-mediated overhead (worker → bridge → page vs Chromium's direct main-thread)?
+  - What % is bridge-mediated overhead (historical: worker → bridge → page at benchmark time; current architecture is worker → page direct via MessagePort)?
 - How the ~499ms Worker-WS-to-Chromium gap splits. cannot be fully determined without WASM symbolication
 - Whether the 249ms NM Data spread (2264 vs 2015) is run-to-run variance or a systematic factor
 
@@ -359,20 +360,20 @@ All 6 Firefox profiles are cold-start (browser + daemon restarted before each ru
 - Firefox GC has **less CPU** than Chrome (~22ms vs 70-75ms)
 - Firefox has **zero GCMajor** in Worker WS mode (zero-copy eliminates allocation pressure)
 - So Firefox "wins" on both directly measurable dimensions, yet is ~499ms slower overall
-- → The overhead is in **browser-engine native code** (libxul layout/paint/style/WebGL) and **idle scheduling** (bridge-mediated data plane), not in the data plane JS or GC
+- → The overhead is in **browser-engine native code** (libxul layout/paint/style/WebGL) and **idle scheduling** (bridge-mediated data plane, historical), not in the data plane JS or GC
 
 ---
 
 ## Optimization Opportunities
 
 ### Already optimized
-- ✅ ArrayBuffer transfer (zero-copy worker → bridge → page via postMessage)
+- ✅ ArrayBuffer transfer (zero-copy worker → page via MessagePort, bypassing bridge)
 - ✅ Zero-copy DataView (polyfill creates DataView directly on transferred ArrayBuffer, no intermediate copy)
 - ✅ Debug-gated hex logging (only allocates hex string when logLevel >= 3)
 - ✅ Arc<[u8]> broadcast (zero-copy daemon → WS)
 - ✅ TCP_NODELAY on WS server
 - ✅ Adaptive WS batching (immediate flush, burst coalescing)
-- ✅ Fire-and-forget sendReport (< 0.1ms resolve)
+- ✅ Ack-wait sendReport (resolves on daemon ack; fire-and-forget removed, isFireAndForget is dead code)
 - ✅ Tab-targeted event delivery
 - ✅ Daemon-side collection normalization
 - ✅ WS data plane auto-reconnect (worker-internal exponential backoff 500ms → 5000ms)
@@ -403,7 +404,7 @@ All 6 Firefox profiles are cold-start (browser + daemon restarted before each ru
 **Both Firefox modes have negligible data plane JS CPU** (0ms on content thread). even **faster than** Chrome's HID library (62ms). The data plane is not the bottleneck in any mode.
 
 **The ~499ms gap to Chromium (Worker WS vs Chromium)** is in browser-engine native code and idle scheduling:
-- ~131ms is idle from bridge-mediated data plane (Worker WS 12.3% vs Chrome 6.7%)
+- ~131ms is idle from bridge-mediated data plane (historical; Worker WS 12.3% vs Chrome 6.7%. Current architecture bypasses bridge for input reports via MessagePort)
 - ~263ms is libxul C++ work (layout/paint/style/WebGL. partially decomposable, >90% confirmed libxul via unsym analysis)
 - Firefox "wins" on data plane JS (-62ms) and GC CPU (-48ms), but loses on native code
 
@@ -445,7 +446,7 @@ All 6 Firefox profiles are cold-start (browser + daemon restarted before each ru
 - Inject WS into page MAIN world. data plane JS is already 0ms, nothing left to optimize at JS layer
 - Custom HIDInputReportEvent batching. spec violation risk
 - Rewrite data plane in C++/WASM. data plane is not the bottleneck, complexity not justified
-- Re-add SharedArrayBuffer. Worker WS postMessage transfer (2 hops, zero-copy) is faster than SAB in cold-start benchmarks and removes COOP/COEP requirement
+- Re-add SharedArrayBuffer. Worker WS MessagePort transfer (1 hop direct worker → page, zero-copy) is faster than SAB in cold-start benchmarks and removes COOP/COEP requirement
 
 ---
 
