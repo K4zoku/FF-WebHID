@@ -22,7 +22,7 @@ pub struct DeviceInfo {
     #[serde(default)]
     pub usage: Option<u16>,
     pub device_id: u32,
-    #[serde(default)]
+    #[serde(default, with = "crate::collections_tlv")]
     pub collections: Vec<Collection>,
     #[serde(default)]
     pub max_input_report_size: u32,

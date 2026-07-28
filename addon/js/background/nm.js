@@ -1,5 +1,6 @@
 (function () {
   const logger = webhid.import("logger");
+  const decodeCollectionsTlv = webhid.import("decodeCollectionsTlv");
   const { ACT, PKG_INPUT_REPORT, PKG_SEND_REPORT, PKG_SEND_FEATURE_REPORT, EVT_CONNECT, EVT_DISCONNECT, buildPackedSend } = webhid.import("bgPacked");
   const { deviceTabMap, deviceCache, pendingPicker } = webhid.import("bgState");
   const { saveDeviceInfo } = webhid.import("bgStorage");
@@ -187,7 +188,13 @@
       if (message.e === EVT_CONNECT || message.e === EVT_DISCONNECT) {
         if (message.v) {
           if (message.e === EVT_CONNECT) {
-            if (!deviceCache.some((d) => d.deviceId === message.v.deviceId)) deviceCache.push(message.v);
+            if (!deviceCache.some((d) => d.deviceId === message.v.deviceId)) {
+              const dev = message.v;
+              if (dev && typeof dev.collections === "string") {
+                try { dev.collections = decodeCollectionsTlv(dev.collections); } catch { dev.collections = []; }
+              }
+              deviceCache.push(dev);
+            }
             saveDeviceInfo(message.v);
           } else {
             const idx = deviceCache.findIndex((d) => d.deviceId === message.i);

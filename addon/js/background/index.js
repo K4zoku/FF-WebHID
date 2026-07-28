@@ -1,6 +1,7 @@
 (function () {
   const logger = webhid.import("logger");
   const http = webhid.import("http");
+  const decodeCollectionsTlv = webhid.import("decodeCollectionsTlv");
   const createSettingsStore = webhid.import("createSettingsStore");
   const GLOBAL_DEFAULTS = webhid.import("GLOBAL_DEFAULTS");
   const SETTING_NAMES = webhid.import("SETTING_NAMES");
@@ -82,6 +83,20 @@
       await migrateLegacyStorage();
     }
     await browser.storage.local.set({ [VERSION_KEY]: STORAGE_SCHEMA_VERSION });
+  }
+
+  function decodeDeviceCollections(devices) {
+    if (!Array.isArray(devices)) return;
+    for (const dev of devices) {
+      if (dev && typeof dev.collections === "string") {
+        try {
+          dev.collections = decodeCollectionsTlv(dev.collections);
+        } catch (e) {
+          logger.warn("decodeCollectionsTlv failed for device", dev.deviceId, e.message);
+          dev.collections = [];
+        }
+      }
+    }
   }
 
   const settings = createSettingsStore(GLOBAL_DEFAULTS);
@@ -253,7 +268,7 @@
       case "enumerate":
         NativeMessaging.enumerateDevices()
           .then((response) => {
-            if (http.isOk(response.s) && response.D) { deviceCache.length = 0; deviceCache.push(...response.D); saveDeviceInfoBatch(response.D); }
+            if (http.isOk(response.s) && response.D) { decodeDeviceCollections(response.D); deviceCache.length = 0; deviceCache.push(...response.D); saveDeviceInfoBatch(response.D); }
             sendResponse(response);
           })
           .catch(() => sendResponse({ s: 500 }));
@@ -419,7 +434,7 @@
         if (deviceCache.length === 0) {
           NativeMessaging.enumerateDevices()
             .then((response) => {
-              if (http.isOk(response.s) && response.D) { deviceCache.length = 0; deviceCache.push(...response.D); }
+              if (http.isOk(response.s) && response.D) { decodeDeviceCollections(response.D); deviceCache.length = 0; deviceCache.push(...response.D); }
               saveDeviceInfoBatch(deviceCache);
               sendResponse({ devices: deviceCache });
             })
