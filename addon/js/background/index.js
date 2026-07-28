@@ -3,14 +3,86 @@
   const http = webhid.import("http");
   const createSettingsStore = webhid.import("createSettingsStore");
   const GLOBAL_DEFAULTS = webhid.import("GLOBAL_DEFAULTS");
+  const SETTING_NAMES = webhid.import("SETTING_NAMES");
+  const globalSettingKey = webhid.import("globalSettingKey");
+  const siteSettingKey = webhid.import("siteSettingKey");
+  const parseSettingsKey = webhid.import("parseSettingsKey");
+  const loadGlobalSettings = webhid.import("loadGlobalSettings");
+  const saveGlobalSetting = webhid.import("saveGlobalSetting");
   logger.initLogger("bg");
 
-  const { deviceCache, pendingPicker, workerPolyfillSites } = webhid.import("bgState");
-  const { saveDeviceInfo, saveDeviceInfoBatch, getDeviceInfo, removeDeviceInfo } = webhid.import("bgStorage");
-  const { registerDeviceTab, unregisterDeviceTab, isTabAuthorizedForDevice, purgeTab, isDeviceAllowedForOrigin } = webhid.import("bgStateOps");
+  const { deviceCache, pendingPicker, workerPolyfillSites, permissionsPolicy, allowedCrossOrigin } = webhid.import("bgState");
+  const { openDb, saveDeviceInfo, saveDeviceInfoBatch, getDeviceInfo, removeDeviceInfo, getAllowedDevices, addAllowedDevice, removeAllowedDevice } = webhid.import("bgStorage");
+  const { registerDeviceTab, unregisterDeviceTab, isTabAuthorizedForDevice, purgeTab } = webhid.import("bgStateOps");
   const { ensureWorkerBundle, ensureWorkerPolyfillBundle } = webhid.import("bgBundle");
   const NativeMessaging = webhid.import("NativeMessaging");
   const { NM_HOST_FORWARDER, NM_HOST_DAEMON } = webhid.import("NM_HOST_NAMES");
+
+  const STORAGE_SCHEMA_VERSION = 1;
+  const VERSION_KEY = "meta :: storage :: version";
+  const GLOBAL_NAMES = new Set(SETTING_NAMES);
+
+  async function migrateLegacyStorage() {
+    const all = await browser.storage.local.get(null);
+    const keysToRemove = [];
+    const patch = {};
+    const db = await openDb();
+
+    for (const [key, value] of Object.entries(all)) {
+      if (!key.startsWith("deviceInfo:")) continue;
+      const deviceId = key.slice("deviceInfo:".length);
+      const tx = db.transaction("deviceInfo", "readwrite");
+      tx.objectStore("deviceInfo").put({ deviceId: Number(deviceId), ...value });
+      await txDone(tx);
+      keysToRemove.push(key);
+    }
+
+    for (const [key, value] of Object.entries(all)) {
+      if (key.startsWith("deviceInfo:") || key.startsWith("site:") || key.startsWith("settings :: ") || key.startsWith("meta :: ") || GLOBAL_NAMES.has(key)) continue;
+      if (!Array.isArray(value)) continue;
+      let origin = key;
+      try { origin = decodeURIComponent(key); } catch {}
+      const tx = db.transaction("origins", "readwrite");
+      const store = tx.objectStore("origins");
+      for (const deviceId of value) store.put({ origin, deviceId: Number(deviceId) });
+      await txDone(tx);
+      keysToRemove.push(key);
+    }
+
+    for (const [key, value] of Object.entries(all)) {
+      if (!key.startsWith("site:")) continue;
+      const origin = key.slice("site:".length);
+      for (const [name, v] of Object.entries(value)) patch[siteSettingKey(origin, name)] = v;
+      keysToRemove.push(key);
+    }
+
+    for (const name of GLOBAL_NAMES) {
+      if (name in all) {
+        patch[globalSettingKey(name)] = all[name];
+        keysToRemove.push(name);
+      }
+    }
+
+    if (Object.keys(patch).length) await browser.storage.local.set(patch);
+    if (keysToRemove.length) await browser.storage.local.remove(keysToRemove);
+  }
+
+  function txDone(tx) {
+    return new Promise((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+  }
+
+  async function ensureStorageSchemaVersion() {
+    const { [VERSION_KEY]: stored } = await browser.storage.local.get(VERSION_KEY);
+    if (stored === STORAGE_SCHEMA_VERSION) return;
+    if (stored === undefined) {
+      await migrateLegacyStorage();
+    }
+    await browser.storage.local.set({ [VERSION_KEY]: STORAGE_SCHEMA_VERSION });
+  }
 
   const settings = createSettingsStore(GLOBAL_DEFAULTS);
 
@@ -19,13 +91,13 @@
   }
 
   async function loadNmHostSetting() {
-    const global = await browser.storage.local.get(GLOBAL_DEFAULTS);
-    const stored = await browser.storage.local.get("daemonAsNmHost");
-    if (stored.daemonAsNmHost === undefined) {
+    await ensureStorageSchemaVersion();
+    const global = await loadGlobalSettings();
+    if (global.daemonAsNmHost === undefined) {
       const platformInfo = await browser.runtime.getPlatformInfo();
       if (platformInfo.os === "win") {
         global.daemonAsNmHost = true;
-        await browser.storage.local.set({ daemonAsNmHost: true });
+        await saveGlobalSetting("daemonAsNmHost", true);
       }
     }
     settings.set(global);
@@ -43,8 +115,9 @@
     workerPolyfillSites.clear();
     const all = await browser.storage.local.get(null);
     for (const [key, val] of Object.entries(all)) {
-      if (key.startsWith("site:") && val && val.workerPolyfillEnabled) {
-        workerPolyfillSites.add(key.slice(5));
+      const parsed = parseSettingsKey(key);
+      if (parsed && parsed.scope === "site" && parsed.name === "workerPolyfillEnabled" && val) {
+        workerPolyfillSites.add(parsed.origin);
       }
     }
   }
@@ -109,7 +182,6 @@
     ["blocking", "responseHeaders"],
   );
 
-  const { permissionsPolicy } = webhid.import("bgState");
 
   browser.webRequest.onHeadersReceived.addListener(
     (details) => {
@@ -161,14 +233,17 @@
   browser.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return;
     let hasSiteChange = false;
-    for (const key of Object.keys(changes)) {
-      if (key.startsWith("site:")) { hasSiteChange = true; break; }
+    const patch = {};
+    for (const [key, change] of Object.entries(changes)) {
+      const parsed = parseSettingsKey(key);
+      if (!parsed) continue;
+      if (parsed.scope === "global") {
+        patch[parsed.name] = change.newValue;
+      } else if (parsed.scope === "site" && parsed.name === "workerPolyfillEnabled") {
+        hasSiteChange = true;
+      }
     }
     if (hasSiteChange) refreshWorkerPolyfillSites();
-    const patch = {};
-    for (const k of Object.keys(GLOBAL_DEFAULTS)) {
-      if (changes[k]) patch[k] = changes[k].newValue;
-    }
     if (Object.keys(patch).length === 0) return;
     settings.set(patch);
   });
@@ -190,8 +265,8 @@
 
       case "open": {
         const tabId = sender.tab != null ? sender.tab.id : undefined;
-        isDeviceAllowedForOrigin(request.origin, request.deviceId).then((allowed) => {
-          if (!allowed) { sendResponse({ s: 403 }); return; }
+        getAllowedDevices(request.origin).then((deviceIds) => {
+          if (!deviceIds.includes(request.deviceId)) { sendResponse({ s: 403 }); return; }
           NativeMessaging.openDevice(request.deviceId)
             .then((response) => {
               if (http.isOk(response.s) && response.i) registerDeviceTab(response.i, tabId);
@@ -216,11 +291,7 @@
           try {
             const origin = request.origin;
             if (!origin) { sendResponse({ success: false, error: "no origin" }); return; }
-            const storageKey = encodeURIComponent(origin);
-            const result = await browser.storage.local.get(storageKey);
-            let hashes = result[storageKey] || [];
-            hashes = hashes.filter((h) => h !== request.deviceId);
-            await browser.storage.local.set({ [storageKey]: hashes });
+            await removeAllowedDevice(origin, request.deviceId);
             removeDeviceInfo(request.deviceId);
             await NativeMessaging.closeDevice(request.deviceId).catch(() => {});
             const tabs = await browser.tabs.query({});
@@ -231,8 +302,10 @@
               if (tabOrigin !== origin) continue;
               unregisterDeviceTab(request.deviceId, tab.id);
               browser.tabs.sendMessage(tab.id, { action: "webhidDeviceEvent", event: { eventType: "revoked", deviceId: request.deviceId } }).catch(() => {});
+              const deviceIds = await getAllowedDevices(origin);
+              browser.tabs.sendMessage(tab.id, { action: "allowedDevicesChanged", deviceIds }).catch(() => {});
             }
-            sendResponse({ success: true, hashes });
+            sendResponse({ success: true });
           } catch (e) { sendResponse({ success: false, error: e.message }); }
         })();
         return true;
@@ -266,9 +339,8 @@
       case "getPairedDevices":
         (async () => {
           try {
-            const key = encodeURIComponent(request.origin);
-            const result = await browser.storage.local.get(key);
-            sendResponse({ success: true, hashes: result[key] || [] });
+            const deviceIds = await getAllowedDevices(request.origin);
+            sendResponse({ success: true, hashes: deviceIds });
           } catch (e) { sendResponse({ success: false, error: e.message, hashes: [] }); }
         })();
         return true;
@@ -276,14 +348,17 @@
       case "pairDevice":
         (async () => {
           try {
-            const key = encodeURIComponent(request.origin);
-            const result = await browser.storage.local.get(key);
-            const hashes = result[key] || [];
-            if (!hashes.includes(request.device.deviceId)) {
-              hashes.push(request.device.deviceId);
-              await browser.storage.local.set({ [key]: hashes });
+            await addAllowedDevice(request.origin, request.device.deviceId);
+            const deviceIds = await getAllowedDevices(request.origin);
+            const tabs = await browser.tabs.query({});
+            for (const tab of tabs) {
+              if (!tab.url) continue;
+              let tabOrigin;
+              try { tabOrigin = new URL(tab.url).origin; } catch { continue; }
+              if (tabOrigin !== request.origin) continue;
+              browser.tabs.sendMessage(tab.id, { action: "allowedDevicesChanged", deviceIds }).catch(() => {});
             }
-            sendResponse({ success: true, hashes });
+            sendResponse({ success: true, hashes: deviceIds });
           } catch (e) { sendResponse({ success: false, error: e.message, hashes: [] }); }
         })();
         return true;
@@ -291,17 +366,31 @@
       case "unpairDevice":
         (async () => {
           try {
-            const origin = request.origin;
-            const storageKey = encodeURIComponent(origin);
-            const result = await browser.storage.local.get(storageKey);
-            let hashes = result[storageKey] || [];
             if (request.deviceId) {
-              hashes = hashes.filter((h) => h !== request.deviceId);
-              await browser.storage.local.set({ [storageKey]: hashes });
+              await removeAllowedDevice(request.origin, request.deviceId);
               removeDeviceInfo(request.deviceId);
+              const tabs = await browser.tabs.query({});
+              for (const tab of tabs) {
+                if (!tab.url) continue;
+                let tabOrigin;
+                try { tabOrigin = new URL(tab.url).origin; } catch { continue; }
+                if (tabOrigin !== request.origin) continue;
+                const deviceIds = await getAllowedDevices(request.origin);
+                browser.tabs.sendMessage(tab.id, { action: "allowedDevicesChanged", deviceIds }).catch(() => {});
+              }
             }
-            sendResponse({ success: true, hashes });
+            const deviceIds = await getAllowedDevices(request.origin);
+            sendResponse({ success: true, hashes: deviceIds });
           } catch (e) { sendResponse({ success: false, error: e.message }); }
+        })();
+        return true;
+
+      case "getAllowedDevices":
+        (async () => {
+          try {
+            const deviceIds = await getAllowedDevices(request.origin);
+            sendResponse({ deviceIds });
+          } catch (e) { sendResponse({ deviceIds: [] }); }
         })();
         return true;
 
@@ -387,7 +476,6 @@
       }
 
       case "getPolicy": {
-        const { permissionsPolicy, allowedCrossOrigin } = webhid.import("bgState");
         const sid = sender.frameId;
         const tid = sender.tab?.id;
         let hid = null;
@@ -407,7 +495,6 @@
       }
 
       case "setFrameAllow": {
-        const { allowedCrossOrigin } = webhid.import("bgState");
         let key;
         if (request.frameId === -1 && request.url) { key = `url:${request.url}`; }
         else { const tid = sender.tab?.id; if (tid == null) { sendResponse({ ok: false }); return false; } key = `${tid}:${request.frameId}`; }

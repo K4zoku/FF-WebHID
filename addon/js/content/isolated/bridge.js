@@ -5,7 +5,9 @@
   const logger = webhid.import("logger");
   const http = webhid.import("http");
   const createSettingsStore = webhid.import("createSettingsStore");
-  const GLOBAL_DEFAULTS = webhid.import("GLOBAL_DEFAULTS");
+  const loadGlobalSettings = webhid.import("loadGlobalSettings");
+  const loadSiteSettings = webhid.import("loadSiteSettings");
+  const parseSettingsKey = webhid.import("parseSettingsKey");
   const WebHidDevicePicker = webhid.import("WebHidDevicePicker");
   logger.initLogger("bridge");
 
@@ -39,7 +41,7 @@
   /** @type {string|null} */
   let wsNonce = null;
   /** @type {import("./types.js").SettingsStore} */
-  const settings = createSettingsStore(GLOBAL_DEFAULTS);
+  const settings = createSettingsStore(webhid.import("GLOBAL_DEFAULTS"));
   settings.on("logLevel", (v) => logger.applyLevel(v));
   /** @type {Map<Window, MessagePort>} */
   const pagePorts = new Map();
@@ -54,16 +56,36 @@
   /** @type {Map<string, number>} */
   const spawnGen = new Map();
 
-  /**
-   * @param {string} origin
-   * @param {string} deviceId
-   * @returns {Promise<boolean>}
-   */
-  async function isDeviceAllowedForOrigin(origin, deviceId) {
-    if (!origin || origin === "null" || !deviceId) return false;
-    const key = encodeURIComponent(origin);
-    const result = await browser.storage.local.get(key);
-    return (result[key] || []).includes(deviceId);
+  const allowedDeviceIds = new Set();
+  let allowedDeviceIdsReady = false;
+  const allowedDeviceIdsQueue = [];
+
+  function flushAllowedDeviceIdsQueue() {
+    while (allowedDeviceIdsQueue.length) {
+      const { deviceId, resolve } = allowedDeviceIdsQueue.shift();
+      resolve(allowedDeviceIds.has(deviceId));
+    }
+  }
+
+  function isDeviceAllowed(deviceId) {
+    if (allowedDeviceIdsReady) return Promise.resolve(allowedDeviceIds.has(deviceId));
+    return new Promise((resolve) => {
+      allowedDeviceIdsQueue.push({ deviceId, resolve });
+    });
+  }
+
+  async function loadAllowedDeviceIds() {
+    try {
+      const resp = await browser.runtime.sendMessage({ action: "getAllowedDevices", origin: window.location.origin });
+      if (resp && Array.isArray(resp.deviceIds)) {
+        allowedDeviceIds.clear();
+        for (const id of resp.deviceIds) allowedDeviceIds.add(id);
+      }
+    } catch (e) {
+      logger.warn("loadAllowedDeviceIds failed:", e.message);
+    }
+    allowedDeviceIdsReady = true;
+    flushAllowedDeviceIdsQueue();
   }
 
   /**
@@ -404,17 +426,14 @@
               "WS data plane will fall back to NM",
           );
         }
-        const global = await browser.storage.local.get(GLOBAL_DEFAULTS);
+        const global = await loadGlobalSettings();
         const origin = window.location.origin;
-        const siteKey = origin ? `site:${origin}` : null;
-        if (siteKey) {
-          const siteResult = await browser.storage.local.get(siteKey);
-          const ss = siteResult[siteKey] || {};
-          for (const k of Object.keys(GLOBAL_DEFAULTS)) {
-            if (ss[k] !== undefined) global[k] = ss[k];
-          }
+        if (origin) {
+          const site = await loadSiteSettings(origin);
+          for (const [k, v] of Object.entries(site)) global[k] = v;
         }
         settings.set(global);
+        loadAllowedDeviceIds();
       }
     } catch (e) {
       logger.warn("handshake failed:", e.message);
@@ -530,13 +549,10 @@
         logger.warn("data-port: missing deviceId or port");
         return;
       }
-      const requestOrigin = getRequestOrigin(data);
-      const allowed = await isDeviceAllowedForOrigin(requestOrigin, deviceId);
+      const allowed = await isDeviceAllowed(deviceId);
       if (!allowed) {
         logger.warn(
-          "data-port: origin",
-          requestOrigin,
-          "not authorized for device",
+          "data-port: not authorized for device",
           deviceId,
         );
         try {
@@ -590,15 +606,11 @@
 
     if (action === "getSettings") {
       try {
-        const global = await browser.storage.local.get(GLOBAL_DEFAULTS);
+        const global = await loadGlobalSettings();
         const origin = window.location.origin;
-        const siteKey = origin ? `site:${origin}` : null;
-        if (siteKey) {
-          const siteResult = await browser.storage.local.get(siteKey);
-          const ss = siteResult[siteKey] || {};
-          for (const k of Object.keys(GLOBAL_DEFAULTS)) {
-            if (ss[k] !== undefined) global[k] = ss[k];
-          }
+        if (origin) {
+          const site = await loadSiteSettings(origin);
+          for (const [k, v] of Object.entries(site)) global[k] = v;
         }
         settings.set(global);
         replyToPage({ type: "response", id, result: global });
@@ -797,11 +809,7 @@
     try {
       let response;
       if (action === "open") {
-        const origin = getRequestOrigin(data);
-        const allowed = await isDeviceAllowedForOrigin(
-          origin,
-          payload.deviceId,
-        );
+        const allowed = await isDeviceAllowed(payload.deviceId);
         if (!allowed) {
           replyToPage({ type: "response", id, result: { s: 403 } });
           return;
@@ -1028,16 +1036,24 @@
   browser.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return;
     const origin = window.location.origin;
-    const siteKey = origin ? `site:${origin}` : null;
     const patch = {};
-    for (const k of Object.keys(GLOBAL_DEFAULTS)) {
-      if (changes[k]) patch[k] = changes[k].newValue;
-    }
-    if (siteKey && changes[siteKey]) {
-      const ss = changes[siteKey].newValue || {};
-      for (const k of Object.keys(ss)) patch[k] = ss[k];
+    for (const [key, change] of Object.entries(changes)) {
+      const parsed = parseSettingsKey(key);
+      if (!parsed) continue;
+      if (parsed.scope === "global") {
+        patch[parsed.name] = change.newValue;
+      } else if (parsed.scope === "site" && parsed.origin === origin) {
+        patch[parsed.name] = change.newValue;
+      }
     }
     if (Object.keys(patch).length === 0) return;
     settings.set(patch);
+  });
+
+  browser.runtime.onMessage.addListener((message) => {
+    if (message.action === "allowedDevicesChanged" && Array.isArray(message.deviceIds)) {
+      allowedDeviceIds.clear();
+      for (const id of message.deviceIds) allowedDeviceIds.add(id);
+    }
   });
 })();

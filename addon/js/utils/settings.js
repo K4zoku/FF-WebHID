@@ -137,4 +137,61 @@
 
   webhid.export("GLOBAL_DEFAULTS", GLOBAL_DEFAULTS);
   webhid.export("createSettingsStore", createSettingsStore);
+
+  const SETTING_NAMES = Object.keys(GLOBAL_DEFAULTS);
+
+  function globalSettingKey(name) {
+    return `settings :: ${name}`;
+  }
+
+  function siteSettingKey(origin, name) {
+    return `settings :: ${origin} :: ${name}`;
+  }
+
+  function parseSettingsKey(key) {
+    const parts = key.split(" :: ");
+    if (parts[0] !== "settings") return null;
+    if (parts.length === 2) return { scope: "global", name: parts[1] };
+    if (parts.length === 3) return { scope: "site", origin: parts[1], name: parts[2] };
+    return null;
+  }
+
+  async function loadGlobalSettings() {
+    const keys = SETTING_NAMES.map((n) => globalSettingKey(n));
+    const raw = await browser.storage.local.get(keys);
+    const result = {};
+    for (const name of SETTING_NAMES) {
+      const k = globalSettingKey(name);
+      result[name] = k in raw ? raw[k] : GLOBAL_DEFAULTS[name];
+    }
+    return result;
+  }
+
+  async function loadSiteSettings(origin) {
+    const keys = SETTING_NAMES.map((n) => siteSettingKey(origin, n));
+    const raw = await browser.storage.local.get(keys);
+    const result = {};
+    for (const name of SETTING_NAMES) {
+      const k = siteSettingKey(origin, name);
+      if (k in raw) result[name] = raw[k];
+    }
+    return result;
+  }
+
+  async function saveGlobalSetting(name, value) {
+    await browser.storage.local.set({ [globalSettingKey(name)]: value });
+  }
+
+  async function saveSiteSetting(origin, name, value) {
+    await browser.storage.local.set({ [siteSettingKey(origin, name)]: value });
+  }
+
+  webhid.export("SETTING_NAMES", SETTING_NAMES);
+  webhid.export("globalSettingKey", globalSettingKey);
+  webhid.export("siteSettingKey", siteSettingKey);
+  webhid.export("parseSettingsKey", parseSettingsKey);
+  webhid.export("loadGlobalSettings", loadGlobalSettings);
+  webhid.export("loadSiteSettings", loadSiteSettings);
+  webhid.export("saveGlobalSetting", saveGlobalSetting);
+  webhid.export("saveSiteSetting", saveSiteSetting);
 })();

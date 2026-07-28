@@ -46,13 +46,6 @@
     }
   }
 
-  async function isDeviceAllowedForOrigin(origin, deviceId) {
-    if (!origin || origin === "null" || !deviceId) return false;
-    const key = encodeURIComponent(origin);
-    const result = await browser.storage.local.get(key);
-    return (result[key] || []).includes(deviceId);
-  }
-
   function broadcastGlobalReset() {
     browser.tabs
       .query({})
@@ -70,6 +63,6 @@
 
   webhid.export("bgStateOps", {
     tabsForEvent, registerDeviceTab, unregisterDeviceTab, isTabAuthorizedForDevice,
-    purgeTab, isDeviceAllowedForOrigin, broadcastGlobalReset,
+    purgeTab, broadcastGlobalReset,
   });
 })();

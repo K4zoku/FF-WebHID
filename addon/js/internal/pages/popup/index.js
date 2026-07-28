@@ -4,7 +4,9 @@
   const guessDeviceType = webhid.import("guessDeviceType");
   const t = webhid.import("t");
   const localizeHTML = webhid.import("localizeHTML");
-  const GLOBAL_DEFAULTS = webhid.import("GLOBAL_DEFAULTS");
+  const loadGlobalSettings = webhid.import("loadGlobalSettings");
+  const loadSiteSettings = webhid.import("loadSiteSettings");
+  const saveSiteSetting = webhid.import("saveSiteSetting");
   logger.initLogger("popup");
 
   localizeHTML(document);
@@ -25,28 +27,16 @@
   const siteLabel = document.getElementById("site-name");
   siteLabel.textContent = origin || t("popupNoSite");
 
-  const siteKey = origin ? `site:${origin}` : null;
-  const siteDevicesKey = origin ? encodeURIComponent(origin) : null;
-
-  /** @returns {Promise<object>} */
   async function loadSettings() {
-    const global = await browser.storage.local.get(GLOBAL_DEFAULTS);
-    if (!siteKey) return global;
-    const site = await browser.storage.local.get(siteKey);
-    return { ...global, ...site[siteKey] };
+    const global = await loadGlobalSettings();
+    if (!origin) return global;
+    const site = await loadSiteSettings(origin);
+    return { ...global, ...site };
   }
 
-  /**
-   * @param {string} key
-   * @param {any} value
-   * @returns {Promise<void>}
-   */
   async function saveSetting(key, value) {
-    if (!siteKey) return;
-    const result = await browser.storage.local.get(siteKey);
-    const siteSettings = result[siteKey] || {};
-    siteSettings[key] = value;
-    await browser.storage.local.set({ [siteKey]: siteSettings });
+    if (!origin) return;
+    await saveSiteSetting(origin, key, value);
   }
 
   const settings = await loadSettings();
@@ -73,9 +63,11 @@
 
   /** @returns {Promise<string[]>} */
   async function loadDevices() {
-    if (!siteDevicesKey) return [];
-    const result = await browser.storage.local.get(siteDevicesKey);
-    return result[siteDevicesKey] || [];
+    if (!origin) return [];
+    try {
+      const resp = await browser.runtime.sendMessage({ action: "getPairedDevices", origin });
+      return resp && resp.success ? resp.hashes : [];
+    } catch { return []; }
   }
 
   /**
@@ -83,7 +75,7 @@
    * @returns {Promise<void>}
    */
   async function removeDevice(hash) {
-    if (!siteDevicesKey || !origin) return;
+    if (!origin) return;
     try {
       await browser.runtime.sendMessage({
         action: "revokeDevice",
