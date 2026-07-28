@@ -54,7 +54,7 @@ const ADAPTIVE_COALESCE_US: u64 = 25;
 //         (data length = 0 on error)
 //
 // Frames from daemon → page that are NOT in this scheme are input-report
-// batches (existing format: `[len_u8][report_bytes]...`).
+// batches (format: `[0x00][len_u16 LE][report_id][payload]` repeated).
 
 const MSG_SEND_REPORT: u8 = 0x01;
 const MSG_SEND_FEATURE_REPORT: u8 = 0x02;
@@ -63,6 +63,10 @@ const MSG_RECEIVE_FEATURE_REPORT: u8 = 0x03;
 const RESP_SEND_REPORT: u8 = 0x81;
 const RESP_SEND_FEATURE_REPORT: u8 = 0x82;
 const RESP_RECEIVE_FEATURE_REPORT: u8 = 0x83;
+
+/// Prefix byte for input-report batch frames (daemon → page).
+/// Distinguishes batch frames from control-response frames (0x81-0x83).
+const MSG_INPUT_BATCH: u8 = 0x00;
 
 /// Start the WebSocket server on the given port.
 pub async fn start_server(
@@ -401,12 +405,13 @@ fn drain_available(
     }
 }
 
-/// Write the batch frame into `out`.
-/// Format: `[len_u16 LE][report_id][payload]` repeated.
+/// Write the batch frame into `out`, prefixed with MSG_INPUT_BATCH.
+/// Format: [0x00][len_u16 LE][report_id][payload] repeated.
 fn write_batch_frame(out: &mut Vec<u8>, reports: &[(u8, Bytes)]) {
     out.clear();
-    let total_size: usize = reports.iter().map(|(_, d)| 2 + 1 + d.len()).sum();
+    let total_size: usize = 1 + reports.iter().map(|(_, d)| 2 + 1 + d.len()).sum::<usize>();
     out.reserve(total_size);
+    out.push(MSG_INPUT_BATCH);
     for (report_id, data) in reports {
         let len = (1 + data.len()) as u16;
         out.push((len & 0xFF) as u8);
@@ -609,15 +614,15 @@ mod tests {
     #[test]
     fn test_batch_frame_empty() {
         let frame = create_batch_frame(&[]);
-        assert!(frame.is_empty());
+        assert_eq!(frame, vec![0x00]);
     }
 
     #[test]
     fn test_batch_frame_single_report() {
         let reports: Vec<(u8, Bytes)> = vec![(0x01, Bytes::from(&[0xAA, 0xBB][..]))];
         let frame = create_batch_frame(&reports);
-        // [len_u16 LE = 3][report_id=0x01][payload 0xAA, 0xBB]
-        assert_eq!(frame, vec![0x03, 0x00, 0x01, 0xAA, 0xBB]);
+        // [0x00][len_u16 LE = 3][report_id=0x01][payload 0xAA, 0xBB]
+        assert_eq!(frame, vec![0x00, 0x03, 0x00, 0x01, 0xAA, 0xBB]);
     }
 
     #[test]
@@ -627,10 +632,10 @@ mod tests {
             (0x02, Bytes::from(&[0xBB, 0xCC][..])),
         ];
         let frame = create_batch_frame(&reports);
-        // [2, 0, 0x01, 0xAA, 3, 0, 0x02, 0xBB, 0xCC]
+        // [0x00][2, 0, 0x01, 0xAA, 3, 0, 0x02, 0xBB, 0xCC]
         assert_eq!(
             frame,
-            vec![0x02, 0x00, 0x01, 0xAA, 0x03, 0x00, 0x02, 0xBB, 0xCC]
+            vec![0x00, 0x02, 0x00, 0x01, 0xAA, 0x03, 0x00, 0x02, 0xBB, 0xCC]
         );
     }
 
@@ -638,8 +643,23 @@ mod tests {
     fn test_batch_frame_empty_report() {
         let reports: Vec<(u8, Bytes)> = vec![(0x05, Bytes::from(&[][..]))];
         let frame = create_batch_frame(&reports);
-        // [len=1, 0, report_id=0x05]
-        assert_eq!(frame, vec![0x01, 0x00, 0x05]);
+        // [0x00][len=1, 0, report_id=0x05]
+        assert_eq!(frame, vec![0x00, 0x01, 0x00, 0x05]);
+    }
+
+    #[test]
+    fn test_batch_frame_large_payload() {
+        // Payload >= 128 bytes: len = 1 + 128 = 129 = 0x81
+        // Without the 0x00 prefix, this would be misinterpreted as a control response.
+        let payload = vec![0xAA; 128];
+        let reports: Vec<(u8, Bytes)> = vec![(0x01, Bytes::from(payload))];
+        let frame = create_batch_frame(&reports);
+        // [0x00][0x81, 0x00][report_id=0x01][128 bytes of 0xAA]
+        assert_eq!(frame[0], 0x00);
+        assert_eq!(frame[1], 0x81);
+        assert_eq!(frame[2], 0x00);
+        assert_eq!(frame[3], 0x01);
+        assert_eq!(frame.len(), 4 + 128);
     }
 
     // ── make_status_resp ────────────────────────────────────────────────

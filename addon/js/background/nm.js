@@ -79,6 +79,10 @@
               return;
             }
           }
+          if (message.s !== undefined && message.n === undefined && message.E === undefined) {
+            logger.warn("daemon error (no req id): status=" + message.s);
+            return;
+          }
           logger.warn("unmatched:", message);
         });
 
@@ -234,24 +238,28 @@
         if (bin.length < 8 || bin[0] !== PKG_INPUT_REPORT) return;
         const deviceId =
           (bin[1] | (bin[2] << 8) | (bin[3] << 16) | (bin[4] << 24)) >>> 0;
-        const reportId = bin[5];
-        const payloadLen = bin[6] | (bin[7] << 8);
-        const payloadEnd = 8 + payloadLen;
-        if (payloadEnd > bin.length) return;
-        const payload = new Uint8Array(payloadLen);
-        payload.set(bin.subarray(8, payloadEnd));
-        const event = {
-          eventType: "input_report",
-          deviceId,
-          reportId,
-          data: payload,
-        };
         const targets = tabsForEventLocal({ i: deviceId });
         if (!targets) return;
-        for (const tabId of targets) {
-          browser.tabs
-            .sendMessage(tabId, { action: "webhidDeviceEvent", event })
-            .catch((e) => logger.debug("event forward to tab failed", e));
+        let offset = 5;
+        while (offset + 3 <= bin.length) {
+          const reportId = bin[offset];
+          const payloadLen = bin[offset + 1] | (bin[offset + 2] << 8);
+          offset += 3;
+          if (offset + payloadLen > bin.length) break;
+          const payload = new Uint8Array(payloadLen);
+          if (payloadLen > 0) payload.set(bin.subarray(offset, offset + payloadLen));
+          offset += payloadLen;
+          const event = {
+            eventType: "input_report",
+            deviceId,
+            reportId,
+            data: payload,
+          };
+          for (const tabId of targets) {
+            browser.tabs
+              .sendMessage(tabId, { action: "webhidDeviceEvent", event })
+              .catch((e) => logger.debug("event forward to tab failed", e));
+          }
         }
       } catch (e) {
         logger.warn("onPackedData: malformed frame dropped:", e.message);

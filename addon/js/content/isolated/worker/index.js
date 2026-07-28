@@ -9,6 +9,7 @@ const MSG_SEND_REPORT = 0x01;
 const MSG_SEND_FEATURE_REPORT = 0x02;
 const MSG_RECEIVE_FEATURE_REPORT = 0x03;
 const RESP_RECEIVE_FEATURE_REPORT = 0x83;
+const MSG_INPUT_BATCH = 0x00;
 /** @type {import("./types.js").SettingsStore} */
 const settings = createSettingsStore(GLOBAL_DEFAULTS);
 settings.on("logLevel", (v) => logger.applyLevel(v));
@@ -33,9 +34,11 @@ self.onmessage = ({ data: msg, ports }) => {
       onClosed: () => self.postMessage({ type: "closed" }),
       onAuthFailed: (code) => self.postMessage({ type: "auth-failed", code }),
       onBinary: (batch) => {
+        if (batch.length > 0 && batch[0] === MSG_INPUT_BATCH)
+          return pushInputBatch(batch, 1);
         if (batch.length > 0 && batch[0] >= 0x81)
           return handleControlResponse(batch);
-        pushInputBatch(batch);
+        pushInputBatch(batch, 0);
       },
     });
     transport.connect(msg);
@@ -76,10 +79,9 @@ function handleDataPortMessage(msg) {
   if (msg.type === "receiveFeature") return handleReceiveFeature(msg);
 }
 
-/** @param {Uint8Array} batch @returns {void} */
-function pushInputBatch(batch) {
-  let offset = 0,
-    count = 0;
+/** @param {Uint8Array} batch @param {number} [offset=0] @returns {void} */
+function pushInputBatch(batch, offset = 0) {
+  let count = 0;
   while (offset + 1 < batch.length) {
     const len = batch[offset] | (batch[offset + 1] << 8);
     offset += 2;

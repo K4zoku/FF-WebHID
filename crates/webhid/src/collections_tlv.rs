@@ -258,57 +258,64 @@ fn decode_report(data: &[u8], off: &mut usize, end: usize) -> Report {
 }
 
 fn decode_field(data: &[u8], off: &mut usize, end: usize) -> Field {
+    macro_rules! need {
+        ($n:expr) => {
+            *off + $n <= end
+        };
+    }
+    macro_rules! read_u32 {
+        () => {{
+            let v = i32::from_le_bytes([
+                data[*off],
+                data[*off + 1],
+                data[*off + 2],
+                data[*off + 3],
+            ]);
+            *off += 4;
+            v
+        }};
+    }
+    macro_rules! read_u8 {
+        () => {{
+            let v = data[*off] as i8 as i32;
+            *off += 1;
+            v
+        }};
+    }
+
+    if !need!(2) {
+        *off = end;
+        return Field::default();
+    }
     let flags = u16::from_le_bytes([data[*off], data[*off + 1]]);
     *off += 2;
     let report_size = read_varint(data, off);
     let report_count = read_varint(data, off);
-    let logical_minimum = i32::from_le_bytes([
-        data[*off],
-        data[*off + 1],
-        data[*off + 2],
-        data[*off + 3],
-    ]);
-    *off += 4;
-    let logical_maximum = i32::from_le_bytes([
-        data[*off],
-        data[*off + 1],
-        data[*off + 2],
-        data[*off + 3],
-    ]);
-    *off += 4;
-    let physical_minimum = i32::from_le_bytes([
-        data[*off],
-        data[*off + 1],
-        data[*off + 2],
-        data[*off + 3],
-    ]);
-    *off += 4;
-    let physical_maximum = i32::from_le_bytes([
-        data[*off],
-        data[*off + 1],
-        data[*off + 2],
-        data[*off + 3],
-    ]);
-    *off += 4;
-    let unit_exponent = data[*off] as i8 as i32;
-    *off += 1;
+
+    if !need!(16) {
+        *off = end;
+        return Field::default();
+    }
+    let logical_minimum = read_u32!();
+    let logical_maximum = read_u32!();
+    let physical_minimum = read_u32!();
+    let physical_maximum = read_u32!();
+    let unit_exponent = read_u8!();
     let unit_system = unit_system_from_tag(data[*off]);
     *off += 1;
-    let unit_factor_length_exponent = data[*off] as i8 as i32;
-    *off += 1;
-    let unit_factor_mass_exponent = data[*off] as i8 as i32;
-    *off += 1;
-    let unit_factor_time_exponent = data[*off] as i8 as i32;
-    *off += 1;
-    let unit_factor_temperature_exponent = data[*off] as i8 as i32;
-    *off += 1;
-    let unit_factor_current_exponent = data[*off] as i8 as i32;
-    *off += 1;
-    let unit_factor_luminous_intensity_exponent = data[*off] as i8 as i32;
-    *off += 1;
+    let unit_factor_length_exponent = read_u8!();
+    let unit_factor_mass_exponent = read_u8!();
+    let unit_factor_time_exponent = read_u8!();
+    let unit_factor_temperature_exponent = read_u8!();
+    let unit_factor_current_exponent = read_u8!();
+    let unit_factor_luminous_intensity_exponent = read_u8!();
 
     let is_range = flags & (1 << 2) != 0;
     let (usages, usage_minimum, usage_maximum) = if is_range {
+        if !need!(8) {
+            *off = end;
+            return Field::default();
+        }
         let min = u32::from_le_bytes([
             data[*off],
             data[*off + 1],
@@ -326,6 +333,10 @@ fn decode_field(data: &[u8], off: &mut usize, end: usize) -> Field {
         (None, Some(min), Some(max))
     } else {
         let count = read_varint(data, off) as usize;
+        if !need!(count * 4) {
+            *off = end;
+            return Field::default();
+        }
         let mut u = Vec::with_capacity(count);
         for _ in 0..count {
             u.push(u32::from_le_bytes([
@@ -343,6 +354,10 @@ fn decode_field(data: &[u8], off: &mut usize, end: usize) -> Field {
     let mut strings = Vec::with_capacity(strings_count);
     for _ in 0..strings_count {
         let byte_len = read_varint(data, off) as usize;
+        if !need!(byte_len) {
+            *off = end;
+            return Field::default();
+        }
         strings.push(String::from_utf8_lossy(&data[*off..*off + byte_len]).to_string());
         *off += byte_len;
     }
