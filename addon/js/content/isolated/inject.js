@@ -8,7 +8,7 @@
     "js/utils/device.js",
     "js/utils/settings.js",
     "js/utils/base64.js",
-    "js/polyfill.js",
+    "js/content/main/index.js",
   ];
 
   /**

@@ -56,7 +56,7 @@
 
     /** @returns {Promise<void>} */
     async loadFragment() {
-      const html = await fetchResource("html/picker.fragment.html");
+      const html = await fetchResource("js/content/isolated/picker/fragment.html");
       const templateDoc = new DOMParser().parseFromString(html, "text/html");
       const template = templateDoc.querySelector("#webhid-picker-template");
       this.shadow.appendChild(template.content.cloneNode(true));
