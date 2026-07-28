@@ -71,7 +71,7 @@
   const bridgeReady = isWorker
     ? new Promise((resolve) => {
         self.addEventListener('message', function onInit(e) {
-          if (e.data && e.data.type === 'webhid-init' && e.ports[0]) {
+          if (e.data === null && e.ports[0]) {
             self.removeEventListener('message', onInit);
             bridgePort = e.ports[0];
             setupBridgePort();
@@ -1272,7 +1272,7 @@
     function PatchedWorker(url, opts) {
       const instance = new NativeWorker(url, opts);
       const ch = new MessageChannel();
-      instance.postMessage({ type: "webhid-init" }, [ch.port1]);
+      instance.postMessage(null, [ch.port1]);
       bridgeReady.then(() => {
         if (!bridgePort) return;
         bridgePort.postMessage(
