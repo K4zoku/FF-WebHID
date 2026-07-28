@@ -23,6 +23,11 @@
   const NM_HOST_FORWARDER = "webhid.forwarder_nm_host";
   const NM_HOST_DAEMON = "webhid.daemon_nm_host";
 
+  /**
+   * Returns the list of tab IDs authorized for the device in the given control event.
+   * @param {object} message
+   * @returns {number[]|null}
+   */
   function tabsForEventLocal(message) {
     return tabsForEvent(message);
   }

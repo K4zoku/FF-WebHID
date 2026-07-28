@@ -17,12 +17,21 @@
     "reserved",
   ];
 
+  /**
+   * Decodes a base64-encoded TLV blob of HID collection descriptors into a tree.
+   * @param {string} b64
+   * @returns {object[]}
+   */
   function decodeCollectionsTlv(b64) {
     if (!b64 || typeof b64 !== "string") return [];
     const bin = Uint8Array.fromBase64(b64);
     const dv = new DataView(bin.buffer, bin.byteOffset, bin.byteLength);
     let off = 0;
 
+    /**
+     * Reads a varint from the DataView at the current offset.
+     * @returns {number}
+     */
     function readVarint() {
       let result = 0,
         shift = 0,
@@ -35,6 +44,10 @@
       return result >>> 0;
     }
 
+    /**
+     * Reads a tagged node (collection, report, or field) from the TLV stream.
+     * @returns {{tag: number, node: object|null}}
+     */
     function readNode() {
       const tag = dv.getUint8(off++);
       const len = readVarint();
@@ -59,6 +72,11 @@
       return { tag, node };
     }
 
+    /**
+     * Reads a collection node and its children from the TLV stream.
+     * @param {number} end
+     * @returns {object}
+     */
     function readCollection(end) {
       const presence = dv.getUint8(off++);
       const usagePage =
@@ -89,6 +107,11 @@
       };
     }
 
+    /**
+     * Reads a report node (input/output/feature) and its fields from the TLV stream.
+     * @param {number} end
+     * @returns {object}
+     */
     function readReport(end) {
       const reportId = dv.getUint8(off++);
       const items = [];
@@ -99,6 +122,10 @@
       return { reportId, items };
     }
 
+    /**
+     * Reads a field descriptor from the TLV stream.
+     * @returns {object}
+     */
     function readField() {
       const flags = dv.getUint16(off, true);
       off += 2;

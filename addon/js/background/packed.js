@@ -18,6 +18,15 @@
   const PKG_SEND_REPORT = 0x02;
   const PKG_SEND_FEATURE_REPORT = 0x04;
 
+  /**
+   * Builds a binary-packed HID send/report frame.
+   * @param {number} msgType
+   * @param {number} reqId
+   * @param {number} deviceId
+   * @param {number} reportId
+   * @param {Uint8Array} data
+   * @returns {Uint8Array}
+   */
   function buildPackedSend(msgType, reqId, deviceId, reportId, data) {
     const buf = new Uint8Array(12 + data.length);
     const dv = new DataView(buf.buffer);

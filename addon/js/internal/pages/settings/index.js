@@ -26,6 +26,11 @@
   const devicePickerModeSelect = document.getElementById("devicePickerMode");
   devicePickerModeSelect.value = current.devicePickerMode || "modal";
 
+  /**
+   * Displays a temporary status message in the settings page.
+   * @param {string} msg
+   * @returns {void}
+   */
   function showStatus(msg) {
     const el = document.getElementById("status");
     el.textContent = msg;

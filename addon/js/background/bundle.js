@@ -4,6 +4,10 @@
   let workerBundle = null;
   let workerBundlePromise = null;
 
+  /**
+   * Fetches and caches the worker bundle (worker index + utils) as a single string.
+   * @returns {Promise<string>}
+   */
   async function ensureWorkerBundle() {
     if (workerBundle) return workerBundle;
     if (workerBundlePromise) return workerBundlePromise;
@@ -33,6 +37,10 @@
   let workerPolyfillBundle = null;
   let workerPolyfillBundlePromise = null;
 
+  /**
+   * Fetches and caches the polyfill worker bundle (main index + utils) as a single string.
+   * @returns {Promise<string>}
+   */
   async function ensureWorkerPolyfillBundle() {
     if (workerPolyfillBundle) return workerPolyfillBundle;
     if (workerPolyfillBundlePromise) return workerPolyfillBundlePromise;

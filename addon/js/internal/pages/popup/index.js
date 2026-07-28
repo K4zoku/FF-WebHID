@@ -33,6 +33,10 @@
   const siteLabel = document.getElementById("site-name");
   siteLabel.textContent = origin || t("popupNoSite");
 
+  /**
+   * Loads global and site settings, merging site overrides on top of global defaults.
+   * @returns {Promise<object>}
+   */
   async function loadSettings() {
     const global = await loadGlobalSettings();
     if (!origin) return global;
@@ -40,6 +44,12 @@
     return { ...global, ...site };
   }
 
+  /**
+   * Saves a single site-level setting.
+   * @param {string} key
+   * @param {any} value
+   * @returns {Promise<void>}
+   */
   async function saveSetting(key, value) {
     if (!origin) return;
     await saveSiteSetting(origin, key, value);

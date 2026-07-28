@@ -44,6 +44,10 @@
   const VERSION_KEY = "meta :: storage :: version";
   const GLOBAL_NAMES = new Set(SETTING_NAMES);
 
+  /**
+   * Migrates legacy browser.storage.local entries to the IndexedDB schema.
+   * @returns {Promise<void>}
+   */
   async function migrateLegacyStorage() {
     const all = await browser.storage.local.get(null);
     const keysToRemove = [];
@@ -103,6 +107,11 @@
     if (keysToRemove.length) await browser.storage.local.remove(keysToRemove);
   }
 
+  /**
+   * Waits for an IndexedDB transaction to complete.
+   * @param {object} tx
+   * @returns {Promise<void>}
+   */
   function txDone(tx) {
     return new Promise((resolve, reject) => {
       tx.oncomplete = () => resolve();
@@ -111,6 +120,10 @@
     });
   }
 
+  /**
+   * Ensures the IndexedDB storage schema is at the current version, migrating if needed.
+   * @returns {Promise<void>}
+   */
   async function ensureStorageSchemaVersion() {
     const { [VERSION_KEY]: stored } =
       await browser.storage.local.get(VERSION_KEY);
@@ -121,6 +134,11 @@
     await browser.storage.local.set({ [VERSION_KEY]: STORAGE_SCHEMA_VERSION });
   }
 
+  /**
+   * Decodes TLV-encoded collections on each device in-place.
+   * @param {object[]} devices
+   * @returns {void}
+   */
   function decodeDeviceCollections(devices) {
     if (!Array.isArray(devices)) return;
     for (const dev of devices) {
@@ -141,10 +159,18 @@
 
   const settings = createSettingsStore(GLOBAL_DEFAULTS);
 
+  /**
+   * Returns the NM host name based on the daemonAsNmHost setting.
+   * @returns {string}
+   */
   function nmHostName() {
     return settings.daemonAsNmHost ? NM_HOST_DAEMON : NM_HOST_FORWARDER;
   }
 
+  /**
+   * Loads NM host settings from storage and configures the NativeMessaging host.
+   * @returns {Promise<void>}
+   */
   async function loadNmHostSetting() {
     await ensureStorageSchemaVersion();
     const global = await loadGlobalSettings();
@@ -166,6 +192,10 @@
     NativeMessaging.reconnectWithNewHost();
   });
 
+  /**
+   * Rebuilds the set of origins that have worker polyfill enabled.
+   * @returns {Promise<void>}
+   */
   async function refreshWorkerPolyfillSites() {
     workerPolyfillSites.clear();
     const all = await browser.storage.local.get(null);

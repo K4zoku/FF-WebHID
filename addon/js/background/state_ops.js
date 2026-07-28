@@ -6,6 +6,11 @@
   const { saveDeviceInfo, saveDeviceInfoBatch } = webhid.import("bgStorage");
   const http = webhid.import("http");
 
+  /**
+   * Returns the list of tab IDs authorized for the device in the given event, or null.
+   * @param {object} message
+   * @returns {number[]|null}
+   */
   function tabsForEvent(message) {
     const eventType = message.e;
     if (eventType === 1 || !message.i) return null;
@@ -13,6 +18,12 @@
     return tabs && tabs.size > 0 ? [...tabs] : null;
   }
 
+  /**
+   * Registers a tab as authorized to access a device.
+   * @param {number} deviceId
+   * @param {number} tabId
+   * @returns {void}
+   */
   function registerDeviceTab(deviceId, tabId) {
     if (!deviceId || tabId == null) return;
     let tabs = deviceTabMap.get(deviceId);
@@ -24,6 +35,12 @@
     logger.debug("register device " + deviceId + " tab " + tabId);
   }
 
+  /**
+   * Unregisters a tab from a device, removing the device entry if no tabs remain.
+   * @param {number} deviceId
+   * @param {number} tabId
+   * @returns {void}
+   */
   function unregisterDeviceTab(deviceId, tabId) {
     if (!deviceId || tabId == null) return;
     const tabs = deviceTabMap.get(deviceId);
@@ -32,11 +49,23 @@
     if (tabs.size === 0) deviceTabMap.delete(deviceId);
   }
 
+  /**
+   * Checks whether a tab is authorized to access a device.
+   * @param {number} tabId
+   * @param {number} deviceId
+   * @returns {boolean}
+   */
   function isTabAuthorizedForDevice(tabId, deviceId) {
     const tabs = deviceTabMap.get(deviceId);
     return !!tabs && tabs.has(tabId);
   }
 
+  /**
+   * Removes all device registrations for a tab and closes devices with no remaining tabs.
+   * @param {number} tabId
+   * @param {Function} closeDeviceFn
+   * @returns {void}
+   */
   function purgeTab(tabId, closeDeviceFn) {
     if (tabId == null) return;
     for (const [deviceId, tabs] of deviceTabMap) {
@@ -49,6 +78,10 @@
     }
   }
 
+  /**
+   * Sends a globalReset message to all tabs.
+   * @returns {void}
+   */
   function broadcastGlobalReset() {
     browser.tabs
       .query({})

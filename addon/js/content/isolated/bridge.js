@@ -60,6 +60,10 @@
   let allowedDeviceIdsReady = false;
   const allowedDeviceIdsQueue = [];
 
+  /**
+   * Resolves all queued isDeviceAllowed promises with the current allowed set.
+   * @returns {void}
+   */
   function flushAllowedDeviceIdsQueue() {
     while (allowedDeviceIdsQueue.length) {
       const { deviceId, resolve } = allowedDeviceIdsQueue.shift();
@@ -67,6 +71,11 @@
     }
   }
 
+  /**
+   * Checks whether a device is in the allowed set, queuing if not yet loaded.
+   * @param {string} deviceId
+   * @returns {Promise<boolean>}
+   */
   function isDeviceAllowed(deviceId) {
     if (allowedDeviceIdsReady)
       return Promise.resolve(allowedDeviceIds.has(deviceId));
@@ -75,6 +84,10 @@
     });
   }
 
+  /**
+   * Loads the allowed device IDs for the current origin from the background.
+   * @returns {Promise<void>}
+   */
   async function loadAllowedDeviceIds() {
     try {
       const resp = await browser.runtime.sendMessage({
@@ -454,7 +467,9 @@
 
   if (window === window.top) {
     /**
-     *
+     * Reports iframe src URLs with allow="hid" to the background so cross-origin
+     * permissions can be tracked.
+     * @returns {void}
      */
     function reportIframes() {
       const iframes = document.querySelectorAll('iframe[allow*="hid" i]');

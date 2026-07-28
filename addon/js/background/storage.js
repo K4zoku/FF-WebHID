@@ -6,6 +6,10 @@
   const DB_VERSION = 1;
   let dbPromise = null;
 
+  /**
+   * Opens (or returns the cached) IndexedDB database instance.
+   * @returns {Promise<object>}
+   */
   function openDb() {
     if (dbPromise) return dbPromise;
     dbPromise = new Promise((resolve, reject) => {
@@ -25,6 +29,11 @@
     return dbPromise;
   }
 
+  /**
+   * Waits for an IndexedDB transaction to complete.
+   * @param {object} tx
+   * @returns {Promise<void>}
+   */
   function txDone(tx) {
     return new Promise((resolve, reject) => {
       tx.oncomplete = () => resolve();
@@ -33,6 +42,11 @@
     });
   }
 
+  /**
+   * Persists a single device info record to IndexedDB.
+   * @param {object} device
+   * @returns {Promise<void>}
+   */
   async function saveDeviceInfo(device) {
     if (!device || !device.deviceId) return;
     try {
@@ -45,6 +59,11 @@
     }
   }
 
+  /**
+   * Persists multiple device info records to IndexedDB in a single transaction.
+   * @param {object[]} devices
+   * @returns {Promise<void>}
+   */
   async function saveDeviceInfoBatch(devices) {
     if (!devices || !devices.length) return;
     try {
@@ -60,6 +79,11 @@
     }
   }
 
+  /**
+   * Retrieves device info from the cache or IndexedDB.
+   * @param {number} deviceId
+   * @returns {Promise<object|null>}
+   */
   async function getDeviceInfo(deviceId) {
     if (!deviceId) return null;
     const live = deviceCache.find((d) => d.deviceId === deviceId);
@@ -77,6 +101,11 @@
     }
   }
 
+  /**
+   * Removes a device info record from IndexedDB.
+   * @param {number} deviceId
+   * @returns {Promise<void>}
+   */
   async function removeDeviceInfo(deviceId) {
     if (!deviceId) return;
     try {
@@ -89,6 +118,11 @@
     }
   }
 
+  /**
+   * Returns the list of allowed device IDs for a given origin.
+   * @param {string} origin
+   * @returns {Promise<number[]>}
+   */
   async function getAllowedDevices(origin) {
     const db = await openDb();
     const tx = db.transaction("origins", "readonly");
@@ -100,6 +134,12 @@
     });
   }
 
+  /**
+   * Adds a device to the allowed list for an origin.
+   * @param {string} origin
+   * @param {number} deviceId
+   * @returns {Promise<void>}
+   */
   async function addAllowedDevice(origin, deviceId) {
     const db = await openDb();
     const tx = db.transaction("origins", "readwrite");
@@ -107,6 +147,12 @@
     await txDone(tx);
   }
 
+  /**
+   * Removes a device from the allowed list for an origin.
+   * @param {string} origin
+   * @param {number} deviceId
+   * @returns {Promise<void>}
+   */
   async function removeAllowedDevice(origin, deviceId) {
     const db = await openDb();
     const tx = db.transaction("origins", "readwrite");

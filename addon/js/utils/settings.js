@@ -140,14 +140,30 @@
 
   const SETTING_NAMES = Object.keys(GLOBAL_DEFAULTS);
 
+  /**
+   * Builds the storage key for a global setting.
+   * @param {string} name
+   * @returns {string}
+   */
   function globalSettingKey(name) {
     return `settings :: ${name}`;
   }
 
+  /**
+   * Builds the storage key for a site-specific setting.
+   * @param {string} origin
+   * @param {string} name
+   * @returns {string}
+   */
   function siteSettingKey(origin, name) {
     return `settings :: ${origin} :: ${name}`;
   }
 
+  /**
+   * Parses a settings storage key into scope, origin, and name components.
+   * @param {string} key
+   * @returns {object|null}
+   */
   function parseSettingsKey(key) {
     const parts = key.split(" :: ");
     if (parts[0] !== "settings") return null;
@@ -157,6 +173,10 @@
     return null;
   }
 
+  /**
+   * Loads all global settings from storage, applying defaults for missing keys.
+   * @returns {Promise<object>}
+   */
   async function loadGlobalSettings() {
     const keys = SETTING_NAMES.map((n) => globalSettingKey(n));
     const raw = await browser.storage.local.get(keys);
@@ -168,6 +188,11 @@
     return result;
   }
 
+  /**
+   * Loads site-specific settings for the given origin from storage.
+   * @param {string} origin
+   * @returns {Promise<object>}
+   */
   async function loadSiteSettings(origin) {
     const keys = SETTING_NAMES.map((n) => siteSettingKey(origin, n));
     const raw = await browser.storage.local.get(keys);
@@ -179,10 +204,23 @@
     return result;
   }
 
+  /**
+   * Saves a single global setting to storage.
+   * @param {string} name
+   * @param {any} value
+   * @returns {Promise<void>}
+   */
   async function saveGlobalSetting(name, value) {
     await browser.storage.local.set({ [globalSettingKey(name)]: value });
   }
 
+  /**
+   * Saves a single site-specific setting to storage.
+   * @param {string} origin
+   * @param {string} name
+   * @param {any} value
+   * @returns {Promise<void>}
+   */
   async function saveSiteSetting(origin, name, value) {
     await browser.storage.local.set({ [siteSettingKey(origin, name)]: value });
   }
