@@ -1,0 +1,72 @@
+import jsdoc from "eslint-plugin-jsdoc";
+
+const browserTypes = [
+  "Worker", "Window", "HTMLElement", "HTMLDialogElement",
+  "HTMLSelectElement", "HTMLInputElement", "ShadowRoot",
+  "Event", "EventListener", "EventListenerObject",
+  "EventListenerOrEventListenerObject", "ErrorConstructor",
+  "PropertyDescriptor", "TypedArray", "BufferSource",
+  "Element", "Document", "MessageEvent", "setTimeout",
+  "HTMLIFrameElement", "MutationObserver", "MutationRecord",
+  "TextEncoder", "TextDecoder", "URL", "Headers", "AbortSignal",
+  "Node", "NodeList",
+];
+
+export default [
+  {
+    files: ["addon/js/**/*.js", "addon/js/pages/**/*.js"],
+    languageOptions: {
+      sourceType: "script",
+      globals: {
+        webhid: "readonly",
+        browser: "readonly",
+        self: "readonly",
+        globalThis: "readonly",
+        document: "readonly",
+        window: "readonly",
+        DOMParser: "readonly",
+        MessageChannel: "readonly",
+        MessagePort: "readonly",
+        WebSocket: "readonly",
+        Uint8Array: "readonly",
+        ArrayBuffer: "readonly",
+        DataView: "readonly",
+        console: "readonly",
+        URL: "readonly",
+        crypto: "readonly",
+        TextEncoder: "readonly",
+        TextDecoder: "readonly",
+        fetch: "readonly",
+        setTimeout: "readonly",
+        clearTimeout: "readonly",
+        requestAnimationFrame: "readonly",
+        setInterval: "readonly",
+        clearInterval: "readonly",
+        MutationObserver: "readonly",
+        location: "readonly",
+        navigator: "readonly",
+        Node: "readonly",
+        EventTarget: "readonly",
+      },
+    },
+    plugins: { jsdoc },
+    rules: {
+      "jsdoc/require-jsdoc": ["warn", {
+        require: {
+          FunctionDeclaration: true,
+          MethodDefinition: true,
+          ClassDeclaration: true,
+          ArrowFunctionExpression: false,
+        },
+      }],
+      "jsdoc/require-param": "warn",
+      "jsdoc/require-returns": "warn",
+      "jsdoc/require-param-type": "warn",
+      "jsdoc/require-returns-type": "warn",
+      "jsdoc/check-types": "warn",
+      "jsdoc/no-undefined-types": ["warn", { definedTypes: browserTypes }],
+      "jsdoc/require-param-name": "warn",
+      "jsdoc/valid-types": "warn",
+    },
+  },
+];

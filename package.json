@@ -5,11 +5,14 @@
   "scripts": {
     "release": "npx commit-and-tag-version",
     "lint": "npx web-ext lint -s addon",
+    "lint:js": "npx eslint addon/js/",
     "format": "npx prettier addon/**/*.js -w",
     "build:addon": "node scripts/build-addon.mjs"
   },
   "devDependencies": {
     "commit-and-tag-version": "^13.1.0",
+    "eslint": "^10.8.0",
+    "eslint-plugin-jsdoc": "^63.3.2",
     "prettier": "^3.9.6",
     "terser": "^5.49.0",
     "web-ext": "^10.5.0"
