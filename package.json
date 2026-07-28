@@ -8,7 +8,7 @@
     "release:patch": "npx commit-and-tag-version --release-as patch",
     "lint": "npx web-ext lint -s addon",
     "lint:js": "npx eslint addon/js/",
-    "format": "npx prettier addon/**/*.js -w",
+    "format": "npx prettier addon/**/*.js addon/**/*.css addon/**/*.html -w",
     "build": "make build && npm run build:addon",
     "build:addon": "node scripts/build-addon.mjs",
     "build:msi": "powershell -NoProfile -ExecutionPolicy Bypass -File packaging/windows/build-msi.ps1"

@@ -42,15 +42,9 @@
    * @returns {boolean}
    */
   function deviceMatchesFilter(device, filter) {
-    if (
-      filter.vendorId !== undefined &&
-      device.vendorId !== filter.vendorId
-    )
+    if (filter.vendorId !== undefined && device.vendorId !== filter.vendorId)
       return false;
-    if (
-      filter.productId !== undefined &&
-      device.productId !== filter.productId
-    )
+    if (filter.productId !== undefined && device.productId !== filter.productId)
       return false;
 
     if (filter.usagePage !== undefined) {
@@ -94,7 +88,9 @@
     if (Array.isArray(exclusionFilters) && exclusionFilters.length > 0) {
       result = result.filter(
         (device) =>
-          !exclusionFilters.some((filter) => deviceMatchesFilter(device, filter)),
+          !exclusionFilters.some((filter) =>
+            deviceMatchesFilter(device, filter),
+          ),
       );
     }
     return result;
@@ -121,12 +117,12 @@
   async function fetchDeviceIcon(type) {
     if (svgCache[type]) return svgCache[type];
     try {
-      const svg = await webhid.import("fetchResource")(
-        "res/" + type + ".svg",
-      );
+      const svg = await webhid.import("fetchResource")("res/" + type + ".svg");
       svgCache[type] = svg;
       return svg;
-    } catch (e) { logger.debug("fetchDeviceIcon failed", e); return null;
+    } catch (e) {
+      logger.debug("fetchDeviceIcon failed", e);
+      return null;
     }
   }
 
@@ -164,10 +160,14 @@
       logger.warn(
         "  excluded: " +
           (d.productName || "(unnamed)") +
-          " VID=" + vidHex +
-          " PID=" + pidHex +
-          " usagePage=" + upHex +
-          " usage=" + (d.usage || 0),
+          " VID=" +
+          vidHex +
+          " PID=" +
+          pidHex +
+          " usagePage=" +
+          upHex +
+          " usage=" +
+          (d.usage || 0),
       );
     }
     const msg = document.createElement("div");

@@ -152,7 +152,8 @@
     const parts = key.split(" :: ");
     if (parts[0] !== "settings") return null;
     if (parts.length === 2) return { scope: "global", name: parts[1] };
-    if (parts.length === 3) return { scope: "site", origin: parts[1], name: parts[2] };
+    if (parts.length === 3)
+      return { scope: "site", origin: parts[1], name: parts[2] };
     return null;
   }
 

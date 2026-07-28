@@ -12,6 +12,7 @@
   const groupDevices = globalThis.webhid.import("groupDevices");
   const logExcludedDevices = globalThis.webhid.import("logExcludedDevices");
   const applyDeviceIcon = globalThis.webhid.import("applyDeviceIcon");
+  const syncBrowserTheme = globalThis.webhid.import("syncBrowserTheme");
   logger.initLogger("picker");
 
   /** @typedef {import("./types.js").HIDDeviceInfo} HIDDeviceInfo */
@@ -56,11 +57,17 @@
 
     /** @returns {Promise<void>} */
     async loadFragment() {
-      const html = await fetchResource("js/content/isolated/picker/fragment.html");
+      const html = await fetchResource(
+        "js/content/isolated/picker/fragment.html",
+      );
       const templateDoc = new DOMParser().parseFromString(html, "text/html");
       const template = templateDoc.querySelector("#webhid-picker-template");
       this.shadow.appendChild(template.content.cloneNode(true));
       localizeHTML(this.shadow);
+
+      syncBrowserTheme(this.host);
+      if (browser.theme)
+        browser.theme.onUpdated.addListener(() => syncBrowserTheme(this.host));
 
       this.dialog = this.shadow.querySelector(".webhid-modal");
 
@@ -146,7 +153,11 @@
 
     /** @returns {boolean} */
     get isOpen() {
-      return this.dialog == null ? void 0 : this.dialog.open != null ? this.dialog.open : false;
+      return this.dialog == null
+        ? void 0
+        : this.dialog.open != null
+          ? this.dialog.open
+          : false;
     }
 
     /** @returns {Promise<void>} */
@@ -170,7 +181,14 @@
         this.renderDevices();
       } catch (error) {
         this.devices = [];
-        logger.warn("enumerate exception:", error != null ? (error.message != null ? error.message : error) : error);
+        logger.warn(
+          "enumerate exception:",
+          error != null
+            ? error.message != null
+              ? error.message
+              : error
+            : error,
+        );
         this.renderDevices();
       }
     }
@@ -236,7 +254,15 @@
         this.filters,
         this.exclusionFilters,
       );
-      if (logExcludedDevices(this.devices, filteredDevices.length, this.filters, deviceList)) return;
+      if (
+        logExcludedDevices(
+          this.devices,
+          filteredDevices.length,
+          this.filters,
+          deviceList,
+        )
+      )
+        return;
       logger.debug(
         "picker: " +
           filteredDevices.length +
@@ -292,7 +318,9 @@
 
         const iface = clone.querySelector(".webhid-device-iface");
         devices.length > 1
-          ? (iface.textContent = t("pickerInterfaces", [String(devices.length)]))
+          ? (iface.textContent = t("pickerInterfaces", [
+              String(devices.length),
+            ]))
           : iface.remove();
 
         deviceList.appendChild(clone);
@@ -312,7 +340,9 @@
             if (!paired.includes(d.deviceId)) paired.push(d.deviceId);
           }
           this.pairedDevices = paired;
-        } catch (e) { logger.debug("getPairedDevices failed", e); }
+        } catch (e) {
+          logger.debug("getPairedDevices failed", e);
+        }
       })();
       this.resolveShow?.({ devices: devicesArr });
       this.resolveShow = null;

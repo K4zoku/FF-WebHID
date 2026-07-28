@@ -88,8 +88,7 @@
        */
       connect(msg) {
         connectMsg = msg;
-        if (msg.logLevel !== undefined)
-          logger.applyLevel(msg.logLevel);
+        if (msg.logLevel !== undefined) logger.applyLevel(msg.logLevel);
         doConnect();
       },
       /**

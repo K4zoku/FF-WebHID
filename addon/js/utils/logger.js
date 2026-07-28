@@ -33,13 +33,7 @@
       "." +
       String(t.getMilliseconds()).padStart(3, "0");
     return (
-      "[" +
-      time +
-      " webhid" +
-      (mod ? "::" + mod : "") +
-      " " +
-      levelName +
-      "]"
+      "[" + time + " webhid" + (mod ? "::" + mod : "") + " " + levelName + "]"
     );
   }
 
@@ -107,7 +101,9 @@
           applyLevel(parseLevel(changes.logLevel.newValue));
         }
       });
-    } catch (e) { console.debug("logger load failed", e); }
+    } catch (e) {
+      console.debug("logger load failed", e);
+    }
   }
 
   applyLevel(LEVEL_WARN);

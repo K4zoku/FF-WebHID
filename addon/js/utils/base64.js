@@ -34,14 +34,16 @@
    */
   function getAlphabetOption(options) {
     var alphabet = options && options.alphabet;
-    if (alphabet === undefined || alphabet === "base64" || alphabet === "base64url")
+    if (
+      alphabet === undefined ||
+      alphabet === "base64" ||
+      alphabet === "base64url"
+    )
       return alphabet || "base64";
     throw new TypeError("Incorrect `alphabet` option");
   }
 
-  var hasOwn = Function.prototype.call.bind(
-    Object.prototype.hasOwnProperty,
-  );
+  var hasOwn = Function.prototype.call.bind(Object.prototype.hasOwnProperty);
 
   /**
    * @param {string} string
@@ -52,7 +54,13 @@
     var length = string.length;
     for (; index < length; index++) {
       var chr = string.charAt(index);
-      if (chr !== " " && chr !== "\t" && chr !== "\n" && chr !== "\f" && chr !== "\r")
+      if (
+        chr !== " " &&
+        chr !== "\t" &&
+        chr !== "\n" &&
+        chr !== "\f" &&
+        chr !== "\r"
+      )
         break;
     }
     return index;
@@ -125,7 +133,10 @@
     if (typeof string !== "string")
       throw new TypeError("Argument is not a string");
 
-    if (options !== undefined && (typeof options !== "object" || options === null)) {
+    if (
+      options !== undefined &&
+      (typeof options !== "object" || options === null)
+    ) {
       throw new TypeError(options + " is not an object or undefined");
     }
 
@@ -267,9 +278,7 @@
       value: function toBase64() {
         var O = this;
 
-        if (
-          Object.prototype.toString.call(O).slice(8, -1) !== "Uint8Array"
-        ) {
+        if (Object.prototype.toString.call(O).slice(8, -1) !== "Uint8Array") {
           throw new TypeError("Argument is not an Uint8Array");
         }
 

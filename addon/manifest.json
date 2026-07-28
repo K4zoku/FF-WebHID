@@ -12,7 +12,8 @@
     "webRequest",
     "webRequestBlocking",
     "webRequestFilterResponse",
-    "notifications"
+    "notifications",
+    "theme"
   ],
   "host_permissions": [
     "<all_urls>"
@@ -85,6 +86,7 @@
         "js/utils/device.js",
         "js/utils/descriptor-tlv.js",
         "js/utils/settings.js",
+        "js/utils/theme-sync.js",
         "js/content/isolated/picker/index.js",
         "js/content/isolated/bridge.js"
       ],

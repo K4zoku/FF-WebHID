@@ -70,7 +70,7 @@ p {
 }
 
 .slider:before {
-  content: '';
+  content: "";
   position: absolute;
   background: var(--toggle-knob);
   border-radius: 50%;

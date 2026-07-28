@@ -4,7 +4,11 @@
   const localizeHTML = webhid.import("localizeHTML");
   const loadGlobalSettings = webhid.import("loadGlobalSettings");
   const saveGlobalSetting = webhid.import("saveGlobalSetting");
+  const syncBrowserTheme = webhid.import("syncBrowserTheme");
   logger.initLogger("settings");
+
+  syncBrowserTheme();
+  if (browser.theme) browser.theme.onUpdated.addListener(syncBrowserTheme);
 
   localizeHTML(document);
 
@@ -26,7 +30,9 @@
     const el = document.getElementById("status");
     el.textContent = msg;
     el.style.display = "block";
-    setTimeout(() => { el.style.display = "none"; }, 1500);
+    setTimeout(() => {
+      el.style.display = "none";
+    }, 1500);
   }
 
   for (const key of ["daemonAsNmHost", "workerPolyfillEnabled"]) {

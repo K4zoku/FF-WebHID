@@ -7,7 +7,15 @@
   const TAG_FEATURE_REPORT = 0x04;
   const TAG_FIELD = 0x05;
 
-  const UNIT_SYSTEMS = ["none", "si-linear", "si-rotation", "english-linear", "english-rotation", "vendor-defined", "reserved"];
+  const UNIT_SYSTEMS = [
+    "none",
+    "si-linear",
+    "si-rotation",
+    "english-linear",
+    "english-rotation",
+    "vendor-defined",
+    "reserved",
+  ];
 
   function decodeCollectionsTlv(b64) {
     if (!b64 || typeof b64 !== "string") return [];
@@ -16,7 +24,9 @@
     let off = 0;
 
     function readVarint() {
-      let result = 0, shift = 0, byte;
+      let result = 0,
+        shift = 0,
+        byte;
       do {
         byte = dv.getUint8(off++);
         result |= (byte & 0x7f) << shift;
@@ -51,8 +61,10 @@
 
     function readCollection(end) {
       const presence = dv.getUint8(off++);
-      const usagePage = presence & 1 ? (off += 2, dv.getUint16(off - 2, true)) : undefined;
-      const usage = presence & 2 ? (off += 2, dv.getUint16(off - 2, true)) : undefined;
+      const usagePage =
+        presence & 1 ? ((off += 2), dv.getUint16(off - 2, true)) : undefined;
+      const usage =
+        presence & 2 ? ((off += 2), dv.getUint16(off - 2, true)) : undefined;
       const type = dv.getUint8(off++);
       const children = [];
       const inputReports = [];
@@ -66,7 +78,15 @@
         else if (tag === TAG_OUTPUT_REPORT) outputReports.push(node);
         else if (tag === TAG_FEATURE_REPORT) featureReports.push(node);
       }
-      return { type, usagePage, usage, children, inputReports, outputReports, featureReports };
+      return {
+        type,
+        usagePage,
+        usage,
+        children,
+        inputReports,
+        outputReports,
+        featureReports,
+      };
     }
 
     function readReport(end) {
@@ -84,10 +104,14 @@
       off += 2;
       const reportSize = readVarint();
       const reportCount = readVarint();
-      const logicalMinimum = dv.getInt32(off, true); off += 4;
-      const logicalMaximum = dv.getInt32(off, true); off += 4;
-      const physicalMinimum = dv.getInt32(off, true); off += 4;
-      const physicalMaximum = dv.getInt32(off, true); off += 4;
+      const logicalMinimum = dv.getInt32(off, true);
+      off += 4;
+      const logicalMaximum = dv.getInt32(off, true);
+      off += 4;
+      const physicalMinimum = dv.getInt32(off, true);
+      off += 4;
+      const physicalMaximum = dv.getInt32(off, true);
+      off += 4;
       const unitExponent = dv.getInt8(off++);
       const unitSystem = UNIT_SYSTEMS[dv.getUint8(off++)] || "reserved";
       const unitFactorLengthExponent = dv.getInt8(off++);
@@ -99,8 +123,10 @@
       const isRange = !!(flags & 4);
       let usages, usageMinimum, usageMaximum;
       if (isRange) {
-        usageMinimum = dv.getUint32(off, true); off += 4;
-        usageMaximum = dv.getUint32(off, true); off += 4;
+        usageMinimum = dv.getUint32(off, true);
+        off += 4;
+        usageMaximum = dv.getUint32(off, true);
+        off += 4;
       } else {
         const count = readVarint();
         usages = [];
@@ -113,7 +139,9 @@
       const strings = [];
       for (let i = 0; i < stringsCount; i++) {
         const byteLen = readVarint();
-        strings.push(new TextDecoder().decode(bin.subarray(off, off + byteLen)));
+        strings.push(
+          new TextDecoder().decode(bin.subarray(off, off + byteLen)),
+        );
         off += byteLen;
       }
       return {

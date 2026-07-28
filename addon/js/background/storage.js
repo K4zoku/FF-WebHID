@@ -40,7 +40,9 @@
       const tx = db.transaction("deviceInfo", "readwrite");
       tx.objectStore("deviceInfo").put(device);
       await txDone(tx);
-    } catch (e) { logger.debug("saveDeviceInfo failed", e); }
+    } catch (e) {
+      logger.debug("saveDeviceInfo failed", e);
+    }
   }
 
   async function saveDeviceInfoBatch(devices) {
@@ -53,7 +55,9 @@
         if (d && d.deviceId) store.put(d);
       }
       await txDone(tx);
-    } catch (e) { logger.debug("saveDeviceInfoBatch failed", e); }
+    } catch (e) {
+      logger.debug("saveDeviceInfoBatch failed", e);
+    }
   }
 
   async function getDeviceInfo(deviceId) {
@@ -80,7 +84,9 @@
       const tx = db.transaction("deviceInfo", "readwrite");
       tx.objectStore("deviceInfo").delete(deviceId);
       await txDone(tx);
-    } catch (e) { logger.debug("removeDeviceInfo failed", e); }
+    } catch (e) {
+      logger.debug("removeDeviceInfo failed", e);
+    }
   }
 
   async function getAllowedDevices(origin) {

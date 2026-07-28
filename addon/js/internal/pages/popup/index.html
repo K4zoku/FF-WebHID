@@ -1,68 +1,97 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-<meta charset="utf-8">
-<title>WebHID</title>
-<link rel="stylesheet" href="../../../css/theme.css">
-<link rel="stylesheet" href="../../../css/shared.css">
-<link rel="stylesheet" href="style.css">
-</head>
-<body>
-<div id="header" role="banner">
-  <h1 data-i18n="popupTitle">WebHID</h1>
-  <span id="site-name" class="muted" aria-live="polite"></span>
-</div>
-<main role="main">
-<div id="devices-section">
-  <h2 data-i18n="popupPairedDevices">Paired Devices <span id="device-count" class="muted" aria-live="polite"></span></h2>
-  <div id="device-list" role="list"></div>
-  <div id="no-devices" class="muted" data-i18n="popupNoDevices" role="status">No devices paired for this site.</div>
-</div>
-<div id="settings-section">
-  <h2 data-i18n="popupSettings">Settings</h2>
-  <div class="setting">
-    <div class="setting-info">
-      <h3 data-i18n="popupDataPlane">Data Plane</h3>
-      <p data-i18n="popupDataPlaneDesc">WebSocket (Worker) or Native Messaging</p>
+  <head>
+    <meta charset="utf-8" />
+    <title>WebHID</title>
+    <link rel="stylesheet" href="../../../css/theme.css" />
+    <link rel="stylesheet" href="../../../css/shared.css" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div id="header" role="banner">
+      <h1 data-i18n="popupTitle">WebHID</h1>
+      <span id="site-name" class="muted" aria-live="polite"></span>
     </div>
-    <select id="dataPlane" aria-labelledby="popupDataPlane">
-      <option value="ws" data-i18n="popupDataPlaneWs">WebSocket (Worker)</option>
-      <option value="nm" data-i18n="popupDataPlaneNm">Native Messaging</option>
-    </select>
-  </div>
-  <div class="setting">
-    <div class="setting-info">
-      <h3 data-i18n="popupWorkerPolyfill">Worker Polyfill</h3>
-      <p data-i18n="popupWorkerPolyfillDesc">Inject WebHID stubs into Worker scripts on this site</p>
-    </div>
-    <label class="toggle">
-      <input type="checkbox" id="workerPolyfillEnabled" aria-labelledby="popupWorkerPolyfill">
-      <span class="slider" role="presentation"></span>
-    </label>
-  </div>
-  <div class="setting">
-    <div class="setting-info">
-      <h3 data-i18n="popupLogLevel">Log Level</h3>
-      <p data-i18n="popupLogLevelDesc">Console output verbosity for this site</p>
-    </div>
-    <select id="logLevel" aria-labelledby="popupLogLevel">
-      <option value="0" data-i18n="logLevelError">Error</option>
-      <option value="1" data-i18n="logLevelWarn">Warn</option>
-      <option value="2" data-i18n="logLevelInfo">Info</option>
-      <option value="3" data-i18n="logLevelDebug">Debug</option>
-    </select>
-  </div>
-</div>
-<div id="default-note" class="muted" data-i18n="popupDefaultNote">Changes here override defaults for this site.</div>
-<a id="open-settings" href="#" data-i18n="popupGlobalSettings">Global settings →</a>
-</main>
-<script src="../../../js/utils/bootstrap.js"></script>
-<script src="../../../js/utils/i18n.js"></script>
-<script src="../../../js/utils/resource.js"></script>
-<script src="../../../js/utils/http.js"></script>
-<script src="../../../js/utils/logger.js"></script>
-<script src="../../../js/utils/device.js"></script>
-<script src="../../../js/utils/settings.js"></script>
-<script src="index.js"></script>
-</body>
+    <main role="main">
+      <div id="devices-section">
+        <h2 data-i18n="popupPairedDevices">
+          Paired Devices
+          <span id="device-count" class="muted" aria-live="polite"></span>
+        </h2>
+        <div id="device-list" role="list"></div>
+        <div
+          id="no-devices"
+          class="muted"
+          data-i18n="popupNoDevices"
+          role="status"
+        >
+          No devices paired for this site.
+        </div>
+      </div>
+      <div id="settings-section">
+        <h2 data-i18n="popupSettings">Settings</h2>
+        <div class="setting">
+          <div class="setting-info">
+            <h3 data-i18n="popupDataPlane">Data Plane</h3>
+            <p data-i18n="popupDataPlaneDesc">
+              WebSocket (Worker) or Native Messaging
+            </p>
+          </div>
+          <select id="dataPlane" aria-labelledby="popupDataPlane">
+            <option value="ws" data-i18n="popupDataPlaneWs">
+              WebSocket (Worker)
+            </option>
+            <option value="nm" data-i18n="popupDataPlaneNm">
+              Native Messaging
+            </option>
+          </select>
+        </div>
+        <div class="setting">
+          <div class="setting-info">
+            <h3 data-i18n="popupWorkerPolyfill">Worker Polyfill</h3>
+            <p data-i18n="popupWorkerPolyfillDesc">
+              Inject WebHID stubs into Worker scripts on this site
+            </p>
+          </div>
+          <label class="toggle">
+            <input
+              type="checkbox"
+              id="workerPolyfillEnabled"
+              aria-labelledby="popupWorkerPolyfill"
+            />
+            <span class="slider" role="presentation"></span>
+          </label>
+        </div>
+        <div class="setting">
+          <div class="setting-info">
+            <h3 data-i18n="popupLogLevel">Log Level</h3>
+            <p data-i18n="popupLogLevelDesc">
+              Console output verbosity for this site
+            </p>
+          </div>
+          <select id="logLevel" aria-labelledby="popupLogLevel">
+            <option value="0" data-i18n="logLevelError">Error</option>
+            <option value="1" data-i18n="logLevelWarn">Warn</option>
+            <option value="2" data-i18n="logLevelInfo">Info</option>
+            <option value="3" data-i18n="logLevelDebug">Debug</option>
+          </select>
+        </div>
+      </div>
+      <div id="default-note" class="muted" data-i18n="popupDefaultNote">
+        Changes here override defaults for this site.
+      </div>
+      <a id="open-settings" href="#" data-i18n="popupGlobalSettings"
+        >Global settings →</a
+      >
+    </main>
+    <script src="../../../js/utils/bootstrap.js"></script>
+    <script src="../../../js/utils/i18n.js"></script>
+    <script src="../../../js/utils/resource.js"></script>
+    <script src="../../../js/utils/http.js"></script>
+    <script src="../../../js/utils/logger.js"></script>
+    <script src="../../../js/utils/device.js"></script>
+    <script src="../../../js/utils/settings.js"></script>
+    <script src="../../../js/utils/theme-sync.js"></script>
+    <script src="index.js"></script>
+  </body>
 </html>

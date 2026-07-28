@@ -7,7 +7,11 @@
   const loadGlobalSettings = webhid.import("loadGlobalSettings");
   const loadSiteSettings = webhid.import("loadSiteSettings");
   const saveSiteSetting = webhid.import("saveSiteSetting");
+  const syncBrowserTheme = webhid.import("syncBrowserTheme");
   logger.initLogger("popup");
+
+  syncBrowserTheme();
+  if (browser.theme) browser.theme.onUpdated.addListener(syncBrowserTheme);
 
   localizeHTML(document);
 
@@ -20,7 +24,9 @@
       if (url.protocol === "http:" || url.protocol === "https:") {
         origin = url.origin;
       }
-    } catch (e) { logger.debug("URL parse failed", e); }
+    } catch (e) {
+      logger.debug("URL parse failed", e);
+    }
   }
 
   /** @type {HTMLElement} */
@@ -45,7 +51,8 @@
   const dataPlaneSelect = document.getElementById("dataPlane");
   dataPlaneSelect.value = settings.dataPlane;
   /** @type {HTMLInputElement} */
-  document.getElementById("workerPolyfillEnabled").checked = settings.workerPolyfillEnabled || false;
+  document.getElementById("workerPolyfillEnabled").checked =
+    settings.workerPolyfillEnabled || false;
 
   /** @type {HTMLSelectElement} */
   const logLevelSelect = document.getElementById("logLevel");
@@ -54,9 +61,11 @@
   dataPlaneSelect.addEventListener("change", (e) => {
     saveSetting("dataPlane", e.target.value);
   });
-  document.getElementById("workerPolyfillEnabled").addEventListener("change", (e) => {
-    saveSetting("workerPolyfillEnabled", e.target.checked);
-  });
+  document
+    .getElementById("workerPolyfillEnabled")
+    .addEventListener("change", (e) => {
+      saveSetting("workerPolyfillEnabled", e.target.checked);
+    });
   logLevelSelect.addEventListener("change", (e) => {
     saveSetting("logLevel", parseInt(e.target.value, 10));
   });
@@ -65,9 +74,14 @@
   async function loadDevices() {
     if (!origin) return [];
     try {
-      const resp = await browser.runtime.sendMessage({ action: "getPairedDevices", origin });
+      const resp = await browser.runtime.sendMessage({
+        action: "getPairedDevices",
+        origin,
+      });
       return resp && resp.success ? resp.hashes : [];
-    } catch { return []; }
+    } catch {
+      return [];
+    }
   }
 
   /**
@@ -82,7 +96,9 @@
         deviceId: hash,
         origin,
       });
-    } catch (e) { logger.debug("revokeDevice failed", e); }
+    } catch (e) {
+      logger.debug("revokeDevice failed", e);
+    }
     renderDevices();
   }
 
@@ -121,7 +137,9 @@
       });
       var rIds = r != null ? r.ids : undefined;
       if (rIds) openIds = new Set(rIds);
-    } catch (e) { logger.debug("getOpenDeviceIds failed", e); }
+    } catch (e) {
+      logger.debug("getOpenDeviceIds failed", e);
+    }
 
     if (token !== renderToken) return;
 
@@ -136,12 +154,16 @@
             deviceId: hash,
           });
           device = r != null ? (r.device != null ? r.device : null) : null;
-        } catch (e) { logger.debug("getDeviceInfo failed", e); }
+        } catch (e) {
+          logger.debug("getDeviceInfo failed", e);
+        }
       }
       if (token !== renderToken) return;
 
       const isDisconnected = !cache.some((d) => d.deviceId === hash);
-      const name = device ? device.productName || t("popupUnknown") : t("popupPairedDevice");
+      const name = device
+        ? device.productName || t("popupUnknown")
+        : t("popupPairedDevice");
       const type = guessDeviceType(device || { productName: name });
       const vid = device ? device.vendorId || 0 : 0;
       const pid = device ? device.productId || 0 : 0;
@@ -190,10 +212,13 @@
       card.appendChild(btn);
 
       list.appendChild(card);
-      if (device && !isDisconnected && openIds.has(device.deviceId)) openCount++;
+      if (device && !isDisconnected && openIds.has(device.deviceId))
+        openCount++;
     }
-    document.getElementById("device-count").textContent =
-      t("popupDeviceCount", [String(openCount), String(hashes.length)]);
+    document.getElementById("device-count").textContent = t(
+      "popupDeviceCount",
+      [String(openCount), String(hashes.length)],
+    );
   }
 
   await renderDevices();
@@ -201,7 +226,10 @@
   browser.runtime.onMessage.addListener((message) => {
     if (message.action === "webhidDeviceEvent" && message.event) {
       const messageEvent = message.event;
-      if (messageEvent.eventType === "connect" || messageEvent.eventType === "disconnect") {
+      if (
+        messageEvent.eventType === "connect" ||
+        messageEvent.eventType === "disconnect"
+      ) {
         renderDevices();
       }
     }

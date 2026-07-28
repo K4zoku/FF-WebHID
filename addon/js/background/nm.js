@@ -1,10 +1,23 @@
 (function () {
   const logger = webhid.import("logger");
   const decodeCollectionsTlv = webhid.import("decodeCollectionsTlv");
-  const { ACT, PKG_INPUT_REPORT, PKG_SEND_REPORT, PKG_SEND_FEATURE_REPORT, EVT_CONNECT, EVT_DISCONNECT, buildPackedSend } = webhid.import("bgPacked");
+  const {
+    ACT,
+    PKG_INPUT_REPORT,
+    PKG_SEND_REPORT,
+    PKG_SEND_FEATURE_REPORT,
+    EVT_CONNECT,
+    EVT_DISCONNECT,
+    buildPackedSend,
+  } = webhid.import("bgPacked");
   const { deviceTabMap, deviceCache, pendingPicker } = webhid.import("bgState");
   const { saveDeviceInfo } = webhid.import("bgStorage");
-  const { tabsForEvent, registerDeviceTab, unregisterDeviceTab, broadcastGlobalReset } = webhid.import("bgStateOps");
+  const {
+    tabsForEvent,
+    registerDeviceTab,
+    unregisterDeviceTab,
+    broadcastGlobalReset,
+  } = webhid.import("bgStateOps");
   const http = webhid.import("http");
 
   const NM_HOST_FORWARDER = "webhid.forwarder_nm_host";
@@ -31,13 +44,21 @@
         logger.debug("connected");
 
         this.port.onMessage.addListener((message) => {
-          if (message.E !== undefined && message.s !== undefined && message.n === undefined) {
+          if (
+            message.E !== undefined &&
+            message.s !== undefined &&
+            message.n === undefined
+          ) {
             logger.error("host error: " + message.E);
             for (const [, p] of this.pending) p.resolve(message);
             this.pending.clear();
             return;
           }
-          if (message.d !== undefined && message.n === undefined && message.e === undefined) {
+          if (
+            message.d !== undefined &&
+            message.n === undefined &&
+            message.e === undefined
+          ) {
             this.onPackedData(message.d);
             return;
           }
@@ -58,9 +79,11 @@
 
         this.port.onDisconnect.addListener(() => {
           logger.warn(
-            "disconnected; will retry in " + this.reconnectDelay + "ms. " +
-            "If persistent: check daemon status (systemctl status webhid-daemon), " +
-            "group membership (groups), and NM host manifest.",
+            "disconnected; will retry in " +
+              this.reconnectDelay +
+              "ms. " +
+              "If persistent: check daemon status (systemctl status webhid-daemon), " +
+              "group membership (groups), and NM host manifest.",
           );
           this.port = null;
           for (const [, p] of this.pending) p.resolve({ s: 503 });
@@ -79,7 +102,11 @@
 
     reconnectWithNewHost() {
       if (this.port) {
-        try { this.port.disconnect(); } catch (e) { logger.debug("port disconnect failed", e); }
+        try {
+          this.port.disconnect();
+        } catch (e) {
+          logger.debug("port disconnect failed", e);
+        }
         this.port = null;
       }
       if (this.reconnectTimer) {
@@ -87,7 +114,9 @@
         this.reconnectTimer = null;
       }
       this.reconnectDelay = 1000;
-      this.connect().catch((e) => logger.debug("speculative reconnect failed", e));
+      this.connect().catch((e) =>
+        logger.debug("speculative reconnect failed", e),
+      );
     },
 
     scheduleReconnect() {
@@ -95,7 +124,9 @@
       this.reconnectTimer = setTimeout(() => {
         this.reconnectTimer = null;
         logger.debug("reconnecting...");
-        this.connect().catch((e) => logger.debug("speculative reconnect failed", e));
+        this.connect().catch((e) =>
+          logger.debug("speculative reconnect failed", e),
+        );
       }, this.reconnectDelay);
       this.reconnectDelay = Math.min(this.reconnectDelay * 2, 10000);
     },
@@ -103,7 +134,9 @@
     sendRequest(request) {
       return new Promise((resolve, reject) => {
         if (!this.port) {
-          this.connect().catch((e) => logger.debug("speculative reconnect failed", e));
+          this.connect().catch((e) =>
+            logger.debug("speculative reconnect failed", e),
+          );
           reject(new Error("NM disconnected, reconnecting; please retry"));
           return;
         }
@@ -122,14 +155,18 @@
     sendPacked(buildPackedFn) {
       return new Promise((resolve, reject) => {
         if (!this.port) {
-          this.connect().catch((e) => logger.debug("speculative reconnect failed", e));
+          this.connect().catch((e) =>
+            logger.debug("speculative reconnect failed", e),
+          );
           reject(new Error("NM disconnected, reconnecting; please retry"));
           return;
         }
         const id = this.nextId++;
         this.pending.set(id, { resolve, reject });
         const packedBuf = buildPackedFn(id);
-        logger.debug("sendPacked msgType=0x" + packedBuf[0].toString(16) + " n=" + id);
+        logger.debug(
+          "sendPacked msgType=0x" + packedBuf[0].toString(16) + " n=" + id,
+        );
         try {
           this.port.postMessage({ d: packedBuf.toBase64() });
         } catch (e) {
@@ -139,48 +176,81 @@
       });
     },
 
-    async enumerateDevices() { return await this.sendRequest({ a: ACT.enum }); },
-    async openDevice(deviceId) { return await this.sendRequest({ a: ACT.open, i: deviceId }); },
+    async enumerateDevices() {
+      return await this.sendRequest({ a: ACT.enum });
+    },
+    async openDevice(deviceId) {
+      return await this.sendRequest({ a: ACT.open, i: deviceId });
+    },
     async closeDevice(deviceId, sessionToken) {
       const req = { a: ACT.close, i: deviceId };
       if (sessionToken) req.T = sessionToken;
       return await this.sendRequest(req);
     },
-    async handshake() { return await this.sendRequest({ a: ACT.hs }); },
+    async handshake() {
+      return await this.sendRequest({ a: ACT.hs });
+    },
     async sendReport(deviceId, reportId, data) {
-      return await this.sendPacked((reqId) => buildPackedSend(PKG_SEND_REPORT, reqId, deviceId, reportId, data));
+      return await this.sendPacked((reqId) =>
+        buildPackedSend(PKG_SEND_REPORT, reqId, deviceId, reportId, data),
+      );
     },
     async receiveFeatureReport(deviceId, reportId) {
-      const resp = await this.sendRequest({ a: ACT.rfr, i: deviceId, r: reportId });
-      if (resp && typeof resp.d === "string") resp.d = Uint8Array.fromBase64(resp.d);
+      const resp = await this.sendRequest({
+        a: ACT.rfr,
+        i: deviceId,
+        r: reportId,
+      });
+      if (resp && typeof resp.d === "string")
+        resp.d = Uint8Array.fromBase64(resp.d);
       return resp;
     },
     async sendFeatureReport(deviceId, reportId, data) {
-      return await this.sendPacked((reqId) => buildPackedSend(PKG_SEND_FEATURE_REPORT, reqId, deviceId, reportId, data));
+      return await this.sendPacked((reqId) =>
+        buildPackedSend(
+          PKG_SEND_FEATURE_REPORT,
+          reqId,
+          deviceId,
+          reportId,
+          data,
+        ),
+      );
     },
 
     onPackedData(b64) {
       let bin;
-      try { bin = Uint8Array.fromBase64(b64); } catch (e) {
-        logger.warn("onPackedData: bad base64 frame dropped:", e.message); return;
+      try {
+        bin = Uint8Array.fromBase64(b64);
+      } catch (e) {
+        logger.warn("onPackedData: bad base64 frame dropped:", e.message);
+        return;
       }
       try {
         if (bin.length < 8 || bin[0] !== PKG_INPUT_REPORT) return;
-        const deviceId = (bin[1] | (bin[2] << 8) | (bin[3] << 16) | (bin[4] << 24)) >>> 0;
+        const deviceId =
+          (bin[1] | (bin[2] << 8) | (bin[3] << 16) | (bin[4] << 24)) >>> 0;
         const reportId = bin[5];
         const payloadLen = bin[6] | (bin[7] << 8);
         const payloadEnd = 8 + payloadLen;
         if (payloadEnd > bin.length) return;
         const payload = new Uint8Array(payloadLen);
         payload.set(bin.subarray(8, payloadEnd));
-        const event = { eventType: "input_report", deviceId, reportId, data: payload };
+        const event = {
+          eventType: "input_report",
+          deviceId,
+          reportId,
+          data: payload,
+        };
         const targets = tabsForEventLocal({ i: deviceId });
         if (!targets) return;
         for (const tabId of targets) {
-          browser.tabs.sendMessage(tabId, { action: "webhidDeviceEvent", event })
+          browser.tabs
+            .sendMessage(tabId, { action: "webhidDeviceEvent", event })
             .catch((e) => logger.debug("event forward to tab failed", e));
         }
-      } catch (e) { logger.warn("onPackedData: malformed frame dropped:", e.message); }
+      } catch (e) {
+        logger.warn("onPackedData: malformed frame dropped:", e.message);
+      }
     },
 
     onControlEvent(message) {
@@ -191,7 +261,11 @@
             if (!deviceCache.some((d) => d.deviceId === message.v.deviceId)) {
               const dev = message.v;
               if (dev && typeof dev.collections === "string") {
-                try { dev.collections = decodeCollectionsTlv(dev.collections); } catch { dev.collections = []; }
+                try {
+                  dev.collections = decodeCollectionsTlv(dev.collections);
+                } catch {
+                  dev.collections = [];
+                }
               }
               deviceCache.push(dev);
             }
@@ -201,25 +275,52 @@
             if (idx >= 0) deviceCache.splice(idx, 1);
           }
         } else {
-          this.enumerateDevices().then((resp) => {
-            if (http.isOk(resp.s) && resp.D) deviceCache.length = 0, deviceCache.push(...resp.D);
-          }).catch((e) => logger.debug("enumerateDevices failed", e));
+          this.enumerateDevices()
+            .then((resp) => {
+              if (http.isOk(resp.s) && resp.D)
+                ((deviceCache.length = 0), deviceCache.push(...resp.D));
+            })
+            .catch((e) => logger.debug("enumerateDevices failed", e));
         }
-        const normalized = { eventType: message.e === EVT_CONNECT ? "connect" : "disconnect", deviceId: message.i, device: message.v || null };
-        browser.runtime.sendMessage({ action: "webhidDeviceEvent", event: normalized }).catch((e) => logger.debug("event forward to runtime failed", e));
-        browser.tabs.query({}).then((tabs) => {
-          for (const tab of tabs) {
-            if (!tab.url) continue;
-            try { new URL(tab.url); } catch { continue; }
-            browser.tabs.sendMessage(tab.id, { action: "webhidDeviceEvent", event: normalized }).catch((e) => logger.debug("event forward to all tabs failed", e));
-          }
-        }).catch((e) => logger.debug("tabs.query failed", e));
+        const normalized = {
+          eventType: message.e === EVT_CONNECT ? "connect" : "disconnect",
+          deviceId: message.i,
+          device: message.v || null,
+        };
+        browser.runtime
+          .sendMessage({ action: "webhidDeviceEvent", event: normalized })
+          .catch((e) => logger.debug("event forward to runtime failed", e));
+        browser.tabs
+          .query({})
+          .then((tabs) => {
+            for (const tab of tabs) {
+              if (!tab.url) continue;
+              try {
+                new URL(tab.url);
+              } catch {
+                continue;
+              }
+              browser.tabs
+                .sendMessage(tab.id, {
+                  action: "webhidDeviceEvent",
+                  event: normalized,
+                })
+                .catch((e) =>
+                  logger.debug("event forward to all tabs failed", e),
+                );
+            }
+          })
+          .catch((e) => logger.debug("tabs.query failed", e));
         return;
       }
       const targets = tabsForEventLocal(message);
       if (targets) {
         for (const tabId of targets) {
-          browser.tabs.sendMessage(tabId, { action: "webhidDeviceEvent", event: message }).catch((e) => logger.debug("event forward to target tab failed", e));
+          browser.tabs
+            .sendMessage(tabId, { action: "webhidDeviceEvent", event: message })
+            .catch((e) =>
+              logger.debug("event forward to target tab failed", e),
+            );
         }
       }
     },

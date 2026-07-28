@@ -1,45 +1,123 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-<meta charset="utf-8">
-<title data-i18n="pickerTitle">Select a HID Device</title>
-<link rel="stylesheet" href="../../../css/theme.css">
-<link rel="stylesheet" href="../../../css/shared.css">
-<link rel="stylesheet" href="style.css">
-<style>
-  html, body { width: 100%; height: 100%; padding: 0; margin: 0; overflow: hidden; }
-  #picker { display: flex; flex-direction: column; width: 100%; height: 100%; max-width: 400px; margin: 0 auto; }
-  .picker-header { padding: 16px 20px 12px; border-bottom: 1px solid var(--border-subtle); flex-shrink: 0; }
-  .picker-header h2 { margin: 0; font-size: 15px; font-weight: 600; text-transform: none; color: var(--text); }
-  #picker-list { overflow-y: auto; flex: 1; padding: 12px 20px; min-height: 0; }
-  .picker-footer { padding: 12px 20px; border-top: 1px solid var(--border-subtle); display: flex; justify-content: flex-end; gap: 10px; flex-shrink: 0; }
-  #picker-cancel { padding: 8px 16px; border: 1px solid var(--border-default); border-radius: var(--radius-md); background: var(--bg); color: var(--text-muted); font-size: 13px; cursor: pointer; }
-  #picker-cancel:hover { background: var(--surface-hover); }
-  #picker-connect { padding: 8px 16px; border: none; border-radius: var(--radius-md); background: var(--accent); color: var(--accent-text); font-size: 13px; font-weight: 600; cursor: pointer; }
-  #picker-connect:hover:not(:disabled) { background: var(--accent-hover); }
-  #picker-connect:disabled { opacity: 0.4; cursor: default; }
-  .webhid-device-item { margin-bottom: 8px; }
-  .webhid-device-list { padding: 0; max-height: none; }
-</style>
-</head>
-<body>
-<div id="picker" role="dialog" aria-modal="true" aria-labelledby="picker-heading">
-  <div class="picker-header">
-    <h2 id="picker-heading" data-i18n="pickerTitle">Select a HID Device</h2>
-  </div>
-  <div id="picker-list" class="webhid-device-list" role="list" aria-live="polite"></div>
-  <div class="picker-footer">
-    <button id="picker-cancel" data-i18n="pickerCancel">Cancel</button>
-    <button id="picker-connect" disabled data-i18n="pickerConnect">Connect</button>
-  </div>
-</div>
-<script src="../../../js/utils/bootstrap.js"></script>
-<script src="../../../js/utils/i18n.js"></script>
-<script src="../../../js/utils/resource.js"></script>
-<script src="../../../js/utils/http.js"></script>
-<script src="../../../js/utils/logger.js"></script>
-<script src="../../../js/utils/device.js"></script>
-<script src="../../../js/utils/settings.js"></script>
-<script src="index.js"></script>
-</body>
+  <head>
+    <meta charset="utf-8" />
+    <title data-i18n="pickerTitle">Select a HID Device</title>
+    <link rel="stylesheet" href="../../../css/theme.css" />
+    <link rel="stylesheet" href="../../../css/shared.css" />
+    <link rel="stylesheet" href="style.css" />
+    <style>
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        padding: 0;
+        margin: 0;
+        overflow: hidden;
+      }
+      #picker {
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        height: 100%;
+        max-width: 400px;
+        margin: 0 auto;
+      }
+      .picker-header {
+        padding: 16px 20px 12px;
+        border-bottom: 1px solid var(--border-subtle);
+        flex-shrink: 0;
+      }
+      .picker-header h2 {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 600;
+        text-transform: none;
+        color: var(--text);
+      }
+      #picker-list {
+        overflow-y: auto;
+        flex: 1;
+        padding: 12px 20px;
+        min-height: 0;
+      }
+      .picker-footer {
+        padding: 12px 20px;
+        border-top: 1px solid var(--border-subtle);
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+        flex-shrink: 0;
+      }
+      #picker-cancel {
+        padding: 8px 16px;
+        border: 1px solid var(--border-default);
+        border-radius: var(--radius-md);
+        background: var(--bg);
+        color: var(--text-muted);
+        font-size: 13px;
+        cursor: pointer;
+      }
+      #picker-cancel:hover {
+        background: var(--surface-hover);
+      }
+      #picker-connect {
+        padding: 8px 16px;
+        border: none;
+        border-radius: var(--radius-md);
+        background: var(--accent);
+        color: var(--accent-text);
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      #picker-connect:hover:not(:disabled) {
+        background: var(--accent-hover);
+      }
+      #picker-connect:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+      .webhid-device-item {
+        margin-bottom: 8px;
+      }
+      .webhid-device-list {
+        padding: 0;
+        max-height: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="picker"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="picker-heading"
+    >
+      <div class="picker-header">
+        <h2 id="picker-heading" data-i18n="pickerTitle">Select a HID Device</h2>
+      </div>
+      <div
+        id="picker-list"
+        class="webhid-device-list"
+        role="list"
+        aria-live="polite"
+      ></div>
+      <div class="picker-footer">
+        <button id="picker-cancel" data-i18n="pickerCancel">Cancel</button>
+        <button id="picker-connect" disabled data-i18n="pickerConnect">
+          Connect
+        </button>
+      </div>
+    </div>
+    <script src="../../../js/utils/bootstrap.js"></script>
+    <script src="../../../js/utils/i18n.js"></script>
+    <script src="../../../js/utils/resource.js"></script>
+    <script src="../../../js/utils/http.js"></script>
+    <script src="../../../js/utils/logger.js"></script>
+    <script src="../../../js/utils/device.js"></script>
+    <script src="../../../js/utils/settings.js"></script>
+    <script src="../../../js/utils/theme-sync.js"></script>
+    <script src="index.js"></script>
+  </body>
 </html>

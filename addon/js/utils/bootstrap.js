@@ -1,13 +1,19 @@
 (function () {
-  if (typeof globalThis === 'undefined') {
+  if (typeof globalThis === "undefined") {
     var getGlobal = function () {
-      if (typeof window !== 'undefined') return window;
-      if (typeof self !== 'undefined') return self;
-      if (typeof global !== 'undefined') return global;
-      return (function () { return this; })() || {};
+      if (typeof window !== "undefined") return window;
+      if (typeof self !== "undefined") return self;
+      if (typeof global !== "undefined") return global;
+      return (
+        (function () {
+          return this;
+        })() || {}
+      );
     };
-    Object.defineProperty(Object.prototype, 'globalThis', {
-      get: function () { return getGlobal(); },
+    Object.defineProperty(Object.prototype, "globalThis", {
+      get: function () {
+        return getGlobal();
+      },
       configurable: true,
       enumerable: false,
     });
@@ -35,5 +41,10 @@
       return v;
     },
   };
-  Object.defineProperty(globalThis, 'webhid', { value: api, writable: false, enumerable: false, configurable: true });
+  Object.defineProperty(globalThis, "webhid", {
+    value: api,
+    writable: false,
+    enumerable: false,
+    configurable: true,
+  });
 })();

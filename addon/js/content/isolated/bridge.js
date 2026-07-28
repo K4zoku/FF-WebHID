@@ -68,7 +68,8 @@
   }
 
   function isDeviceAllowed(deviceId) {
-    if (allowedDeviceIdsReady) return Promise.resolve(allowedDeviceIds.has(deviceId));
+    if (allowedDeviceIdsReady)
+      return Promise.resolve(allowedDeviceIds.has(deviceId));
     return new Promise((resolve) => {
       allowedDeviceIdsQueue.push({ deviceId, resolve });
     });
@@ -76,7 +77,10 @@
 
   async function loadAllowedDeviceIds() {
     try {
-      const resp = await browser.runtime.sendMessage({ action: "getAllowedDevices", origin: window.location.origin });
+      const resp = await browser.runtime.sendMessage({
+        action: "getAllowedDevices",
+        origin: window.location.origin,
+      });
       if (resp && Array.isArray(resp.deviceIds)) {
         allowedDeviceIds.clear();
         for (const id of resp.deviceIds) allowedDeviceIds.add(id);
@@ -115,7 +119,9 @@
       if (port && keepPort) {
         try {
           worker.postMessage({ type: "unsetPort" });
-        } catch (e) { logger.debug("unsetPort failed (keepPort)", e); }
+        } catch (e) {
+          logger.debug("unsetPort failed (keepPort)", e);
+        }
         const returned = await new Promise((resolve) => {
           let done = false;
           const onMsg = (event) => {
@@ -143,11 +149,15 @@
         dataPorts.delete(deviceId);
         try {
           worker.postMessage({ type: "unsetPort" });
-        } catch (e) { logger.debug("unsetPort failed (port path)", e); }
+        } catch (e) {
+          logger.debug("unsetPort failed (port path)", e);
+        }
         try {
           port.onmessage = null;
           port.close();
-        } catch (e) { logger.debug("port cleanup failed (port path)", e); }
+        } catch (e) {
+          logger.debug("port cleanup failed (port path)", e);
+        }
       }
       worker.terminate();
       workers.delete(deviceId);
@@ -157,7 +167,9 @@
         try {
           port.onmessage = null;
           port.close();
-        } catch (e) { logger.debug("port cleanup failed (no worker)", e); }
+        } catch (e) {
+          logger.debug("port cleanup failed (no worker)", e);
+        }
         dataPorts.delete(deviceId);
       }
     }
@@ -449,16 +461,21 @@
       for (const iframe of iframes) {
         const src = iframe.src || iframe.getAttribute("src") || "";
         if (!src) continue;
-        browser.runtime.sendMessage({
-          action: "setFrameAllow",
-          url: src,
-          frameId: -1,
-        }).catch((e) => logger.debug("setFrameAllow failed", e));
+        browser.runtime
+          .sendMessage({
+            action: "setFrameAllow",
+            url: src,
+            frameId: -1,
+          })
+          .catch((e) => logger.debug("setFrameAllow failed", e));
       }
     }
     reportIframes();
     const observer = new MutationObserver(() => reportIframes());
-    observer.observe(document.documentElement, { childList: true, subtree: true });
+    observer.observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+    });
   }
 
   /**
@@ -489,15 +506,16 @@
     pageSourceByPort.set(port, source);
     portOrigin.set(port, event.origin);
     if (window === window.top) {
-      for (const iframe of document.querySelectorAll('iframe')) {
+      for (const iframe of document.querySelectorAll("iframe")) {
         if (iframe.contentWindow === source) {
-          if (iframe.hasAttribute('allow')) allowAttrMap.set(source, true);
+          if (iframe.hasAttribute("allow")) allowAttrMap.set(source, true);
           break;
         }
       }
     }
     port.onmessage = (event) => {
-      if (event.data != null && event.data.id != null) requestPortMap.set(event.data.id, port);
+      if (event.data != null && event.data.id != null)
+        requestPortMap.set(event.data.id, port);
       handleRequest(event.data, event.ports, source);
     };
     logger.debug(
@@ -534,7 +552,8 @@
         const origin = getRequestOrigin(data);
         portOrigin.set(p, origin || window.location.origin);
         p.onmessage = (event) => {
-          if (event.data != null && event.data.id != null) requestPortMap.set(event.data.id, p);
+          if (event.data != null && event.data.id != null)
+            requestPortMap.set(event.data.id, p);
           handleRequest(event.data, event.ports, null);
         };
         replyToPage({ type: "response", id, result: { ok: true } });
@@ -551,13 +570,12 @@
       }
       const allowed = await isDeviceAllowed(deviceId);
       if (!allowed) {
-        logger.warn(
-          "data-port: not authorized for device",
-          deviceId,
-        );
+        logger.warn("data-port: not authorized for device", deviceId);
         try {
           port.close();
-        } catch (e) { logger.debug("unauthorized port close failed", e); }
+        } catch (e) {
+          logger.debug("unauthorized port close failed", e);
+        }
         return;
       }
       dataPorts.set(deviceId, port);
@@ -582,23 +600,39 @@
           const requestFrameUrl = (payload && payload.frameUrl) || "";
           let hasAllowAttr = false;
           if (window === window.top && requestFrameUrl) {
-            for (const iframe of document.querySelectorAll('iframe[allow*="hid" i]')) {
+            for (const iframe of document.querySelectorAll(
+              'iframe[allow*="hid" i]',
+            )) {
               const s = iframe.src || iframe.getAttribute("src") || "";
-              if (s === requestFrameUrl) { hasAllowAttr = true; break; }
+              if (s === requestFrameUrl) {
+                hasAllowAttr = true;
+                break;
+              }
             }
           }
-          const policyUrl = requestFrameUrl || getRequestOrigin(data) || location.href;
+          const policyUrl =
+            requestFrameUrl || getRequestOrigin(data) || location.href;
           const resp = await browser.runtime.sendMessage({
             action: "getPolicy",
             isCrossOrigin: payload && payload.isCrossOrigin ? true : false,
             url: policyUrl,
             hasAllowAttr,
           });
-          const result = resp ? resp.policy || { hid: "allowed" } : { hid: "allowed" };
-          result._dbg = { requestFrameUrl, hasAllowAttr, top: window === window.top };
+          const result = resp
+            ? resp.policy || { hid: "allowed" }
+            : { hid: "allowed" };
+          result._dbg = {
+            requestFrameUrl,
+            hasAllowAttr,
+            top: window === window.top,
+          };
           replyToPage({ type: "response", id, result });
         } catch (e) {
-          replyToPage({ type: "response", id, result: { hid: "allowed", _err: String(e) } });
+          replyToPage({
+            type: "response",
+            id,
+            result: { hid: "allowed", _err: String(e) },
+          });
         }
       })();
       return;
@@ -911,7 +945,9 @@
               },
               buffer ? [buffer] : [],
             );
-          } catch (e) { logger.debug("forward inputReport to page failed", e); }
+          } catch (e) {
+            logger.debug("forward inputReport to page failed", e);
+          }
           return;
         }
       }
@@ -920,7 +956,9 @@
         if (port) {
           try {
             port.postMessage({ type: "disconnect" });
-          } catch (e) { logger.debug("forward disconnect to page failed", e); }
+          } catch (e) {
+            logger.debug("forward disconnect to page failed", e);
+          }
         }
       }
       if (
@@ -962,20 +1000,40 @@
         const status = response ? response.s : 500;
         if (msg.type === "receiveFeature") {
           if (status === 403) {
-            try { port.postMessage({ type: "featureResult", reqId: msg.reqId, error: "blocked" }); } catch (e) { logger.debug("postMessage featureResult blocked failed", e); }
+            try {
+              port.postMessage({
+                type: "featureResult",
+                reqId: msg.reqId,
+                error: "blocked",
+              });
+            } catch (e) {
+              logger.debug("postMessage featureResult blocked failed", e);
+            }
             return;
           }
           const data = http.isOk(status) && response.d ? response.d : null;
           try {
-            port.postMessage({ type: "featureResult", reqId: msg.reqId, data: data || null });
-          } catch (e) { logger.debug("postMessage featureResult data failed", e); }
+            port.postMessage({
+              type: "featureResult",
+              reqId: msg.reqId,
+              data: data || null,
+            });
+          } catch (e) {
+            logger.debug("postMessage featureResult data failed", e);
+          }
         } else {
           let error = null;
           if (status === 403) error = "blocked";
           else if (!http.isOk(status)) error = "send failed";
           try {
-            port.postMessage({ type: msg.type === "send" ? "sendResult" : "featureResult", reqId: msg.reqId, error });
-          } catch (e) { logger.debug("postMessage sendResult failed", e); }
+            port.postMessage({
+              type: msg.type === "send" ? "sendResult" : "featureResult",
+              reqId: msg.reqId,
+              error,
+            });
+          } catch (e) {
+            logger.debug("postMessage sendResult failed", e);
+          }
         }
       };
       const m = Object.assign({ action }, payload);
@@ -1051,7 +1109,10 @@
   });
 
   browser.runtime.onMessage.addListener((message) => {
-    if (message.action === "allowedDevicesChanged" && Array.isArray(message.deviceIds)) {
+    if (
+      message.action === "allowedDevicesChanged" &&
+      Array.isArray(message.deviceIds)
+    ) {
       allowedDeviceIds.clear();
       for (const id of message.deviceIds) allowedDeviceIds.add(id);
     }

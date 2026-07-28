@@ -10,7 +10,11 @@
   const groupDevices = webhid.import("groupDevices");
   const logExcludedDevices = webhid.import("logExcludedDevices");
   const applyDeviceIcon = webhid.import("applyDeviceIcon");
+  const syncBrowserTheme = webhid.import("syncBrowserTheme");
   logger.initLogger("picker-popup");
+
+  syncBrowserTheme();
+  if (browser.theme) browser.theme.onUpdated.addListener(syncBrowserTheme);
 
   localizeHTML(document);
 
@@ -62,7 +66,15 @@
       pendingRequest.filters || [],
       pendingRequest.exclusionFilters || [],
     );
-    if (logExcludedDevices(devices, filtered.length, pendingRequest.filters, listEl)) return;
+    if (
+      logExcludedDevices(
+        devices,
+        filtered.length,
+        pendingRequest.filters,
+        listEl,
+      )
+    )
+      return;
     logger.debug(
       "picker: " + filtered.length + "/" + devices.length + " devices matched",
     );
@@ -141,9 +153,10 @@
       action: "pickerResult",
       requestId: pendingRequest.requestId,
       tabId: pendingRequest.tabId,
-      windowId: browser.windows.getCurrent != null
-        ? (await browser.windows.getCurrent()).id
-        : undefined,
+      windowId:
+        browser.windows.getCurrent != null
+          ? (await browser.windows.getCurrent()).id
+          : undefined,
       selected: true,
       devices,
     });
@@ -157,9 +170,10 @@
         action: "pickerResult",
         requestId: pendingRequest.requestId,
         tabId: pendingRequest.tabId,
-        windowId: browser.windows.getCurrent != null
-          ? (await browser.windows.getCurrent()).id
-          : undefined,
+        windowId:
+          browser.windows.getCurrent != null
+            ? (await browser.windows.getCurrent()).id
+            : undefined,
         selected: false,
       });
       pendingRequest = null;

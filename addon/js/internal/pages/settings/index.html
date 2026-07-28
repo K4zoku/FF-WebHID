@@ -1,76 +1,133 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-<meta charset="utf-8">
-<title data-i18n="settingsTitle">FF-WebHID Settings</title>
-<link rel="stylesheet" href="../../../css/theme.css">
-<link rel="stylesheet" href="../../../css/shared.css">
-<link rel="stylesheet" href="style.css">
-</head>
-<body>
-<main role="main">
-<h1 data-i18n="settingsTitle">WebHID Settings</h1>
-<div class="setting">
-  <div class="setting-info">
-    <h3 data-i18n="settingsDaemonAsNmHost">Daemon as NM host</h3>
-    <p>Talk to the daemon directly over native messaging (skip the <code>webhid-native-messaging</code> forwarder and Unix socket). Requires the <code>webhid.daemon_nm_host</code> native-messaging manifest to be installed and the daemon to run as your user (with the udev rule). Lower latency, but no root-daemon fallback. The addon reconnects automatically when toggled.</p>
-  </div>
-  <label class="toggle">
-    <input type="checkbox" id="daemonAsNmHost" aria-labelledby="settingsDaemonAsNmHost">
-    <span class="slider" role="presentation"></span>
-  </label>
-</div>
-<div class="setting">
-  <div class="setting-info">
-    <h3 data-i18n="settingsDataPlane">Data Plane</h3>
-    <p><strong>WebSocket</strong>: spawn a Web Worker that owns the WS connection to the daemon. Input reports are forwarded to the page via <code>postMessage</code> with ArrayBuffer transfer (off-main-thread, zero-copy). No SAB, no COOP/COEP.<br><strong>Native Messaging</strong>: route all data (sendReport, input reports, feature reports) through the NM host via the content-script bridge. No WS. Fallback when WS is blocked.</p>
-  </div>
-  <select id="dataPlane" aria-labelledby="settingsDataPlane">
-    <option value="ws" data-i18n="settingsDataPlaneWs">WebSocket (Worker)</option>
-    <option value="nm" data-i18n="settingsDataPlaneNm">Native Messaging (via bridge)</option>
-  </select>
-</div>
-<div class="setting">
-  <div class="setting-info">
-    <h3 data-i18n="settingsDevicePickerMode">Device Picker Mode</h3>
-    <p><strong>Modal</strong>: show a shadow DOM overlay on the page when <code>requestDevice()</code> is called (default, matches native WebHID behavior).<br><strong>Page Action</strong>: switch the url bar icon to alert mode and open the device picker as a popup. User must click the icon to open the picker. Firefox only, Chromium will fall back to modal.</p>
-  </div>
-  <select id="devicePickerMode" aria-labelledby="settingsDevicePickerMode">
-    <option value="modal" data-i18n="settingsDevicePickerModal">Modal (overlay)</option>
-    <option value="pageAction" data-i18n="settingsDevicePickerPageAction">Page Action (url bar popup)</option>
-    <option value="window" data-i18n="settingsDevicePickerWindow">Window (separate popup window)</option>
-  </select>
-</div>
-<div class="setting">
-  <div class="setting-info">
-    <h3 data-i18n="settingsWorkerPolyfill">Worker Polyfill</h3>
-    <p>Inject WebHID API stubs into Web Worker scripts (<code>new Worker()</code>, <code>new SharedWorker()</code>). Workers get <code>navigator.hid</code>, <code>HIDDevice</code>, and related constructors. Methods throw <code>NotSupportedError</code> until full worker communication is implemented. Can be overridden per-site from the popup. Reload pages after changing.</p>
-  </div>
-  <label class="toggle">
-    <input type="checkbox" id="workerPolyfillEnabled" aria-labelledby="settingsWorkerPolyfill">
-    <span class="slider" role="presentation"></span>
-  </label>
-</div>
-<div class="setting">
-  <div class="setting-info">
-    <h3 data-i18n="settingsLogLevel">Log Level</h3>
-    <p>Controls console output verbosity. Error = errors only, Warn = +warnings, Info = +info, Debug = +debug (includes performance timing). Reload pages after changing.</p>
-  </div>
-  <select id="logLevel" aria-labelledby="settingsLogLevel">
-    <option value="0" data-i18n="logLevelError">Error</option>
-    <option value="1" data-i18n="logLevelWarn">Warn</option>
-    <option value="2" data-i18n="logLevelInfo">Info</option>
-    <option value="3" data-i18n="logLevelDebug">Debug</option>
-  </select>
-</div>
-<div class="status" id="status" role="status" aria-live="polite"></div>
-</main>
-<script src="../../../js/utils/bootstrap.js"></script>
-<script src="../../../js/utils/i18n.js"></script>
-<script src="../../../js/utils/resource.js"></script>
-<script src="../../../js/utils/http.js"></script>
-<script src="../../../js/utils/logger.js"></script>
-<script src="../../../js/utils/settings.js"></script>
-<script src="index.js"></script>
-</body>
+  <head>
+    <meta charset="utf-8" />
+    <title data-i18n="settingsTitle">FF-WebHID Settings</title>
+    <link rel="stylesheet" href="../../../css/theme.css" />
+    <link rel="stylesheet" href="../../../css/shared.css" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main role="main">
+      <h1 data-i18n="settingsTitle">WebHID Settings</h1>
+      <div class="setting">
+        <div class="setting-info">
+          <h3 data-i18n="settingsDaemonAsNmHost">Daemon as NM host</h3>
+          <p>
+            Talk to the daemon directly over native messaging (skip the
+            <code>webhid-native-messaging</code> forwarder and Unix socket).
+            Requires the <code>webhid.daemon_nm_host</code> native-messaging
+            manifest to be installed and the daemon to run as your user (with
+            the udev rule). Lower latency, but no root-daemon fallback. The
+            addon reconnects automatically when toggled.
+          </p>
+        </div>
+        <label class="toggle">
+          <input
+            type="checkbox"
+            id="daemonAsNmHost"
+            aria-labelledby="settingsDaemonAsNmHost"
+          />
+          <span class="slider" role="presentation"></span>
+        </label>
+      </div>
+      <div class="setting">
+        <div class="setting-info">
+          <h3 data-i18n="settingsDataPlane">Data Plane</h3>
+          <p>
+            <strong>WebSocket</strong>: spawn a Web Worker that owns the WS
+            connection to the daemon. Input reports are forwarded to the page
+            via <code>postMessage</code> with ArrayBuffer transfer
+            (off-main-thread, zero-copy). No SAB, no COOP/COEP.<br /><strong
+              >Native Messaging</strong
+            >: route all data (sendReport, input reports, feature reports)
+            through the NM host via the content-script bridge. No WS. Fallback
+            when WS is blocked.
+          </p>
+        </div>
+        <select id="dataPlane" aria-labelledby="settingsDataPlane">
+          <option value="ws" data-i18n="settingsDataPlaneWs">
+            WebSocket (Worker)
+          </option>
+          <option value="nm" data-i18n="settingsDataPlaneNm">
+            Native Messaging (via bridge)
+          </option>
+        </select>
+      </div>
+      <div class="setting">
+        <div class="setting-info">
+          <h3 data-i18n="settingsDevicePickerMode">Device Picker Mode</h3>
+          <p>
+            <strong>Modal</strong>: show a shadow DOM overlay on the page when
+            <code>requestDevice()</code> is called (default, matches native
+            WebHID behavior).<br /><strong>Page Action</strong>: switch the url
+            bar icon to alert mode and open the device picker as a popup. User
+            must click the icon to open the picker. Firefox only, Chromium will
+            fall back to modal.
+          </p>
+        </div>
+        <select
+          id="devicePickerMode"
+          aria-labelledby="settingsDevicePickerMode"
+        >
+          <option value="modal" data-i18n="settingsDevicePickerModal">
+            Modal (overlay)
+          </option>
+          <option value="pageAction" data-i18n="settingsDevicePickerPageAction">
+            Page Action (url bar popup)
+          </option>
+          <option value="window" data-i18n="settingsDevicePickerWindow">
+            Window (separate popup window)
+          </option>
+        </select>
+      </div>
+      <div class="setting">
+        <div class="setting-info">
+          <h3 data-i18n="settingsWorkerPolyfill">Worker Polyfill</h3>
+          <p>
+            Inject WebHID API stubs into Web Worker scripts (<code
+              >new Worker()</code
+            >, <code>new SharedWorker()</code>). Workers get
+            <code>navigator.hid</code>, <code>HIDDevice</code>, and related
+            constructors. Methods throw <code>NotSupportedError</code> until
+            full worker communication is implemented. Can be overridden per-site
+            from the popup. Reload pages after changing.
+          </p>
+        </div>
+        <label class="toggle">
+          <input
+            type="checkbox"
+            id="workerPolyfillEnabled"
+            aria-labelledby="settingsWorkerPolyfill"
+          />
+          <span class="slider" role="presentation"></span>
+        </label>
+      </div>
+      <div class="setting">
+        <div class="setting-info">
+          <h3 data-i18n="settingsLogLevel">Log Level</h3>
+          <p>
+            Controls console output verbosity. Error = errors only, Warn =
+            +warnings, Info = +info, Debug = +debug (includes performance
+            timing). Reload pages after changing.
+          </p>
+        </div>
+        <select id="logLevel" aria-labelledby="settingsLogLevel">
+          <option value="0" data-i18n="logLevelError">Error</option>
+          <option value="1" data-i18n="logLevelWarn">Warn</option>
+          <option value="2" data-i18n="logLevelInfo">Info</option>
+          <option value="3" data-i18n="logLevelDebug">Debug</option>
+        </select>
+      </div>
+      <div class="status" id="status" role="status" aria-live="polite"></div>
+    </main>
+    <script src="../../../js/utils/bootstrap.js"></script>
+    <script src="../../../js/utils/i18n.js"></script>
+    <script src="../../../js/utils/resource.js"></script>
+    <script src="../../../js/utils/http.js"></script>
+    <script src="../../../js/utils/logger.js"></script>
+    <script src="../../../js/utils/settings.js"></script>
+    <script src="../../../js/utils/theme-sync.js"></script>
+    <script src="index.js"></script>
+  </body>
 </html>

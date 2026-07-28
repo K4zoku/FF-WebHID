@@ -1,6 +1,7 @@
 (function () {
   const logger = webhid.import("logger");
-  const { ACT, PKG_INPUT_REPORT, EVT_CONNECT, EVT_DISCONNECT } = webhid.import("bgPacked");
+  const { ACT, PKG_INPUT_REPORT, EVT_CONNECT, EVT_DISCONNECT } =
+    webhid.import("bgPacked");
   const { deviceTabMap, deviceCache } = webhid.import("bgState");
   const { saveDeviceInfo, saveDeviceInfoBatch } = webhid.import("bgStorage");
   const http = webhid.import("http");
@@ -41,7 +42,9 @@
     for (const [deviceId, tabs] of deviceTabMap) {
       if (tabs.delete(tabId) && tabs.size === 0) {
         deviceTabMap.delete(deviceId);
-        closeDeviceFn(deviceId).catch((e) => logger.debug("closeDevice failed", e));
+        closeDeviceFn(deviceId).catch((e) =>
+          logger.debug("closeDevice failed", e),
+        );
       }
     }
   }
@@ -52,7 +55,11 @@
       .then((tabs) => {
         for (const tab of tabs) {
           if (!tab.url) continue;
-          try { new URL(tab.url); } catch (e) { continue; }
+          try {
+            new URL(tab.url);
+          } catch (e) {
+            continue;
+          }
           browser.tabs
             .sendMessage(tab.id, { action: "globalReset" })
             .catch((e) => logger.debug("globalReset send to tab failed", e));
@@ -62,7 +69,11 @@
   }
 
   webhid.export("bgStateOps", {
-    tabsForEvent, registerDeviceTab, unregisterDeviceTab, isTabAuthorizedForDevice,
-    purgeTab, broadcastGlobalReset,
+    tabsForEvent,
+    registerDeviceTab,
+    unregisterDeviceTab,
+    isTabAuthorizedForDevice,
+    purgeTab,
+    broadcastGlobalReset,
   });
 })();

@@ -1,5 +1,5 @@
 (function () {
-  const isWorker = typeof window === 'undefined' || !(window instanceof Window);
+  const isWorker = typeof window === "undefined" || !(window instanceof Window);
   if (!isWorker && !window.isSecureContext) {
     console.debug("NO POLYFILL");
     return;
@@ -23,7 +23,10 @@
   let getOriginalStack;
   if (!isWorker) {
     OriginalError = window.Error;
-    stackDescriptor = Object.getOwnPropertyDescriptor(OriginalError.prototype, 'stack');
+    stackDescriptor = Object.getOwnPropertyDescriptor(
+      OriginalError.prototype,
+      "stack",
+    );
     getOriginalStack = stackDescriptor && stackDescriptor.get;
   }
 
@@ -34,27 +37,29 @@
       throw new OriginalError();
     } catch (e) {
       const stack = getOriginalStack ? getOriginalStack.call(e) : e.stack;
-      if (typeof stack !== 'string') return false;
-      const lines = stack.split('\n');
-      const callerFrame = lines.at(2) || '';
-      return callerFrame.includes('debugger eval code');
+      if (typeof stack !== "string") return false;
+      const lines = stack.split("\n");
+      const callerFrame = lines.at(2) || "";
+      return callerFrame.includes("debugger eval code");
     }
   }
 
   /** @returns {string} */
   function getCallerFrameUrl() {
-    if (isWorker) return '';
+    if (isWorker) return "";
     try {
       const stack = new Error().stack;
       if (!stack) return location.href;
-      const lines = stack.split('\n');
+      const lines = stack.split("\n");
       for (let i = lines.length - 1; i >= 0; i--) {
         const m = lines[i].match(/@(.*?):\d+:\d+/);
-        if (m && m[1].startsWith('http')) {
+        if (m && m[1].startsWith("http")) {
           return m[1];
         }
       }
-    } catch (e) { console.debug("stack trace extraction failed", e); }
+    } catch (e) {
+      console.debug("stack trace extraction failed", e);
+    }
     return location.href;
   }
 
@@ -70,9 +75,9 @@
   /** @type {Promise<void>} */
   const bridgeReady = isWorker
     ? new Promise((resolve) => {
-        self.addEventListener('message', function onInit(e) {
+        self.addEventListener("message", function onInit(e) {
           if (e.data === null && e.ports[0]) {
-            self.removeEventListener('message', onInit);
+            self.removeEventListener("message", onInit);
             bridgePort = e.ports[0];
             setupBridgePort();
             resolve();
@@ -83,7 +88,7 @@
         const channel = new MessageChannel();
         bridgePort = channel.port1;
         const target = window === window.top ? window : window.top;
-        target.postMessage(null, '*', [channel.port2]);
+        target.postMessage(null, "*", [channel.port2]);
         setupBridgePort();
         resolve();
       });
@@ -122,7 +127,7 @@
     await bridgeReady;
     if (!bridgePort) return { s: 0 };
     return new Promise((resolve) => {
-      const id = frameNonce + ':' + (++nextReqId);
+      const id = frameNonce + ":" + ++nextReqId;
       const timeoutMs = opts.timeoutMs != null ? opts.timeoutMs : 30000;
       let settled = false;
       let timer = null;
@@ -208,7 +213,10 @@
         );
       }
     } catch (e) {
-      logger.warn("pairDevice error:", e != null ? (e.message != null ? e.message : e) : e);
+      logger.warn(
+        "pairDevice error:",
+        e != null ? (e.message != null ? e.message : e) : e,
+      );
     }
   }
 
@@ -230,11 +238,15 @@
 
   /** @returns {{isCrossOrigin: boolean, frameUrl: string}} */
   function getPolicyContext() {
-    if (isWorker) return { isCrossOrigin: false, frameUrl: '' };
+    if (isWorker) return { isCrossOrigin: false, frameUrl: "" };
     const url = getCallerFrameUrl();
     let isCrossOrigin = false;
     if (window !== window.top) {
-      try { window.parent.location.origin; } catch { isCrossOrigin = true; }
+      try {
+        window.parent.location.origin;
+      } catch {
+        isCrossOrigin = true;
+      }
     }
     return { isCrossOrigin, frameUrl: url };
   }
@@ -245,7 +257,9 @@
   }
 
   if (!isWorker) {
-    const originalQuery = navigator.permissions?.query?.bind(navigator.permissions);
+    const originalQuery = navigator.permissions?.query?.bind(
+      navigator.permissions,
+    );
     if (originalQuery) {
       navigator.permissions.query = async (desc) => {
         if (desc && desc.name === "hid") {
@@ -293,7 +307,11 @@
   Object.defineProperties(HIDDevice.prototype, {
     opened: {
       get() {
-        return devState.get(this) == null ? void 0 : devState.get(this).opened != null ? devState.get(this).opened : false;
+        return devState.get(this) == null
+          ? void 0
+          : devState.get(this).opened != null
+            ? devState.get(this).opened
+            : false;
       },
       enumerable: false,
       configurable: true,
@@ -332,7 +350,11 @@
     },
     oninputreport: {
       get() {
-        return devState.get(this) == null ? void 0 : devState.get(this).oninputreport != null ? devState.get(this).oninputreport : null;
+        return devState.get(this) == null
+          ? void 0
+          : devState.get(this).oninputreport != null
+            ? devState.get(this).oninputreport
+            : null;
       },
       /** @param {Function|null} v */
       set(v) {
@@ -470,9 +492,16 @@
               resolve: () => resolve(),
               reject: (e) => {
                 if (e && e.blocked) {
-                  reject(new DOMException("Report is blocked", "NotAllowedError"));
+                  reject(
+                    new DOMException("Report is blocked", "NotAllowedError"),
+                  );
                 } else {
-                  reject(new DOMException(e && e.message || e || "send failed", "NetworkError"));
+                  reject(
+                    new DOMException(
+                      (e && e.message) || e || "send failed",
+                      "NetworkError",
+                    ),
+                  );
                 }
               },
             });
@@ -518,9 +547,16 @@
               },
               reject: (e) => {
                 if (e && e.blocked) {
-                  reject(new DOMException("Report is blocked", "NotAllowedError"));
+                  reject(
+                    new DOMException("Report is blocked", "NotAllowedError"),
+                  );
                 } else {
-                  reject(new DOMException(e && e.message || e || "receive failed", "NetworkError"));
+                  reject(
+                    new DOMException(
+                      (e && e.message) || e || "receive failed",
+                      "NetworkError",
+                    ),
+                  );
                 }
               },
             });
@@ -569,9 +605,16 @@
               resolve: () => resolve(undefined),
               reject: (e) => {
                 if (e && e.blocked) {
-                  reject(new DOMException("Report is blocked", "NotAllowedError"));
+                  reject(
+                    new DOMException("Report is blocked", "NotAllowedError"),
+                  );
                 } else {
-                  reject(new DOMException(e && e.message || e || "send failed", "NetworkError"));
+                  reject(
+                    new DOMException(
+                      (e && e.message) || e || "send failed",
+                      "NetworkError",
+                    ),
+                  );
                 }
               },
             });
@@ -659,7 +702,10 @@
         try {
           device = await resolvePairedDevice(detail.deviceId);
         } catch (e) {
-          logger.warn("connect event lookup failed:", e != null ? (e.message != null ? e.message : e) : e);
+          logger.warn(
+            "connect event lookup failed:",
+            e != null ? (e.message != null ? e.message : e) : e,
+          );
         }
       }
       if (hidInstance && device) {
@@ -707,7 +753,9 @@
     for (const [, entry] of state.dataPending) {
       try {
         entry.reject(error);
-      } catch (e) { logger.debug("reject pending report failed", e); }
+      } catch (e) {
+        logger.debug("reject pending report failed", e);
+      }
     }
     state.dataPending.clear();
   }
@@ -780,7 +828,11 @@
       } catch (error) {
         logger.warn(
           "teardownForgottenDevice: close failed:",
-          error != null ? (error.message != null ? error.message : error) : error,
+          error != null
+            ? error.message != null
+              ? error.message
+              : error
+            : error,
         );
       }
       if (state.dataPort) {
@@ -819,7 +871,10 @@
   function onDataPortMessage(state, data) {
     if (!data) return;
     if (data.type === "sendResult" || data.type === "featureResult") {
-      const entry = state.dataPending != null ? state.dataPending.get(data.reqId) : undefined;
+      const entry =
+        state.dataPending != null
+          ? state.dataPending.get(data.reqId)
+          : undefined;
       if (!entry) return;
       state.dataPending.delete(data.reqId);
       if (data.error) entry.reject(new Error(data.error));
@@ -978,7 +1033,9 @@
       [type],
       new.target || HIDConnectionEvent,
     );
-    evtState.set(obj, { device: init == null ? void 0 : init.device != null ? init.device : init });
+    evtState.set(obj, {
+      device: init == null ? void 0 : init.device != null ? init.device : init,
+    });
     return obj;
   }
   HIDConnectionEvent.prototype = Object.create(Event.prototype);
@@ -1016,7 +1073,10 @@
       value: async function () {
         const policy = await getPolicy();
         if (policy && policy.hid === "none") {
-          throw new DOMException("Access to HID is blocked by Permissions Policy", "SecurityError");
+          throw new DOMException(
+            "Access to HID is blocked by Permissions Policy",
+            "SecurityError",
+          );
         }
         try {
           const pairedHashes = await getPairedDevices();
@@ -1046,13 +1106,23 @@
        */
       value: async function (options = {}) {
         if (isWorker) {
-          throw new DOMException("Not allowed in worker context", "NotSupportedError");
+          throw new DOMException(
+            "Not allowed in worker context",
+            "NotSupportedError",
+          );
         }
         const policy = await getPolicy();
         if (policy && policy.hid === "none") {
-          throw new DOMException("Access to HID is blocked by Permissions Policy", "SecurityError");
+          throw new DOMException(
+            "Access to HID is blocked by Permissions Policy",
+            "SecurityError",
+          );
         }
-        if (!isCalledFromConsole() && navigator.userActivation && !navigator.userActivation.isActive) {
+        if (
+          !isCalledFromConsole() &&
+          navigator.userActivation &&
+          !navigator.userActivation.isActive
+        ) {
           throw new DOMException(
             "Must be handling a user gesture to perform a hid.requestDevice() call.",
             "SecurityError",
@@ -1093,7 +1163,7 @@
             JSON.stringify(exclusionFilters),
         );
         return new Promise((resolve, reject) => {
-          const id = frameNonce + ':' + (++nextReqId);
+          const id = frameNonce + ":" + ++nextReqId;
           pending[id] = async (result) => {
             try {
               if (result.cancelled) {
@@ -1157,7 +1227,11 @@
     },
     onconnect: {
       get() {
-        return hidState.get(this) == null ? void 0 : hidState.get(this).onconnect != null ? hidState.get(this).onconnect : null;
+        return hidState.get(this) == null
+          ? void 0
+          : hidState.get(this).onconnect != null
+            ? hidState.get(this).onconnect
+            : null;
       },
       /** @param {Function|null} v */
       set(v) {
@@ -1173,7 +1247,11 @@
     },
     ondisconnect: {
       get() {
-        return hidState.get(this) == null ? void 0 : hidState.get(this).ondisconnect != null ? hidState.get(this).ondisconnect : null;
+        return hidState.get(this) == null
+          ? void 0
+          : hidState.get(this).ondisconnect != null
+            ? hidState.get(this).ondisconnect
+            : null;
       },
       /** @param {Function|null} v */
       set(v) {
@@ -1232,16 +1310,28 @@
     });
   } else {
     Object.defineProperty(self, "HID", {
-      value: HID, writable: false, configurable: true, enumerable: false,
+      value: HID,
+      writable: false,
+      configurable: true,
+      enumerable: false,
     });
     Object.defineProperty(self, "HIDDevice", {
-      value: HIDDevice, writable: false, configurable: true, enumerable: false,
+      value: HIDDevice,
+      writable: false,
+      configurable: true,
+      enumerable: false,
     });
     Object.defineProperty(self, "HIDInputReportEvent", {
-      value: HIDInputReportEvent, writable: false, configurable: true, enumerable: false,
+      value: HIDInputReportEvent,
+      writable: false,
+      configurable: true,
+      enumerable: false,
     });
     Object.defineProperty(self, "HIDConnectionEvent", {
-      value: HIDConnectionEvent, writable: false, configurable: true, enumerable: false,
+      value: HIDConnectionEvent,
+      writable: false,
+      configurable: true,
+      enumerable: false,
     });
   }
 
@@ -1257,8 +1347,11 @@
   } else {
     const navProto = Object.getPrototypeOf(self.navigator);
     Object.defineProperty(navProto, "hid", {
-      get() { return hidInstance; },
-      configurable: true, enumerable: true,
+      get() {
+        return hidInstance;
+      },
+      configurable: true,
+      enumerable: true,
     });
   }
 
@@ -1276,7 +1369,11 @@
       bridgeReady.then(() => {
         if (!bridgePort) return;
         bridgePort.postMessage(
-          { id: frameNonce + ':' + (++nextReqId), action: "workerPort", payload: {} },
+          {
+            id: frameNonce + ":" + ++nextReqId,
+            action: "workerPort",
+            payload: {},
+          },
           [ch.port2],
         );
       });

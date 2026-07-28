@@ -30,5 +30,14 @@
     return buf;
   }
 
-  webhid.export("bgPacked", { EVT_HANDSHAKE, EVT_CONNECT, EVT_DISCONNECT, ACT, PKG_INPUT_REPORT, PKG_SEND_REPORT, PKG_SEND_FEATURE_REPORT, buildPackedSend });
+  webhid.export("bgPacked", {
+    EVT_HANDSHAKE,
+    EVT_CONNECT,
+    EVT_DISCONNECT,
+    ACT,
+    PKG_INPUT_REPORT,
+    PKG_SEND_REPORT,
+    PKG_SEND_FEATURE_REPORT,
+    buildPackedSend,
+  });
 })();
