@@ -25,6 +25,9 @@ jobs:
           git config --global --add safe.directory "${GITHUB_WORKSPACE}"
           echo "VERSION=$(git describe --tags | sed 's/^v//;s/_/./;s/\([^-]*-g\)/r\1/;s/-/./g')" >> "$GITHUB_OUTPUT"
 
+      - name: Install dependencies
+        run: npm ci
+
       - name: Build Addon XPI
         run: |
           make build-addon

@@ -57,18 +57,8 @@ build:
 MV ?= 3
 
 build-addon:
-	@mkdir -p "$(DIST_DIR)"
-	@test -f "$(ADDON_DIR)/manifest.v$(MV).json" || { echo "manifest.v$(MV).json not found in $(ADDON_DIR)" >&2; exit 1; }
-	@rm -f "$(DIST_DIR)/webhid-addon-mv$(MV).xpi"
-	@if [ -f "$(ADDON_DIR)/manifest.json" ]; then \
-		cp "$(ADDON_DIR)/manifest.json" "$(ADDON_DIR)/.manifest.bak"; fi
-	@cp "$(ADDON_DIR)/manifest.v$(MV).json" "$(ADDON_DIR)/manifest.json"
-	@echo "==> Packaging addon XPI (MV$(MV))…"
-	cd "$(ADDON_DIR)" && zip -r -X "$(DIST_DIR)/webhid-addon-mv$(MV).xpi" . -x "*.DS_Store" "*/.git/*" "manifest.v?.*" ".manifest.bak" >/dev/null
-	@echo "Created $(DIST_DIR)/webhid-addon-mv$(MV).xpi"
-	@if [ -f "$(ADDON_DIR)/.manifest.bak" ]; then \
-		mv "$(ADDON_DIR)/.manifest.bak" "$(ADDON_DIR)/manifest.json"; \
-	else rm -f "$(ADDON_DIR)/manifest.json"; fi
+	@echo "==> Packaging addon (MV$(MV))…"
+	MV=$(MV) npm run build:addon
 
 package: build build-addon
 
@@ -200,7 +190,7 @@ clean:
 help:
 	@echo "Targets:"
 	@echo "  build                    - cargo build --release (daemon + nm host)"
-	@echo "  build-addon            - package addon/ into dist/webhid-addon.xpi"
+	@echo "  build-addon            - lint, minify JS, package addon into dist/webhid-addon-mv{2,3}.xpi"
 	@echo "  package                        - build + build-addon"
 	@echo "  windows-msi            - build Windows MSI installer (run on Windows)"
 	@echo "  install-system  - install binaries + NM manifest + systemd service (needs root)"

@@ -33,13 +33,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Lint addon
-        run: npm run lint
-
       - name: Build Addon XPI
         run: |
           make build-addon
-          mv dist/webhid-addon-mv3.xpi dist/webhid-addon-v${{ steps.variables.outputs.VERSION }}.xpi
+          mv dist/webhid-addon.xpi dist/webhid-addon-v${{ steps.variables.outputs.VERSION }}.xpi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7

@@ -117,7 +117,7 @@ common test scenarios:
 | `gamepad.bin`  | Generic Desktop / Joystick                       | `guessDeviceType() == "controller"` test |
 | `vendor.bin`   | Mouse **+** Vendor-defined 0xff1c/0x92 (2 collections) | Issue #2 regression: filter must iterate `device.collections` |
 
-Regenerate with `python3 scripts/gen-descriptors.py`.
+Regenerate with `node scripts/gen-descriptors.mjs`.
 
 ## Example: spawn + inject input report
 
