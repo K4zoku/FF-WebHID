@@ -816,6 +816,11 @@
 
   browser.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return;
+    let hasSiteChange = false;
+    for (const key of Object.keys(changes)) {
+      if (key.startsWith("site:")) { hasSiteChange = true; break; }
+    }
+    if (hasSiteChange) refreshWorkerPolyfillSites();
     const patch = {};
     for (const k of Object.keys(GLOBAL_DEFAULTS)) {
       if (changes[k]) patch[k] = changes[k].newValue;

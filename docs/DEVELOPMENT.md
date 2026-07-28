@@ -33,7 +33,7 @@ cargo build --manifest-path crates/Cargo.toml
 make build                # or: make build CARGO_ARGS=--frozen
 
 # Addon XPI (zips addon/, default MV3; use MV=2 for MV2)
-make build-addon          # or: make build-addon MV=2
+npm run build:addon          # or: MV=2 npm run build:addon
 ```
 
 Binaries: `crates/target/{debug,release}/webhid-daemon`, `webhid-native-messaging`, and `uhid-mock` (Linux only, test helper).
@@ -252,9 +252,9 @@ cd packaging/linux/archlinux/webhid-addon && makepkg -si
 Versioning uses [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) (configured in `.versionrc.json`). Current version: 2.2.0.
 
 ```sh
-make bump           # interactive (prompts for type)
-make bump-minor      # or: make bump-minor CARGO_ARGS=--frozen
-make bump-patch
+npm run release
+npm run release:minor
+npm run release:patch
 ```
 
 Bumps `.version.json`, `package.json`, `addon/manifest.json`, the three `Cargo.toml` files, and `Cargo.lock` (via `.versionrc.cargo-updater.cjs`).

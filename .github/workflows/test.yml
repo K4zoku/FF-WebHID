@@ -40,7 +40,7 @@ jobs:
       - name: Build addon
         run: |
           npm ci
-          make build-addon
+          npm run build:addon
       - name: Install Playwright
         working-directory: tests
         run: |
@@ -75,7 +75,7 @@ jobs:
   #     - name: Build addon
   #       run: |
   #         npm ci
-  #         make build-addon
+  #         npm run build:addon
   #     - name: Install Playwright
   #       working-directory: tests
   #       run: |

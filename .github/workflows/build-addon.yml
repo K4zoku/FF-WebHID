@@ -35,7 +35,7 @@ jobs:
 
       - name: Build Addon XPI
         run: |
-          make build-addon
+          npm run build:addon
           mv dist/webhid-addon.xpi dist/webhid-addon-v${{ steps.variables.outputs.VERSION }}.xpi
 
       - name: Upload artifact

@@ -28,47 +28,23 @@ USER_NM_DIR       ?= $(HOME)/.mozilla/native-messaging-hosts
 USER_SYSTEMD_DIR  ?= $(HOME)/.config/systemd/user
 
 
-.PHONY: all build build-addon package \
+.PHONY: all build \
 		install install-system install-user install-udev-rule \
 		install-webhid-group \
 		install-daemon-nm-host-system install-daemon-nm-host-user \
 		uninstall uninstall-system uninstall-user \
-		windows-msi \
-		clean test help \
-		bump bump-patch
+		clean test help
 
-all: build build-addon
-
-bump:
-	npx commit-and-tag-version
-
-bump-minor:
-	npx commit-and-tag-version --release-as minor
-
-bump-patch:
-	npx commit-and-tag-version --release-as patch
+all: build
 
 ## ---- Build ----
+## `build-addon`, `package`, `windows-msi`, and `bump*` moved to package.json
+## (npm run build:addon / build / build:msi / release*): they were pure
+## npx/node/powershell wrappers with no Make-specific value.
 
 build:
 	@echo "==> Building Rust crates (release)…"
 	cargo build --release $(CARGO_ARGS) --manifest-path "$(CRATES_DIR)/Cargo.toml"
-
-MV ?= 3
-
-build-addon:
-	@echo "==> Packaging addon (MV$(MV))…"
-	MV=$(MV) npm run build:addon
-
-package: build build-addon
-
-## ---- Windows MSI ----
-## Requires: WiX v5 (`dotnet tool install --global wix`) on Windows host.
-## Cross-build is not supported; run on a Windows machine or CI runner.
-
-windows-msi:
-	@echo "==> Building Windows MSI (run on Windows)…"
-	powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(ROOT)/packaging/windows/build-msi.ps1"
 
 ## ---- Install ----
 ## System-wide: requires root, binaries+NM manifest shared for all users
@@ -190,9 +166,7 @@ clean:
 help:
 	@echo "Targets:"
 	@echo "  build                    - cargo build --release (daemon + nm host)"
-	@echo "  build-addon            - lint, minify JS, package addon into dist/webhid-addon-mv{2,3}.xpi"
-	@echo "  package                        - build + build-addon"
-	@echo "  windows-msi            - build Windows MSI installer (run on Windows)"
+	@echo "  (npm run build / build:addon / build:msi / release* - see package.json)"
 	@echo "  install-system  - install binaries + NM manifest + systemd service (needs root)"
 	@echo "  install-webhid-group - create 'webhid' group + add current user (needs root)"
 	@echo "  install-user      - install binaries + NM manifest + systemd user service (no root)"
