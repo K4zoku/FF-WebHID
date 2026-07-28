@@ -21,10 +21,10 @@
     "message": "Data Plane"
   },
   "popupDataPlaneDesc": {
-    "message": "WebSocket (Worker) or Native Messaging"
+    "message": "WebSocket or Native Messaging"
   },
   "popupDataPlaneWs": {
-    "message": "WebSocket (Worker)"
+    "message": "WebSocket"
   },
   "popupDataPlaneNm": {
     "message": "Native Messaging"
@@ -33,7 +33,7 @@
     "message": "Worker Polyfill"
   },
   "popupWorkerPolyfillDesc": {
-    "message": "Inject WebHID stubs into Worker scripts on this site"
+    "message": "Inject WebHID API into Worker scripts on this site"
   },
   "popupLogLevel": {
     "message": "Log Level"
@@ -84,10 +84,10 @@
     "message": "Data Plane"
   },
   "settingsDataPlaneWs": {
-    "message": "WebSocket (Worker)"
+    "message": "WebSocket"
   },
   "settingsDataPlaneNm": {
-    "message": "Native Messaging (via bridge)"
+    "message": "Native Messaging"
   },
   "settingsDevicePickerMode": {
     "message": "Device Picker Mode"
@@ -96,7 +96,7 @@
     "message": "Modal (overlay)"
   },
   "settingsDevicePickerPageAction": {
-    "message": "Page Action (url bar popup)"
+    "message": "Page Action (URL bar popup)"
   },
   "settingsDevicePickerWindow": {
     "message": "Window (separate popup window)"
