@@ -20,7 +20,7 @@ struct Entry {
     stop_flag: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
     refcount: u32,
-    dataplane_mode: Mutex<String>,
+    dataplane_modes: Mutex<HashMap<String, String>>,
     ws_generation: AtomicU64,
     vendor_id: u16,
     product_id: u16,
@@ -102,7 +102,7 @@ fn compute_ws_auth_hash(token: &str, nonce: &str) -> String {
 
 pub struct DeviceManager {
     devices: Arc<Mutex<HashMap<u32, Entry>>>,
-    ws_auth_hashes: Arc<Mutex<HashMap<String, u32>>>,
+    ws_auth_hashes: Arc<Mutex<HashMap<String, (u32, String)>>>,
     ws_nonce: String,
     event_tx: broadcast::Sender<IpcResponse>,
 }
@@ -136,11 +136,13 @@ impl DeviceManager {
             if let Some(entry) = map.get_mut(&device_id) {
                 entry.refcount += 1;
                 let rc = entry.refcount;
+                entry.dataplane_modes.lock().unwrap_or_else(|e| e.into_inner())
+                    .insert(session_token.clone(), "nm".to_string());
                 drop(map);
                 self.ws_auth_hashes
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
-                    .insert(ws_auth_hash.clone(), device_id);
+                    .insert(ws_auth_hash.clone(), (device_id, session_token.clone()));
                 log::info!("[device_mgr] {device_id:#x} refcount → {rc} (existing session)");
                 return Ok((device_id, Some(session_token)));
             }
@@ -167,11 +169,13 @@ impl DeviceManager {
         if let Some(entry) = map.get_mut(&id) {
             entry.refcount += 1;
             let rc = entry.refcount;
+            entry.dataplane_modes.lock().unwrap_or_else(|e| e.into_inner())
+                .insert(session_token.clone(), "nm".to_string());
             drop(map);
             self.ws_auth_hashes
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
-                .insert(ws_auth_hash.clone(), id);
+                .insert(ws_auth_hash.clone(), (id, session_token.clone()));
             log::info!("[device_mgr] {id:#x} refcount → {rc} (existing session)");
             return Ok((id, Some(session_token)));
         }
@@ -182,7 +186,7 @@ impl DeviceManager {
             handle: None,
             refcount: 1,
             ws_generation: AtomicU64::new(0),
-            dataplane_mode: Mutex::new("nm".to_string()),
+            dataplane_modes: Mutex::new(HashMap::from([(session_token.clone(), "nm".to_string())])),
             vendor_id: info.vendor_id,
             product_id: info.product_id,
             report_to_collection: Arc::clone(&report_map),
@@ -192,7 +196,7 @@ impl DeviceManager {
         self.ws_auth_hashes
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .insert(ws_auth_hash.clone(), id);
+            .insert(ws_auth_hash.clone(), (id, session_token.clone()));
 
         let dev_id = id;
         let dev_for_task = Arc::clone(&reader_arc);
@@ -269,11 +273,15 @@ impl DeviceManager {
         Ok((id, Some(session_token)))
     }
 
-    pub fn close(&self, device_id: u32) -> anyhow::Result<()> {
+    pub fn close(&self, device_id: u32, session_token: Option<&str>) -> anyhow::Result<()> {
         let mut map = self.devices.lock().unwrap_or_else(|e| e.into_inner());
         let entry = map
             .get_mut(&device_id)
             .ok_or_else(|| anyhow!("'{device_id:#x}' not open"))?;
+        if let Some(token) = session_token {
+            entry.dataplane_modes.lock().unwrap_or_else(|e| e.into_inner())
+                .remove(token);
+        }
         if entry.refcount > 1 {
             entry.refcount -= 1;
             log::info!(
@@ -292,7 +300,7 @@ impl DeviceManager {
         drop(map);
 
         let mut hashes = self.ws_auth_hashes.lock().unwrap_or_else(|e| e.into_inner());
-        hashes.retain(|_, &mut v| v != device_id);
+        hashes.retain(|_, (dev_id, _)| *dev_id != device_id);
         log::info!("[device_mgr] {device_id:#x} closed (refcount → 0)");
         Ok(())
     }
@@ -305,19 +313,21 @@ impl DeviceManager {
         Ok(Arc::clone(&entry.device))
     }
 
-    pub fn set_dataplane_mode(&self, device_id: u32, mode: &str) {
+    pub fn set_dataplane_mode(&self, device_id: u32, session_token: &str, mode: &str) {
         let map = self.devices.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(entry) = map.get(&device_id) {
-            *entry.dataplane_mode.lock().unwrap_or_else(|e| e.into_inner()) = mode.to_string();
-            log::info!("[device_mgr] {device_id:#x} dataplane mode → {mode}");
+            entry.dataplane_modes.lock().unwrap_or_else(|e| e.into_inner())
+                .insert(session_token.to_string(), mode.to_string());
+            log::info!("[device_mgr] {device_id:#x} session dataplane mode → {mode}");
         }
     }
 
-    pub fn ws_connect(&self, device_id: u32) -> u64 {
+    pub fn ws_connect(&self, device_id: u32, session_token: &str) -> u64 {
         let map = self.devices.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(entry) = map.get(&device_id) {
             let g = entry.ws_generation.fetch_add(1, Ordering::SeqCst) + 1;
-            *entry.dataplane_mode.lock().unwrap_or_else(|e| e.into_inner()) = "ws".to_string();
+            entry.dataplane_modes.lock().unwrap_or_else(|e| e.into_inner())
+                .insert(session_token.to_string(), "ws".to_string());
             log::info!("[device_mgr] {device_id:#x} WS connect gen={g}");
             g
         } else {
@@ -325,12 +335,13 @@ impl DeviceManager {
         }
     }
 
-    pub fn ws_disconnect(&self, device_id: u32, generation: u64) {
+    pub fn ws_disconnect(&self, device_id: u32, session_token: &str, generation: u64) {
         let map = self.devices.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(entry) = map.get(&device_id) {
             let current = entry.ws_generation.load(Ordering::SeqCst);
             if current == generation {
-                *entry.dataplane_mode.lock().unwrap_or_else(|e| e.into_inner()) = "nm".to_string();
+                entry.dataplane_modes.lock().unwrap_or_else(|e| e.into_inner())
+                    .insert(session_token.to_string(), "nm".to_string());
                 log::info!("[device_mgr] {device_id:#x} WS disconnect gen={generation} → nm");
             } else {
                 log::info!(
@@ -340,16 +351,14 @@ impl DeviceManager {
         }
     }
 
-    pub fn dataplane_mode(&self, device_id: u32) -> String {
+    pub fn has_nm_session(&self, device_id: u32) -> bool {
         let map = self.devices.lock().unwrap_or_else(|e| e.into_inner());
-        map.get(&device_id)
-            .map(|e| {
-                e.dataplane_mode
-                    .lock()
-                    .unwrap_or_else(|pe| pe.into_inner())
-                    .clone()
-            })
-            .unwrap_or_else(|| "nm".to_string())
+        if let Some(entry) = map.get(&device_id) {
+            let modes = entry.dataplane_modes.lock().unwrap_or_else(|e| e.into_inner());
+            modes.values().any(|m| m == "nm")
+        } else {
+            false
+        }
     }
 
     pub fn close_all_devices(&self) {
@@ -381,7 +390,7 @@ impl DeviceManager {
         }
         drop(map);
         let mut hashes = self.ws_auth_hashes.lock().unwrap_or_else(|e| e.into_inner());
-        hashes.retain(|_, &mut v| v != device_id);
+        hashes.retain(|_, (dev_id, _)| *dev_id != device_id);
         log::info!("[device_mgr] {device_id:#x} force-closed (hotplug removal)");
     }
 
@@ -417,9 +426,9 @@ impl DeviceManager {
         )
     }
 
-    pub fn get_device_by_ws_auth(&self, hash: &str) -> Option<u32> {
+    pub fn get_device_by_ws_auth(&self, hash: &str) -> Option<(u32, String)> {
         let hashes = self.ws_auth_hashes.lock().unwrap_or_else(|e| e.into_inner());
-        hashes.get(hash).copied()
+        hashes.get(hash).cloned()
     }
 }
 
@@ -429,11 +438,11 @@ mod tests {
     use tokio::sync::broadcast;
 
     #[test]
-    fn test_dataplane_mode_default() {
+    fn test_has_nm_session_no_device() {
         let (tx, _) = broadcast::channel(16);
         let mgr = DeviceManager::new(tx);
-        assert_eq!(mgr.dataplane_mode(0xDEADBEEF), "nm");
-        assert_eq!(mgr.dataplane_mode(0x1234), "nm");
+        assert!(!mgr.has_nm_session(0xDEADBEEF));
+        assert!(!mgr.has_nm_session(0x1234));
     }
 
     #[test]

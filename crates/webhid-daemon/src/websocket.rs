@@ -175,8 +175,8 @@ async fn handle_websocket(
         }
     };
 
-    let device_id = match device_mgr.get_device_by_ws_auth(&hash) {
-        Some(id) => id,
+    let (device_id, session_token) = match device_mgr.get_device_by_ws_auth(&hash) {
+        Some((id, token)) => (id, token),
         None => {
             log::warn!("[ws] unknown auth hash; closing");
             let _ = send_close(ws_stream, WS_CLOSE_UNKNOWN_TOKEN, "unknown token").await;
@@ -188,7 +188,7 @@ async fn handle_websocket(
 
     let mut event_rx = event_tx.subscribe();
 
-    let ws_gen = device_mgr.ws_connect(device_id);
+    let ws_gen = device_mgr.ws_connect(device_id, &session_token);
 
     let (mut ws_sender, mut ws_receiver) = ws_stream.split();
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
@@ -322,7 +322,7 @@ async fn handle_websocket(
     sender_task.abort();
 
     log::info!("[ws] connection for {device_id:#x} closed");
-    device_mgr.ws_disconnect(device_id, ws_gen);
+    device_mgr.ws_disconnect(device_id, &session_token, ws_gen);
     Ok(())
 }
 

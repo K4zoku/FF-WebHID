@@ -513,8 +513,10 @@
     async openDevice(deviceId) {
       return await this.sendRequest({ a: ACT.open, i: deviceId });
     },
-    async closeDevice(deviceId) {
-      return await this.sendRequest({ a: ACT.close, i: deviceId });
+    async closeDevice(deviceId, sessionToken) {
+      const req = { a: ACT.close, i: deviceId };
+      if (sessionToken) req.T = sessionToken;
+      return await this.sendRequest(req);
     },
     async handshake() {
       return await this.sendRequest({ a: ACT.hs });
@@ -733,7 +735,7 @@
           sendResponse({ s: 403 });
           return true;
         }
-        NativeMessaging.closeDevice(request.deviceId)
+        NativeMessaging.closeDevice(request.deviceId, request.sessionToken)
           .then((response) => {
             if (http.isOk(response.s))
               unregisterDeviceTab(request.deviceId, tabId);
@@ -793,6 +795,7 @@
           a: ACT.sdp,
           i: request.deviceId,
           m: request.mode,
+          T: request.sessionToken,
         })
           .then(sendResponse)
           .catch((e) => sendResponse({ s: 500 }));

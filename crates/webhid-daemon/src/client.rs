@@ -41,7 +41,7 @@ pub async fn handle(
                         device_mgr_for_events.force_close(device.device_id);
                     }
                     if let webhid::IpcResponse::InputReport { ref device_id, .. } = ev {
-                        if device_mgr_for_events.dataplane_mode(*device_id) == "ws" {
+                        if !device_mgr_for_events.has_nm_session(*device_id) {
                             continue;
                         }
                     }
@@ -112,7 +112,7 @@ async fn dispatch(device_mgr: &DeviceManager, req: NmRequest, ws_port: u16) -> N
             }
         },
 
-        NmRequest::Close { device_id, .. } => match device_mgr.close(device_id) {
+        NmRequest::Close { device_id, session_token, .. } => match device_mgr.close(device_id, session_token.as_deref()) {
             Ok(()) => NmResponse::ok(),
             Err(e) => {
                 let code = if e.to_string().contains("not open") {
@@ -207,9 +207,11 @@ async fn dispatch(device_mgr: &DeviceManager, req: NmRequest, ws_port: u16) -> N
         }
 
         NmRequest::SetDataPlane {
-            device_id, mode, ..
+            device_id, mode, session_token, ..
         } => {
-            device_mgr.set_dataplane_mode(device_id, &mode);
+            if let Some(ref token) = session_token {
+                device_mgr.set_dataplane_mode(device_id, token, &mode);
+            }
             NmResponse::ok()
         }
 

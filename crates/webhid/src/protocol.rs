@@ -85,6 +85,7 @@ pub async fn read_nm_request<R: AsyncRead + Unpin>(reader: &mut R) -> io::Result
         crate::ACT_CLOSE => NmRequest::Close {
             id,
             device_id: get_u32(&v, "i")?,
+            session_token: v.get("T").and_then(|x| x.as_str()).map(String::from),
         },
         crate::ACT_SEND_REPORT => NmRequest::SendReport {
             id,
@@ -105,6 +106,7 @@ pub async fn read_nm_request<R: AsyncRead + Unpin>(reader: &mut R) -> io::Result
             id,
             device_id: get_u32(&v, "i")?,
             mode: get_str(&v, "m")?,
+            session_token: v.get("T").and_then(|x| x.as_str()).map(String::from),
         },
         crate::ACT_HANDSHAKE => NmRequest::Handshake { id },
         _ => {

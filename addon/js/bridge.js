@@ -343,6 +343,7 @@
           action: "setDataPlane",
           deviceId: deviceId,
           mode: "nm",
+          sessionToken: sessionToken,
         })
         .catch((e) => logger.debug("setDataPlane NM fallback failed", e));
     }
@@ -756,9 +757,13 @@
 
       if (action === "close") {
         const deviceId = payload.deviceId;
+        const sessionToken = sessionTokens.get(deviceId);
         logger.debug("close deviceId=" + deviceId);
         openDevices.delete(deviceId);
         sessionTokens.delete(deviceId);
+        if (sessionToken) {
+          msg.T = sessionToken;
+        }
         browser.runtime
           .sendMessage({
             action: "deviceCountChanged",

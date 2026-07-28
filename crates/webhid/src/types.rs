@@ -136,6 +136,7 @@ pub enum IpcRequest {
     Close {
         id: u32,
         device_id: u32,
+        session_token: Option<String>,
     },
     SendReport {
         id: u32,
@@ -158,6 +159,7 @@ pub enum IpcRequest {
         id: u32,
         device_id: u32,
         mode: String,
+        session_token: Option<String>,
     },
 }
 
@@ -291,6 +293,8 @@ pub enum NmRequest {
         id: Option<u32>,
         #[serde(rename = "i")]
         device_id: u32,
+        #[serde(rename = "T", default)]
+        session_token: Option<String>,
     },
     /// Packed sendReport. `d` is base64 of TLV binary.
     SendReport {
@@ -324,6 +328,8 @@ pub enum NmRequest {
         device_id: u32,
         #[serde(rename = "m")]
         mode: String,
+        #[serde(rename = "T", default)]
+        session_token: Option<String>,
     },
     Handshake {
         #[serde(default)]
@@ -597,6 +603,7 @@ mod tests {
         let req = NmRequest::Close {
             id: Some(20),
             device_id: 0x5678,
+            session_token: None,
         };
         assert_eq!(req.id(), Some(20));
     }
@@ -798,6 +805,7 @@ mod tests {
             IpcRequest::Close {
                 id: 3,
                 device_id: 0xfeedface,
+                session_token: None,
             },
             IpcRequest::SendReport {
                 id: 5,
