@@ -1,5 +1,7 @@
 (function () {
   "use strict";
+
+  /** @type {import("./types.js").Logger} */
   const logger = globalThis.webhid.import("logger");
   const fetchResource = globalThis.webhid.import("fetchResource");
   const http = globalThis.webhid.import("http");
@@ -12,18 +14,34 @@
   const applyDeviceIcon = globalThis.webhid.import("applyDeviceIcon");
   logger.initLogger("picker");
 
+  /** @typedef {import("./types.js").HIDDeviceInfo} HIDDeviceInfo */
+
+  /**
+   *
+   */
   class WebHidDevicePicker {
+    /** @type {ShadowRoot|null} */
     shadow = null;
+    /** @type {HTMLElement|null} */
     host = null;
+    /** @type {HTMLDialogElement|null} */
     dialog = null;
+    /** @type {HIDDeviceInfo[]} */
     devices = [];
+    /** @type {object[]} */
     filters = [];
+    /** @type {object[]} */
     exclusionFilters = [];
+    /** @type {{[key: string]: HIDDeviceInfo[]}} */
     deviceGroups = {};
+    /** @type {string[]|null} */
     pairedDevices = null;
+    /** @type {Promise<void>|null} */
     fragmentReady = null;
+    /** @type {Function|null} */
     resolveShow = null;
 
+    /** @constructor */
     constructor() {
       this.host = document.createElement("div");
       this.host.id = "webhid-shadow-host";
@@ -31,10 +49,12 @@
       this.fragmentReady = this.loadFragment();
     }
 
+    /** @returns {HTMLElement} */
     get host() {
       return this.host;
     }
 
+    /** @returns {Promise<void>} */
     async loadFragment() {
       const html = await fetchResource("html/picker.fragment.html");
       const templateDoc = new DOMParser().parseFromString(html, "text/html");
@@ -91,6 +111,11 @@
       });
     }
 
+    /**
+     * @param {object[]} [filters]
+     * @param {object[]} [exclusionFilters]
+     * @returns {Promise<{devices: HIDDeviceInfo[]}>}
+     */
     async show(filters = [], exclusionFilters = []) {
       await this.fragmentReady;
       this.filters = filters;
@@ -112,16 +137,19 @@
       });
     }
 
+    /** @returns {Promise<void>} */
     async refreshDevices() {
       if (!this.dialog || !this.dialog.open) return;
       this.pairedDevices = null;
       await this.loadDevices();
     }
 
+    /** @returns {boolean} */
     get isOpen() {
       return this.dialog == null ? void 0 : this.dialog.open != null ? this.dialog.open : false;
     }
 
+    /** @returns {Promise<void>} */
     async loadDevices() {
       try {
         const response = await browser.runtime.sendMessage({
@@ -147,6 +175,11 @@
       }
     }
 
+    /**
+     * @param {string} message
+     * @param {boolean} [isError]
+     * @returns {void}
+     */
     showMessage(message, isError = false) {
       if (!this.dialog) return;
       const deviceList = this.dialog.querySelector("#webhidDeviceList");
@@ -158,6 +191,7 @@
       deviceList.appendChild(div);
     }
 
+    /** @returns {Promise<string[]>} */
     async getPairedDevices() {
       if (this.pairedDevices !== null) return this.pairedDevices;
       try {
@@ -172,11 +206,16 @@
       }
     }
 
+    /**
+     * @param {HIDDeviceInfo} device
+     * @returns {Promise<boolean>}
+     */
     async deviceMatchesSaved(device) {
       const pairedIds = await this.getPairedDevices();
       return pairedIds.includes(device.deviceId);
     }
 
+    /** @returns {Promise<void>} */
     async renderDevices() {
       if (!this.dialog) return;
       const deviceList = this.dialog.querySelector("#webhidDeviceList");
@@ -260,6 +299,10 @@
       }
     }
 
+    /**
+     * @param {HIDDeviceInfo|HIDDeviceInfo[]} devices
+     * @returns {void}
+     */
     onDeviceSelected(devices) {
       const devicesArr = Array.isArray(devices) ? devices : [devices];
       (async () => {
@@ -275,6 +318,7 @@
       this.resolveShow = null;
     }
 
+    /** @returns {void} */
     onDeviceCancelled() {
       this.resolveShow?.({ devices: [] });
       this.resolveShow = null;

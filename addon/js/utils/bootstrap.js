@@ -12,13 +12,23 @@
       enumerable: false,
     });
   }
+  /** @type {Map<string, any>} */
   const registry = new Map();
   const api = {
+    /**
+     * @param {string} name
+     * @param {any} value
+     * @returns {any}
+     */
     export(name, value) {
       registry.set(name, value);
       api[name] = value;
       return value;
     },
+    /**
+     * @param {string} name
+     * @returns {any}
+     */
     import(name) {
       const v = registry.get(name);
       if (v === undefined) throw new Error("module '" + name + "' not loaded");

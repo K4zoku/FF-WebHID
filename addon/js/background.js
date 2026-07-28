@@ -1,13 +1,20 @@
 (function () {
+  /** @type {import("./types.js").Logger} */
   const logger = webhid.import("logger");
   const http = webhid.import("http");
   const createSettingsStore = webhid.import("createSettingsStore");
   const GLOBAL_DEFAULTS = webhid.import("GLOBAL_DEFAULTS");
   logger.initLogger("bg");
 
+  /** @type {Array} */
   let deviceCache = [];
+  /** @type {Map<number, object>} */
   const pendingPicker = new Map();
 
+  /**
+   * @param {object} device
+   * @returns {Promise<void>}
+   */
   async function saveDeviceInfo(device) {
     if (!device || !device.deviceId) return;
     try {
@@ -17,6 +24,10 @@
     } catch (e) { logger.debug("saveDeviceInfo failed", e); }
   }
 
+  /**
+   * @param {object[]} devices
+   * @returns {Promise<void>}
+   */
   async function saveDeviceInfoBatch(devices) {
     if (!devices || !devices.length) return;
     const entries = {};
@@ -28,6 +39,10 @@
     } catch (e) { logger.debug("saveDeviceInfoBatch failed", e); }
   }
 
+  /**
+   * @param {string} deviceId
+   * @returns {Promise<object | null>}
+   */
   async function getDeviceInfo(deviceId) {
     if (!deviceId) return null;
     const live = deviceCache.find((d) => d.deviceId === deviceId);
@@ -40,6 +55,10 @@
     }
   }
 
+  /**
+   * @param {string} deviceId
+   * @returns {Promise<void>}
+   */
   async function removeDeviceInfo(deviceId) {
     if (!deviceId) return;
     try {
@@ -47,13 +66,19 @@
     } catch (e) { logger.debug("removeDeviceInfo failed", e); }
   }
 
+  /** @type {Map<string, Set<number>>} */
   const deviceTabMap = new Map();
+  /** @type {Map<string, string>} */
   const permissionsPolicy = new Map();
+  /** @type {Map<string, boolean>} */
   const allowedCrossOrigin = new Map();
 
+  /** @type {string|null} */
   let workerBundle = null;
+  /** @type {Promise<string>|null} */
   let workerBundlePromise = null;
 
+  /** @returns {Promise<string>} */
   async function ensureWorkerBundle() {
     if (workerBundle) return workerBundle;
     if (workerBundlePromise) return workerBundlePromise;
@@ -80,9 +105,12 @@
   }
   ensureWorkerBundle();
 
+  /** @type {string|null} */
   let workerPolyfillBundle = null;
+  /** @type {Promise<string>|null} */
   let workerPolyfillBundlePromise = null;
 
+  /** @returns {Promise<string>} */
   async function ensureWorkerPolyfillBundle() {
     if (workerPolyfillBundle) return workerPolyfillBundle;
     if (workerPolyfillBundlePromise) return workerPolyfillBundlePromise;
@@ -107,8 +135,10 @@
   }
   ensureWorkerPolyfillBundle();
 
+  /** @type {Set<string>} */
   const workerPolyfillSites = new Set();
 
+  /** @returns {Promise<void>} */
   async function refreshWorkerPolyfillSites() {
     workerPolyfillSites.clear();
     const all = await browser.storage.local.get(null);
@@ -119,16 +149,14 @@
     }
   }
   refreshWorkerPolyfillSites();
-  browser.storage.onChanged.addListener((changes, area) => {
-    if (area !== "local") return;
-    let needRefresh = false;
-    for (const key of Object.keys(changes)) {
-      if (key.startsWith("site:")) { needRefresh = true; break; }
-    }
-    if (needRefresh) refreshWorkerPolyfillSites();
-  });
+
+  // ── WebRequest hooks ──────────────────────────────────────────────
 
   browser.webRequest.onBeforeRequest.addListener(
+    /**
+     * @param {object} details
+     * @returns {object}
+     */
     (details) => {
       if (details.type !== "script") return;
       const isShadowUrl = details.url === details.documentUrl;
@@ -199,6 +227,10 @@
   );
 
   browser.webRequest.onHeadersReceived.addListener(
+    /**
+     * @param {object} details
+     * @returns {object}
+     */
     (details) => {
       if (details.type !== "script" || details.url !== details.documentUrl)
         return;
@@ -217,6 +249,10 @@
   );
 
   browser.webRequest.onHeadersReceived.addListener(
+    /**
+     * @param {object} details
+     * @returns {object}
+     */
     (details) => {
       const ph = details.responseHeaders?.find(
         (h) => h.name.toLowerCase() === "permissions-policy"
@@ -240,6 +276,13 @@
     ["blocking", "responseHeaders"],
   );
 
+  // ── Device tab tracking ───────────────────────────────────────────
+
+  /**
+   * @param {string} deviceId
+   * @param {number} tabId
+   * @returns {void}
+   */
   function registerDeviceTab(deviceId, tabId) {
     if (!deviceId || tabId == null) return;
     let tabs = deviceTabMap.get(deviceId);
@@ -251,6 +294,11 @@
     logger.debug("register device " + deviceId + " tab " + tabId);
   }
 
+  /**
+   * @param {string} deviceId
+   * @param {number} tabId
+   * @returns {void}
+   */
   function unregisterDeviceTab(deviceId, tabId) {
     if (!deviceId || tabId == null) return;
     const tabs = deviceTabMap.get(deviceId);
@@ -259,11 +307,20 @@
     if (tabs.size === 0) deviceTabMap.delete(deviceId);
   }
 
+  /**
+   * @param {number} tabId
+   * @param {string} deviceId
+   * @returns {boolean}
+   */
   function isTabAuthorizedForDevice(tabId, deviceId) {
     const tabs = deviceTabMap.get(deviceId);
     return !!tabs && tabs.has(tabId);
   }
 
+  /**
+   * @param {number} tabId
+   * @returns {void}
+   */
   function purgeTab(tabId) {
     if (tabId == null) return;
     for (const [deviceId, tabs] of deviceTabMap) {
@@ -296,6 +353,10 @@
   const PKG_SEND_REPORT = 0x02;
   const PKG_SEND_FEATURE_REPORT = 0x04;
 
+  /**
+   * @param {object} message
+   * @returns {number[]|null}
+   */
   function tabsForEvent(message) {
     const eventType = message.e;
     if (eventType === EVT_HANDSHAKE || !message.i) return null;
@@ -303,6 +364,11 @@
     return tabs && tabs.size > 0 ? [...tabs] : null;
   }
 
+  /**
+   * @param {string} origin
+   * @param {string} deviceId
+   * @returns {Promise<boolean>}
+   */
   async function isDeviceAllowedForOrigin(origin, deviceId) {
     if (!origin || origin === "null" || !deviceId) return false;
     const key = encodeURIComponent(origin);
@@ -310,6 +376,7 @@
     return (result[key] || []).includes(deviceId);
   }
 
+  /** @returns {void} */
   function broadcastGlobalReset() {
     browser.tabs
       .query({})
@@ -334,10 +401,13 @@
   const NM_HOST_DAEMON = "webhid.daemon_nm_host";
 
   const settings = createSettingsStore(GLOBAL_DEFAULTS);
+
+  /** @returns {string} */
   function nmHostName() {
     return settings.daemonAsNmHost ? NM_HOST_DAEMON : NM_HOST_FORWARDER;
   }
 
+  /** @returns {Promise<void>} */
   async function loadNmHostSetting() {
     const global = await browser.storage.local.get(GLOBAL_DEFAULTS);
     const stored = await browser.storage.local.get("daemonAsNmHost");
@@ -357,6 +427,14 @@
     NativeMessaging.reconnectWithNewHost();
   });
 
+  /**
+   * @param {number} msgType
+   * @param {number} reqId
+   * @param {number} deviceId
+   * @param {number} reportId
+   * @param {Uint8Array} data
+   * @returns {Uint8Array}
+   */
   function buildPackedSend(msgType, reqId, deviceId, reportId, data) {
     const buf = new Uint8Array(12 + data.length);
     const dv = new DataView(buf.buffer);
@@ -370,12 +448,18 @@
   }
 
   const NativeMessaging = {
+    /** @type {object | null} */
     port: null,
+    /** @type {number} */
     nextId: 1,
+    /** @type {Map<number, {resolve: Function, reject: Function}>} */
     pending: new Map(),
+    /** @type {number|null} */
     reconnectTimer: null,
+    /** @type {number} */
     reconnectDelay: 1000,
 
+    /** @returns {Promise<void>} */
     connect() {
       if (this.port) return Promise.resolve();
       logger.debug("connecting to " + nmHostName() + "...");
@@ -441,6 +525,7 @@
       }
     },
 
+    /** @returns {void} */
     reconnectWithNewHost() {
       if (this.port) {
         try {
@@ -456,6 +541,7 @@
       this.connect().catch((e) => logger.debug("speculative reconnect failed", e));
     },
 
+    /** @returns {void} */
     scheduleReconnect() {
       if (this.reconnectTimer) return;
       this.reconnectTimer = setTimeout(() => {
@@ -466,6 +552,10 @@
       this.reconnectDelay = Math.min(this.reconnectDelay * 2, 10000);
     },
 
+    /**
+     * @param {object} request
+     * @returns {Promise<object>}
+     */
     sendRequest(request) {
       return new Promise((resolve, reject) => {
         if (!this.port) {
@@ -485,6 +575,10 @@
       });
     },
 
+    /**
+     * @param {Function} buildPackedFn
+     * @returns {Promise<object>}
+     */
     sendPacked(buildPackedFn) {
       return new Promise((resolve, reject) => {
         if (!this.port) {
@@ -507,25 +601,47 @@
       });
     },
 
+    /** @returns {Promise<object>} */
     async enumerateDevices() {
       return await this.sendRequest({ a: ACT.enum });
     },
+    /**
+     * @param {number} deviceId
+     * @returns {Promise<object>}
+     */
     async openDevice(deviceId) {
       return await this.sendRequest({ a: ACT.open, i: deviceId });
     },
+    /**
+     * @param {number} deviceId
+     * @param {string} [sessionToken]
+     * @returns {Promise<object>}
+     */
     async closeDevice(deviceId, sessionToken) {
       const req = { a: ACT.close, i: deviceId };
       if (sessionToken) req.T = sessionToken;
       return await this.sendRequest(req);
     },
+    /** @returns {Promise<object>} */
     async handshake() {
       return await this.sendRequest({ a: ACT.hs });
     },
+    /**
+     * @param {number} deviceId
+     * @param {number} reportId
+     * @param {Uint8Array} data
+     * @returns {Promise<object>}
+     */
     async sendReport(deviceId, reportId, data) {
       return await this.sendPacked((reqId) =>
         buildPackedSend(PKG_SEND_REPORT, reqId, deviceId, reportId, data),
       );
     },
+    /**
+     * @param {number} deviceId
+     * @param {number} reportId
+     * @returns {Promise<object>}
+     */
     async receiveFeatureReport(deviceId, reportId) {
       const resp = await this.sendRequest({
         a: ACT.rfr,
@@ -537,6 +653,12 @@
       }
       return resp;
     },
+    /**
+     * @param {number} deviceId
+     * @param {number} reportId
+     * @param {Uint8Array} data
+     * @returns {Promise<object>}
+     */
     async sendFeatureReport(deviceId, reportId, data) {
       return await this.sendPacked((reqId) =>
         buildPackedSend(
@@ -549,6 +671,10 @@
       );
     },
 
+    /**
+     * @param {string} b64
+     * @returns {void}
+     */
     onPackedData(b64) {
       let bin;
       try {
@@ -586,6 +712,10 @@
       }
     },
 
+    /**
+     * @param {object} message
+     * @returns {void}
+     */
     onControlEvent(message) {
       if (message.e === undefined) return;
       if (message.e === EVT_CONNECT || message.e === EVT_DISCONNECT) {
@@ -647,6 +777,8 @@
     },
   };
 
+  // ── Runtime lifecycle ─────────────────────────────────────────────
+
   browser.runtime.onStartup.addListener(() => {
     loadNmHostSetting().then(() => NativeMessaging.connect());
   });
@@ -688,6 +820,8 @@
     if (Object.keys(patch).length === 0) return;
     settings.set(patch);
   });
+
+  // ── Message router ────────────────────────────────────────────────
 
   browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
     switch (request.action) {
@@ -1042,11 +1176,9 @@
         const sid = sender.frameId;
         const tid = sender.tab?.id;
         let hid = null;
-        // 1) Check frame's own policy.
         if (tid != null) {
           hid = permissionsPolicy.get(`${tid}:${sid}`);
         }
-        // 2) Fall back to top-frame policy.
         if (hid == null && tid != null) {
           hid = permissionsPolicy.get(`${tid}:0`);
         }
@@ -1055,7 +1187,6 @@
           sendResponse({ policy: { hid: "none" } });
           return true;
         }
-        // 3) Cross-origin: check allow attr.
         if (request.isCrossOrigin) {
           if (request.hasAllowAttr) {
             sendResponse({ policy: { hid: "allowed" } });
@@ -1074,7 +1205,6 @@
           sendResponse({ policy: { hid: "none" } });
           return true;
         }
-        // 4) Same-origin: allowed.
         sendResponse({ policy: { hid: "allowed" } });
         return true;
       }

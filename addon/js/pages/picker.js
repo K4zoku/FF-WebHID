@@ -1,4 +1,5 @@
 (async () => {
+  /** @type {import("../types.js").Logger} */
   const logger = webhid.import("logger");
   const http = webhid.import("http");
   const guessDeviceType = webhid.import("guessDeviceType");
@@ -13,14 +14,21 @@
 
   localizeHTML(document);
 
+  /** @type {HTMLElement} */
   const listEl = document.getElementById("picker-list");
+  /** @type {HTMLElement} */
   const cancelBtn = document.getElementById("picker-cancel");
+  /** @type {HTMLElement} */
   const connectBtn = document.getElementById("picker-connect");
 
+  /** @type {string|null} */
   let selectedDeviceId = null;
+  /** @type {{[key: string]: import("../types.js").HIDDeviceInfo[]}} */
   let deviceGroups = {};
+  /** @type {{requestId: number, tabId: number, filters?: import("../types.js").HIDDeviceFilter[], exclusionFilters?: import("../types.js").HIDDeviceFilter[]}|null} */
   let pendingRequest = null;
 
+  /** @returns {Promise<void>} */
   async function loadPending() {
     const resp = await browser.runtime.sendMessage({
       action: "getPendingPicker",
@@ -37,6 +45,7 @@
     await loadDevices();
   }
 
+  /** @returns {Promise<void>} */
   async function loadDevices() {
     const loading = document.createElement("div");
     loading.className = "webhid-loading";
@@ -44,6 +53,7 @@
     loading.textContent = t("pickerLoading");
     listEl.replaceChildren(loading);
     const response = await browser.runtime.sendMessage({ action: "enumerate" });
+    /** @type {import("../types.js").HIDDeviceInfo[]} */
     const devices =
       http.isOk(response.s) && Array.isArray(response.D) ? response.D : [];
 

@@ -1,16 +1,27 @@
 (function () {
   if (typeof window !== "undefined") return;
 
+  /** @type {import("./types.js").Logger} */
   const logger = webhid.import("logger");
   logger.initLogger("worker-polyfill");
 
+  /** @type {WeakMap<object, object>} */
   const devState = new WeakMap();
+  /** @type {WeakMap<object, object>} */
   const hidState = new WeakMap();
+  /** @type {WeakMap<object, object>} */
   const evtState = new WeakMap();
+  /** @type {symbol} */
   const irState = Symbol("webhid_ir");
+  /** @type {Map<string, object>} */
   const deviceRegistry = new Map();
+  /** @type {object | null} */
   let hidInstance = null;
 
+  /**
+   * @constructor
+   * @throws {TypeError}
+   */
   function HIDDevice() {
     throw new TypeError("Illegal constructor");
   }
@@ -26,40 +37,35 @@
       get() {
         return devState.get(this) == null ? void 0 : devState.get(this).opened != null ? devState.get(this).opened : false;
       },
-      enumerable: false,
-      configurable: true,
+      enumerable: false, configurable: true,
     },
     vendorId: {
       get() {
         var dev = devState.get(this);
         return dev != null ? dev.vendorId : undefined;
       },
-      enumerable: false,
-      configurable: true,
+      enumerable: false, configurable: true,
     },
     productId: {
       get() {
         var dev = devState.get(this);
         return dev != null ? dev.productId : undefined;
       },
-      enumerable: false,
-      configurable: true,
+      enumerable: false, configurable: true,
     },
     productName: {
       get() {
         var dev = devState.get(this);
         return dev != null ? dev.productName : undefined;
       },
-      enumerable: false,
-      configurable: true,
+      enumerable: false, configurable: true,
     },
     collections: {
       get() {
         var dev = devState.get(this);
         return dev != null ? dev.collections : undefined;
       },
-      enumerable: false,
-      configurable: true,
+      enumerable: false, configurable: true,
     },
     oninputreport: {
       get() {
@@ -73,77 +79,64 @@
         state.oninputreport = v;
         if (v) this.addEventListener("inputreport", v);
       },
-      enumerable: false,
-      configurable: true,
+      enumerable: false, configurable: true,
     },
     open: {
       value: async function () {
         throw new DOMException("Not implemented in worker", "NotSupportedError");
       },
-      enumerable: false,
-      configurable: true,
-      writable: true,
+      enumerable: false, configurable: true, writable: true,
     },
     close: {
       value: async function () {
         throw new DOMException("Not implemented in worker", "NotSupportedError");
       },
-      enumerable: false,
-      configurable: true,
-      writable: true,
+      enumerable: false, configurable: true, writable: true,
     },
     sendReport: {
       value: async function () {
         throw new DOMException("Not implemented in worker", "NotSupportedError");
       },
-      enumerable: false,
-      configurable: true,
-      writable: true,
+      enumerable: false, configurable: true, writable: true,
     },
     receiveFeatureReport: {
       value: async function () {
         throw new DOMException("Not implemented in worker", "NotSupportedError");
       },
-      enumerable: false,
-      configurable: true,
-      writable: true,
+      enumerable: false, configurable: true, writable: true,
     },
     sendFeatureReport: {
       value: async function () {
         throw new DOMException("Not implemented in worker", "NotSupportedError");
       },
-      enumerable: false,
-      configurable: true,
-      writable: true,
+      enumerable: false, configurable: true, writable: true,
     },
     forget: {
       value: async function () {
         throw new DOMException("Not implemented in worker", "NotSupportedError");
       },
-      enumerable: false,
-      configurable: true,
-      writable: true,
+      enumerable: false, configurable: true, writable: true,
     },
     addEventListener: {
       value: function (type, listener) {
         const state = devState.get(this);
         if (state) state.eventTarget.addEventListener(type, listener);
       },
-      enumerable: false,
-      configurable: true,
-      writable: true,
+      enumerable: false, configurable: true, writable: true,
     },
     removeEventListener: {
       value: function (type, listener) {
         const state = devState.get(this);
         if (state) state.eventTarget.removeEventListener(type, listener);
       },
-      enumerable: false,
-      configurable: true,
-      writable: true,
+      enumerable: false, configurable: true, writable: true,
     },
   });
 
+  /**
+   * @param {object} deviceInfo
+   * @returns {object}
+   */
   function createHIDDevice(deviceInfo) {
     const obj = Object.create(HIDDevice.prototype);
     const eventTarget = new EventTarget();
@@ -161,6 +154,10 @@
     return obj;
   }
 
+  /**
+   * @param {object} deviceInfo
+   * @returns {object}
+   */
   function getOrCreateDevice(deviceInfo) {
     const id = deviceInfo.deviceId;
     if (id && deviceRegistry.has(id)) return deviceRegistry.get(id);
@@ -169,6 +166,12 @@
     return device;
   }
 
+  /**
+   * @constructor
+   * @param {string} type
+   * @param {object} init
+   * @returns {Event}
+   */
   function HIDInputReportEvent(type, init) {
     const obj = Reflect.construct(
       Event,
@@ -194,33 +197,32 @@
         var st = this[irState];
         return st != null ? st.device : undefined;
       },
-      enumerable: false,
-      configurable: true,
+      enumerable: false, configurable: true,
     },
     reportId: {
       get() {
         var st = this[irState];
         return st != null ? st.reportId : undefined;
       },
-      enumerable: false,
-      configurable: true,
+      enumerable: false, configurable: true,
     },
     data: {
       get() {
         var st = this[irState];
         return st != null ? st.data : undefined;
       },
-      enumerable: false,
-      configurable: true,
+      enumerable: false, configurable: true,
     },
   });
 
+  /**
+   * @constructor
+   * @param {string} type
+   * @param {object} init
+   * @returns {Event}
+   */
   function HIDConnectionEvent(type, init) {
-    const obj = Reflect.construct(
-      Event,
-      [type],
-      new.target || HIDConnectionEvent,
-    );
+    const obj = Reflect.construct(Event, [type], new.target || HIDConnectionEvent);
     evtState.set(obj, { device: init == null ? void 0 : init.device != null ? init.device : init });
     return obj;
   }
@@ -235,10 +237,13 @@
       var st = evtState.get(this);
       return st != null ? st.device : undefined;
     },
-    enumerable: false,
-    configurable: true,
+    enumerable: false, configurable: true,
   });
 
+  /**
+   * @constructor
+   * @throws {TypeError}
+   */
   function HID() {
     throw new TypeError("Illegal constructor");
   }
@@ -254,35 +259,27 @@
       value: async function () {
         throw new DOMException("Not implemented in worker", "NotSupportedError");
       },
-      enumerable: false,
-      configurable: true,
-      writable: true,
+      enumerable: false, configurable: true, writable: true,
     },
     requestDevice: {
       value: async function () {
         throw new DOMException("Not implemented in worker", "NotSupportedError");
       },
-      enumerable: false,
-      configurable: true,
-      writable: true,
+      enumerable: false, configurable: true, writable: true,
     },
     addEventListener: {
       value: function (type, listener) {
         const state = hidState.get(this);
         if (state) state.eventTarget.addEventListener(type, listener);
       },
-      enumerable: false,
-      configurable: true,
-      writable: true,
+      enumerable: false, configurable: true, writable: true,
     },
     removeEventListener: {
       value: function (type, listener) {
         const state = hidState.get(this);
         if (state) state.eventTarget.removeEventListener(type, listener);
       },
-      enumerable: false,
-      configurable: true,
-      writable: true,
+      enumerable: false, configurable: true, writable: true,
     },
     onconnect: {
       get() {
@@ -296,8 +293,7 @@
         state.onconnect = v;
         if (v) state.eventTarget.addEventListener("connect", v);
       },
-      enumerable: false,
-      configurable: true,
+      enumerable: false, configurable: true,
     },
     ondisconnect: {
       get() {
@@ -311,11 +307,11 @@
         state.ondisconnect = v;
         if (v) state.eventTarget.addEventListener("disconnect", v);
       },
-      enumerable: false,
-      configurable: true,
+      enumerable: false, configurable: true,
     },
   });
 
+  /** @returns {object} */
   function createHID() {
     const obj = Object.create(HID.prototype);
     const eventTarget = new EventTarget();
@@ -329,37 +325,22 @@
   }
 
   Object.defineProperty(self, "HID", {
-    value: HID,
-    writable: false,
-    configurable: true,
-    enumerable: false,
+    value: HID, writable: false, configurable: true, enumerable: false,
   });
   Object.defineProperty(self, "HIDDevice", {
-    value: HIDDevice,
-    writable: false,
-    configurable: true,
-    enumerable: false,
+    value: HIDDevice, writable: false, configurable: true, enumerable: false,
   });
   Object.defineProperty(self, "HIDInputReportEvent", {
-    value: HIDInputReportEvent,
-    writable: false,
-    configurable: true,
-    enumerable: false,
+    value: HIDInputReportEvent, writable: false, configurable: true, enumerable: false,
   });
   Object.defineProperty(self, "HIDConnectionEvent", {
-    value: HIDConnectionEvent,
-    writable: false,
-    configurable: true,
-    enumerable: false,
+    value: HIDConnectionEvent, writable: false, configurable: true, enumerable: false,
   });
   hidInstance = createHID();
   const navProto = Object.getPrototypeOf(self.navigator);
   Object.defineProperty(navProto, "hid", {
-    get() {
-      return hidInstance;
-    },
-    configurable: true,
-    enumerable: true,
+    get() { return hidInstance; },
+    configurable: true, enumerable: true,
   });
   delete self.webhid;
 })();

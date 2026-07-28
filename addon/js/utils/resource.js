@@ -1,6 +1,11 @@
 (function () {
   const webhid = globalThis.webhid;
+  /** @type {Map<string, string>} */
   const cache = new Map();
+  /**
+   * @param {string} path
+   * @returns {Promise<string>}
+   */
   webhid.export("fetchResource", async function fetchResource(path) {
     if (cache.has(path)) return cache.get(path);
     const resp = await browser.runtime.sendMessage({ action: "fetchResource", path });

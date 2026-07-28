@@ -1,6 +1,11 @@
 (function () {
   const webhid = globalThis.webhid;
 
+  /**
+   * @param {string} key
+   * @param {string|string[]} [subs]
+   * @returns {string}
+   */
   function t(key, subs) {
     if (typeof browser !== "undefined" && browser.i18n) {
       const msg = browser.i18n.getMessage(key, subs);
@@ -9,6 +14,10 @@
     return key;
   }
 
+  /**
+   * @param {Element|Document} [root]
+   * @returns {void}
+   */
   function localizeHTML(root) {
     const scope = root || document;
     scope.querySelectorAll("[data-i18n]").forEach((el) => {

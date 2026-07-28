@@ -1,6 +1,11 @@
 (function () {
   const webhid = globalThis.webhid;
+  /**
+   * @param {number} s
+   * @returns {boolean}
+   */
   const isOk = (s) => typeof s === "number" && s >= 200 && s < 300;
+  /** @type {{[key: number]: string}} */
   const NAME = {
     200: "OK",
     201: "Created",

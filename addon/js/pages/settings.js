@@ -1,5 +1,7 @@
 (async () => {
-  const { logger, GLOBAL_DEFAULTS } = webhid;
+  /** @type {import("../types.js").Logger} */
+  const { logger } = webhid;
+  const GLOBAL_DEFAULTS = webhid.GLOBAL_DEFAULTS;
   const t = webhid.import("t");
   const localizeHTML = webhid.import("localizeHTML");
   logger.initLogger("settings");
@@ -9,18 +11,24 @@
   const current = await browser.storage.local.get(GLOBAL_DEFAULTS);
 
   for (const key of ["daemonAsNmHost", "workerPolyfillEnabled"]) {
+    /** @type {HTMLInputElement} */
     document.getElementById(key).checked = current[key];
   }
 
+  /** @type {HTMLSelectElement} */
   const logLevelSelect = document.getElementById("logLevel");
   logLevelSelect.value = String(current.logLevel);
 
+  /** @type {HTMLSelectElement} */
   const dataPlaneSelect = document.getElementById("dataPlane");
   dataPlaneSelect.value = current.dataPlane;
+  /** @type {HTMLSelectElement} */
   const devicePickerModeSelect = document.getElementById("devicePickerMode");
   devicePickerModeSelect.value = current.devicePickerMode || "modal";
 
+  /** @param {string} msg @returns {void} */
   function showStatus(msg) {
+    /** @type {HTMLElement} */
     const el = document.getElementById("status");
     el.textContent = msg;
     el.style.display = "block";

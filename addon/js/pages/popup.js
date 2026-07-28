@@ -1,4 +1,5 @@
 (async () => {
+  /** @type {import("../types.js").Logger} */
   const logger = webhid.import("logger");
   const guessDeviceType = webhid.import("guessDeviceType");
   const t = webhid.import("t");
@@ -9,6 +10,7 @@
   localizeHTML(document);
 
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+  /** @type {string} */
   let origin = "";
   if (tab && tab.url) {
     try {
@@ -19,12 +21,14 @@
     } catch (e) { logger.debug("URL parse failed", e); }
   }
 
+  /** @type {HTMLElement} */
   const siteLabel = document.getElementById("site-name");
   siteLabel.textContent = origin || t("popupNoSite");
 
   const siteKey = origin ? `site:${origin}` : null;
   const siteDevicesKey = origin ? encodeURIComponent(origin) : null;
 
+  /** @returns {Promise<object>} */
   async function loadSettings() {
     const global = await browser.storage.local.get(GLOBAL_DEFAULTS);
     if (!siteKey) return global;
@@ -32,6 +36,11 @@
     return { ...global, ...site[siteKey] };
   }
 
+  /**
+   * @param {string} key
+   * @param {any} value
+   * @returns {Promise<void>}
+   */
   async function saveSetting(key, value) {
     if (!siteKey) return;
     const result = await browser.storage.local.get(siteKey);
@@ -42,10 +51,13 @@
 
   const settings = await loadSettings();
 
+  /** @type {HTMLSelectElement} */
   const dataPlaneSelect = document.getElementById("dataPlane");
   dataPlaneSelect.value = settings.dataPlane;
+  /** @type {HTMLInputElement} */
   document.getElementById("workerPolyfillEnabled").checked = settings.workerPolyfillEnabled || false;
 
+  /** @type {HTMLSelectElement} */
   const logLevelSelect = document.getElementById("logLevel");
   logLevelSelect.value = String(settings.logLevel);
 
@@ -59,12 +71,17 @@
     saveSetting("logLevel", parseInt(e.target.value, 10));
   });
 
+  /** @returns {Promise<string[]>} */
   async function loadDevices() {
     if (!siteDevicesKey) return [];
     const result = await browser.storage.local.get(siteDevicesKey);
     return result[siteDevicesKey] || [];
   }
 
+  /**
+   * @param {string} hash
+   * @returns {Promise<void>}
+   */
   async function removeDevice(hash) {
     if (!siteDevicesKey || !origin) return;
     try {
@@ -77,10 +94,14 @@
     renderDevices();
   }
 
+  /** @type {number} */
   let renderToken = 0;
+  /** @returns {Promise<void>} */
   async function renderDevices() {
     const token = ++renderToken;
+    /** @type {HTMLElement} */
     const list = document.getElementById("device-list");
+    /** @type {HTMLElement} */
     const noDevices = document.getElementById("no-devices");
     const hashes = await loadDevices();
 
@@ -97,8 +118,10 @@
       action: "getDeviceCache",
     });
     if (token !== renderToken) return;
+    /** @type {import("../types.js").HIDDeviceInfo[]} */
     const cache = (response && response.devices) || [];
 
+    /** @type {Set<string>} */
     let openIds = new Set();
     try {
       const r = await browser.tabs.sendMessage(tab.id, {
@@ -112,6 +135,7 @@
 
     let openCount = 0;
     for (const hash of hashes) {
+      /** @type {import("../types.js").HIDDeviceInfo|undefined} */
       let device = cache.find((d) => d.deviceId === hash);
       if (!device) {
         try {

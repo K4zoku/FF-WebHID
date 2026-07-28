@@ -1,35 +1,27 @@
-// Shared WebSocket transport for worker.js.
-// Provides connect/reconnect/backoff/auth-failure-handling logic so both
-// workers don't duplicate ~50 lines of boilerplate.
-//
-// Usage:
-//   const transport = __webhid.import('createWsTransport')({
-//     tag: 'worker',                  // for log prefix
-//     onReady: () => {...},           // WS connected
-//     onClosed: () => {...},          // WS closed (non-auth, will reconnect)
-//     onAuthFailed: (code) => {...},  // WS closed with 4401/4402
-//     onBinary: (frame) => {...},     // binary frame received
-//     onText: (text) => {...},        // text frame received
-//   });
-//   transport.connect({ wsPort, token, logLevel });
-//   transport.send(frame);            // Uint8Array or string
-//   transport.isOpen();               // readyState === OPEN
-//   transport.disconnect();           // halt + close
-
 (function () {
   const webhid = globalThis.webhid;
   const WS_CLOSE_UNKNOWN_TOKEN = 4401;
   const WS_CLOSE_BAD_TOKEN = 4402;
+  /** @type {import("../types.js").Logger} */
   const logger = webhid.import("logger");
 
+  /**
+   * @param {import("../types.js").WsTransportOpts} opts
+   * @returns {import("../types.js").WsTransport}
+   */
   function createWsTransport(opts) {
     const tag = opts.tag || "ws";
     const log = (level, msg) => logger[level](msg);
+    /** @type {WebSocket|null} */
     let ws = null;
+    /** @type {{wsPort: number, token: string, logLevel?: number}|null} */
     let connectMsg = null;
+    /** @type {ReturnType<typeof setTimeout>|null} */
     let reconnectTimer = null;
+    /** @type {number} */
     let reconnectDelay = 500;
 
+    /** @returns {void} */
     function doConnect() {
       if (!connectMsg) return;
       log("debug", "WS connecting to ws://127.0.0.1:" + connectMsg.wsPort);
@@ -78,6 +70,7 @@
       };
     }
 
+    /** @returns {void} */
     function scheduleReconnect() {
       if (!connectMsg || reconnectTimer) return;
       log("debug", "scheduling reconnect in " + reconnectDelay + "ms");
@@ -89,20 +82,30 @@
     }
 
     return {
+      /**
+       * @param {{wsPort: number, token: string, logLevel?: number}} msg
+       * @returns {void}
+       */
       connect(msg) {
         connectMsg = msg;
         if (msg.logLevel !== undefined)
           logger.applyLevel(msg.logLevel);
         doConnect();
       },
+      /**
+       * @param {Uint8Array | string} frame
+       * @returns {boolean}
+       */
       send(frame) {
         if (!ws || ws.readyState !== WebSocket.OPEN) return false;
         ws.send(frame);
         return true;
       },
+      /** @returns {boolean} */
       isOpen() {
         return ws && ws.readyState === WebSocket.OPEN;
       },
+      /** @returns {void} */
       disconnect() {
         if (ws) {
           ws.onclose = null;
@@ -118,7 +121,6 @@
       },
     };
   }
-
 
   webhid.export("createWsTransport", createWsTransport);
 })();

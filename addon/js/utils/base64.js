@@ -11,6 +11,10 @@
   var base64Alphabet = commonAlphabet + "+/";
   var base64UrlAlphabet = commonAlphabet + "-_";
 
+  /**
+   * @param {string} characters
+   * @returns {{[key: string]: number}}
+   */
   function inverse(characters) {
     var result = {};
     var index = 0;
@@ -23,6 +27,11 @@
   var i2c = base64Alphabet;
   var i2cUrl = base64UrlAlphabet;
 
+  /**
+   * @param {object} [options]
+   * @param {string} [options.alphabet]
+   * @returns {string}
+   */
   function getAlphabetOption(options) {
     var alphabet = options && options.alphabet;
     if (alphabet === undefined || alphabet === "base64" || alphabet === "base64url")
@@ -34,6 +43,11 @@
     Object.prototype.hasOwnProperty,
   );
 
+  /**
+   * @param {string} string
+   * @param {number} index
+   * @returns {number}
+   */
   var skipAsciiWhitespace = function (string, index) {
     var length = string.length;
     for (; index < length; index++) {
@@ -44,6 +58,12 @@
     return index;
   };
 
+  /**
+   * @param {string} chunk
+   * @param {{[key: string]: number}} alphabet
+   * @param {boolean} throwOnExtraBits
+   * @returns {number[]}
+   */
   var decodeBase64Chunk = function (chunk, alphabet, throwOnExtraBits) {
     var chunkLength = chunk.length;
 
@@ -80,6 +100,12 @@
     return chunkBytes;
   };
 
+  /**
+   * @param {number[]} bytes
+   * @param {number[]} elements
+   * @param {number} written
+   * @returns {number}
+   */
   var writeBytes = function (bytes, elements, written) {
     var elementsLength = elements.length;
     for (var index = 0; index < elementsLength; index++) {
@@ -88,6 +114,13 @@
     return written + elementsLength;
   };
 
+  /**
+   * @param {string} string
+   * @param {object} [options]
+   * @param {number[]} [into]
+   * @param {number} [maxLength]
+   * @returns {{bytes: number[], read: number, written: number}}
+   */
   var $fromBase64 = function (string, options, into, maxLength) {
     if (typeof string !== "string")
       throw new TypeError("Argument is not a string");
@@ -203,6 +236,11 @@
 
   if (typeof Uint8Array.fromBase64 !== "function") {
     Object.defineProperty(Uint8Array, "fromBase64", {
+      /**
+       * @param {string} string
+       * @param {object} [options]
+       * @returns {Uint8Array}
+       */
       value: function fromBase64(string) {
         var result = $fromBase64(
           string,
@@ -220,6 +258,12 @@
 
   if (typeof Uint8Array.prototype.toBase64 !== "function") {
     Object.defineProperty(Uint8Array.prototype, "toBase64", {
+      /**
+       * @param {object} [options]
+       * @param {string} [options.alphabet]
+       * @param {boolean} [options.omitPadding]
+       * @returns {string}
+       */
       value: function toBase64() {
         var O = this;
 

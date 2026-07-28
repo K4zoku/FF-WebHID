@@ -1,6 +1,7 @@
 (function () {
-  // WebHID Standard implementation with injected modal
   "use strict";
+
+  /** @type {import("./types.js").Logger} */
   const logger = webhid.import("logger");
   const http = webhid.import("http");
   const createSettingsStore = webhid.import("createSettingsStore");
@@ -8,20 +9,12 @@
   const WebHidDevicePicker = webhid.import("WebHidDevicePicker");
   logger.initLogger("bridge");
 
-  // ---------------------------------------------------------------------------
-  // Initialize device picker custom element
-  // ---------------------------------------------------------------------------
   const devicePicker = new WebHidDevicePicker();
   document.documentElement.appendChild(devicePicker.host);
 
-  // ---------------------------------------------------------------------------
-  // Content script ↔ Page bridge
-  //
-  // Page  →  content script:  port.postMessage({ id, action, payload })
-  // Content script  →  page:  port.postMessage({ type: 'res', id, result })
-  //                           port.postMessage({ type: 'evt', event })
-  // ---------------------------------------------------------------------------
+  /** @type {Set<string>} */
   const openDevices = new Set();
+  /** @type {Map<string, string>} */
   const sessionTokens = new Map();
 
   browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -30,22 +23,42 @@
       return true;
     }
   });
+
+  /** @type {Map<string, Worker>} */
   const workers = new Map();
+  /** @type {Map<string, Map<number, Function>>} */
   const workerCallbacks = new Map();
+  /** @type {Set<string>} */
   const workerReady = new Set();
+  /** @type {Map<string, object[]>} */
   const workerQueues = new Map();
+  /** @type {Map<string, MessagePort>} */
   const dataPorts = new Map();
+  /** @type {number|null} */
   let wsPort = null;
+  /** @type {string|null} */
   let wsNonce = null;
+  /** @type {import("./types.js").SettingsStore} */
   const settings = createSettingsStore(GLOBAL_DEFAULTS);
   settings.on("logLevel", (v) => logger.applyLevel(v));
+  /** @type {Map<Window, MessagePort>} */
   const pagePorts = new Map();
+  /** @type {Map<MessagePort, Window>} */
   const pageSourceByPort = new Map();
+  /** @type {Map<string, MessagePort>} */
   const requestPortMap = new Map();
+  /** @type {Map<MessagePort, string>} */
   const portOrigin = new Map();
+  /** @type {Map<Window, boolean>} */
   const allowAttrMap = new Map();
+  /** @type {Map<string, number>} */
   const spawnGen = new Map();
 
+  /**
+   * @param {string} origin
+   * @param {string} deviceId
+   * @returns {Promise<boolean>}
+   */
   async function isDeviceAllowedForOrigin(origin, deviceId) {
     if (!origin || origin === "null" || !deviceId) return false;
     const key = encodeURIComponent(origin);
@@ -53,6 +66,10 @@
     return (result[key] || []).includes(deviceId);
   }
 
+  /**
+   * @param {string} sessionToken
+   * @returns {Promise<string|null>}
+   */
   async function computeWsAuthHash(sessionToken) {
     if (!wsNonce || !sessionToken) return null;
     const data = new TextEncoder().encode(sessionToken + wsNonce);
@@ -62,6 +79,11 @@
       .join("");
   }
 
+  /**
+   * @param {string} deviceId
+   * @param {{keepPort?: boolean}} [opts]
+   * @returns {Promise<void>}
+   */
   async function despawnDataPlane(deviceId, { keepPort = false } = {}) {
     const gen = (spawnGen.get(deviceId) || 0) + 1;
     spawnGen.set(deviceId, gen);
@@ -123,6 +145,10 @@
     spawnGen.delete(deviceId);
   }
 
+  /**
+   * @param {string} deviceId
+   * @returns {Promise<void>}
+   */
   async function refreshDataPlaneToken(deviceId) {
     if (workers.has(deviceId)) return;
     try {
@@ -144,6 +170,16 @@
       logger.error("data plane token refresh error:", e.message);
     }
   }
+
+  /**
+   * @param {string} deviceId
+   * @param {string} sessionToken
+   * @param {number} wsPort
+   * @param {object} [opts]
+   * @param {number} [opts.reportSize]
+   * @param {number} gen
+   * @returns {Promise<boolean>}
+   */
   async function spawnWorker(deviceId, sessionToken, wsPort, opts = {}, gen) {
     if (workers.has(deviceId)) return true;
     const wsAuthHash = await computeWsAuthHash(sessionToken);
@@ -332,6 +368,13 @@
     });
   }
 
+  /**
+   * @param {string} deviceId
+   * @param {string} sessionToken
+   * @param {number} wsPort
+   * @param {object} [opts]
+   * @returns {Promise<void>}
+   */
   async function spawnDataPlane(deviceId, sessionToken, wsPort, opts = {}) {
     const gen = (spawnGen.get(deviceId) || 0) + 1;
     spawnGen.set(deviceId, gen);
@@ -379,6 +422,9 @@
   })();
 
   if (window === window.top) {
+    /**
+     *
+     */
     function reportIframes() {
       const iframes = document.querySelectorAll('iframe[allow*="hid" i]');
       for (const iframe of iframes) {
@@ -396,6 +442,11 @@
     observer.observe(document.documentElement, { childList: true, subtree: true });
   }
 
+  /**
+   * @param {object} msg
+   * @param {ArrayBuffer[]} [transfer]
+   * @returns {void}
+   */
   function replyToPage(msg, transfer) {
     if (msg != null && msg.id != null) {
       const port = requestPortMap.get(msg.id);
@@ -436,11 +487,21 @@
     );
   });
 
+  /**
+   * @param {object} data
+   * @returns {string}
+   */
   function getRequestOrigin(data) {
     const port = requestPortMap.get(data.id);
     return port ? portOrigin.get(port) : window.location.origin;
   }
 
+  /**
+   * @param {object} data
+   * @param {MessagePort[]} ports
+   * @param {Window} source
+   * @returns {Promise<void>}
+   */
   async function handleRequest(data, ports, source) {
     if (!data || data.id === undefined) return;
 
@@ -784,6 +845,7 @@
     }
   }
 
+  /** @returns {void} */
   function handleGlobalReset() {
     logger.warn("global reset: clearing bridge device state");
     const deviceIds = Array.from(openDevices);
@@ -850,6 +912,11 @@
     }
   });
 
+  /**
+   * @param {string} deviceId
+   * @param {object} msg
+   * @returns {void}
+   */
   function onDataPortMessage(deviceId, msg) {
     if (!msg) return;
     if (
@@ -897,8 +964,10 @@
     }
   }
 
-  // ── Settings observer ─────────────────────────────────────────────
-
+  /**
+   * @param {string} dp
+   * @returns {Promise<void>}
+   */
   async function applyDataPlane(dp) {
     for (const id of openDevices) {
       await despawnDataPlane(id, { keepPort: true });

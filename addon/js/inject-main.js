@@ -1,4 +1,5 @@
 (function () {
+  /** @type {string[]} */
   var scripts = [
     "js/utils/bootstrap.js",
     "js/utils/resource.js",
@@ -10,14 +11,18 @@
     "js/polyfill.js",
   ];
 
-  Promise.all(
-    scripts.map(function (path) {
-      return browser.runtime.sendMessage({
-        action: "fetchResource",
-        path: path,
-      });
-    }),
-  )
+  /**
+   * @param {string} path
+   * @returns {Promise<{text: string}>}
+   */
+  var fetchScript = function (path) {
+    return browser.runtime.sendMessage({
+      action: "fetchResource",
+      path: path,
+    });
+  };
+
+  Promise.all(scripts.map(fetchScript))
     .then(function (responses) {
       var codes = responses.map(function (r) {
         return r.text;

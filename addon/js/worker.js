@@ -1,4 +1,5 @@
 "use strict";
+/** @type {import("./types.js").Logger} */
 const logger = webhid.import("logger");
 const createSettingsStore = webhid.import("createSettingsStore");
 const GLOBAL_DEFAULTS = webhid.import("GLOBAL_DEFAULTS");
@@ -8,13 +9,22 @@ const MSG_SEND_REPORT = 0x01;
 const MSG_SEND_FEATURE_REPORT = 0x02;
 const MSG_RECEIVE_FEATURE_REPORT = 0x03;
 const RESP_RECEIVE_FEATURE_REPORT = 0x83;
+/** @type {import("./types.js").SettingsStore} */
 const settings = createSettingsStore(GLOBAL_DEFAULTS);
 settings.on("logLevel", (v) => logger.applyLevel(v));
+/** @type {number} */
 let nextReqId = 1;
+/** @type {Map<number, {resolve: Function, reject: Function}>} */
 const pending = new Map();
+/** @type {import("./types.js").WsTransport|null} */
 let transport = null;
+/** @type {MessagePort|null} */
 let dataPort = null;
 
+/**
+ * @param {MessageEvent} event
+ * @returns {void}
+ */
 self.onmessage = ({ data: msg, ports }) => {
   if (msg.type === "connect") {
     transport = createWsTransport({
@@ -54,6 +64,10 @@ self.onmessage = ({ data: msg, ports }) => {
   }
 };
 
+/**
+ * @param {object} msg
+ * @returns {void}
+ */
 function handleDataPortMessage(msg) {
   if (!msg) return;
   if (msg.type === "send") return handleSend(msg, MSG_SEND_REPORT);
@@ -62,6 +76,7 @@ function handleDataPortMessage(msg) {
   if (msg.type === "receiveFeature") return handleReceiveFeature(msg);
 }
 
+/** @param {Uint8Array} batch @returns {void} */
 function pushInputBatch(batch) {
   let offset = 0,
     count = 0;
@@ -105,6 +120,11 @@ function pushInputBatch(batch) {
     logger.debug("forwarded " + count + " reports via data port");
 }
 
+/**
+ * @param {{reqId: number, data: Uint8Array, reportId: number}} msg
+ * @param {number} msgType
+ * @returns {void}
+ */
 function handleSend(msg, msgType) {
   if (!transport || !transport.isOpen()) {
     logger.warn("send: WS not open");
@@ -145,7 +165,6 @@ function handleSend(msg, msgType) {
         error: String(e.message || e),
       }),
   });
-  // Reject pending promise if WS closed between check and send.
   if (!transport.send(frame)) {
     const entry = pending.get(reqId);
     if (entry) {
@@ -155,6 +174,7 @@ function handleSend(msg, msgType) {
   }
 }
 
+/** @param {{reqId: number, reportId: number}} msg @returns {void} */
 function handleReceiveFeature(msg) {
   if (!transport || !transport.isOpen()) {
     replyData({
@@ -192,10 +212,19 @@ function handleReceiveFeature(msg) {
   }
 }
 
+/**
+ * @param {object} msg
+ * @param {Array} [transfer]
+ * @returns {void}
+ */
 function replyData(msg, transfer) {
   if (dataPort) dataPort.postMessage(msg, transfer || []);
 }
 
+/**
+ * @param {Uint8Array} batch
+ * @returns {void}
+ */
 function handleControlResponse(batch) {
   if (batch.length < 6) return;
   const respType = batch[0];

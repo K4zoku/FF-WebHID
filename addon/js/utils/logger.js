@@ -5,13 +5,23 @@
   const LEVEL_INFO = 2;
   const LEVEL_DEBUG = 3;
 
+  /** @type {() => void} */
   const nop = () => {};
+  /** @type {string} */
   let mod = "";
 
+  /**
+   * @param {string} m
+   * @returns {void}
+   */
   function initLogger(m) {
     mod = m || "";
   }
 
+  /**
+   * @param {string} levelName
+   * @returns {string}
+   */
   function prefix(levelName) {
     const t = new Date();
     const time =
@@ -33,6 +43,7 @@
     );
   }
 
+  /** @type {import("../types.js").Logger} */
   const logger = {
     error: nop,
     warn: nop,
@@ -44,6 +55,10 @@
     initLogger: initLogger,
   };
 
+  /**
+   * @param {number} level
+   * @returns {void}
+   */
   function applyLevel(level) {
     logger.level = level;
     logger.error =
@@ -64,6 +79,10 @@
         : nop;
   }
 
+  /**
+   * @param {number|string} v
+   * @returns {number}
+   */
   function parseLevel(v) {
     if (typeof v === "number") return v;
     if (typeof v === "string") {
@@ -75,6 +94,7 @@
     return LEVEL_WARN;
   }
 
+  /** @returns {Promise<void>} */
   async function load() {
     if (logger.loaded) return;
     logger.loaded = true;

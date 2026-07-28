@@ -4,7 +4,10 @@
     return;
   }
 
+  /** @type {import("./types.js").Logger} */
   const webhid = globalThis.webhid;
+
+  /** @type {import("./types.js").Logger} */
   const logger = webhid.import("logger");
   const http = webhid.import("http");
   const GLOBAL_DEFAULTS = webhid.import("GLOBAL_DEFAULTS");
@@ -14,10 +17,14 @@
 
   logger.initLogger("polyfill");
 
+  /** @type {ErrorConstructor} */
   const OriginalError = window.Error;
+  /** @type {PropertyDescriptor|undefined} */
   const stackDescriptor = Object.getOwnPropertyDescriptor(OriginalError.prototype, 'stack');
+  /** @type {Function|undefined} */
   const getOriginalStack = stackDescriptor && stackDescriptor.get;
 
+  /** @returns {boolean} */
   function isCalledFromConsole() {
     try {
       throw new OriginalError();
@@ -31,6 +38,7 @@
     }
   }
 
+  /** @returns {string} */
   function getCallerFrameUrl() {
     try {
       const stack = new Error().stack;
@@ -46,18 +54,26 @@
     return location.href;
   }
 
+  /** @type {number} */
   let nextReqId = 0;
+  /** @type {{[key: string]: Function}} */
   const pending = {};
+  /** @type {string} */
   const frameNonce = crypto.randomUUID();
 
+  /** @type {MessageChannel} */
   const channel = new MessageChannel();
+  /** @type {MessagePort} */
   const bridgePort = channel.port1;
   const target = window === window.top ? window : window.top;
   target.postMessage(null, "*", [channel.port2]);
 
+  /** @type {string[]|null} */
   let pairedDevices = null;
+  /** @type {Map<string, object> | null} */
   let deviceInfoCache = null;
 
+  /** @returns {Promise<string[]>} */
   async function getPairedDevices() {
     if (pairedDevices !== null) return pairedDevices;
     try {
@@ -70,6 +86,7 @@
     }
   }
 
+  /** @returns {Promise<Map<string, object>>} */
   async function getDeviceCache() {
     if (deviceInfoCache !== null) return deviceInfoCache;
     try {
@@ -86,6 +103,10 @@
     }
   }
 
+  /**
+   * @param {import("./types.js").HIDDeviceInfo} deviceInfo
+   * @returns {Promise<void>}
+   */
   async function pairDevice(deviceInfo) {
     try {
       pairedDevices = null;
@@ -130,6 +151,13 @@
     }
   };
 
+  /**
+   * @param {string} action
+   * @param {object} [payload]
+   * @param {object} [opts]
+   * @param {number} [opts.timeoutMs]
+   * @returns {Promise<object>}
+   */
   function sendRequest(action, payload, opts = {}) {
     return new Promise((resolve) => {
       const id = frameNonce + ':' + (++nextReqId);
@@ -172,6 +200,7 @@
     logger.info("data plane: " + settings.dataPlane);
   });
 
+  /** @returns {{isCrossOrigin: boolean, frameUrl: string}} */
   function getPolicyContext() {
     const url = getCallerFrameUrl();
     let isCrossOrigin = false;
@@ -181,6 +210,7 @@
     return { isCrossOrigin, frameUrl: url };
   }
 
+  /** @returns {Promise<object>} */
   function getPolicy() {
     return sendRequest("getPolicy", getPolicyContext());
   }
@@ -202,13 +232,23 @@
     };
   }
 
+  /** @type {WeakMap<object, object>} */
   const devState = new WeakMap();
+  /** @type {WeakMap<object, object>} */
   const hidState = new WeakMap();
+  /** @type {WeakMap<object, object>} */
   const evtState = new WeakMap();
+  /** @type {symbol} */
   const irState = Symbol("webhid_ir");
+  /** @type {Map<string, object>} */
   const deviceRegistry = new Map();
+  /** @type {object | null} */
   let hidInstance = null;
 
+  /**
+   * @constructor
+   * @throws {TypeError}
+   */
   function HIDDevice() {
     throw new TypeError("Illegal constructor");
   }
@@ -263,6 +303,7 @@
       get() {
         return devState.get(this) == null ? void 0 : devState.get(this).oninputreport != null ? devState.get(this).oninputreport : null;
       },
+      /** @param {Function|null} v */
       set(v) {
         const state = devState.get(this);
         if (!state) return;
@@ -278,6 +319,7 @@
       configurable: true,
     },
     open: {
+      /** @returns {Promise<void>} */
       value: async function () {
         const state = devState.get(this);
         if (!state)
@@ -327,6 +369,7 @@
       writable: true,
     },
     close: {
+      /** @returns {Promise<void>} */
       value: async function () {
         const state = devState.get(this);
         if (!state) return;
@@ -365,6 +408,11 @@
       writable: true,
     },
     sendReport: {
+      /**
+       * @param {number} reportId
+       * @param {ArrayBuffer|DataView|TypedArray} data
+       * @returns {Promise<void>}
+       */
       value: async function (reportId, data) {
         const state = devState.get(this);
         if (!state)
@@ -407,6 +455,10 @@
       writable: true,
     },
     receiveFeatureReport: {
+      /**
+       * @param {number} reportId
+       * @returns {Promise<DataView>}
+       */
       value: async function (reportId) {
         const state = devState.get(this);
         if (!state)
@@ -455,6 +507,11 @@
       writable: true,
     },
     sendFeatureReport: {
+      /**
+       * @param {number} reportId
+       * @param {ArrayBuffer|DataView|TypedArray} data
+       * @returns {Promise<void>}
+       */
       value: async function (reportId, data) {
         const state = devState.get(this);
         if (!state)
@@ -497,6 +554,7 @@
       writable: true,
     },
     forget: {
+      /** @returns {Promise<void>} */
       value: async function () {
         const state = devState.get(this);
         if (!state) return;
@@ -509,6 +567,11 @@
       writable: true,
     },
     addEventListener: {
+      /**
+       * @param {string} type
+       * @param {EventListenerOrEventListenerObject} listener
+       * @returns {void}
+       */
       value: function (type, listener) {
         const state = devState.get(this);
         if (state) state.eventTarget.addEventListener(type, listener);
@@ -518,6 +581,11 @@
       writable: true,
     },
     removeEventListener: {
+      /**
+       * @param {string} type
+       * @param {EventListenerOrEventListenerObject} listener
+       * @returns {void}
+       */
       value: function (type, listener) {
         const state = devState.get(this);
         if (state) state.eventTarget.removeEventListener(type, listener);
@@ -529,9 +597,8 @@
   });
 
   /**
-   * Resolves a HIDDevice for a paired deviceId this page has not yet
-   * materialized (e.g. first connect event of the session, before any
-   * getDevices()/requestDevice() call).
+   * @param {string} deviceId
+   * @returns {Promise<object | null>}
    */
   async function resolvePairedDevice(deviceId) {
     deviceInfoCache = null;
@@ -544,6 +611,10 @@
     return info ? getOrCreateDevice(info) : null;
   }
 
+  /**
+   * @param {object} detail
+   * @returns {Promise<void>}
+   */
   async function dispatchDeviceEvent(detail) {
     if (!detail) return;
     if (detail.eventType === "revoked") {
@@ -594,6 +665,11 @@
     }
   }
 
+  /**
+   * @param {object} state
+   * @param {Error} error
+   * @returns {void}
+   */
   function rejectPendingReports(state, error) {
     if (!state.dataPending || !state.dataPending.size) return;
     for (const [, entry] of state.dataPending) {
@@ -604,6 +680,10 @@
     state.dataPending.clear();
   }
 
+  /**
+   * @param {object} collection
+   * @returns {boolean}
+   */
   function collectionUsesReportIds(collection) {
     const reports = [
       ...(collection.inputReports || []),
@@ -614,14 +694,19 @@
     return (collection.children || []).some(collectionUsesReportIds);
   }
 
+  /**
+   * @param {object[]} collections
+   * @returns {boolean}
+   */
   function deviceUsesReportIds(collections) {
     return (collections || []).some(collectionUsesReportIds);
   }
 
   /**
-   * Validates a sendReport/sendFeatureReport/receiveFeatureReport reportId:
-   * must be an integer in [0, 255], must be 0 iff the interface does not
-   * use report IDs. Throws TypeError on violation.
+   * @param {number} reportId
+   * @param {object[]} collections
+   * @returns {void}
+   * @throws {TypeError}
    */
   function validateReportId(reportId, collections) {
     if (
@@ -645,6 +730,11 @@
     }
   }
 
+  /**
+   * @param {object} device
+   * @param {object} state
+   * @returns {Promise<void>}
+   */
   async function teardownForgottenDevice(device, state) {
     state.forgotten = true;
     rejectPendingReports(
@@ -673,6 +763,10 @@
     deviceRegistry.delete(state.deviceId);
   }
 
+  /**
+   * @param {string} deviceId
+   * @returns {Promise<void>}
+   */
   async function forceForgetDevice(deviceId) {
     const device = deviceRegistry.get(deviceId);
     if (!device) {
@@ -685,6 +779,11 @@
     await teardownForgottenDevice(device, state);
   }
 
+  /**
+   * @param {object} state
+   * @param {object} data
+   * @returns {void}
+   */
   function onDataPortMessage(state, data) {
     if (!data) return;
     if (data.type === "sendResult" || data.type === "featureResult") {
@@ -726,6 +825,10 @@
     }
   }
 
+  /**
+   * @param {object} object
+   * @returns {object}
+   */
   function deepFreeze(object) {
     const propNames = Reflect.ownKeys(object);
 
@@ -740,6 +843,10 @@
     return Object.freeze(object);
   }
 
+  /**
+   * @param {import("./types.js").HIDDeviceInfo} deviceInfo
+   * @returns {object}
+   */
   function createHIDDevice(deviceInfo) {
     const obj = Object.create(HIDDevice.prototype);
     const eventTarget = new EventTarget();
@@ -763,6 +870,10 @@
     return obj;
   }
 
+  /**
+   * @param {import("./types.js").HIDDeviceInfo} deviceInfo
+   * @returns {object}
+   */
   function getOrCreateDevice(deviceInfo) {
     const id = deviceInfo.deviceId;
     if (id && deviceRegistry.has(id)) return deviceRegistry.get(id);
@@ -771,6 +882,12 @@
     return device;
   }
 
+  /**
+   * @constructor
+   * @param {string} type
+   * @param {object} init
+   * @returns {Event}
+   */
   function HIDInputReportEvent(type, init) {
     const obj = Reflect.construct(
       Event,
@@ -817,6 +934,12 @@
     },
   });
 
+  /**
+   * @constructor
+   * @param {string} type
+   * @param {object} init
+   * @returns {Event}
+   */
   function HIDConnectionEvent(type, init) {
     const obj = Reflect.construct(
       Event,
@@ -841,6 +964,10 @@
     configurable: true,
   });
 
+  /**
+   * @constructor
+   * @throws {TypeError}
+   */
   function HID() {
     throw new TypeError("Illegal constructor");
   }
@@ -853,6 +980,7 @@
 
   Object.defineProperties(HID.prototype, {
     getDevices: {
+      /** @returns {Promise<object[]>} */
       value: async function () {
         const policy = await getPolicy();
         if (policy && policy.hid === "none") {
@@ -878,6 +1006,12 @@
       writable: true,
     },
     requestDevice: {
+      /**
+       * @param {object} [options]
+       * @param {object[]} [options.filters]
+       * @param {object[]} [options.exclusionFilters]
+       * @returns {Promise<object[]>}
+       */
       value: async function (options = {}) {
         const policy = await getPolicy();
         if (policy && policy.hid === "none") {
@@ -959,6 +1093,11 @@
       writable: true,
     },
     addEventListener: {
+      /**
+       * @param {string} type
+       * @param {EventListenerOrEventListenerObject} listener
+       * @returns {void}
+       */
       value: function (type, listener) {
         const state = hidState.get(this);
         if (state) state.eventTarget.addEventListener(type, listener);
@@ -968,6 +1107,11 @@
       writable: true,
     },
     removeEventListener: {
+      /**
+       * @param {string} type
+       * @param {EventListenerOrEventListenerObject} listener
+       * @returns {void}
+       */
       value: function (type, listener) {
         const state = hidState.get(this);
         if (state) state.eventTarget.removeEventListener(type, listener);
@@ -980,6 +1124,7 @@
       get() {
         return hidState.get(this) == null ? void 0 : hidState.get(this).onconnect != null ? hidState.get(this).onconnect : null;
       },
+      /** @param {Function|null} v */
       set(v) {
         const state = hidState.get(this);
         if (!state) return;
@@ -995,6 +1140,7 @@
       get() {
         return hidState.get(this) == null ? void 0 : hidState.get(this).ondisconnect != null ? hidState.get(this).ondisconnect : null;
       },
+      /** @param {Function|null} v */
       set(v) {
         const state = hidState.get(this);
         if (!state) return;
@@ -1011,6 +1157,7 @@
     },
   });
 
+  /** @returns {object} */
   function createHID() {
     const obj = Object.create(HID.prototype);
     const eventTarget = new EventTarget();

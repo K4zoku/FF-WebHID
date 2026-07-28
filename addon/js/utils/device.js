@@ -1,8 +1,14 @@
 (function () {
   const webhid = globalThis.webhid;
+  /** @type {import("../types.js").Logger} */
   const logger = webhid.import("logger");
+  /** @type {{[key: string]: string}} */
   const svgCache = {};
 
+  /**
+   * @param {import("../types.js").HIDDeviceInfo} device
+   * @returns {string}
+   */
   function guessDeviceType(device) {
     if (device.usagePage === 0x01) {
       const u = device.usage;
@@ -30,6 +36,11 @@
     return "unknown";
   }
 
+  /**
+   * @param {import("../types.js").HIDDeviceInfo} device
+   * @param {import("../types.js").HIDDeviceFilter} filter
+   * @returns {boolean}
+   */
   function deviceMatchesFilter(device, filter) {
     if (
       filter.vendorId !== undefined &&
@@ -67,6 +78,12 @@
     return true;
   }
 
+  /**
+   * @param {import("../types.js").HIDDeviceInfo[]} devices
+   * @param {import("../types.js").HIDDeviceFilter[]} [filters]
+   * @param {import("../types.js").HIDDeviceFilter[]} [exclusionFilters]
+   * @returns {import("../types.js").HIDDeviceInfo[]}
+   */
   function applyFilters(devices, filters, exclusionFilters) {
     let result = devices;
     if (Array.isArray(filters) && filters.length > 0) {
@@ -83,6 +100,10 @@
     return result;
   }
 
+  /**
+   * @param {import("../types.js").HIDDeviceInfo[]} devices
+   * @returns {Map<string, import("../types.js").HIDDeviceInfo[]>}
+   */
   function groupDevices(devices) {
     const groups = new Map();
     for (const device of devices) {
@@ -93,6 +114,10 @@
     return groups;
   }
 
+  /**
+   * @param {string} type
+   * @returns {Promise<string|null>}
+   */
   async function fetchDeviceIcon(type) {
     if (svgCache[type]) return svgCache[type];
     try {
@@ -106,8 +131,8 @@
   }
 
   /**
-   * Returns whether a HIDDeviceFilter is well-formed per the WebHID spec:
-   * non-empty, productId requires vendorId, usage requires usagePage.
+   * @param {import("../types.js").HIDDeviceFilter} filter
+   * @returns {boolean}
    */
   function isValidFilter(filter) {
     if (!filter || typeof filter !== "object") return false;
@@ -117,6 +142,13 @@
     return true;
   }
 
+  /**
+   * @param {import("../types.js").HIDDeviceInfo[]} allDevices
+   * @param {number} matchCount
+   * @param {import("../types.js").HIDDeviceFilter[]} [filters]
+   * @param {Element} containerEl
+   * @returns {boolean}
+   */
   function logExcludedDevices(allDevices, matchCount, filters, containerEl) {
     if (matchCount > 0) return false;
     logger.warn(
@@ -146,6 +178,11 @@
     return true;
   }
 
+  /**
+   * @param {Element} iconSpan
+   * @param {string} type
+   * @returns {void}
+   */
   function applyDeviceIcon(iconSpan, type) {
     fetchDeviceIcon(type).then((svg) => {
       if (svg) {
