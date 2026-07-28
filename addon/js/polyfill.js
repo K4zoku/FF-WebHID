@@ -1,6 +1,7 @@
 (function () {
-  if (typeof window === 'undefined' || !(window instanceof Window && window.isSecureContext)) {
-    console.debug("NO POLYFILL")
+  const isWorker = typeof window === 'undefined' || !(window instanceof Window);
+  if (!isWorker && !window.isSecureContext) {
+    console.debug("NO POLYFILL");
     return;
   }
 
@@ -17,21 +18,23 @@
 
   logger.initLogger("polyfill");
 
-  /** @type {ErrorConstructor} */
-  const OriginalError = window.Error;
-  /** @type {PropertyDescriptor|undefined} */
-  const stackDescriptor = Object.getOwnPropertyDescriptor(OriginalError.prototype, 'stack');
-  /** @type {Function|undefined} */
-  const getOriginalStack = stackDescriptor && stackDescriptor.get;
+  let OriginalError;
+  let stackDescriptor;
+  let getOriginalStack;
+  if (!isWorker) {
+    OriginalError = window.Error;
+    stackDescriptor = Object.getOwnPropertyDescriptor(OriginalError.prototype, 'stack');
+    getOriginalStack = stackDescriptor && stackDescriptor.get;
+  }
 
   /** @returns {boolean} */
   function isCalledFromConsole() {
+    if (isWorker) return false;
     try {
       throw new OriginalError();
     } catch (e) {
       const stack = getOriginalStack ? getOriginalStack.call(e) : e.stack;
       if (typeof stack !== 'string') return false;
-
       const lines = stack.split('\n');
       const callerFrame = lines.at(2) || '';
       return callerFrame.includes('debugger eval code');
@@ -40,6 +43,7 @@
 
   /** @returns {string} */
   function getCallerFrameUrl() {
+    if (isWorker) return '';
     try {
       const stack = new Error().stack;
       if (!stack) return location.href;
@@ -61,12 +65,91 @@
   /** @type {string} */
   const frameNonce = crypto.randomUUID();
 
-  /** @type {MessageChannel} */
-  const channel = new MessageChannel();
-  /** @type {MessagePort} */
-  const bridgePort = channel.port1;
-  const target = window === window.top ? window : window.top;
-  target.postMessage(null, "*", [channel.port2]);
+  /** @type {MessagePort|null} */
+  let bridgePort = null;
+  /** @type {Promise<void>} */
+  const bridgeReady = isWorker
+    ? new Promise((resolve) => {
+        self.addEventListener('message', function onInit(e) {
+          if (e.data && e.data.type === 'webhid-init' && e.ports[0]) {
+            self.removeEventListener('message', onInit);
+            bridgePort = e.ports[0];
+            setupBridgePort();
+            resolve();
+          }
+        });
+      })
+    : new Promise((resolve) => {
+        const channel = new MessageChannel();
+        bridgePort = channel.port1;
+        const target = window === window.top ? window : window.top;
+        target.postMessage(null, '*', [channel.port2]);
+        setupBridgePort();
+        resolve();
+      });
+
+  /** @returns {void} */
+  function setupBridgePort() {
+    if (!bridgePort) return;
+    bridgePort.onmessage = (event) => {
+      if (!event.data) return;
+      if (event.data.type === "response") {
+        const handler = pending[event.data.id];
+        if (handler) {
+          delete pending[event.data.id];
+          handler(event.data.result);
+        }
+        return;
+      }
+      if (event.data.type === "settings") {
+        settings.set(event.data.settings || {});
+        return;
+      }
+      if (event.data.type === "event") {
+        dispatchDeviceEvent(event.data.event);
+      }
+    };
+  }
+
+  /**
+   * @param {string} action
+   * @param {object} [payload]
+   * @param {object} [opts]
+   * @param {number} [opts.timeoutMs]
+   * @returns {Promise<object>}
+   */
+  async function sendRequest(action, payload, opts = {}) {
+    await bridgeReady;
+    if (!bridgePort) return { s: 0 };
+    return new Promise((resolve) => {
+      const id = frameNonce + ':' + (++nextReqId);
+      const timeoutMs = opts.timeoutMs != null ? opts.timeoutMs : 30000;
+      let settled = false;
+      let timer = null;
+      if (timeoutMs > 0) {
+        timer = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          delete pending[id];
+          logger.warn("sendRequest timeout: " + action + " (id=" + id + ")");
+          resolve({ s: 504 });
+        }, timeoutMs);
+      }
+      pending[id] = (result) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        delete pending[id];
+        resolve(result);
+      };
+      const msg = { id, action, payload: payload || {} };
+      const transfers = [];
+      if (payload && payload.data instanceof Uint8Array) {
+        transfers.push(payload.data.buffer);
+      }
+      bridgePort.postMessage(msg, transfers.length ? transfers : undefined);
+    });
+  }
 
   /** @type {string[]|null} */
   let pairedDevices = null;
@@ -132,76 +215,22 @@
   const defs = GLOBAL_DEFAULTS;
   const settings = createSettingsStore(defs);
 
-  bridgePort.onmessage = (event) => {
-    if (!event.data) return;
-    if (event.data.type === "response") {
-      const handler = pending[event.data.id];
-      if (handler) {
-        delete pending[event.data.id];
-        handler(event.data.result);
-      }
-      return;
-    }
-    if (event.data.type === "settings") {
-      settings.set(event.data.settings || {});
-      return;
-    }
-    if (event.data.type === "event") {
-      dispatchDeviceEvent(event.data.event);
-    }
-  };
-
-  /**
-   * @param {string} action
-   * @param {object} [payload]
-   * @param {object} [opts]
-   * @param {number} [opts.timeoutMs]
-   * @returns {Promise<object>}
-   */
-  function sendRequest(action, payload, opts = {}) {
-    return new Promise((resolve) => {
-      const id = frameNonce + ':' + (++nextReqId);
-      const timeoutMs = opts.timeoutMs != null ? opts.timeoutMs : 30000;
-      let settled = false;
-      let timer = null;
-      if (timeoutMs > 0) {
-        timer = setTimeout(() => {
-          if (settled) return;
-          settled = true;
-          delete pending[id];
-          logger.warn("sendRequest timeout: " + action + " (id=" + id + ")");
-          resolve({ s: 504 });
-        }, timeoutMs);
-      }
-      pending[id] = (result) => {
-        if (settled) return;
-        settled = true;
-        if (timer) clearTimeout(timer);
-        delete pending[id];
-        resolve(result);
-      };
-      const msg = { id, action, payload: payload || {} };
-      const transfers = [];
-      if (payload && payload.data instanceof Uint8Array) {
-        transfers.push(payload.data.buffer);
-      }
-      bridgePort.postMessage(msg, transfers.length ? transfers : undefined);
-    });
-  }
-
   settings.on("dataPlane", (v) => logger.info("data plane changed: " + v));
   settings.on("logLevel", (v) => {
     if (logger.applyLevel) logger.applyLevel(v);
   });
 
-  sendRequest("getSettings", {}).then((result) => {
-    if (!result) return;
-    settings.set(result);
-    logger.info("data plane: " + settings.dataPlane);
+  bridgeReady.then(() => {
+    sendRequest("getSettings", {}).then((result) => {
+      if (!result) return;
+      settings.set(result);
+      logger.info("data plane: " + settings.dataPlane);
+    });
   });
 
   /** @returns {{isCrossOrigin: boolean, frameUrl: string}} */
   function getPolicyContext() {
+    if (isWorker) return { isCrossOrigin: false, frameUrl: '' };
     const url = getCallerFrameUrl();
     let isCrossOrigin = false;
     if (window !== window.top) {
@@ -215,21 +244,23 @@
     return sendRequest("getPolicy", getPolicyContext());
   }
 
-  const originalQuery = navigator.permissions?.query?.bind(navigator.permissions);
-  if (originalQuery) {
-    navigator.permissions.query = async (desc) => {
-      if (desc && desc.name === "hid") {
-        const policy = await getPolicy();
-        return {
-          state: policy && policy.hid === "none" ? "denied" : "granted",
-          onchange: null,
-          addEventListener: () => {},
-          removeEventListener: () => {},
-          dispatchEvent: () => false,
-        };
-      }
-      return originalQuery(desc);
-    };
+  if (!isWorker) {
+    const originalQuery = navigator.permissions?.query?.bind(navigator.permissions);
+    if (originalQuery) {
+      navigator.permissions.query = async (desc) => {
+        if (desc && desc.name === "hid") {
+          const policy = await getPolicy();
+          return {
+            state: policy && policy.hid === "none" ? "denied" : "granted",
+            onchange: null,
+            addEventListener: () => {},
+            removeEventListener: () => {},
+            dispatchEvent: () => false,
+          };
+        }
+        return originalQuery(desc);
+      };
+    }
   }
 
   /** @type {WeakMap<object, object>} */
@@ -340,6 +371,7 @@
             reportSize: state.maxInputReportSize + 3,
           });
           if (http.isOk(response.s)) {
+            await bridgeReady;
             const dataChannel = new MessageChannel();
             state.dataPort = dataChannel.port1;
             state.dataPort.onmessage = (event) =>
@@ -1013,6 +1045,9 @@
        * @returns {Promise<object[]>}
        */
       value: async function (options = {}) {
+        if (isWorker) {
+          throw new DOMException("Not allowed in worker context", "NotSupportedError");
+        }
         const policy = await getPolicy();
         if (policy && policy.hid === "none") {
           throw new DOMException("Access to HID is blocked by Permissions Policy", "SecurityError");
@@ -1170,36 +1205,85 @@
     return obj;
   }
 
-  Object.defineProperty(globalThis, "HID", {
-    value: HID,
-    writable: false,
-    configurable: true,
-    enumerable: false,
-  });
-  Object.defineProperty(globalThis, "HIDDevice", {
-    value: HIDDevice,
-    writable: false,
-    configurable: true,
-    enumerable: false,
-  });
-  Object.defineProperty(globalThis, "HIDInputReportEvent", {
-    value: HIDInputReportEvent,
-    writable: false,
-    configurable: true,
-    enumerable: false,
-  });
-  Object.defineProperty(globalThis, "HIDConnectionEvent", {
-    value: HIDConnectionEvent,
-    writable: false,
-    configurable: true,
-    enumerable: false,
-  });
+  if (!isWorker) {
+    Object.defineProperty(globalThis, "HID", {
+      value: HID,
+      writable: false,
+      configurable: true,
+      enumerable: false,
+    });
+    Object.defineProperty(globalThis, "HIDDevice", {
+      value: HIDDevice,
+      writable: false,
+      configurable: true,
+      enumerable: false,
+    });
+    Object.defineProperty(globalThis, "HIDInputReportEvent", {
+      value: HIDInputReportEvent,
+      writable: false,
+      configurable: true,
+      enumerable: false,
+    });
+    Object.defineProperty(globalThis, "HIDConnectionEvent", {
+      value: HIDConnectionEvent,
+      writable: false,
+      configurable: true,
+      enumerable: false,
+    });
+  } else {
+    Object.defineProperty(self, "HID", {
+      value: HID, writable: false, configurable: true, enumerable: false,
+    });
+    Object.defineProperty(self, "HIDDevice", {
+      value: HIDDevice, writable: false, configurable: true, enumerable: false,
+    });
+    Object.defineProperty(self, "HIDInputReportEvent", {
+      value: HIDInputReportEvent, writable: false, configurable: true, enumerable: false,
+    });
+    Object.defineProperty(self, "HIDConnectionEvent", {
+      value: HIDConnectionEvent, writable: false, configurable: true, enumerable: false,
+    });
+  }
+
   hidInstance = createHID();
-  Object.defineProperty(Navigator.prototype, "hid", {
-    get() {
-      return hidInstance;
-    },
-    configurable: true,
-    enumerable: true,
-  });
+  if (!isWorker) {
+    Object.defineProperty(Navigator.prototype, "hid", {
+      get() {
+        return hidInstance;
+      },
+      configurable: true,
+      enumerable: true,
+    });
+  } else {
+    const navProto = Object.getPrototypeOf(self.navigator);
+    Object.defineProperty(navProto, "hid", {
+      get() { return hidInstance; },
+      configurable: true, enumerable: true,
+    });
+  }
+
+  const NativeWorker = globalThis.Worker;
+  if (NativeWorker) {
+    /**
+     * @param {string|URL} url
+     * @param {object} [opts]
+     * @returns {Worker}
+     */
+    function PatchedWorker(url, opts) {
+      const instance = new NativeWorker(url, opts);
+      const ch = new MessageChannel();
+      instance.postMessage({ type: "webhid-init" }, [ch.port1]);
+      bridgeReady.then(() => {
+        if (!bridgePort) return;
+        bridgePort.postMessage(
+          { id: frameNonce + ':' + (++nextReqId), action: "workerPort", payload: {} },
+          [ch.port2],
+        );
+      });
+      return instance;
+    }
+    PatchedWorker.prototype = NativeWorker.prototype;
+    Object.setPrototypeOf(PatchedWorker, NativeWorker);
+    globalThis.Worker = PatchedWorker;
+  }
 })();

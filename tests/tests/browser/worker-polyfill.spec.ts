@@ -35,7 +35,7 @@ test.describe('Worker Polyfill', () => {
     expect(raw!.hidToStringTag).toBe('[object HID]');
   });
 
-  test('method stubs throw NotSupportedError', async ({ mainPage, pageUrl }) => {
+  test('getDevices works in worker', async ({ mainPage, pageUrl }) => {
     await mainPage.goto(pageUrl('/worker-polyfill-check'), { waitUntil: 'domcontentloaded', timeout: 15000 });
 
     await mainPage.waitForFunction(
@@ -53,8 +53,27 @@ test.describe('Worker Polyfill', () => {
     });
 
     expect(raw).not.toBeNull();
-    expect(raw!.getDevicesError.ok).toBe(false);
-    expect(raw!.getDevicesError.name).toBe('NotSupportedError');
+    expect(raw!.getDevicesResult.ok).toBe(true);
+  });
+
+  test('requestDevice throws NotSupportedError in worker', async ({ mainPage, pageUrl }) => {
+    await mainPage.goto(pageUrl('/worker-polyfill-check'), { waitUntil: 'domcontentloaded', timeout: 15000 });
+
+    await mainPage.waitForFunction(
+      () => {
+        const el = document.getElementById('__worker-polyfill-result');
+        return el && el.textContent && el.textContent !== 'waiting...';
+      },
+      { timeout: 10000 },
+    );
+
+    const raw = await mainPage.evaluate(() => {
+      const el = document.getElementById('__worker-polyfill-result');
+      if (!el || !el.textContent) return null;
+      try { return JSON.parse(el.textContent); } catch { return null; }
+    });
+
+    expect(raw).not.toBeNull();
     expect(raw!.requestDeviceError.ok).toBe(false);
     expect(raw!.requestDeviceError.name).toBe('NotSupportedError');
   });

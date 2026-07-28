@@ -117,7 +117,10 @@
     const files = [
       "js/utils/bootstrap.js",
       "js/utils/logger.js",
-      "js/worker-polyfill.js",
+      "js/utils/http.js",
+      "js/utils/settings.js",
+      "js/utils/device.js",
+      "js/polyfill.js",
     ];
     workerPolyfillBundlePromise = (async () => {
       const texts = await Promise.all(

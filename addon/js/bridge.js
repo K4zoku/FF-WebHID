@@ -509,6 +509,20 @@
     let action = reqAction;
     logger.debug("req action=" + action + " id=" + id);
 
+    if (action === "workerPort") {
+      const p = ports && ports[0];
+      if (p) {
+        const origin = getRequestOrigin(data);
+        portOrigin.set(p, origin || window.location.origin);
+        p.onmessage = (event) => {
+          if (event.data != null && event.data.id != null) requestPortMap.set(event.data.id, p);
+          handleRequest(event.data, event.ports, null);
+        };
+        replyToPage({ type: "response", id, result: { ok: true } });
+      }
+      return;
+    }
+
     if (action === "dataPort") {
       const deviceId = payload.deviceId;
       const port = ports && ports[0];
@@ -557,10 +571,11 @@
               if (s === requestFrameUrl) { hasAllowAttr = true; break; }
             }
           }
+          const policyUrl = requestFrameUrl || getRequestOrigin(data) || location.href;
           const resp = await browser.runtime.sendMessage({
             action: "getPolicy",
             isCrossOrigin: payload && payload.isCrossOrigin ? true : false,
-            url: requestFrameUrl || location.href,
+            url: policyUrl,
             hasAllowAttr,
           });
           const result = resp ? resp.policy || { hid: "allowed" } : { hid: "allowed" };
