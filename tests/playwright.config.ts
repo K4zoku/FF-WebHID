@@ -12,7 +12,6 @@ export default defineConfig({
   expect: { timeout: 10000 },
   fullyParallel: false,
   retries: 0,
-  workers: 1,
   globalSetup: 'firefox-webext-playwright-harness/globalSetup',
   use: {
     headless: false,

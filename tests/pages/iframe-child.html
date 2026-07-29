@@ -1,41 +1,42 @@
-<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Iframe Child</title></head>
-<body>
-<div id="__start-marker"></div>
-<script>
-(async function() {
-  const _urlAtStart = location.href;
-  let isCrossOrigin = false;
-  if (window !== window.top) {
-    try { window.parent.location.origin; }
-    catch { isCrossOrigin = true; }
-  }
-  let qHid;
-  try { qHid = (await navigator.permissions.query({ name: 'hid' })).state; }
-  catch (e) { qHid = 'ERROR: ' + e.message; }
-  console.log('DEBUG[' + _urlAtStart + '] qHid =', qHid);
-  let getDevicesResult;
-  try {
-    console.log('DEBUG[' + _urlAtStart + '] calling getDevices...');
-    const devices = await navigator.hid.getDevices();
-    console.log('DEBUG[' + _urlAtStart + '] getDevices done, count=', devices.length);
-    getDevicesResult = { ok: true, count: devices.length };
-  } catch (e) {
-    console.log('DEBUG[' + _urlAtStart + '] getDevices caught:', e.name, e.message);
-    getDevicesResult = { ok: false, name: e.name, message: e.message };
-  }
-  console.log('DEBUG[' + _urlAtStart + '] creating result element');
-  const result = {
-    isCrossOrigin,
-    queryHid: qHid,
-    getDevices: getDevicesResult,
-    _urlAtStart,
-  };
-  const el = document.createElement('div');
-  el.id = '__perm-result';
-  el.dataset.json = JSON.stringify(result);
-  document.body.appendChild(el);
-  console.log('DEBUG[' + _urlAtStart + '] result element appended');
-})();
-</script>
-</body></html>
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Iframe Child</title>
+  </head>
+  <body>
+    <div id="__start-marker"></div>
+    <script>
+      (async function () {
+        const _urlAtStart = location.href;
+        let isCrossOrigin = false;
+        if (window !== window.top) {
+          try {
+            window.parent.location.origin;
+          } catch {
+            isCrossOrigin = true;
+          }
+        }
+
+        let qHid;
+        try {
+          qHid = (await navigator.permissions.query({ name: "hid" })).state;
+        } catch (e) {
+          qHid = "ERROR: " + e.message;
+        }
+        console.log("DEBUG[" + _urlAtStart + "] qHid =", qHid);
+
+        const hidUndefined = typeof navigator.hid === "undefined";
+        console.log("DEBUG[" + _urlAtStart + "] hidUndefined =", hidUndefined);
+
+        const result = { isCrossOrigin, queryHid: qHid, hidUndefined, _urlAtStart };
+        const el = document.createElement("div");
+        el.id = "__perm-result";
+        el.dataset.json = JSON.stringify(result);
+        el.textContent = JSON.stringify(result);
+        document.body.appendChild(el);
+        console.log("DEBUG[" + _urlAtStart + "] result element appended");
+      })();
+    </script>
+  </body>
+</html>

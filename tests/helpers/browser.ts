@@ -60,9 +60,10 @@ export const test = base.extend<
     }
   }, { scope: 'worker' }],
 
-  _harnessCtx: [async ({ rdpPort }, use) => {
+  _harnessCtx: [async ({ rdpPort, headless }, use) => {
     const { context } = await createFirefoxContext(rdpPort, EXTENSION_PATH, {
       routeHandler: defaultRouteHandler,
+      playwrightOptions: { headless },
     });
 
     let bridge;
@@ -112,6 +113,12 @@ export const test = base.extend<
     installAddScriptTagPatch(page);
     await use(wrapWithNetworkBridge(page, _harnessCtx._firefoxBridge));
   }, { scope: 'worker' }],
+
+  page: [async ({ _harnessCtx }, use) => {
+    const page = await _harnessCtx.newPage();
+    installAddScriptTagPatch(page);
+    await use(wrapWithNetworkBridge(page, _harnessCtx._firefoxBridge));
+  }, { scope: 'test' }],
 
   pageUrl: [async ({ servers }, use) => {
     await use((path: string) => `http://localhost:${servers.main.port}${path}`);
