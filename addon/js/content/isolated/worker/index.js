@@ -79,7 +79,11 @@ function handleDataPortMessage(msg) {
   if (msg.type === "receiveFeature") return handleReceiveFeature(msg);
 }
 
-/** @param {Uint8Array} batch @param {number} [offset=0] @returns {void} */
+/**
+ * @param {Uint8Array} batch
+ * @param {number} [offset=0]
+ * @returns {void}
+ */
 function pushInputBatch(batch, offset = 0) {
   let count = 0;
   while (offset + 1 < batch.length) {

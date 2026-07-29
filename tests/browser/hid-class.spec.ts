@@ -1,4 +1,5 @@
 import { test, expect } from '../helpers/browser.js';
+import "../types/webhid.js";
 
 test.describe('HID class and navigator.hid', () => {
 

@@ -1,10 +1,23 @@
 import { test, expect } from '../helpers/browser.js';
+import "../types/webhid.js";
+import "../types/webext.js";
+
+interface WorkerResult {
+  hasNavigatorHid: boolean;
+  hasHID: boolean;
+  hasHIDDevice: boolean;
+  hasHIDInputReportEvent: boolean;
+  hasHIDConnectionEvent: boolean;
+  hidToStringTag: string;
+  getDevicesResult: { ok: boolean };
+  requestDeviceError: { ok: boolean; name?: string; message?: string };
+  illegalConstructor: { ok: boolean; name?: string; message?: string };
+}
 
 test.describe('Worker WebHID API', () => {
 
   let storageSet = false;
-  let raw: any;
-
+  let raw: WorkerResult;
   test.beforeAll(async ({ backgroundPage, sharedPage, pageUrl, servers }) => {
     if (!storageSet) {
       const origin = `http://localhost:${servers.main.port}`;
@@ -21,11 +34,11 @@ test.describe('Worker WebHID API', () => {
       const w = new Worker('/worker.js?_=' + ts);
       const result = await new Promise((resolve, reject) => {
         w.onmessage = (e: MessageEvent) => resolve(e.data);
-        w.onerror = (e: any) => reject(e.message || e.error?.message || String(e));
+        w.onerror = (e: ErrorEvent) => reject(e.message || e.error?.message || String(e));
         setTimeout(() => reject('timeout'), 10000);
       });
       w.terminate();
-      return result;
+      return result as WorkerResult;
     });
   });
 

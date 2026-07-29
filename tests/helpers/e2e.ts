@@ -3,7 +3,7 @@ import type { TestType, PlaywrightTestArgs, PlaywrightTestOptions, PlaywrightWor
 import { createRequire } from 'module';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { startServer } from '../serve-static.mjs';
+import { startStaticServer } from '../serve.js';
 import {
   startDaemon, stopDaemon,
   startWebhidMock, stopWebhidMock,
@@ -94,7 +94,7 @@ export const test = harnessTest.extend<E2eTestFixtures, E2eWorkerFixtures>({
   }, { scope: 'worker', auto: true }],
 
   httpPort: [async ({}, use) => {
-    const { port, server } = await startServer();
+    const { port, server } = await startStaticServer();
     await use(port);
     server.close();
   }, { scope: 'worker', auto: true }],

@@ -21,6 +21,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.62.0",
+    "@types/node": "^26.1.2",
     "commit-and-tag-version": "^13.1.0",
     "eslint": "^10.8.0",
     "eslint-plugin-jsdoc": "^63.3.2",

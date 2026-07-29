@@ -4,11 +4,12 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "strict": true,
-    "noImplicitAny": false,
+    "types": ["node"],
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "allowJs": true
   },
   "include": ["types/**/*.d.ts", "helpers/**/*.ts", "tests/**/*.ts", "playwright.config.ts"]
 }

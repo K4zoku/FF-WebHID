@@ -13,6 +13,7 @@ export async function getPermResult(page: Page) {
     queryHid: string;
     queryCamera: string;
     policySource: string;
+    hidUndefined: boolean;
     getDevices: { ok: boolean; count?: number; name?: string; message?: string };
   } | null;
 }
