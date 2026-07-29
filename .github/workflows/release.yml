@@ -18,6 +18,8 @@ jobs:
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
 
+      - uses: nubjs/setup-nub@v0
+
       - name: Define variables
         id: variables
         shell: bash
@@ -26,11 +28,11 @@ jobs:
           echo "VERSION=$(git describe --tags | sed 's/^v//;s/_/./;s/\([^-]*-g\)/r\1/;s/-/./g')" >> "$GITHUB_OUTPUT"
 
       - name: Install dependencies
-        run: npm ci
+        run: nub ci
 
       - name: Build Addon XPI
         run: |
-          npm run build:addon
+          nub run build:addon
           mv dist/webhid-addon.xpi dist/webhid-addon-v${{ steps.variables.outputs.VERSION }}.xpi
 
       - name: Upload XPI artifact
@@ -45,12 +47,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-24.04
+          - os: ubuntu-22.04
             arch: x86_64
             artifact_name: webhid-linux-x86_64
             apt_deps: libudev-dev zip
             rust_target: ""
-          - os: ubuntu-24.04-arm
+          - os: ubuntu-22.04-arm
             arch: aarch64
             artifact_name: webhid-linux-aarch64
             apt_deps: libudev-dev zip
