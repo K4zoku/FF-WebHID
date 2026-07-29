@@ -242,7 +242,7 @@ Bridge sends `handshake` on init. The response contains `wsPort` (the daemon's W
 
 5. **Adaptive batching** keeps latency low for sparse reports (0µs) while amortizing syscalls during bursts (≤25µs).
 
-6. **Daemon does not broadcast to both channels.** `dataplane_mode` per device ensures events go only to the requested channel.
+6. **Daemon does not broadcast to both channels.** `has_nm_session` per device checks if any session on that device is in NM mode before forwarding InputReports via NM. Per-session `dataplane_modes` (HashMap<session_token, mode>) ensures each session's mode is tracked independently.
 
 7. **WS data frame header is 6 bytes** (no device ID): `[type:u8][reqId:u32 LE][reportId:u8][payload]`. The WS connection is per-device, so the device ID is implicit. NM packed TLVs include a device ID (12-byte header) because the NM connection is shared across all devices.
 

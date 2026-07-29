@@ -111,7 +111,7 @@ Note: the user systemd unit (`manifests/webhid-daemon.user.service`) hardcodes `
 | `devicePickerMode` | `modal` / `pageAction` / `window` | `modal` | Device picker UI mode |
 | `workerPolyfillEnabled` | bool | `false` | Inject WebHID polyfill into page-created Web Workers |
 
-All settings can be overridden per-site via the popup (saved to `site:<origin>` key in `browser.storage.local`).
+All settings can be overridden per-site via the popup. Settings use per-key format in `browser.storage.local`: global keys are `settings :: <name>`, site overrides are `settings :: <origin> :: <name>`. Device info + origin allowlists are stored in IndexedDB (`webhid-store`).
 
 The bridge uses a `SettingsStore` Proxy-based observer. `storage.onChanged` extracts `changes[k].newValue` and calls `settings.set(patch)`. The store handles diffing internally and fires listeners only when a value actually changes.
 
