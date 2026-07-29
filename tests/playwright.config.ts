@@ -14,7 +14,7 @@ export default defineConfig({
   retries: 0,
   globalSetup: 'firefox-webext-playwright-harness/globalSetup',
   use: {
-    headless: false,
+    headless: true,
     screenshot: 'only-on-failure',
     trace: 'retain-on-failure',
   },

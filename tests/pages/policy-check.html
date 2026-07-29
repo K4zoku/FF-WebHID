@@ -8,14 +8,13 @@
     try { window.parent.location.origin; }
     catch { isCrossOrigin = true; }
   }
-
   let qHid, qCamera;
   try { qHid = (await navigator.permissions.query({ name: 'hid' })).state; }
   catch (e) { qHid = 'ERROR: ' + e.message; }
   try { qCamera = (await navigator.permissions.query({ name: 'camera' })).state; }
   catch (e) { qCamera = 'ERROR: ' + e.message; }
+  const hidUndefined = typeof navigator.hid === 'undefined';
 
-  // Try getDevices — will throw SecurityError if policy blocks
   let getDevicesResult;
   try {
     const devices = await navigator.hid.getDevices();
@@ -23,15 +22,14 @@
   } catch (e) {
     getDevicesResult = { ok: false, name: e.name, message: e.message };
   }
-
   const result = {
     isTop: window === window.top,
     isCrossOrigin,
     queryHid: qHid,
     queryCamera: qCamera,
     getDevices: getDevicesResult,
+    hidUndefined
   };
-
   const el = document.createElement('div');
   el.id = '__perm-result';
   el.dataset.json = JSON.stringify(result);
