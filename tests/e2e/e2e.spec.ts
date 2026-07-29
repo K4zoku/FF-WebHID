@@ -1,7 +1,6 @@
 import { test, expect } from "../helpers/e2e.js";
 import { ensureDevicePaired } from "../helpers/e2e-devices.js";
 import { sendInput, waitForOutputReport } from "../helpers/e2e-process.js";
-import "../types/webhid.js";
 
 // Nintendo Switch Pro Controller constants
 const VID = 0x16c0;

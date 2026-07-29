@@ -1,6 +1,4 @@
 import { test, expect } from '../helpers/browser.js';
-import "../types/webhid.js";
-import "../types/webext.js";
 
 interface WorkerResult {
   hasNavigatorHid: boolean;

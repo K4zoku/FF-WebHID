@@ -1,7 +1,6 @@
 import { test, expect } from '../helpers/browser.js';
 import { waitForPermResult } from '../helpers/browser-utils.js';
 import type { Page, Frame } from '@playwright/test';
-import "../types/webhid.js";
 
 test.describe('Permissions Policy', () => {
   test.describe.configure({ mode: 'parallel' });
