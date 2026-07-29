@@ -1,10 +1,13 @@
-import { test, expect } from '../../helpers/browser.js';
+import { test, expect } from '../helpers/browser.js';
 
 test.describe('HIDConnectionEvent', () => {
 
-  test('new HIDConnectionEvent("connect", { device }) creates an instance', async ({ mainPage, pageUrl }) => {
-    await mainPage.goto(pageUrl('/policy-check'), { waitUntil: 'domcontentloaded', timeout: 15000 });
-    const result = await mainPage.evaluate(() => {
+  test.beforeEach(async ({ sharedPage, pageUrl }) => {
+    await sharedPage.goto(pageUrl('/policy-check'), { waitUntil: 'domcontentloaded', timeout: 15000 });
+  });
+
+  test('new HIDConnectionEvent("connect", { device }) creates an instance', async ({ sharedPage }) => {
+    const result = await sharedPage.evaluate(() => {
       const fakeDevice = Object.create(HIDDevice.prototype);
       const ev = new HIDConnectionEvent('connect', { device: fakeDevice });
       return {
@@ -20,9 +23,8 @@ test.describe('HIDConnectionEvent', () => {
     expect(result.instanceOfEvent).toBe(true);
   });
 
-  test('new HIDConnectionEvent("disconnect", { device }) is also constructable', async ({ mainPage, pageUrl }) => {
-    await mainPage.goto(pageUrl('/policy-check'), { waitUntil: 'domcontentloaded', timeout: 15000 });
-    const result = await mainPage.evaluate(() => {
+  test('new HIDConnectionEvent("disconnect", { device }) is also constructable', async ({ sharedPage }) => {
+    const result = await sharedPage.evaluate(() => {
       const fakeDevice = Object.create(HIDDevice.prototype);
       const ev = new HIDConnectionEvent('disconnect', { device: fakeDevice });
       return { type: ev.type, deviceIsSame: ev.device === fakeDevice };
@@ -35,9 +37,12 @@ test.describe('HIDConnectionEvent', () => {
 
 test.describe('HIDInputReportEvent', () => {
 
-  test('new HIDInputReportEvent("inputreport", { device, reportId, data }) creates an instance', async ({ mainPage, pageUrl }) => {
-    await mainPage.goto(pageUrl('/policy-check'), { waitUntil: 'domcontentloaded', timeout: 15000 });
-    const result = await mainPage.evaluate(() => {
+  test.beforeEach(async ({ sharedPage, pageUrl }) => {
+    await sharedPage.goto(pageUrl('/policy-check'), { waitUntil: 'domcontentloaded', timeout: 15000 });
+  });
+
+  test('new HIDInputReportEvent("inputreport", { device, reportId, data }) creates an instance', async ({ sharedPage }) => {
+    const result = await sharedPage.evaluate(() => {
       const fakeDevice = Object.create(HIDDevice.prototype);
       const buf = new ArrayBuffer(4);
       const dv = new DataView(buf);
@@ -61,9 +66,8 @@ test.describe('HIDInputReportEvent', () => {
     expect(result.instanceOf).toBe(true);
   });
 
-  test('data attribute is a DataView', async ({ mainPage, pageUrl }) => {
-    await mainPage.goto(pageUrl('/policy-check'), { waitUntil: 'domcontentloaded', timeout: 15000 });
-    const result = await mainPage.evaluate(() => {
+  test('data attribute is a DataView', async ({ sharedPage }) => {
+    const result = await sharedPage.evaluate(() => {
       const fakeDevice = Object.create(HIDDevice.prototype);
       const buf = new ArrayBuffer(8);
       const dv = new DataView(buf);
@@ -77,9 +81,8 @@ test.describe('HIDInputReportEvent', () => {
     expect(result).toBe(true);
   });
 
-  test('reportId ranges 0–255 (octet)', async ({ mainPage, pageUrl }) => {
-    await mainPage.goto(pageUrl('/policy-check'), { waitUntil: 'domcontentloaded', timeout: 15000 });
-    const result = await mainPage.evaluate(() => {
+  test('reportId ranges 0–255 (octet)', async ({ sharedPage }) => {
+    const result = await sharedPage.evaluate(() => {
       const fakeDevice = Object.create(HIDDevice.prototype);
       const buf = new ArrayBuffer(1);
       const dv = new DataView(buf);

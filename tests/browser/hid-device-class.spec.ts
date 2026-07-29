@@ -1,10 +1,13 @@
-import { test, expect } from '../../helpers/browser.js';
+import { test, expect } from '../helpers/browser.js';
 
 test.describe('HIDDevice class', () => {
 
-  test('HIDDevice constructor throws TypeError (Illegal constructor)', async ({ mainPage, pageUrl }) => {
-    await mainPage.goto(pageUrl('/policy-check'), { waitUntil: 'domcontentloaded', timeout: 15000 });
-    const result = await mainPage.evaluate(() => {
+  test.beforeEach(async ({ sharedPage, pageUrl }) => {
+    await sharedPage.goto(pageUrl('/policy-check'), { waitUntil: 'domcontentloaded', timeout: 15000 });
+  });
+
+  test('HIDDevice constructor throws TypeError (Illegal constructor)', async ({ sharedPage }) => {
+    const result = await sharedPage.evaluate(() => {
       try {
         new HIDDevice();
         return { ok: true, name: '' } as const;
@@ -16,9 +19,8 @@ test.describe('HIDDevice class', () => {
     expect(result.name).toBe('TypeError');
   });
 
-  test('HIDDevice.prototype has all six methods', async ({ mainPage, pageUrl }) => {
-    await mainPage.goto(pageUrl('/policy-check'), { waitUntil: 'domcontentloaded', timeout: 15000 });
-    const methods = await mainPage.evaluate(() => {
+  test('HIDDevice.prototype has all six methods', async ({ sharedPage }) => {
+    const methods = await sharedPage.evaluate(() => {
       const proto = HIDDevice.prototype;
       return {
         open: typeof proto.open,
@@ -37,9 +39,8 @@ test.describe('HIDDevice class', () => {
     expect(methods.receiveFeatureReport).toBe('function');
   });
 
-  test('opened getter is defined on HIDDevice.prototype', async ({ mainPage, pageUrl }) => {
-    await mainPage.goto(pageUrl('/policy-check'), { waitUntil: 'domcontentloaded', timeout: 15000 });
-    const result = await mainPage.evaluate(() => {
+  test('opened getter is defined on HIDDevice.prototype', async ({ sharedPage }) => {
+    const result = await sharedPage.evaluate(() => {
       const desc = Object.getOwnPropertyDescriptor(HIDDevice.prototype, 'opened');
       return { hasGetter: typeof desc?.get === 'function', enumerable: desc?.enumerable };
     });
@@ -47,9 +48,8 @@ test.describe('HIDDevice class', () => {
     expect(result.enumerable).toBe(false);
   });
 
-  test('oninputreport getter/setter is defined on HIDDevice.prototype', async ({ mainPage, pageUrl }) => {
-    await mainPage.goto(pageUrl('/policy-check'), { waitUntil: 'domcontentloaded', timeout: 15000 });
-    const result = await mainPage.evaluate(() => {
+  test('oninputreport getter/setter is defined on HIDDevice.prototype', async ({ sharedPage }) => {
+    const result = await sharedPage.evaluate(() => {
       const desc = Object.getOwnPropertyDescriptor(HIDDevice.prototype, 'oninputreport');
       return { hasGetter: typeof desc?.get === 'function', hasSetter: typeof desc?.set === 'function' };
     });

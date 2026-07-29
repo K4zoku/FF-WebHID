@@ -2,6 +2,7 @@ import http from 'node:http';
 import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { once } from 'node:events';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -20,9 +21,6 @@ const PAGES = {
   '/iframe-child-with-allow': loadPage('iframe-child.html'),
   '/worker-check': loadPage('worker-check.html'),
   '/worker.js': loadPage('worker.js'),
-  '/worker-polyfill-check': loadPage('worker-polyfill-check.html'),
-  '/worker-polyfill.js': loadPage('worker-polyfill.js'),
-  '/worker-strict.js': loadPage('worker-strict.js'),
 };
 
 const HEADERS = {
@@ -38,26 +36,25 @@ const HEADERS = {
   },
 };
 
-export function startServer(port) {
-  return new Promise((resolve) => {
-    const server = http.createServer((req, res) => {
-      const pathname = req.url.split('?')[0];
-      const body = PAGES[pathname];
-      if (!body) {
-        res.writeHead(404);
-        res.end('not found: ' + req.url);
-        return;
-      }
-      const headers = HEADERS[pathname] || {};
-      res.writeHead(200, {
-        'Content-Type': pathname.endsWith('.js') ? 'application/javascript' : 'text/html',
-        'Cache-Control': 'no-store',
-        ...headers,
-      });
-      res.end(body);
+export async function startServer(port = 0) {
+  const server = http.createServer((req, res) => {
+    const pathname = req.url.split('?')[0];
+    const body = PAGES[pathname];
+    if (!body) {
+      res.writeHead(404);
+      res.end('not found: ' + req.url);
+      return;
+    }
+    const headers = HEADERS[pathname] || {};
+    res.writeHead(200, {
+      'Content-Type': pathname.endsWith('.js') ? 'application/javascript' : 'text/html',
+      'Cache-Control': 'no-store',
+      ...headers,
     });
-    server.listen(port, () => {
-      resolve({ port, server });
-    });
+    res.end(body);
   });
+  server.listen(port);
+  await once(server, 'listening');
+  const actualPort = server.address().port;
+  return { port: actualPort, server };
 }

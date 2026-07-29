@@ -33,8 +33,9 @@ export async function startDaemon(socketPath: string = DEFAULT_SOCKET): Promise<
       reject(new Error(`Daemon binary not found at ${bin}. Build with 'cargo build' first.`));
       return;
     }
-    const proc = spawn(bin, ['--socket', socketPath], {
+    const proc = spawn(bin, [], {
       stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, WEBHID_SOCKET: socketPath },
     });
     const onData = (data: Buffer) => {
       const msg = data.toString();
@@ -42,13 +43,8 @@ export async function startDaemon(socketPath: string = DEFAULT_SOCKET): Promise<
         resolvePromise({ process: proc, socketPath });
       }
     };
+    proc.stderr!.on('data', onData);
     proc.stdout!.on('data', onData);
-    proc.stderr!.on('data', (data: Buffer) => {
-      const msg = data.toString();
-      if (msg.includes('Error') || msg.includes('error')) {
-        reject(new Error(`Daemon error: ${msg}`));
-      }
-    });
     proc.on('error', reject);
     proc.on('exit', (code: number | null) => {
       reject(new Error(`Daemon exited with code ${code} before listening`));
@@ -77,16 +73,16 @@ export function startUhidMock(
     throw new Error(`uhid-mock binary not found at ${bin}. Build with 'cargo build' first.`);
   }
   const proc = spawn(bin, [
-    '--socket', socketPath,
-    '--descriptor', join(projectRoot, 'tests', 'e2e', 'fixtures', descriptor),
-    '--vid', vid.toString(16),
-    '--pid', pid.toString(16),
+    'spawn',
+    '--vid', '0x' + vid.toString(16),
+    '--pid', '0x' + pid.toString(16),
+    '--descriptor', join(projectRoot, 'tests', 'fixtures', 'descriptors', descriptor),
   ], {
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['pipe', 'pipe', 'pipe'],
   });
   const ready = new Promise<void>((resolvePromise, reject) => {
     proc.stdout!.on('data', (data: Buffer) => {
-      if (data.toString().includes('Device created')) {
+      if (data.toString().includes('ready')) {
         resolvePromise();
       }
     });
@@ -100,16 +96,19 @@ export function startUhidMock(
 }
 
 export function stopUhidMock(mock: UhidMockProcess): void {
+  try {
+    mock.process.stdin!.write('{"cmd":"destroy"}\n');
+  } catch {}
   mock.process.kill('SIGTERM');
 }
 
 export function sendInput(mock: UhidMockProcess, reportId: number, data: number[]): void {
-  const payload = Buffer.alloc(data.length + 1);
-  payload[0] = reportId;
-  for (let i = 0; i < data.length; i++) {
-    payload[i + 1] = data[i];
-  }
-  mock.process.stdin!.write(payload);
+  const cmd = JSON.stringify({
+    cmd: 'input',
+    reportId: reportId,
+    data: data,
+  });
+  mock.process.stdin!.write(cmd + '\n');
 }
 
 export async function waitForOutputReport(
@@ -118,12 +117,19 @@ export async function waitForOutputReport(
 ): Promise<{ reportId: number; data: number[] }> {
   return new Promise((resolvePromise, reject) => {
     const timer = setTimeout(() => reject(new Error('Timeout waiting for output report')), timeout);
-    mock.process.stdout!.once('data', (data: Buffer) => {
-      clearTimeout(timer);
-      resolvePromise({
-        reportId: data[0],
-        data: Array.from(data.subarray(1)),
-      });
+    mock.process.stdout!.on('data', (data: Buffer) => {
+      try {
+        const parsed = JSON.parse(data.toString());
+        if (parsed.event === 'output_report') {
+          clearTimeout(timer);
+          resolvePromise({
+            reportId: 0,
+            data: parsed.data || [],
+          });
+        }
+      } catch {
+        // Ignore non-JSON output
+      }
     });
   });
 }

@@ -1,23 +1,20 @@
 <!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Worker Check</title></head>
+<html><head><meta charset="utf-8"><title>Worker API Check</title></head>
 <body>
 <pre id="__worker-result">waiting...</pre>
 <script>
-(async function() {
+(async function () {
+  var ts = Date.now();
   try {
-    const ts = Date.now();
-    const url = '/worker.js?_=' + ts;
-    const w = new Worker(url);
-    const result = await new Promise((resolve, reject) => {
-      w.onmessage = (e) => resolve(e.data);
-      w.onerror = (e) => reject(e.message);
-      setTimeout(() => reject('timeout'), 5000);
+    var w = new Worker('/worker.js?_=' + ts);
+    var r = await new Promise(function (resolve, reject) {
+      w.onmessage = function (e) { resolve(e.data); };
+      w.onerror = function (e) { reject(e.message || e.error?.message || String(e)); };
+      setTimeout(function () { reject('timeout'); }, 10000);
     });
-    document.getElementById('__worker-result').textContent = JSON.stringify(result);
+    document.getElementById('__worker-result').textContent = JSON.stringify(r);
   } catch (e) {
-    document.getElementById('__worker-result').textContent = JSON.stringify({
-      error: e.message || String(e),
-    });
+    document.getElementById('__worker-result').textContent = JSON.stringify({ error: e.message || String(e) });
   }
 })();
 </script>

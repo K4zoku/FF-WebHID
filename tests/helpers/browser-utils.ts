@@ -61,3 +61,22 @@ export async function getPolicyFromGetDevices(page: Page) {
     }
   });
 }
+
+export async function waitForWorkerResultElement(page: Page, elementId: string, timeout = 10000) {
+  await page.waitForFunction(
+    (id) => {
+      const el = document.getElementById(id);
+      return el && el.textContent && el.textContent !== 'waiting...';
+    },
+    elementId,
+    { timeout },
+  );
+}
+
+export async function parseElementJson(page: Page, elementId: string) {
+  return page.evaluate((id) => {
+    const el = document.getElementById(id);
+    if (!el || !el.textContent) return null;
+    try { return JSON.parse(el.textContent); } catch { return null; }
+  }, elementId);
+}

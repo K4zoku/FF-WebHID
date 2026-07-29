@@ -39,7 +39,6 @@ export async function grantDevicePermission(
         "Picker may have cancelled or no device matched the filter.",
     );
   }
-  console.log('devices:', JSON.stringify(devices))
   return devices;
 }
 

@@ -6,9 +6,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 type PlaywrightUseOptions = Exclude<Parameters<typeof defineConfig>[0], undefined>['use'];
-type UseWithHarness = PlaywrightUseOptions & {
-  firefoxHarnessConfig: { extensionPath: string };
-};
 
 export default defineConfig({
   timeout: 120000,
@@ -18,23 +15,25 @@ export default defineConfig({
   workers: 1,
   globalSetup: 'firefox-webext-playwright-harness/globalSetup',
   use: {
-    headless: true,
+    headless: false,
     screenshot: 'only-on-failure',
     trace: 'retain-on-failure',
-    firefoxHarnessConfig: {
-      extensionPath: resolve(__dirname, '..', 'addon'),
-    },
-  } as UseWithHarness,
+  },
   projects: [
     {
       name: 'firefox-browser',
-      testDir: './tests/browser',
+      testDir: './browser',
       use: { browserName: 'firefox' },
     },
     {
       name: 'firefox-e2e',
-      testDir: './tests/e2e',
-      use: { browserName: 'firefox' },
+      testDir: './e2e',
+      use: {
+        browserName: 'firefox',
+        firefoxHarnessConfig: {
+          extensionPath: resolve(__dirname, '..', 'addon'),
+        },
+      } as PlaywrightUseOptions & { firefoxHarnessConfig: { extensionPath: string } },
     },
   ],
 });
