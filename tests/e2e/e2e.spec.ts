@@ -62,7 +62,7 @@ test.describe.serial("Switch Pro Gamepad E2E", () => {
 
   test("receive 64-byte input packet", async ({
     sharedPage,
-    uhidMock,
+    webhidMock,
     testApi,
   }) => {
     const devices = await ensureDevicePaired(sharedPage, testApi);
@@ -71,7 +71,7 @@ test.describe.serial("Switch Pro Gamepad E2E", () => {
     const reportPromise = testApi.onInputReport(devices[0].index);
     await new Promise(resolve => setTimeout(resolve, 200));
     // Send raw packet: 0x30 (report ID) + 63 zero bytes
-    sendInput(uhidMock, 0x30, new Array(PACKET_SIZE).fill(0));
+    sendInput(webhidMock, 0x30, new Array(PACKET_SIZE).fill(0));
 
     const event = await reportPromise;
     expect(event.reportId).toBe(0x30);
@@ -80,7 +80,7 @@ test.describe.serial("Switch Pro Gamepad E2E", () => {
 
   test("receive input packet with button press", async ({
     sharedPage,
-    uhidMock,
+    webhidMock,
     testApi,
   }) => {
     const devices = await ensureDevicePaired(sharedPage, testApi);
@@ -93,7 +93,7 @@ test.describe.serial("Switch Pro Gamepad E2E", () => {
 
     const reportPromise = testApi.onInputReport(devices[0].index);
     await new Promise(resolve => setTimeout(resolve, 200));
-    sendInput(uhidMock, 0x30, packet);
+    sendInput(webhidMock, 0x30, packet);
 
     const event = await reportPromise;
     expect(event.reportId).toBe(0x30);
@@ -104,7 +104,7 @@ test.describe.serial("Switch Pro Gamepad E2E", () => {
 
   test("sendReport succeeds with output report ID after open", async ({
     sharedPage,
-    uhidMock,
+    webhidMock,
     testApi,
   }) => {
     const devices = await ensureDevicePaired(sharedPage, testApi);
@@ -112,7 +112,7 @@ test.describe.serial("Switch Pro Gamepad E2E", () => {
 
     // Switch Pro descriptor has vendor-defined output report ID 0x01 (63 bytes)
     const reportData = new Array(63).fill(0x42);
-    const outputPromise = waitForOutputReport(uhidMock);
+    const outputPromise = waitForOutputReport(webhidMock);
     await new Promise(resolve => setTimeout(resolve, 200));
     await testApi.sendReport(0, 0x01, reportData);
     const output = await outputPromise;

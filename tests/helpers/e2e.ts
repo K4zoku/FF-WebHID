@@ -6,9 +6,9 @@ import { fileURLToPath } from 'url';
 import { startServer } from '../serve-static.mjs';
 import {
   startDaemon, stopDaemon,
-  startUhidMock, stopUhidMock,
+  startWebhidMock, stopWebhidMock,
   installNmManifest, uninstallNmManifest, DEFAULT_SOCKET,
-  type DaemonProcess, type UhidMockProcess,
+  type DaemonProcess, type WebhidMockProcess,
 } from './e2e-process.js';
 import type { WebHidTestAPI, DeviceFilter } from './e2e-types.js';
 
@@ -74,7 +74,7 @@ interface E2eTestFixtures {
 
 interface E2eWorkerFixtures {
   daemon: DaemonProcess;
-  uhidMock: UhidMockProcess;
+  webhidMock: WebhidMockProcess;
   httpPort: number;
   nmManifest: void;
 }
@@ -86,11 +86,11 @@ export const test = harnessTest.extend<E2eTestFixtures, E2eWorkerFixtures>({
     stopDaemon(d);
   }, { scope: 'worker', auto: true }],
 
-  uhidMock: [async ({}, use) => {
-    const m = await startUhidMock('switchpro-gamepad.bin', 0x16c0, 0x0001);
+  webhidMock: [async ({}, use) => {
+    const m = await startWebhidMock('switchpro-gamepad.bin', 0x16c0, 0x0001);
     await m.ready;
     await use(m);
-    stopUhidMock(m);
+    stopWebhidMock(m);
   }, { scope: 'worker', auto: true }],
 
   httpPort: [async ({}, use) => {

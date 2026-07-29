@@ -30,6 +30,7 @@ USER_SYSTEMD_DIR  ?= $(HOME)/.config/systemd/user
 
 .PHONY: all build \
 		install install-system install-user install-udev-rule \
+		install-e2e-udev-rule \
 		install-webhid-group \
 		install-daemon-nm-host-system install-daemon-nm-host-user \
 		uninstall uninstall-system uninstall-user \
@@ -109,6 +110,13 @@ install-udev-rule:
 	udevadm control --reload-rules && udevadm trigger
 	@echo "Done."
 
+install-e2e-udev-rule: install-webhid-group
+	@echo "==> Installing e2e udev rule to $(UDEV_DIR)/"
+	install -Dm644 "$(MANIFEST_DIR)/99-webhid-e2e.rules" "$(DESTDIR)$(UDEV_DIR)/99-webhid-e2e.rules"
+	modprobe uhid 2>/dev/null || true
+	udevadm control --reload-rules && udevadm trigger
+	@echo "Done. Users in the '$(WEBHID_GROUP)' group can now run tests/e2e without root."
+
 ## ---- Daemon-as-NM-host mode ----
 ## Installs only the daemon binary + its own NM manifest. The daemon speaks
 ## the native-messaging protocol directly on stdin/stdout (no separate
@@ -171,6 +179,7 @@ help:
 	@echo "  install-webhid-group - create 'webhid' group + add current user (needs root)"
 	@echo "  install-user      - install binaries + NM manifest + systemd user service (no root)"
 	@echo "  install-udev-rule  - install udev rule for hidraw access (needs root)"
+	@echo "  install-e2e-udev-rule - install e2e udev rule (uhid + hidraw VID 16C0) + webhid group (needs root)"
 	@echo "  install-daemon-nm-host-system - install daemon + daemon-as-NM-host manifest (needs root)"
 	@echo "  install-daemon-nm-host-user   - same, user-local (no root)"
 				@echo "  uninstall-system / uninstall-user"

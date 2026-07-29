@@ -19,7 +19,11 @@ function findProjectRoot(dir: string): string {
 
 const projectRoot = findProjectRoot(__dirname);
 
-export const DEFAULT_SOCKET = '/tmp/webhid-daemon.sock';
+// User-mode daemon default socket, matching the forwarder's candidate list
+// ($XDG_RUNTIME_DIR/webhid/webhid.sock). The e2e daemon must listen here so the
+// NM forwarder spawned by the test Firefox can find it without env overrides.
+const xdgRuntime = process.env.XDG_RUNTIME_DIR || `/run/user/${process.getuid?.() ?? 1000}`;
+export const DEFAULT_SOCKET = join(xdgRuntime, 'webhid', 'webhid.sock');
 
 export interface DaemonProcess {
   process: ChildProcess;
@@ -28,7 +32,7 @@ export interface DaemonProcess {
 
 export async function startDaemon(socketPath: string = DEFAULT_SOCKET): Promise<DaemonProcess> {
   return new Promise((resolvePromise, reject) => {
-    const bin = join(projectRoot, 'target', 'debug', 'webhid-daemon');
+    const bin = join(projectRoot, 'crates', 'target', 'debug', 'webhid-daemon');
     if (!existsSync(bin)) {
       reject(new Error(`Daemon binary not found at ${bin}. Build with 'cargo build' first.`));
       return;
@@ -57,20 +61,20 @@ export function stopDaemon(daemon: DaemonProcess): void {
   daemon.process.kill('SIGTERM');
 }
 
-export interface UhidMockProcess {
+export interface WebhidMockProcess {
   process: ChildProcess;
   ready: Promise<void>;
 }
 
-export function startUhidMock(
+export function startWebhidMock(
   descriptor: string,
   vid: number,
   pid: number,
   socketPath: string = DEFAULT_SOCKET,
-): UhidMockProcess {
-  const bin = join(projectRoot, 'target', 'debug', 'uhid-mock');
+): WebhidMockProcess {
+  const bin = join(projectRoot, 'crates', 'target', 'debug', 'webhid-mock');
   if (!existsSync(bin)) {
-    throw new Error(`uhid-mock binary not found at ${bin}. Build with 'cargo build' first.`);
+    throw new Error(`webhid-mock binary not found at ${bin}. Build with 'cargo build' first.`);
   }
   const proc = spawn(bin, [
     'spawn',
@@ -88,21 +92,21 @@ export function startUhidMock(
     });
     proc.on('error', reject);
     proc.on('exit', (code: number | null) => {
-      reject(new Error(`uhid-mock exited with code ${code} before ready`));
+      reject(new Error(`webhid-mock exited with code ${code} before ready`));
     });
-    setTimeout(() => reject(new Error('uhid-mock start timeout')), 10000);
+    setTimeout(() => reject(new Error('webhid-mock start timeout')), 10000);
   });
   return { process: proc, ready };
 }
 
-export function stopUhidMock(mock: UhidMockProcess): void {
+export function stopWebhidMock(mock: WebhidMockProcess): void {
   try {
     mock.process.stdin!.write('{"cmd":"destroy"}\n');
   } catch {}
   mock.process.kill('SIGTERM');
 }
 
-export function sendInput(mock: UhidMockProcess, reportId: number, data: number[]): void {
+export function sendInput(mock: WebhidMockProcess, reportId: number, data: number[]): void {
   const cmd = JSON.stringify({
     cmd: 'input',
     reportId: reportId,
@@ -112,7 +116,7 @@ export function sendInput(mock: UhidMockProcess, reportId: number, data: number[
 }
 
 export async function waitForOutputReport(
-  mock: UhidMockProcess,
+  mock: WebhidMockProcess,
   timeout = 5000,
 ): Promise<{ reportId: number; data: number[] }> {
   return new Promise((resolvePromise, reject) => {
@@ -138,17 +142,17 @@ export function installNmManifest(socketPath: string): void {
   const nmDir = join(homedir(), '.mozilla', 'native-messaging-hosts');
   mkdirSync(nmDir, { recursive: true });
   const manifest = {
-    name: 'webhid_daemon',
-    description: 'WebHID daemon native messaging host',
-    path: join(projectRoot, 'target', 'debug', 'nm-host'),
+    name: 'webhid.forwarder_nm_host',
+    description: 'WebHID daemon native messaging host (e2e: debug forwarder)',
+    path: join(projectRoot, 'crates', 'target', 'debug', 'webhid-native-messaging'),
     type: 'stdio',
-    allowed_extensions: ['webhid-polyfill@example.com'],
+    allowed_extensions: ['webhid@k4zoku.dev'],
   };
-  writeFileSync(join(nmDir, 'webhid_daemon.json'), JSON.stringify(manifest, null, 2));
+  writeFileSync(join(nmDir, 'webhid.forwarder_nm_host.json'), JSON.stringify(manifest, null, 2));
 }
 
 export function uninstallNmManifest(): void {
-  const manifestPath = join(homedir(), '.mozilla', 'native-messaging-hosts', 'webhid_daemon.json');
+  const manifestPath = join(homedir(), '.mozilla', 'native-messaging-hosts', 'webhid.forwarder_nm_host.json');
   if (existsSync(manifestPath)) unlinkSync(manifestPath);
 }
 
@@ -157,7 +161,7 @@ export function createProfile(profileDir: string): void {
 }
 
 export async function cleanupAll(): Promise<void> {
-  for (const p of ['/tmp/webhid-daemon.sock', '/tmp/webhid-daemon.pid']) {
+  for (const p of [DEFAULT_SOCKET, '/tmp/webhid-daemon.sock', '/tmp/webhid-daemon.pid']) {
     if (existsSync(p)) await rm(p, { force: true });
   }
 }

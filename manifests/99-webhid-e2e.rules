@@ -1,0 +1,10 @@
+# FF-WebHID E2E test rules (tests/e2e). Grants the 'webhid' group permission to:
+#   1. create virtual HID devices via /dev/uhid (webhid-mock)
+#   2. open hidraw nodes of any device with VID 0x16C0 (the e2e mock VID)
+# so the E2E suite runs as a normal user, without root and without a seat/uaccess.
+# One-time setup: sudo make install-e2e-udev-rule
+KERNEL=="uhid", SUBSYSTEM=="misc", GROUP="webhid", MODE="0660"
+
+# uhid-created devices have no USB parent, so ATTRS{idVendor} does not match them.
+# Match the parent hid device's kernel name "<bus>:<VID>:<PID>.<n>" instead.
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", KERNELS=="????:16C0:*", GROUP="webhid", MODE="0660"
