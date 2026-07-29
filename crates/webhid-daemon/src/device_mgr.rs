@@ -427,8 +427,18 @@ impl DeviceManager {
     }
 
     pub fn get_device_by_ws_auth(&self, hash: &str) -> Option<(u32, String)> {
+        use subtle::ConstantTimeEq;
         let hashes = self.ws_auth_hashes.lock().unwrap_or_else(|e| e.into_inner());
-        hashes.get(hash).cloned()
+        let hash_bytes = hash.as_bytes();
+        for (stored_hash, (dev_id, token)) in hashes.iter() {
+            let stored_bytes = stored_hash.as_bytes();
+            if stored_bytes.len() == hash_bytes.len()
+                && stored_bytes.ct_eq(hash_bytes).into()
+            {
+                return Some((*dev_id, token.clone()));
+            }
+        }
+        None
     }
 }
 
