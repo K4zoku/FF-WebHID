@@ -3,7 +3,7 @@ members = [
     "webhid",
     "webhid-daemon",
     "webhid-native-messaging",
-    "uhid-mock",
+    "webhid-mock",
 ]
 resolver = "2"
 

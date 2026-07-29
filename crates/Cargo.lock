@@ -52,6 +52,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
+name = "core-foundation"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b2a6cd9ae233e7f62ba4e9353e81a88df7fc8a5987b8d445b4d90c879bd156f6"
+dependencies = [
+ "core-foundation-sys",
+ "libc",
+]
+
+[[package]]
 name = "core-foundation-sys"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -636,17 +646,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "uhid-mock"
-version = "2.1.1"
-dependencies = [
- "anyhow",
- "libc",
- "log",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "unicode-ident"
 version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -761,6 +760,19 @@ dependencies = [
  "tokio-tungstenite",
  "udev",
  "webhid",
+]
+
+[[package]]
+name = "webhid-mock"
+version = "3.0.0"
+dependencies = [
+ "anyhow",
+ "core-foundation",
+ "core-foundation-sys",
+ "libc",
+ "log",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

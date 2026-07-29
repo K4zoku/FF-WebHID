@@ -1,4 +1,4 @@
-//! Raw bindings to the Linux `/dev/uhid` interface.
+//! Linux backend: raw bindings to the `/dev/uhid` interface + event loop.
 //!
 //! `/dev/uhid` is the kernel's userspace HID transport: a userspace process
 //! opens `/dev/uhid`, writes a `UHID_CREATE2` event containing a report
@@ -17,9 +17,11 @@
 //!   - https://www.kernel.org/doc/html/latest/hid/uhid.html
 //!   - linux/uhid.h
 
-#![cfg(target_os = "linux")]
-
 use std::os::unix::io::RawFd;
+
+use anyhow::Context as _;
+
+use crate::{CmdResult, MockDevice, SpawnOpts, emit_stdout, handle_command};
 
 // ── Event type constants ─────────────────────────────────────────────────
 //
@@ -197,7 +199,10 @@ pub struct UhidEvent {
 pub const UHID_EVENT_SIZE: usize = std::mem::size_of::<UhidEvent>();
 
 // Compile-time check: kernel's sizeof(struct uhid_event) = 4 + 128+64+64+2+2+4+4+4+4+4096 = 4376
-const _: () = assert!(UHID_EVENT_SIZE == 4376, "UHID_EVENT_SIZE mismatch with kernel ABI");
+const _: () = assert!(
+    UHID_EVENT_SIZE == 4376,
+    "UHID_EVENT_SIZE mismatch with kernel ABI"
+);
 
 // ── Syscall helpers ──────────────────────────────────────────────────────
 
@@ -208,7 +213,7 @@ const _: () = assert!(UHID_EVENT_SIZE == 4376, "UHID_EVENT_SIZE mismatch with ke
 pub fn open_uhid() -> std::io::Result<RawFd> {
     // O_RDWR = 0o2; we don't need O_CLOEXEC because the process is single-
     // purpose and won't fork+exec while the fd is open.
-    let fd = unsafe { libc::open(b"/dev/uhid\0".as_ptr() as *const _, libc::O_RDWR) };
+    let fd = unsafe { libc::open(c"/dev/uhid".as_ptr(), libc::O_RDWR) };
     if fd < 0 {
         return Err(std::io::Error::last_os_error());
     }
@@ -413,4 +418,304 @@ pub fn output_event_payload(event: &UhidEvent) -> Option<&[u8]> {
         return None;
     }
     Some(&output.data[..size])
+}
+
+// ── MockDevice impl ──────────────────────────────────────────────────────
+
+/// The spawned Linux virtual device: just the `/dev/uhid` fd.
+struct LinuxDevice {
+    fd: RawFd,
+}
+
+impl MockDevice for LinuxDevice {
+    fn send_input(&self, payload: &[u8]) -> anyhow::Result<()> {
+        let event = build_input_event(payload)?;
+        write_event(self.fd, &event).context("UHID_INPUT2 write failed")?;
+        Ok(())
+    }
+}
+
+// ── Spawn + event loop (single-threaded, poll-based) ─────────────────────
+//
+// We use a single-threaded poll() loop that multiplexes between the uhid fd
+// and stdin.  This avoids the "reader thread stuck on blocking read" problem
+// that arises when the kernel's hid_add_device() workqueue is slow to run:
+// the process can still accept stdin commands (including destroy) and exit
+// cleanly without waiting for UHID_START.
+
+pub fn run_spawn(opts: SpawnOpts) -> anyhow::Result<()> {
+    let rd = std::fs::read(&opts.descriptor_path)
+        .with_context(|| format!("failed to read descriptor at {}", opts.descriptor_path))?;
+    log::info!(
+        "loaded {} bytes of report descriptor from {}",
+        rd.len(),
+        opts.descriptor_path
+    );
+
+    let fd = open_uhid()
+        .context("failed to open /dev/uhid (are you root or in a group with write access?)")?;
+
+    let create = build_create_event(
+        &opts.name,
+        &rd,
+        opts.vid,
+        opts.pid,
+        opts.version,
+        opts.country,
+        opts.bus,
+    )?;
+    write_event(fd, &create).context("UHID_CREATE2 write failed")?;
+    log::info!(
+        "created virtual device: VID={:#06x} PID={:#06x} name='{}' rd={}B",
+        opts.vid,
+        opts.pid,
+        opts.name,
+        rd.len()
+    );
+
+    // Emit ready immediately — UHID_START may arrive later (kernel workqueue).
+    emit_stdout(&serde_json::json!({
+        "event": "ready",
+        "vid": opts.vid,
+        "pid": opts.pid,
+        "name": opts.name,
+        "usagePage": opts.usage_page,
+        "usage": opts.usage,
+    }));
+
+    let dev = LinuxDevice { fd };
+
+    // Set stdin to non-blocking so poll() can drive both fds.
+    let stdin_fd = libc::STDIN_FILENO;
+    let stdin_flags = unsafe { libc::fcntl(stdin_fd, libc::F_GETFL) };
+    if stdin_flags < 0 {
+        anyhow::bail!(
+            "fcntl(F_GETFL) on stdin failed: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+    if unsafe { libc::fcntl(stdin_fd, libc::F_SETFL, stdin_flags | libc::O_NONBLOCK) } < 0 {
+        anyhow::bail!(
+            "fcntl(F_SETFL, O_NONBLOCK) on stdin failed: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+
+    let mut stdin_buf = Vec::new();
+    let mut done = false;
+    let mut uhid_error_count = 0;
+
+    while !done {
+        let mut pfds = [
+            libc::pollfd {
+                fd,
+                events: libc::POLLIN,
+                revents: 0,
+            },
+            libc::pollfd {
+                fd: libc::STDIN_FILENO,
+                events: libc::POLLIN,
+                revents: 0,
+            },
+        ];
+
+        let ret = unsafe { libc::poll(pfds.as_mut_ptr(), 2, -1) };
+        if ret < 0 {
+            let err = std::io::Error::last_os_error();
+            if err.kind() == std::io::ErrorKind::Interrupted {
+                continue;
+            }
+            anyhow::bail!("poll failed: {err}");
+        }
+
+        let uhid_revents = pfds[0].revents;
+
+        // ── uhid fd error (POLLERR/POLLHUP/POLLNVAL) ──────────────────────
+        // The kernel sets these when the virtual device has been destroyed
+        // internally (a kernel bug on some Zen kernels after repeated
+        // open/close cycles).  Exit cleanly so the test runner knows the
+        // device is dead and can restart us.
+        if uhid_revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0 {
+            uhid_error_count += 1;
+            emit_stdout(&serde_json::json!({
+                "event": "uhid_error",
+                "revents": uhid_revents,
+                "count": uhid_error_count,
+            }));
+            if uhid_error_count >= 3 {
+                log::error!(
+                    "uhid fd entered error state (revents={}) after {}/3 checks; exiting",
+                    uhid_revents,
+                    uhid_error_count,
+                );
+                break;
+            }
+            log::warn!(
+                "uhid fd error (revents={}) check {}/3 — will pause before retry",
+                uhid_revents,
+                uhid_error_count,
+            );
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            continue;
+        }
+
+        if uhid_revents & libc::POLLIN != 0
+            && let Err(e) = poll_read_uhid_event(fd)
+        {
+            log::warn!("uhid read error: {e:#}");
+            break;
+        }
+
+        let stdin_revents = pfds[1].revents;
+
+        // stdin EOF or error
+        if stdin_revents & (libc::POLLIN | libc::POLLHUP) != 0 {
+            if stdin_revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0 {
+                log::info!("stdin closed, destroying device");
+                break;
+            }
+            let n = poll_read_stdin(&mut stdin_buf)?;
+            if n == 0 {
+                log::info!("stdin EOF, destroying device");
+                break;
+            }
+            done = poll_process_stdin(&dev, &mut stdin_buf)?;
+        }
+    }
+
+    // Cleanup — best-effort destroy, then let the process exit.
+    let _ = write_event(fd, &build_destroy_event());
+    unsafe { libc::close(fd) };
+    Ok(())
+}
+
+fn poll_read_uhid_event(fd: RawFd) -> anyhow::Result<()> {
+    let mut event = UhidEvent {
+        type_: 0,
+        u: UhidEventUnion {
+            create2: UhidCreate2Req {
+                name: [0u8; UHID_CREATE2_NAME_MAX],
+                phys: [0u8; UHID_DEVICE2_CLASS_MAX],
+                uniq: [0u8; UHID_DEVICE2_CLASS_MAX],
+                rd_size: 0,
+                bus: 0,
+                vendor: 0,
+                product: 0,
+                version: 0,
+                country: 0,
+                rd_data: [0u8; UHID_DATA_MAX],
+            },
+        },
+    };
+
+    let n = read_event(fd, &mut event).context("read_event failed")?;
+    let kind = event.type_;
+
+    match kind {
+        UHID_START => emit_stdout(&serde_json::json!({"event": "uhid_start"})),
+        UHID_STOP => emit_stdout(&serde_json::json!({"event": "uhid_stop"})),
+        UHID_OPEN => emit_stdout(&serde_json::json!({"event": "uhid_open"})),
+        UHID_CLOSE => emit_stdout(&serde_json::json!({"event": "uhid_close"})),
+        UHID_OUTPUT => {
+            if let Some(payload) = output_event_payload(&event) {
+                emit_stdout(&serde_json::json!({
+                    "event": "output_report",
+                    "data": payload,
+                }));
+            }
+        }
+        UHID_GET_REPORT => {
+            let rid = get_report_request_id(&event);
+            emit_stdout(&serde_json::json!({
+                "event": "get_report",
+                "id": rid,
+            }));
+            let reply = build_get_report_reply_event(rid);
+            if let Err(e) = write_event(fd, &reply) {
+                log::warn!("get_report reply write failed: {e:#}");
+            }
+        }
+        UHID_SET_REPORT => {
+            let rid = get_report_request_id(&event);
+            emit_stdout(&serde_json::json!({
+                "event": "set_report",
+                "id": rid,
+            }));
+            let reply = build_set_report_reply_event(rid);
+            if let Err(e) = write_event(fd, &reply) {
+                log::warn!("set_report reply write failed: {e:#}");
+            }
+        }
+        other => {
+            emit_stdout(&serde_json::json!({
+                "event": "unknown",
+                "type": other,
+            }));
+        }
+    }
+
+    log::info!("uhid event: type={kind} n={n}");
+    Ok(())
+}
+
+fn poll_read_stdin(buf: &mut Vec<u8>) -> anyhow::Result<usize> {
+    let mut tmp = [0u8; 4096];
+    let n = loop {
+        let r = unsafe {
+            libc::read(
+                libc::STDIN_FILENO,
+                tmp.as_mut_ptr() as *mut std::ffi::c_void,
+                tmp.len(),
+            )
+        };
+        if r < 0 {
+            let err = std::io::Error::last_os_error();
+            if err.kind() == std::io::ErrorKind::Interrupted {
+                continue;
+            }
+            if err.kind() == std::io::ErrorKind::WouldBlock {
+                return Ok(0);
+            }
+            return Err(err.into());
+        }
+        break r;
+    };
+    if n == 0 {
+        return Ok(0);
+    }
+    buf.extend_from_slice(&tmp[..n as usize]);
+    Ok(n as usize)
+}
+
+/// Process complete lines from the stdin buffer. Returns `true` if the
+/// caller should stop the event loop (destroy command received).
+fn poll_process_stdin(dev: &dyn MockDevice, buf: &mut Vec<u8>) -> anyhow::Result<bool> {
+    loop {
+        let newline = match buf.iter().position(|&b| b == b'\n') {
+            Some(pos) => pos,
+            None => return Ok(false),
+        };
+
+        let raw = std::str::from_utf8(&buf[..newline])
+            .context("stdin is not valid UTF-8")?
+            .trim()
+            .to_owned();
+
+        buf.drain(..=newline);
+
+        if raw.is_empty() {
+            continue;
+        }
+
+        match handle_command(dev, &raw) {
+            Ok(CmdResult::Continue) => {}
+            Ok(CmdResult::Destroy) => return Ok(true),
+            Err(e) => {
+                emit_stdout(&serde_json::json!({
+                    "event": "error",
+                    "error": format!("{e:#}"),
+                }));
+            }
+        }
+    }
 }
