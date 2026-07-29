@@ -26,12 +26,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-22.04
+          - os: ubuntu-24.04
             arch: x86_64
             artifact_name: webhid-linux-x86_64
             apt_deps: libudev-dev zip
             rust_target: ""
-          - os: ubuntu-22.04-arm
+          - os: ubuntu-24.04-arm
             arch: aarch64
             artifact_name: webhid-linux-aarch64
             apt_deps: libudev-dev zip
