@@ -84,23 +84,12 @@ test.describe('Cross-origin iframe', () => {
       withAllow.src = crossUrl + '/iframe-child-with-allow';
       withAllow.allow = 'hid';
       document.body.appendChild(withAllow);
-    }, crossUrl('/'));
+    }, crossUrl(''));
 
     const childFrame = await waitForFrame(sharedPage, '/iframe-child-no-allow');
     await childFrame.locator('#__start-marker').waitFor({ state: 'attached', timeout: 10000 });
 
-    // Now wait for the result
-    try {
-      await childFrame.locator('#__perm-result').waitFor({ state: 'attached', timeout: 5000 });
-    } catch {
-      throw new Error('element not found');
-    }
-
-    const raw = await childFrame.evaluate(() => {
-      const el = document.getElementById('__perm-result');
-      if (!el || !el.dataset.json) return null;
-      try { return JSON.parse(el.dataset.json); } catch { return null; }
-    });
+    const raw = await readIframeResult(sharedPage, '/iframe-child-no-allow');
     expect(raw).not.toBeNull();
     expect(raw!.isCrossOrigin).toBe(true);
     expect(raw!.queryHid).toBe('denied');
@@ -120,19 +109,9 @@ test.describe('Cross-origin iframe', () => {
       withAllow.src = crossUrl + '/iframe-child-with-allow';
       withAllow.allow = 'hid';
       document.body.appendChild(withAllow);
-    }, crossUrl('/'));
+    }, crossUrl(''));
 
-    const childFrame = await waitForFrame(sharedPage, '/iframe-child-with-allow');
-    const noAllowFrame = await waitForFrame(sharedPage, '/iframe-child-no-allow');
-
-    await childFrame.locator('#__perm-result').waitFor({ state: 'attached', timeout: 10000 });
-    await noAllowFrame.locator('#__perm-result').waitFor({ state: 'attached', timeout: 10000 });
-
-    const raw = await childFrame.evaluate(() => {
-      const el = document.getElementById('__perm-result');
-      if (!el || !el.dataset.json) return null;
-      try { return JSON.parse(el.dataset.json); } catch { return null; }
-    });
+    const raw = await readIframeResult(sharedPage, '/iframe-child-with-allow');
     expect(raw).not.toBeNull();
     expect(raw!.isCrossOrigin).toBe(true);
     expect(raw!.queryHid).toBe('granted');
