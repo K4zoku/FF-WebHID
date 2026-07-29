@@ -5,13 +5,13 @@
 ```mermaid
 graph TB
     subgraph "Firefox tab"
-        Page["Web page (MAIN world)<br/>polyfill.js<br/>navigator.hid"]
-        Bridge["bridge.js<br/>(content script, isolated world)"]
-        Worker["worker.js<br/>(Web Worker, per-device)"]
+        Page["Web page (MAIN world)<br/>content/main/index.js<br/>navigator.hid"]
+        Bridge["content/isolated/bridge.js<br/>(content script, isolated world)"]
+        Worker["content/isolated/worker/index.js<br/>(Web Worker, per-device)"]
     end
 
     subgraph "Firefox background"
-        BG["background.js<br/>(extension background)"]
+        BG["background/index.js<br/>(extension background)"]
     end
 
     subgraph "OS processes"
@@ -43,21 +43,30 @@ Control operations (`enumerate`, `open`, `close`, `handshake`, `getPolicy`, `req
 
 | Component | What it does |
 |---|---|
-| `polyfill.js` | Polyfills `navigator.hid` in MAIN world; guards on `isSecureContext`; communicates with bridge via a MessageChannel port (port1) using a per-frame `frameNonce` for request origin tracking; per-device data channel is a separate MessageChannel created on `open()` (port1 kept, port2 transferred to bridge then to worker); receives input reports via the data port (direct from worker, zero-copy); sendReport/sendFeatureReport resolve on ack from worker; zero-copy DataView on transferred ArrayBuffer for input reports; `requestDevice` checks `navigator.userActivation.isActive` unless called from devtools console (`isCalledFromConsole`); wraps `navigator.permissions.query` for `hid` descriptor via `getPolicy` |
-| `bridge.js` | Content script (ISOLATED world); routes control/data actions; spawns per-device data worker via `new Worker(location.href)` (redirect-interception trick served by background.js webRequest filtering); relays data MessagePort page↔worker; sends NM handshake on init to get wsPort + wsNonce; computes WS auth hash via `crypto.subtle.digest("SHA-256", token + wsNonce)`; `SettingsStore` observer for live settings propagation; tracks open devices via `openDevices` Set; per-port origin tracking via `portOrigin` map (populated from browser-verified `MessageEvent.origin`); `getPolicy` checks iframe `allow="hid"` attribute for cross-origin frames; `globalReset` handler clears state on NM disconnect |
-| `worker.js` | Web Worker (per-device, WS data plane); binary WS to daemon via `createWsTransport`; input reports forwarded via transferred MessagePort (direct to page, zero-copy, no Xray); sendReport/sendFeatureReport sent as binary WS frames, resolved on WS ack (`handleControlResponse`); receiveFeatureReport via WS; auto-reconnect with exponential backoff; detects WS auth-failure close code 4401/4402 and triggers token refresh via bridge |
-| `worker-polyfill.js` | Not a worker. Stub WebHID API polyfill (HID, HIDDevice, HIDInputReportEvent, HIDConnectionEvent constructors) injected as a prefix into page-created Web Worker scripts by background.js webRequest filtering when `workerPolyfillEnabled` is true (global or per-site). All methods throw `NotSupportedError`. Exposes `navigator.hid` in worker scope. |
-| `background.js` | Extension background; owns NM port; handles `handshake` (returns wsPort + wsNonce); tab-targeted event delivery; `daemonAsNmHost` via `SettingsStore` (Windows defaults to true); NM error frame logging; packed TLV encode/decode for sendReport/sendFeatureReport/inputReport; serves worker bundle via webRequest `filterResponseData` on shadow-URL; injects worker-polyfill bundle into page worker scripts; `getPolicy` resolves Permissions-Policy (`hid` directive) from response headers + cross-origin iframe `allow` attr; broadcasts `globalReset` to all tabs on NM disconnect |
-| `picker.js` | `WebHidDevicePicker` class (ISOLATED world); closed-mode Shadow DOM (`attachShadow({mode:'closed'})`); three modes via `devicePickerMode` setting: `modal` (default, inline dialog), `pageAction` (url-bar popup), `window` (separate popup window) |
-| `settings.html` / `popup.html` | Settings UI: data plane (WS/NM), log level (global + per-site), daemon-as-NM-host, device picker mode, worker polyfill toggle |
-| `inject-main.js` | MV2-only MAIN-world injector. Fetches scripts via `runtime.sendMessage` `fetchResource`, injects as one `<script>`. Referenced only in `manifest.v2.json`. Not used in MV3 (content scripts use `"world": "MAIN"`). |
-| `utils/base64.js` | Polyfills `Uint8Array.fromBase64` + `Uint8Array.prototype.toBase64` if absent. Used by background.js for NM packed TLV base64. |
+| `content/main/index.js` | Polyfills `navigator.hid` in MAIN world; guards on `isSecureContext`; communicates with bridge via a MessageChannel port (port1) using a per-frame `frameNonce` for request origin tracking; per-device data channel is a separate MessageChannel created on `open()` (port1 kept, port2 transferred to bridge then to worker); receives input reports via the data port (direct from worker, zero-copy); sendReport/sendFeatureReport resolve on ack from worker; zero-copy DataView on transferred ArrayBuffer for input reports; `requestDevice` checks `navigator.userActivation.isActive` unless called from devtools console (`isCalledFromConsole`); wraps `navigator.permissions.query` for `hid` descriptor via `getPolicy` |
+| `content/isolated/bridge.js` | Content script (ISOLATED world); routes control/data actions; spawns per-device data worker via `new Worker(location.href)` (redirect-interception trick served by background webRequest filtering); relays data MessagePort page↔worker; sends NM handshake on init to get wsPort + wsNonce; computes WS auth hash via `crypto.subtle.digest("SHA-256", token + wsNonce)`; in-memory `allowedDeviceIds` Set (synced via `getAllowedDevices` message + `allowedDevicesChanged` broadcast); `dataPort` auth check is sync (`Set.has`) not async; `SettingsStore` observer for live settings propagation; tracks open devices via `openDevices` Set; per-port origin tracking via `portOrigin` map (populated from browser-verified `MessageEvent.origin`); `getPolicy` checks iframe `allow="hid"` attribute for cross-origin frames; `globalReset` handler clears state on NM disconnect |
+| `content/isolated/worker/index.js` | Web Worker (per-device, WS data plane); binary WS to daemon via `createWsTransport`; input reports forwarded via transferred MessagePort (direct to page, zero-copy, no Xray); sendReport/sendFeatureReport sent as binary WS frames, resolved on WS ack (`handleControlResponse`); receiveFeatureReport via WS; auto-reconnect with exponential backoff; detects WS auth-failure close code 4401/4402 and triggers token refresh via bridge |
+| `worker-polyfill.js` | Not a worker. Stub WebHID API polyfill (HID, HIDDevice, HIDInputReportEvent, HIDConnectionEvent constructors) injected as a prefix into page-created Web Worker scripts by background webRequest filtering when `workerPolyfillEnabled` is true (global or per-site). All methods throw `NotSupportedError`. Exposes `navigator.hid` in worker scope. |
+| `background/index.js` | Extension background entry; owns NM port; handles `handshake` (returns wsPort + wsNonce); tab-targeted event delivery; `daemonAsNmHost` via `SettingsStore` (Windows defaults to true); packed TLV encode/decode for sendReport/sendFeatureReport/inputReport; serves worker bundle via webRequest `filterResponseData` on shadow-URL; injects worker-polyfill bundle into page worker scripts; `getPolicy` resolves Permissions-Policy (`hid` directive) from response headers + cross-origin iframe `allow` attr; broadcasts `globalReset` to all tabs on NM disconnect; `ensureStorageSchemaVersion()` runs before any settings read; pair/unpair/revoke use IndexedDB + broadcast `allowedDevicesChanged`; `decodeDeviceCollections` decodes TLV base64 at cache time |
+| `background/state.js` | Shared mutable state: `deviceCache`, `deviceTabMap`, `permissionsPolicy`, `allowedCrossOrigin`, `pendingPicker`, `workerPolyfillSites` |
+| `background/storage.js` | IndexedDB `webhid-store`: `deviceInfo` store (keyPath: `deviceId`) + `origins` store (compound key `[origin, deviceId]`); `getAllowedDevices`/`addAllowedDevice`/`removeAllowedDevice` use per-record atomic ops (no read-modify-write) |
+| `background/nm.js` | `NativeMessaging` singleton: connect/reconnect/sendRequest/sendPacked; packed TLV event decode; `onPackedData`/`onControlEvent` handlers |
+| `background/bundle.js` | `ensureWorkerBundle` + `ensureWorkerPolyfillBundle`: fetch + concatenate JS files into a single string for StreamFilter injection |
+| `background/packed.js` | NM constants (ACT, EVT, PKG) + `buildPackedSend` binary TLV builder |
+| `background/state_ops.js` | Tab tracking: `registerDeviceTab`/`unregisterDeviceTab`/`isTabAuthorizedForDevice`/`purgeTab`; `broadcastGlobalReset` |
+| `content/isolated/picker/index.js` | `WebHidDevicePicker` class (ISOLATED world); closed-mode Shadow DOM (`attachShadow({mode:'closed'})`); three modes via `devicePickerMode` setting: `modal` (default, inline dialog), `pageAction` (url-bar popup), `window` (separate popup window) |
+| `internal/pages/settings/` | Settings UI (colocated HTML+CSS+JS): data plane (WS/NM), log level, daemon-as-NM-host, device picker mode, worker polyfill toggle |
+| `internal/pages/popup/` | Popup UI (colocated HTML+CSS+JS): per-site device list + settings overrides |
+| `content/isolated/inject.js` | MV2-only MAIN-world injector. Fetches scripts via `runtime.sendMessage` `fetchResource`, injects as one `<script>`. Referenced only in `manifest.v2.json`. Not used in MV3 (content scripts use `"world": "MAIN"`). |
+| `utils/base64.js` | Polyfills `Uint8Array.fromBase64` + `Uint8Array.prototype.toBase64` if absent. Used by background for NM packed TLV base64. |
 | `utils/bootstrap.js` | Module registry: `globalThis.webhid` with `export(name, value)` / `import(name)` backed by a Map. Polyfills `globalThis` if absent. |
 | `utils/websocket.js` | `createWsTransport` factory: WS connect/reconnect/backoff/auth-failure-handling. Reconnect 500ms→5s exponential backoff. Close codes 4401/4402 → `onAuthFailed` (halts reconnect). Subprotocol `webhid.<hash>` where hash is `SHA-256(sessionToken + wsNonce)`. |
+| `utils/descriptor-tlv.js` | `decodeCollectionsTlv(base64)`: decodes TLV binary + base64 wire format for `DeviceInfo.collections` into JS `HIDCollectionInfo[]` objects. Called once at cache time in background. |
+| `utils/i18n.js` | `t(key, subs)` wrapper around `browser.i18n.getMessage` + `localizeHTML(root)` for `data-i18n` attribute scanning. Works on document + shadow DOM. |
 | `webhid.forwarder_nm_host` | Thin byte-pipe NM host (forwarder mode): stdin ↔ Unix socket/named pipe via vectored I/O (`write_vectored`) on all platforms |
 | `webhid.daemon_nm_host` | Daemon-as-NM-host mode: daemon speaks NM directly on stdin/stdout (auto-detected via Firefox's 2 positional args) |
-| `webhid-daemon` | Long-running service; hidapi device handles; WS server (data only, loopback-only, port 0 by default); adaptive batching (25µs coalesce); Arc<[u8]> broadcast; per-device dataplane_mode; udev hot-plug; FIDO/U2F per-product blocklist (`hid.rs`) + collection/report-level blocklist (`blocklist.rs`: mouse/keyboard/keypad/System Control/Jabra/OnlyKey); report-level blocking via `is_report_blocked` on send/feature paths; abstract socket `@webhid` (Linux root); SO_PEERCRED + webhid group check; seccomp BPF + prctl hardening (Linux, release-only) |
-| `crates/webhid` | Shared Rust library: message types (NmRequest, NmResponse, IpcRequest, IpcResponse), protocol framing, base64 serde, FNV-1a device ID hash. NM wire uses single-char field names + HTTP status codes; packed binary TLVs for hot-path messages. |
+| `webhid-daemon` | Long-running service; hidapi device handles; WS server (data only, loopback-only, port 0 by default); adaptive batching (25µs coalesce); Arc<[u8]> broadcast; per-session `dataplane_modes` (HashMap<session_token, mode>); `has_nm_session` check for NM event forwarding; udev hot-plug; FIDO/U2F per-product blocklist (`hid.rs`) + collection/report-level blocklist (`blocklist.rs`: mouse/keyboard/keypad/System Control/Jabra/OnlyKey); report-level blocking via `is_report_blocked` on send/feature paths; abstract socket `@webhid` (Linux root); SO_PEERCRED + webhid group check; seccomp BPF + prctl hardening (Linux, release-only); constant-time WS auth hash comparison via `subtle::ConstantTimeEq` |
+| `crates/webhid` | Shared Rust library: message types (NmRequest, NmResponse, IpcRequest, IpcResponse), protocol framing, base64 serde, FNV-1a device ID hash, `collections_tlv` module (TLV binary + base64 serde for `DeviceInfo.collections`). NM wire uses single-char field names + HTTP status codes; packed binary TLVs for hot-path messages + collections. |
 
 ## Control plane (NM only)
 
@@ -119,7 +128,7 @@ sendReport/sendFeatureReport via NM resolve on the NM ack. Input reports come vi
 | `Arc::from(&frame[6..])` in WS binary handler | Zero-copy slice for spawn_blocking |
 | Batch Vec stores `(u8, Arc<[u8]>)` | No per-report `full_report` alloc; reportId prepended in `create_batch_frame` |
 | Adaptive flush (25µs coalescing) | 0 latency for sparse, ≤25µs for bursts |
-| Per-device `dataplane_mode` | Events sent only to requested channel (NM or WS), no duplicate delivery |
+| Per-session `dataplane_modes` | Events sent only to sessions with matching mode; `has_nm_session` checks if any session on a device is in NM mode before forwarding InputReports via NM |
 | Thread-local `WRITE_BUF` / `READ_BUF` | Avoids per-call allocation in hot path |
 | NM packed TLVs (0x01/0x02/0x04) | Hot-path messages use `{"d":"<b64>"}` wrapper, reqId inside TLV: saves 7-14 bytes vs JSON fields |
 | NM bg→tab Uint8Array transfer | Background decodes base64 once, sends Uint8Array to tab (structured clone): saves 1 encode + 1 decode per input report |
@@ -185,7 +194,9 @@ All layers auto-reconnect with exponential backoff:
 
 ## Settings
 
-Settings are stored in `browser.storage.local`. Global defaults + the `SettingsStore` factory live in `js/utils/settings.js`. Per-site overrides are stored under the key `site:<origin>`.
+Settings are stored in `browser.storage.local` with per-key format: global settings use key `settings :: <name>`, site overrides use `settings :: <origin> :: <name>` (separator `" :: "` with spaces to avoid collision with IPv6 origin literals). The `SettingsStore` factory + key helpers (`globalSettingKey`, `siteSettingKey`, `parseSettingsKey`, `loadGlobalSettings`, `loadSiteSettings`, `saveGlobalSetting`, `saveSiteSetting`) live in `js/utils/settings.js`. A schema version key `meta :: storage :: version` prevents re-migration.
+
+Device info cache and origin device allowlists are stored in IndexedDB (`webhid-store`), not `storage.local`. Object stores: `deviceInfo` (keyPath: `deviceId`) and `origins` (compound key `[origin, deviceId]`). Content scripts maintain an in-memory `allowedDeviceIds` Set synced via `getAllowedDevices` message + `allowedDevicesChanged` broadcast from background.
 
 | Setting | Values | Default | Description |
 |---|---|---|---|
