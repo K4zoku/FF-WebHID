@@ -161,6 +161,8 @@ export function createProfile(profileDir: string): void {
 
 export async function cleanupAll(): Promise<void> {
   for (const p of [DEFAULT_SOCKET, '/tmp/webhid-daemon.sock', '/tmp/webhid-daemon.pid']) {
-    if (existsSync(p)) await rm(p, { force: true });
+    const resolved = resolve(p);
+    if (!resolved.startsWith('/tmp/') && !resolved.startsWith('/run/user/')) continue;
+    if (existsSync(resolved)) await rm(resolved, { force: true });
   }
 }

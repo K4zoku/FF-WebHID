@@ -63,8 +63,8 @@ export async function startPolicyServer(port = 0): Promise<ServerHandle> {
     const pathname = (req.url ?? '/').split('?')[0];
     const body = PAGES[pathname];
     if (!body) {
-      res.writeHead(404);
-      res.end('not found: ' + req.url);
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('not found');
       return;
     }
     const headers = HEADERS[pathname] || {};
