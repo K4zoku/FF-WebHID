@@ -47,7 +47,7 @@ function minifyCSS(code) {
 
 function minifyHTML(code) {
   return code
-    .replace(/<!--[\s\S]*?--\s*>/g, "")                   // remove HTML comments
+    .replace(/<!--[\s\S]*?-->/g, "")                      // remove HTML comments
     .replace(/>\s+</g, "><")                              // collapse whitespace between tags
     .replace(/\s{2,}/g, " ")                              // collapse multiple whitespace
     .replace(/\s*([=])\s*/g, "$1")                        // collapse spaces around =
@@ -232,11 +232,11 @@ function replaceUtilScripts(arr) {
  */
 function transformHtml(html) {
   const cleaned = html.replace(
-    /<script[^>]*src="[^"]*\/js\/utils\/[^/]+\.js"[^>]*><\/script>\s*/g,
+    /<script[^<]*src="[^"]*\/js\/utils\/[^/]+\.js"[^<]*><\/script>\s*/gi,
     ""
   );
   return cleaned.replace(
-    /(<script[^>]*src="[^"]*"[^>]*><\/script>)/,
+    /(<script[^<]*src="[^"]*"[^<]*><\/script>)/i,
     '<script src="../../../js/utils/common.js"></script>\n    $1'
   );
 }
