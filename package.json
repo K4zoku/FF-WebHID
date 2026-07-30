@@ -9,7 +9,7 @@
     "release:patch": "nubx commit-and-tag-version --release-as patch",
     "lint": "nubx web-ext lint -s addon",
     "lint:js": "nubx eslint addon/js/",
-    "format": "nubx prettier addon/**/*.js addon/**/*.css addon/**/*.html -w",
+    "format": "nubx prettier . --write",
     "build": "make build && npm run build:addon",
     "build:addon": "node scripts/build-addon.mjs",
     "build:msi": "powershell -NoProfile -ExecutionPolicy Bypass -File packaging/windows/build-msi.ps1",
@@ -18,7 +18,12 @@
     "test:e2e": "nubx playwright test --config tests/playwright.config.ts --project=firefox-e2e",
     "test:headed": "nubx playwright test --config tests/playwright.config.ts --headed",
     "test:debug": "nubx playwright test --config tests/playwright.config.ts --debug",
-    "lint:test": "nubx eslint tests/ eslint.config.ts"
+    "lint:test": "nubx eslint tests/ eslint.config.ts",
+    "format:js": "nubx prettier 'addon/**/*.js' --write",
+    "format:css": "nubx prettier 'addon/**/*.css' --write",
+    "format:html": "nubx prettier 'addon/**/*.html' --write",
+    "format:json": "nubx prettier 'addon/**/*.json' '*.json' --write",
+    "format:docs": "nubx prettier '**/*.md' --write"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

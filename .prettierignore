@@ -1,0 +1,9 @@
+.store/
+node_modules/
+dist/
+addon/_locales/
+addon/manifest.v2.json
+addon/manifest.v3.json
+crates/target/
+test-results/
+.zed/
