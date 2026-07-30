@@ -23,9 +23,26 @@ const EVENT_CAPACITY: usize = 8192;
 const DEFAULT_SOCKET: &str = "/tmp/webhid.sock";
 
 #[cfg(unix)]
+fn validate_socket_path(path: &str) -> String {
+    #[cfg(target_os = "linux")]
+    {
+        if path.starts_with('@') {
+            return path.to_string();
+        }
+    }
+    let p = std::path::Path::new(path);
+    if !p.is_absolute() {
+        panic!("WEBHID_SOCKET must be an absolute path");
+    }
+    if path.contains("..") {
+        panic!("WEBHID_SOCKET must not contain '..'");
+    }
+    path.to_string()
+}
+
 fn resolve_socket_path() -> String {
     if let Ok(path) = std::env::var("WEBHID_SOCKET") {
-        return path;
+        return validate_socket_path(&path);
     }
     #[cfg(target_os = "linux")]
     {
@@ -36,7 +53,10 @@ fn resolve_socket_path() -> String {
         // User-mode: filesystem socket (parent dir is 0700, no cross-user symlink risk)
         if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
             if !dir.is_empty() {
-                return format!("{dir}/webhid/webhid.sock");
+                let p = std::path::Path::new(&dir);
+                if p.is_absolute() && !dir.contains("..") {
+                    return format!("{dir}/webhid/webhid.sock");
+                }
             }
         }
         let uid = unsafe { libc::getuid() };
@@ -206,7 +226,10 @@ async fn main() -> anyhow::Result<()> {
     #[cfg(windows)]
     {
         use tokio::net::windows::named_pipe::ServerOptions;
-        let pipe_name = std::env::var("WEBHID_PIPE").unwrap_or_else(|_| DEFAULT_PIPE.to_string());
+        let pipe_name = match std::env::var("WEBHID_PIPE") {
+            Ok(name) if name.starts_with(r"\\.\pipe\") && !name[8..].contains('\\') => name,
+            _ => DEFAULT_PIPE.to_string(),
+        };
 
         log::info!("webhid-daemon listening on {pipe_name}");
         log::info!("WebSocket server on port {actual_ws_port}");

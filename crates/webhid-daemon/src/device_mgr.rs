@@ -14,6 +14,9 @@ use webhid::{DeviceInfo, IpcResponse};
 
 use crate::blocklist::{self, ReportType};
 use crate::hid;
+const MODE_NM: &str = "nm";
+const MODE_WS: &str = "ws";
+
 
 struct Entry {
     device: Arc<Mutex<HidDevice>>,
@@ -27,21 +30,10 @@ struct Entry {
     report_to_collection: Arc<HashMap<(u8, u8), (Option<u16>, Option<u16>)>>,
 }
 
-const HEX_CHARS: &[u8; 16] = b"0123456789abcdef";
-
-fn hex_encode(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for &b in bytes {
-        out.push(HEX_CHARS[(b >> 4) as usize] as char);
-        out.push(HEX_CHARS[(b & 0x0f) as usize] as char);
-    }
-    out
-}
-
 fn random_hex_token(n: usize) -> Result<String, getrandom::Error> {
     let mut buf = vec![0u8; n];
     getrandom::fill(&mut buf)?;
-    Ok(hex_encode(&buf))
+    Ok(hex::encode(&buf))
 }
 
 fn build_report_collection_map(
@@ -97,7 +89,7 @@ fn compute_ws_auth_hash(token: &str, nonce: &str) -> String {
     hasher.update(token.as_bytes());
     hasher.update(nonce.as_bytes());
     let digest = hasher.finalize();
-    hex_encode(&digest)
+    hex::encode(&digest)
 }
 
 pub struct DeviceManager {
@@ -106,11 +98,10 @@ pub struct DeviceManager {
     ws_nonce: String,
     event_tx: broadcast::Sender<IpcResponse>,
 }
-
 impl DeviceManager {
     pub fn new(event_tx: broadcast::Sender<IpcResponse>) -> Self {
         let ws_nonce = random_hex_token(16)
-            .unwrap_or_else(|_| "00000000000000000000000000000000".to_string());
+            .expect("getrandom should not fail on modern kernels");
         Self {
             devices: Mutex::new(HashMap::new()).into(),
             ws_auth_hashes: Mutex::new(HashMap::new()).into(),
@@ -127,6 +118,7 @@ impl DeviceManager {
         hid::enumerate()
     }
 
+
     pub fn open(&self, device_id: u32) -> anyhow::Result<(u32, Option<String>)> {
         let session_token = random_hex_token(16)?;
         let ws_auth_hash = compute_ws_auth_hash(&session_token, &self.ws_nonce);
@@ -137,14 +129,14 @@ impl DeviceManager {
                 entry.refcount += 1;
                 let rc = entry.refcount;
                 entry.dataplane_modes.lock().unwrap_or_else(|e| e.into_inner())
-                    .insert(session_token.clone(), "nm".to_string());
+                    .insert(session_token.clone(), MODE_NM.to_string());
                 drop(map);
                 self.ws_auth_hashes
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
                     .insert(ws_auth_hash.clone(), (device_id, session_token.clone()));
                 log::info!("[device_mgr] {device_id:#x} refcount → {rc} (existing session)");
-                return Ok((device_id, Some(session_token)));
+                return Ok((rc, None));
             }
         }
 
@@ -170,7 +162,7 @@ impl DeviceManager {
             entry.refcount += 1;
             let rc = entry.refcount;
             entry.dataplane_modes.lock().unwrap_or_else(|e| e.into_inner())
-                .insert(session_token.clone(), "nm".to_string());
+                .insert(session_token.clone(), MODE_NM.to_string());
             drop(map);
             self.ws_auth_hashes
                 .lock()
@@ -186,7 +178,7 @@ impl DeviceManager {
             handle: None,
             refcount: 1,
             ws_generation: AtomicU64::new(0),
-            dataplane_modes: Mutex::new(HashMap::from([(session_token.clone(), "nm".to_string())])),
+            dataplane_modes: Mutex::new(HashMap::from([(session_token.clone(), MODE_NM.to_string())])),
             vendor_id: info.vendor_id,
             product_id: info.product_id,
             report_to_collection: Arc::clone(&report_map),
@@ -327,7 +319,7 @@ impl DeviceManager {
         if let Some(entry) = map.get(&device_id) {
             let g = entry.ws_generation.fetch_add(1, Ordering::SeqCst) + 1;
             entry.dataplane_modes.lock().unwrap_or_else(|e| e.into_inner())
-                .insert(session_token.to_string(), "ws".to_string());
+                .insert(session_token.to_string(), MODE_WS.to_string());
             log::info!("[device_mgr] {device_id:#x} WS connect gen={g}");
             g
         } else {
@@ -341,7 +333,7 @@ impl DeviceManager {
             let current = entry.ws_generation.load(Ordering::SeqCst);
             if current == generation {
                 entry.dataplane_modes.lock().unwrap_or_else(|e| e.into_inner())
-                    .insert(session_token.to_string(), "nm".to_string());
+                    .insert(session_token.to_string(), MODE_NM.to_string());
                 log::info!("[device_mgr] {device_id:#x} WS disconnect gen={generation} → nm");
             } else {
                 log::info!(
@@ -355,7 +347,7 @@ impl DeviceManager {
         let map = self.devices.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(entry) = map.get(&device_id) {
             let modes = entry.dataplane_modes.lock().unwrap_or_else(|e| e.into_inner());
-            modes.values().any(|m| m == "nm")
+            modes.values().any(|m| m == MODE_NM)
         } else {
             false
         }
@@ -441,11 +433,13 @@ impl DeviceManager {
         None
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use tokio::sync::broadcast;
+
+    fn test_token(seed: u8) -> String { hex::encode(&[seed; 16]) }
+    fn test_nonce(seed: u8) -> String { hex::encode(&[seed; 16]) }
 
     #[test]
     fn test_has_nm_session_no_device() {
@@ -481,8 +475,8 @@ mod tests {
     #[test]
     fn test_compute_ws_auth_hash_is_64_hex_chars() {
         let hash = compute_ws_auth_hash(
-            "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
-            "0123456789abcdef0123456789abcdef",
+            &test_token(0xa1),
+            &test_nonce(0x01),
         );
         assert_eq!(hash.len(), 64);
         assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
@@ -490,26 +484,26 @@ mod tests {
 
     #[test]
     fn test_compute_ws_auth_hash_deterministic() {
-        let token = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6";
-        let nonce = "0123456789abcdef0123456789abcdef";
-        let h1 = compute_ws_auth_hash(token, nonce);
-        let h2 = compute_ws_auth_hash(token, nonce);
+        let token = test_token(0xa1);
+        let nonce = test_nonce(0x01);
+        let h1 = compute_ws_auth_hash(&token, &nonce);
+        let h2 = compute_ws_auth_hash(&token, &nonce);
         assert_eq!(h1, h2);
     }
 
     #[test]
     fn test_compute_ws_auth_hash_differs_on_token() {
-        let nonce = "0123456789abcdef0123456789abcdef";
-        let h1 = compute_ws_auth_hash("a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6", nonce);
-        let h2 = compute_ws_auth_hash("b1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6", nonce);
+        let nonce = test_nonce(0x01);
+        let h1 = compute_ws_auth_hash(&test_token(0xa1), &nonce);
+        let h2 = compute_ws_auth_hash(&test_token(0xb1), &nonce);
         assert_ne!(h1, h2);
     }
 
     #[test]
     fn test_compute_ws_auth_hash_differs_on_nonce() {
-        let token = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6";
-        let h1 = compute_ws_auth_hash(token, "0123456789abcdef0123456789abcdef");
-        let h2 = compute_ws_auth_hash(token, "123456789abcdef0123456789abcdef0");
+        let token = test_token(0xa1);
+        let h1 = compute_ws_auth_hash(&token, &test_nonce(0x01));
+        let h2 = compute_ws_auth_hash(&token, &test_nonce(0x02));
         assert_ne!(h1, h2);
     }
 }
