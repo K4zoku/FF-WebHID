@@ -2,7 +2,7 @@
 
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { mkdir, readFile, writeFile, rm } from "node:fs/promises";
-import { join, dirname } from "node:path";
+import { join, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { minify } from "terser";
@@ -47,7 +47,7 @@ function minifyCSS(code) {
 
 function minifyHTML(code) {
   return code
-    .replace(/<!--[\s\S]*?-->/g, "")                      // remove HTML comments
+    .replace(/<!--[\s\S]*?(?:-->|$)/g, "")                // remove HTML comments
     .replace(/>\s+</g, "><")                              // collapse whitespace between tags
     .replace(/\s{2,}/g, " ")                              // collapse multiple whitespace
     .replace(/\s*([=])\s*/g, "$1")                        // collapse spaces around =
@@ -229,15 +229,22 @@ function replaceUtilScripts(arr) {
 
 /**
  * Replaces individual util <script> tags in HTML with a single common.js tag.
+ * @param {string} html - HTML content
+ * @param {string} htmlRel - path relative to addon root (e.g. "js/internal/pages/popup/index.html")
  */
-function transformHtml(html) {
-  const cleaned = html.replace(
-    /<script[^<]*src="[^"]*\/js\/utils\/[^/]+\.js"[^<]*><\/script>\s*/gi,
-    ""
-  );
-  return cleaned.replace(
-    /(<script[^<]*src="[^"]*"[^<]*><\/script>)/i,
-    '<script src="../../../js/utils/common.js"></script>\n    $1'
+function transformHtml(html, htmlRel) {
+  const commonRel = relative(dirname(htmlRel), 'js/utils/common.js');
+  let inserted = false;
+  return html.replace(
+    /<script[^<]*src="([^"]*)"[^<]*><\/script\s*>\s*/gi,
+    (match, src) => {
+      if (src.includes('/js/utils/')) return '';
+      if (!inserted) {
+        inserted = true;
+        return `<script src="${commonRel}"></script>\n    ` + match;
+      }
+      return match;
+    }
   );
 }
 
@@ -270,7 +277,7 @@ function transformBundleJs(code) {
 
 function transformFile(rel, code) {
   if (rel === "manifest.json") return transformManifest(code);
-  if (rel.endsWith(".html") && code.includes("../../../js/utils/")) return transformHtml(code);
+  if (rel.endsWith(".html") && code.includes('/js/utils/')) return transformHtml(code, rel);
   if (rel === "js/content/isolated/inject.js") return transformInjectJs(code);
   if (rel === "js/background/bundle.js") return transformBundleJs(code);
   return code;
