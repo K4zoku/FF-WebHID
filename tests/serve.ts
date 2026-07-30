@@ -93,10 +93,15 @@ const MIME: Record<string, string> = {
 export async function startStaticServer(port = 0): Promise<ServerHandle> {
   const server = http.createServer((req, res) => {
     const filePath = join(projectRoot, req.url === '/' ? '/index.html' : req.url ?? '/');
-    const ext = extname(filePath);
-    readFile(filePath, (err, data) => {
+    const resolved = resolve(filePath);
+    if (!resolved.startsWith(projectRoot + '/')) {
+      res.writeHead(403);
+      res.end('Forbidden');
+      return;
+    }
+    const ext = extname(resolved);
+    readFile(resolved, (err, data) => {
       if (err) {
-        res.writeHead(404);
         res.end('Not found');
         return;
       }

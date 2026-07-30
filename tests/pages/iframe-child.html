@@ -24,10 +24,8 @@
         } catch (e) {
           qHid = "ERROR: " + e.message;
         }
-        console.log("DEBUG[" + _urlAtStart + "] qHid =", qHid);
 
         const hidUndefined = typeof navigator.hid === "undefined";
-        console.log("DEBUG[" + _urlAtStart + "] hidUndefined =", hidUndefined);
 
         const result = { isCrossOrigin, queryHid: qHid, hidUndefined, _urlAtStart };
         const el = document.createElement("div");
@@ -35,7 +33,6 @@
         el.dataset.json = JSON.stringify(result);
         el.textContent = JSON.stringify(result);
         document.body.appendChild(el);
-        console.log("DEBUG[" + _urlAtStart + "] result element appended");
       })();
     </script>
   </body>

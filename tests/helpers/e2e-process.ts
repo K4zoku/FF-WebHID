@@ -36,9 +36,14 @@ export async function startDaemon(socketPath: string = DEFAULT_SOCKET): Promise<
       reject(new Error(`Daemon binary not found at ${bin}. Build with 'cargo build' first.`));
       return;
     }
+    const resolvedSocket = resolve(socketPath);
+    const tmpDir = resolve('/tmp');
+    if (!resolvedSocket.startsWith(tmpDir + '/') && !resolvedSocket.startsWith(projectRoot)) {
+      throw new Error(`socketPath must be under ${tmpDir} or ${projectRoot}`);
+    }
     const proc = spawn(bin, [], {
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, WEBHID_SOCKET: socketPath },
+      env: { ...process.env, WEBHID_SOCKET: resolvedSocket },
     });
     const onData = (data: Buffer) => {
       const msg = data.toString();
@@ -75,10 +80,13 @@ export function startWebhidMock(
   if (!existsSync(bin)) {
     throw new Error(`webhid-mock binary not found at ${bin}. Build with 'cargo build' first.`);
   }
+  if (descriptor.includes('/') || descriptor.includes('\\') || descriptor === '..' || descriptor.startsWith('..')) {
+    throw new Error(`Invalid descriptor filename: ${descriptor}`);
+  }
   const proc = spawn(bin, [
     'spawn',
-    '--vid', '0x' + vid.toString(16),
-    '--pid', '0x' + pid.toString(16),
+    '--vid', `0x${vid.toString(16)}`,
+    '--pid', `0x${pid.toString(16)}`,
     '--descriptor', join(projectRoot, 'tests', 'fixtures', 'descriptors', descriptor),
   ], {
     stdio: ['pipe', 'pipe', 'pipe'],
