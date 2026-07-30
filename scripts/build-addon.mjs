@@ -31,20 +31,26 @@ const TERSER_OPTS = {
 // ── HTML/CSS minification ────────────────────────────────────────────────────
 
 function minifyCSS(code) {
-  return code
-    .replace(/\/\*[\s\S]*?\*\//g, "")       // remove comments
-    .replace(/\s*([{}:;,])\s*/g, "$1")       // collapse whitespace around tokens
-    .replace(/;\}/g, "}")                     // remove trailing semicolons
-    .replace(/\/\//g, "")                     // no single-line comments in CSS
+  const strings = [];
+  code = code.replace(/(['"])(?:\\.|(?!\1)[^\\])*?\1/g, s => {
+    strings.push(s);
+    return `\0STR${strings.length - 1}\0`;
+  });
+  code = code.replace(/\/\*[\s\S]*?\*\//g, "");           // remove comments
+  code = code.replace(/\0STR(\d+)\0/g, (_, i) => strings[i]);
+  code = code
+    .replace(/\s*([{}:;,])\s*/g, "$1")                    // collapse whitespace around tokens
+    .replace(/;\}/g, "}")                                 // remove trailing semicolons
     .trim();
+  return code;
 }
 
 function minifyHTML(code) {
   return code
-    .replace(/<!--[\s\S]*?-->/g, "")          // remove HTML comments
-    .replace(/>\s+</g, "><")                  // collapse whitespace between tags
-    .replace(/\s{2,}/g, " ")                  // collapse multiple whitespace
-    .replace(/\s*([=])\s*/g, "$1")            // collapse spaces around =
+    .replace(/<!--[\s\S]*?--\s*>/g, "")                   // remove HTML comments
+    .replace(/>\s+</g, "><")                              // collapse whitespace between tags
+    .replace(/\s{2,}/g, " ")                              // collapse multiple whitespace
+    .replace(/\s*([=])\s*/g, "$1")                        // collapse spaces around =
     .trim();
 }
 
@@ -171,20 +177,12 @@ function collectAllFiles(manifestFiles) {
   return all;
 }
 
-// ── common.js generation ──────────────────────────────────────────────────────
+// ── utils bundled into common.js (derived from manifest at build time) ────────
 
-const UTILS_ORDER = [
-  "bootstrap.js",
-  "i18n.js",
-  "resource.js",
-  "http.js",
-  "logger.js",
-  "device.js",
-  "descriptor-tlv.js",
-  "settings.js",
-  "base64.js",
-  "theme-sync.js",
-];
+/** @type {string[]} */
+let UTIL_FILES = [];
+/** @type {Set<string>} */
+let BUNDLED_UTILS = new Set();
 
 /**
  * Concatenates and minifies all utils into common.js, writing to outDir.
@@ -194,7 +192,7 @@ const UTILS_ORDER = [
  */
 async function buildCommonJs(srcDir, outDir) {
   const codes = [];
-  for (const f of UTILS_ORDER) {
+  for (const f of UTIL_FILES) {
     const fp = join(srcDir, "js/utils", f);
     if (existsSync(fp)) codes.push(await readFile(fp, "utf-8"));
   }
@@ -205,24 +203,6 @@ async function buildCommonJs(srcDir, outDir) {
   await mkdir(dirname(commonPath), { recursive: true });
   await writeFile(commonPath, result.code ?? "", "utf-8");
 }
-
-// ── build ────────────────────────────────────────────────────────────────────
-
-// ── build-time transforms (replace individual utils with common.js) ──────────
-
-const UTIL_PATTERN = /^js\/utils\/(bootstrap|i18n|resource|http|logger|device|descriptor-tlv|settings|base64|theme-sync)\.js$/;
-const BUNDLED_UTILS = new Set([
-  "js/utils/bootstrap.js",
-  "js/utils/i18n.js",
-  "js/utils/resource.js",
-  "js/utils/http.js",
-  "js/utils/logger.js",
-  "js/utils/device.js",
-  "js/utils/descriptor-tlv.js",
-  "js/utils/settings.js",
-  "js/utils/base64.js",
-  "js/utils/theme-sync.js",
-]);
 
 /**
  * Replaces individual util references in a manifest JSON string with common.js.
@@ -241,9 +221,9 @@ function transformManifest(json) {
 }
 
 function replaceUtilScripts(arr) {
-  const hasUtil = arr.some(s => UTIL_PATTERN.test(s));
-  if (!hasUtil) return arr;
-  const nonUtils = arr.filter(s => !UTIL_PATTERN.test(s) && s !== "js/utils/common.js");
+  const hasCommon = arr.some(s => BUNDLED_UTILS.has(s));
+  if (!hasCommon) return arr;
+  const nonUtils = arr.filter(s => !BUNDLED_UTILS.has(s) && s !== "js/utils/common.js");
   return ["js/utils/common.js", ...nonUtils];
 }
 
@@ -327,7 +307,30 @@ async function build() {
   const allowedFiles = collectAllFiles(manifestFiles);
   console.log(`Source manifest references ${allowedFiles.size} files`);
 
-  // Clean dist directory to avoid leftover files from previous builds
+  // Read manifest to find utils shared across 2+ context arrays (the "common" ones)
+  const rawManifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
+  const contextArrays = [];
+  if (rawManifest.background?.scripts) contextArrays.push(rawManifest.background.scripts);
+  if (Array.isArray(rawManifest.content_scripts)) {
+    for (const cs of rawManifest.content_scripts) {
+      if (Array.isArray(cs.js)) contextArrays.push(cs.js);
+    }
+  }
+  const utilCounts = new Map();
+  for (const arr of contextArrays) {
+    const seen = new Set();
+    for (const p of arr) {
+      if (p.startsWith("js/utils/") && p.endsWith(".js") && !seen.has(p)) {
+        utilCounts.set(p, (utilCounts.get(p) || 0) + 1);
+        seen.add(p);
+      }
+    }
+  }
+  const bundledUtils = new Set([...utilCounts].filter(([_, c]) => c >= 2).map(([p]) => p));
+
+  // Derive bundled util list from manifest script intersection
+  UTIL_FILES = [...bundledUtils].map(p => p.replace("js/utils/", ""));
+  BUNDLED_UTILS = bundledUtils;
   if (existsSync(DIST)) {
     await rm(DIST, { recursive: true, force: true });
   }
