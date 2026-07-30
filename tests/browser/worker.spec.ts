@@ -32,8 +32,8 @@ test.describe('Worker WebHID API', () => {
       const w = new Worker('/worker.js?_=' + ts);
       const result = await new Promise((resolve, reject) => {
         w.onmessage = (e: MessageEvent) => resolve(e.data);
-        w.onerror = (e: ErrorEvent) => reject(e.message || e.error?.message || String(e));
-        setTimeout(() => reject('timeout'), 10000);
+        w.onerror = (e: ErrorEvent) => reject(new Error(e.message));
+        setTimeout(() => reject(new Error('timeout')), 10000);
       });
       w.terminate();
       return result as WorkerResult;

@@ -1,8 +1,6 @@
 import { test as base, type Page, expect } from '@playwright/test';
 import type { TestType, PlaywrightTestArgs, PlaywrightTestOptions, PlaywrightWorkerArgs, PlaywrightWorkerOptions } from '@playwright/test';
 import { createRequire } from 'module';
-import { resolve, dirname } from 'path';
-import { fileURLToPath } from 'url';
 import { startStaticServer } from '../serve.js';
 import {
   startDaemon, stopDaemon,
@@ -31,10 +29,6 @@ const { applyFirefoxHarness } = require('firefox-webext-playwright-harness') as 
     opts?: { defaultRouteHandler?: (route: { continue(): void }) => void },
   ) => HarnessTestType;
 };
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
 function createTestApi(page: Page): WebHidTestAPI {
   return {
     isPolyfillLoaded: () =>
@@ -87,7 +81,7 @@ export const test = harnessTest.extend<E2eTestFixtures, E2eWorkerFixtures>({
   }, { scope: 'worker', auto: true }],
 
   webhidMock: [async ({}, use) => {
-    const m = await startWebhidMock('switchpro-gamepad.bin', 0x16c0, 0x0001);
+    const m = startWebhidMock('switchpro-gamepad.bin', 0x16c0, 0x0001);
     await m.ready;
     await use(m);
     stopWebhidMock(m);
@@ -100,7 +94,7 @@ export const test = harnessTest.extend<E2eTestFixtures, E2eWorkerFixtures>({
   }, { scope: 'worker', auto: true }],
 
   nmManifest: [async ({}, use) => {
-    await installNmManifest(DEFAULT_SOCKET);
+    installNmManifest(DEFAULT_SOCKET);
     await use();
     uninstallNmManifest();
   }, { scope: 'worker', auto: true }],
@@ -119,7 +113,7 @@ export const test = harnessTest.extend<E2eTestFixtures, E2eWorkerFixtures>({
     await use(createTestApi(sharedPage));
   }, { scope: 'test' }],
 
-  beforeEach: [async ({ testApi }, use) => {
+  beforeEach: [async ({}, use) => {
     await use();
   }, { scope: 'test', auto: true }],
 });

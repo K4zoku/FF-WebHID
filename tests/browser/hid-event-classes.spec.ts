@@ -7,8 +7,8 @@ test.describe('HIDConnectionEvent', () => {
   });
 
   test('new HIDConnectionEvent("connect", { device }) creates an instance', async ({ sharedPage }) => {
-    const result = await sharedPage.evaluate(() => {
-      const fakeDevice = Object.create(HIDDevice.prototype);
+    const result = await sharedPage.evaluate<{ type: string; deviceIsSame: boolean; instanceOf: boolean; instanceOfEvent: boolean }>(() => {
+      const fakeDevice = Object.create(HIDDevice.prototype) as HIDDevice;
       const ev = new HIDConnectionEvent('connect', { device: fakeDevice });
       return {
         type: ev.type,
@@ -24,8 +24,8 @@ test.describe('HIDConnectionEvent', () => {
   });
 
   test('new HIDConnectionEvent("disconnect", { device }) is also constructable', async ({ sharedPage }) => {
-    const result = await sharedPage.evaluate(() => {
-      const fakeDevice = Object.create(HIDDevice.prototype);
+    const result = await sharedPage.evaluate<{ type: string; deviceIsSame: boolean }>(() => {
+      const fakeDevice = Object.create(HIDDevice.prototype) as HIDDevice;
       const ev = new HIDConnectionEvent('disconnect', { device: fakeDevice });
       return { type: ev.type, deviceIsSame: ev.device === fakeDevice };
     });
@@ -42,8 +42,8 @@ test.describe('HIDInputReportEvent', () => {
   });
 
   test('new HIDInputReportEvent("inputreport", { device, reportId, data }) creates an instance', async ({ sharedPage }) => {
-    const result = await sharedPage.evaluate(() => {
-      const fakeDevice = Object.create(HIDDevice.prototype);
+    const result = await sharedPage.evaluate<{ type: string; deviceIsSame: boolean; reportId: number; dataIsSame: boolean; instanceOf: boolean }>(() => {
+      const fakeDevice = Object.create(HIDDevice.prototype) as HIDDevice;
       const buf = new ArrayBuffer(4);
       const dv = new DataView(buf);
       const ev = new HIDInputReportEvent('inputreport', {
@@ -67,8 +67,8 @@ test.describe('HIDInputReportEvent', () => {
   });
 
   test('data attribute is a DataView', async ({ sharedPage }) => {
-    const result = await sharedPage.evaluate(() => {
-      const fakeDevice = Object.create(HIDDevice.prototype);
+    const result = await sharedPage.evaluate<boolean>(() => {
+      const fakeDevice = Object.create(HIDDevice.prototype) as HIDDevice;
       const buf = new ArrayBuffer(8);
       const dv = new DataView(buf);
       const ev = new HIDInputReportEvent('inputreport', {
@@ -82,8 +82,8 @@ test.describe('HIDInputReportEvent', () => {
   });
 
   test('reportId ranges 0–255 (octet)', async ({ sharedPage }) => {
-    const result = await sharedPage.evaluate(() => {
-      const fakeDevice = Object.create(HIDDevice.prototype);
+    const result = await sharedPage.evaluate<{ high: number; low: number }>(() => {
+      const fakeDevice = Object.create(HIDDevice.prototype) as HIDDevice;
       const buf = new ArrayBuffer(1);
       const dv = new DataView(buf);
       const ev = new HIDInputReportEvent('inputreport', {

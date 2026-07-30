@@ -63,13 +63,24 @@ test.describe('Cross-origin iframe', () => {
     throw new Error('Frame with URL containing "' + urlSubstring + '" not found');
   }
 
+interface PermResult {
+  isTop: boolean;
+  isCrossOrigin: boolean;
+  hidAllowed: boolean;
+  queryHid: string;
+  queryCamera: string;
+  policySource: string;
+  hidUndefined: boolean;
+  getDevices: { ok: boolean; count?: number; name?: string; message?: string };
+}
+
   async function readIframeResult(p: Page, urlSubstring: string) {
     const childFrame = await waitForFrame(p, urlSubstring);
     await childFrame.locator('#__perm-result').waitFor({ state: 'attached', timeout: 10000 });
-    const raw = await childFrame.evaluate(() => {
+    const raw = await childFrame.evaluate<PermResult | null>(() => {
       const el = document.getElementById('__perm-result');
       if (!el || !el.dataset.json) return null;
-      try { return JSON.parse(el.dataset.json); } catch { return null; }
+      try { return JSON.parse(el.dataset.json) as PermResult; } catch { return null; }
     });
     return raw;
   }

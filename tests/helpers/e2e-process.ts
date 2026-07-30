@@ -1,9 +1,8 @@
 import { spawn, type ChildProcess } from 'child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, chmodSync } from 'fs';
-import { readFile, writeFile, mkdir, rm, copyFile } from 'fs/promises';
+import { existsSync, mkdirSync, writeFileSync, unlinkSync } from 'fs';
+import { rm } from 'fs/promises';
 import { join, resolve, dirname } from 'path';
-import { homedir, tmpdir } from 'os';
-import { mkdtempSync } from 'fs';
+import { homedir } from 'os';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -47,8 +46,8 @@ export async function startDaemon(socketPath: string = DEFAULT_SOCKET): Promise<
         resolvePromise({ process: proc, socketPath });
       }
     };
-    proc.stderr!.on('data', onData);
-    proc.stdout!.on('data', onData);
+    proc.stderr.on('data', onData);
+    proc.stdout.on('data', onData);
     proc.on('error', reject);
     proc.on('exit', (code: number | null) => {
       reject(new Error(`Daemon exited with code ${code} before listening`));
@@ -70,7 +69,7 @@ export function startWebhidMock(
   descriptor: string,
   vid: number,
   pid: number,
-  socketPath: string = DEFAULT_SOCKET,
+  _socketPath: string = DEFAULT_SOCKET,
 ): WebhidMockProcess {
   const bin = join(projectRoot, 'crates', 'target', 'debug', 'webhid-mock');
   if (!existsSync(bin)) {
@@ -85,7 +84,7 @@ export function startWebhidMock(
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   const ready = new Promise<void>((resolvePromise, reject) => {
-    proc.stdout!.on('data', (data: Buffer) => {
+    proc.stdout.on('data', (data: Buffer) => {
       if (data.toString().includes('ready')) {
         resolvePromise();
       }
@@ -123,7 +122,7 @@ export async function waitForOutputReport(
     const timer = setTimeout(() => reject(new Error('Timeout waiting for output report')), timeout);
     mock.process.stdout!.on('data', (data: Buffer) => {
       try {
-        const parsed = JSON.parse(data.toString());
+        const parsed = JSON.parse(data.toString()) as { event: string; data?: number[] };
         if (parsed.event === 'output_report') {
           clearTimeout(timer);
           resolvePromise({
@@ -138,7 +137,7 @@ export async function waitForOutputReport(
   });
 }
 
-export function installNmManifest(socketPath: string): void {
+export function installNmManifest(_socketPath: string): void {
   const nmDir = join(homedir(), '.mozilla', 'native-messaging-hosts');
   mkdirSync(nmDir, { recursive: true });
   const manifest = {

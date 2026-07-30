@@ -27,7 +27,7 @@ test.describe('HID class and navigator.hid', () => {
   });
 
   test('navigator.hid.toString() returns [object HID]', async ({ sharedPage }) => {
-    const str = await sharedPage.evaluate(() => navigator.hid.toString());
+    const str = await sharedPage.evaluate(() => (navigator.hid as { toString(): string }).toString());
     expect(str).toBe('[object HID]');
   });
 

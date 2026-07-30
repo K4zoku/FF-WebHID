@@ -38,7 +38,7 @@ test.describe.serial("Switch Pro Gamepad E2E", () => {
   test("sendReport fails before open", async ({ testApi }) => {
     let failed = false;
     try {
-      await testApi.sendReport(0, 0x01, new Array(63).fill(0));
+      await testApi.sendReport(0, 0x01, new Array<number>(63).fill(0));
     } catch {
       failed = true;
     }
@@ -53,7 +53,7 @@ test.describe.serial("Switch Pro Gamepad E2E", () => {
   });
 
   test("open and close multiple times", async ({ testApi }) => {
-    const devices = await testApi.getDevices();
+    await testApi.getDevices();
     for (let i = 0; i < 3; i++) {
       await testApi.open(0);
       await testApi.close(0);
@@ -71,7 +71,7 @@ test.describe.serial("Switch Pro Gamepad E2E", () => {
     const reportPromise = testApi.onInputReport(devices[0].index);
     await new Promise(resolve => setTimeout(resolve, 200));
     // Send raw packet: 0x30 (report ID) + 63 zero bytes
-    sendInput(webhidMock, 0x30, new Array(PACKET_SIZE).fill(0));
+    sendInput(webhidMock, 0x30, new Array<number>(PACKET_SIZE).fill(0));
 
     const event = await reportPromise;
     expect(event.reportId).toBe(0x30);
@@ -87,7 +87,7 @@ test.describe.serial("Switch Pro Gamepad E2E", () => {
     await testApi.open(devices[0].index);
 
     // Raw packet: byte 0 = report ID (0x30), byte 1 = buttons 1-8
-    const packet = new Array(PACKET_SIZE).fill(0);
+    const packet = new Array<number>(PACKET_SIZE).fill(0);
     packet[0] = 0x30;  // report ID (treated as data by daemon)
     packet[1] = 0xff;  // buttons 1-8 pressed
 
@@ -111,7 +111,7 @@ test.describe.serial("Switch Pro Gamepad E2E", () => {
     await testApi.open(devices[0].index);
 
     // Switch Pro descriptor has vendor-defined output report ID 0x01 (63 bytes)
-    const reportData = new Array(63).fill(0x42);
+    const reportData = new Array<number>(63).fill(0x42);
     const outputPromise = waitForOutputReport(webhidMock);
     await new Promise(resolve => setTimeout(resolve, 200));
     await testApi.sendReport(0, 0x01, reportData);

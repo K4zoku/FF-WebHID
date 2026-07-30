@@ -1,12 +1,7 @@
 import type { Page } from '@playwright/test';
 
 export async function getPermResult(page: Page) {
-  const raw = await page.evaluate(() => {
-    const el = document.getElementById('__perm-result');
-    if (!el || !el.dataset.json) return null;
-    try { return JSON.parse(el.dataset.json); } catch { return null; }
-  });
-  return raw as {
+  return page.evaluate<{
     isTop: boolean;
     isCrossOrigin: boolean;
     hidAllowed: boolean;
@@ -15,7 +10,11 @@ export async function getPermResult(page: Page) {
     policySource: string;
     hidUndefined: boolean;
     getDevices: { ok: boolean; count?: number; name?: string; message?: string };
-  } | null;
+  } | null>(() => {
+    const el = document.getElementById('__perm-result');
+    if (!el || !el.dataset.json) return null;
+    try { return JSON.parse(el.dataset.json) as { isTop: boolean; isCrossOrigin: boolean; hidAllowed: boolean; queryHid: string; queryCamera: string; policySource: string; hidUndefined: boolean; getDevices: { ok: boolean; count?: number; name?: string; message?: string }; }; } catch { return null; }
+  });
 }
 
 export async function waitForPermResult(page: Page, timeout = 10000) {
@@ -30,15 +29,14 @@ export async function waitForPermResult(page: Page, timeout = 10000) {
 }
 
 export async function getWorkerResult(page: Page) {
-  const raw = await page.evaluate(() => {
-    const el = document.getElementById('__worker-result');
-    if (!el || !el.textContent) return null;
-    try { return JSON.parse(el.textContent); } catch { return null; }
-  });
-  return raw as {
+  return page.evaluate<{
     hasNavigatorHid: boolean;
     polyfillInjected: boolean;
-  } | null;
+  } | null>(() => {
+    const el = document.getElementById('__worker-result');
+    if (!el || !el.textContent) return null;
+    try { return JSON.parse(el.textContent) as { hasNavigatorHid: boolean; polyfillInjected: boolean; }; } catch { return null; }
+  });
 }
 
 export async function waitForWorkerResult(page: Page, timeout = 15000) {
@@ -74,10 +72,10 @@ export async function waitForWorkerResultElement(page: Page, elementId: string, 
   );
 }
 
-export async function parseElementJson(page: Page, elementId: string) {
-  return page.evaluate((id) => {
+export async function parseElementJson<T>(page: Page, elementId: string) {
+  return page.evaluate<T | null, string>((id) => {
     const el = document.getElementById(id);
     if (!el || !el.textContent) return null;
-    try { return JSON.parse(el.textContent); } catch { return null; }
+    try { return JSON.parse(el.textContent) as T; } catch { return null; }
   }, elementId);
 }
