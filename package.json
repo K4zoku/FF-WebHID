@@ -17,18 +17,23 @@
     "test:browser": "nubx playwright test --config tests/playwright.config.ts --project=firefox-browser",
     "test:e2e": "nubx playwright test --config tests/playwright.config.ts --project=firefox-e2e",
     "test:headed": "nubx playwright test --config tests/playwright.config.ts --headed",
-    "test:debug": "nubx playwright test --config tests/playwright.config.ts --debug"
+    "test:debug": "nubx playwright test --config tests/playwright.config.ts --debug",
+    "lint:test": "nubx eslint tests/ eslint.config.ts"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.62.0",
+    "@types/firefox-webext-browser": "^143.0.0",
     "@types/node": "^26.1.2",
     "commit-and-tag-version": "^13.1.0",
     "eslint": "^10.8.0",
     "eslint-plugin-jsdoc": "^63.3.2",
     "firefox-webext-playwright-harness": "github:duckduckgo/firefox-webext-playwright-harness#0.3.0",
+    "jiti": "^2.7.0",
     "jszip": "^3.10.1",
     "prettier": "^3.9.6",
     "terser": "^5.49.0",
+    "typescript-eslint": "^8.65.0",
     "web-ext": "^10.5.0"
   },
   "dependencies": {

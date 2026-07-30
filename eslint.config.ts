@@ -1,4 +1,6 @@
+import js from "@eslint/js";
 import jsdoc from "eslint-plugin-jsdoc";
+import tseslint from "typescript-eslint";
 
 const browserTypes = [
   "Worker", "Window", "HTMLElement", "HTMLDialogElement",
@@ -12,19 +14,43 @@ const browserTypes = [
   "Node", "NodeList",
 ];
 
-export default [
+const testGlobals = {
+  node: true,
+  es2022: true,
+  test: "readonly",
+  expect: "readonly",
+  describe: "readonly",
+  it: "readonly",
+  beforeEach: "readonly",
+  afterEach: "readonly",
+  beforeAll: "readonly",
+  afterAll: "readonly",
+} as const;
+
+export default tseslint.config(
   {
     files: ["addon/js/**/*.js", "addon/js/pages/**/*.js"],
+    extends: [js.configs.recommended],
     languageOptions: {
       sourceType: "script",
       globals: {
         webhid: "readonly",
         browser: "readonly",
+        chrome: "readonly",
         self: "readonly",
         globalThis: "readonly",
         document: "readonly",
         window: "readonly",
+        Window: "readonly",
+        Worker: "readonly",
+        Navigator: "readonly",
+        Event: "readonly",
+        EventTarget: "readonly",
+        EventListener: "readonly",
+        CustomEvent: "readonly",
+        MessageEvent: "readonly",
         DOMParser: "readonly",
+        DOMException: "readonly",
         MessageChannel: "readonly",
         MessagePort: "readonly",
         WebSocket: "readonly",
@@ -46,11 +72,27 @@ export default [
         location: "readonly",
         navigator: "readonly",
         Node: "readonly",
-        EventTarget: "readonly",
+        NodeList: "readonly",
+        AbortSignal: "readonly",
+        Headers: "readonly",
+        IDBKeyRange: "readonly",
+        indexedDB: "readonly",
+        Text: "readonly",
+        Comment: "readonly",
+        performance: "readonly",
+        // Worker globals for content-script workers
+        importScripts: "readonly",
+        postMessage: "readonly",
+        close: "readonly",
+        onmessage: "readonly",
+        onerror: "readonly",
+        // Background page global
+        global: "readonly",
       },
     },
     plugins: { jsdoc },
     rules: {
+      "no-unused-vars": ["error", { varsIgnorePattern: "^_", argsIgnorePattern: "^_" }],
       "jsdoc/require-jsdoc": ["warn", {
         require: {
           FunctionDeclaration: true,
@@ -69,4 +111,34 @@ export default [
       "jsdoc/valid-types": "warn",
     },
   },
-];
+  {
+    files: ["tests/**/*.ts"],
+    extends: [
+      ...tseslint.configs.recommended,
+      ...tseslint.configs.recommendedTypeChecked,
+    ],
+    languageOptions: {
+      parserOptions: {
+        project: "tests/tsconfig.json",
+      },
+      globals: testGlobals,
+    },
+    rules: {
+      "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
+    },
+  },
+  {
+    files: ["eslint.config.ts"],
+    extends: [
+      ...tseslint.configs.recommended,
+    ],
+    languageOptions: {
+      globals: {
+        node: true,
+      },
+    },
+    rules: {
+      "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
+    },
+  },
+);
