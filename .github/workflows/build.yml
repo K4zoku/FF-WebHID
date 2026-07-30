@@ -18,6 +18,8 @@ on:
       - 'Makefile'
       - '.github/workflows/build.yml'
   workflow_dispatch:
+permissions:
+  contents: read
 
 jobs:
   build:

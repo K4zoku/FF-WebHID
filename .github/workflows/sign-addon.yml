@@ -10,6 +10,7 @@ on:
         description: 'URL to download the signed XPI (default: AMO latest)'
         required: false
         default: 'https://addons.mozilla.org/firefox/downloads/latest/webhid/latest.xpi'
+permissions: read-all
 
 jobs:
   attach-signed:

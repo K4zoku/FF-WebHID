@@ -16,6 +16,8 @@ on:
       - 'tests/**'
       - '.github/workflows/test.yml'
   workflow_dispatch:
+permissions:
+  contents: read
 
 jobs:
   unit:

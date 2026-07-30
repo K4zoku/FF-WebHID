@@ -18,6 +18,8 @@ on:
       - 'nub.lock'
       - '.github/workflows/check.yml'
   workflow_dispatch:
+permissions:
+  contents: read
 
 jobs:
   cargo-audit:

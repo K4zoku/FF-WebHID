@@ -8,6 +8,7 @@ on:
       tag:
         description: 'Git tag to release (e.g. v1.5.1)'
         required: true
+permissions: read-all
 
 jobs:
   build-addon:
