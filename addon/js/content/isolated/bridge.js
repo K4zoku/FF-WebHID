@@ -554,7 +554,7 @@
    * @param {Window} source
    * @returns {Promise<void>}
    */
-  async function handleRequest(data, ports, source) {
+  async function handleRequest(data, ports, _source) {
     if (!data || data.id === undefined) return;
 
     const { id, action: reqAction, payload } = data;
@@ -663,7 +663,7 @@
         }
         settings.set(global);
         replyToPage({ type: "response", id, result: global });
-      } catch (e) {
+      } catch {
         replyToPage({ type: "response", id, result: {} });
       }
       return;
@@ -791,7 +791,7 @@
           { type: "response", id, result: response },
           transfers.length ? transfers : undefined,
         );
-      } catch (error) {
+      } catch {
         replyToPage({ type: "response", id, result: { s: 500 } });
       }
       return;
@@ -912,7 +912,7 @@
         { type: "response", id, result: response },
         transfers.length ? transfers : undefined,
       );
-    } catch (error) {
+    } catch {
       replyToPage({ type: "response", id, result: { s: 500 } });
     }
   }

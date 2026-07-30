@@ -10,12 +10,12 @@
     EVT_DISCONNECT,
     buildPackedSend,
   } = webhid.import("bgPacked");
-  const { deviceTabMap, deviceCache, pendingPicker } = webhid.import("bgState");
+  const { deviceTabMap: _deviceTabMap, deviceCache, pendingPicker: _pendingPicker } = webhid.import("bgState");
   const { saveDeviceInfo } = webhid.import("bgStorage");
   const {
     tabsForEvent,
-    registerDeviceTab,
-    unregisterDeviceTab,
+    _registerDeviceTab,
+    _unregisterDeviceTab,
     broadcastGlobalReset,
   } = webhid.import("bgStateOps");
   const http = webhid.import("http");

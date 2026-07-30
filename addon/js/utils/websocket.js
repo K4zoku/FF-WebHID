@@ -10,7 +10,7 @@
    * @returns {import("../types.js").WsTransport}
    */
   function createWsTransport(opts) {
-    const tag = opts.tag || "ws";
+    const _tag = opts.tag || "ws";
     const log = (level, msg) => logger[level](msg);
     /** @type {WebSocket|null} */
     let ws = null;

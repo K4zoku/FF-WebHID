@@ -21,7 +21,7 @@
   } = webhid.import("bgState");
   const {
     openDb,
-    saveDeviceInfo,
+    _saveDeviceInfo,
     saveDeviceInfoBatch,
     getDeviceInfo,
     removeDeviceInfo,
@@ -79,7 +79,7 @@
       let origin = key;
       try {
         origin = decodeURIComponent(key);
-      } catch {}
+      } catch { /* ignored */ }
       const tx = db.transaction("origins", "readwrite");
       const store = tx.objectStore("origins");
       for (const deviceId of value)
@@ -237,7 +237,7 @@
       let origin = null;
       try {
         origin = new URL(details.url).origin;
-      } catch (e) {}
+      } catch { /* unregistered device */ }
       if (
         !settings.workerPolyfillEnabled &&
         (!origin || !workerPolyfillSites.has(origin))
@@ -282,7 +282,7 @@
       filter.onerror = () => {
         try {
           filter.close();
-        } catch (e) {}
+        } catch { /* no such device */ }
       };
       return {};
     },
@@ -649,7 +649,7 @@
           try {
             const deviceIds = await getAllowedDevices(request.origin);
             sendResponse({ deviceIds });
-          } catch (e) {
+          } catch {
             sendResponse({ deviceIds: [] });
           }
         })();

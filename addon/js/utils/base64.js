@@ -296,8 +296,8 @@
         if (O.buffer) {
           try {
             new Uint8Array(O.buffer);
-          } catch (e) {
-            throw new TypeError("ArrayBuffer is detached");
+          } catch (_e) {
+            throw new TypeError("ArrayBuffer is detached", { cause: _e });
           }
         }
 

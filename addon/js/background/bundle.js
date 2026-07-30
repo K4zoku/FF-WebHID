@@ -1,5 +1,5 @@
 (function () {
-  const logger = webhid.import("logger");
+  const _logger = webhid.import("logger");
 
   let workerBundle = null;
   let workerBundlePromise = null;

@@ -50,10 +50,6 @@
       this.fragmentReady = this.loadFragment();
     }
 
-    /** @returns {HTMLElement} */
-    get host() {
-      return this.host;
-    }
 
     /** @returns {Promise<void>} */
     async loadFragment() {
@@ -170,7 +166,7 @@
           this.devices = response.D || [];
         } else {
           this.devices = [];
-          const code = response != null ? response.s : undefined;
+          let code = response != null ? response.s : undefined;
           code = code != null ? code : 0;
           if (code === 500) {
             logger.warn("enumerate returned 500, treating as empty list");

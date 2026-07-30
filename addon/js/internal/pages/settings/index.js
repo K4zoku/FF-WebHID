@@ -1,6 +1,5 @@
 (async () => {
   const { logger } = webhid;
-  const t = webhid.import("t");
   const localizeHTML = webhid.import("localizeHTML");
   const loadGlobalSettings = webhid.import("loadGlobalSettings");
   const saveGlobalSetting = webhid.import("saveGlobalSetting");

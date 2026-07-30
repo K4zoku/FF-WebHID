@@ -5,7 +5,6 @@
   const guessDeviceType = webhid.import("guessDeviceType");
   const t = webhid.import("t");
   const localizeHTML = webhid.import("localizeHTML");
-  const GLOBAL_DEFAULTS = webhid.import("GLOBAL_DEFAULTS");
   const applyFilters = webhid.import("applyFilters");
   const groupDevices = webhid.import("groupDevices");
   const logExcludedDevices = webhid.import("logExcludedDevices");

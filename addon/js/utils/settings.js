@@ -78,7 +78,7 @@
        * @param {object} receiver
        * @returns {any}
        */
-      get(target, prop, receiver) {
+      get(target, prop) {
         if (prop in target) return target[prop];
         return values[prop];
       },
@@ -89,7 +89,7 @@
        * @param {object} receiver
        * @returns {boolean}
        */
-      set(target, prop, value, receiver) {
+      set(target, prop, value) {
         if (prop in target) {
           target[prop] = value;
           return true;
