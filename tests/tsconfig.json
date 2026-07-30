@@ -1,15 +1,13 @@
 {
+  "extends": "../tsconfig.json",
   "compilerOptions": {
-    "target": "ES2022",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "strict": true,
-    "types": ["node"],
-    "esModuleInterop": true,
-    "resolveJsonModule": true,
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "skipLibCheck": true,
+    "types": ["node", "firefox-webext-browser"],
     "allowJs": true
   },
-  "include": ["types/**/*.d.ts", "helpers/**/*.ts", "tests/**/*.ts", "playwright.config.ts"]
+  "include": [
+    "**/*.ts",
+    "**/*.d.ts",
+    "../types/**/*.d.ts",
+    "playwright.config.ts"
+  ]
 }
