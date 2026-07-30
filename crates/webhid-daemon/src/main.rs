@@ -40,6 +40,7 @@ fn validate_socket_path(path: &str) -> String {
     path.to_string()
 }
 
+#[cfg(unix)]
 fn resolve_socket_path() -> String {
     if let Ok(path) = std::env::var("WEBHID_SOCKET") {
         return validate_socket_path(&path);
