@@ -263,13 +263,17 @@
             return;
           }
           const str = dec.decode(event.data, { stream: true });
-          const m = str.match(
-            /^(\s*(?:\/\/[^\n]*\n|\/\*[\s\S]*?\*\/\s*)*["']use strict["'];?\s*)/,
-          );
-          if (m) {
-            filter.write(enc.encode(m[1]));
+          const cleaned = str.replace(/\/\/[^\n]*\n/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+          const hasUseStrict = /^\s*["']use strict["'];?\s*/.test(cleaned);
+          if (hasUseStrict) {
+            const p = str.indexOf('"use strict"');
+            const pos = p >= 0 ? p : str.indexOf("'use strict'");
+            let end = pos + 12;
+            if (str[end] === ';') end++;
+            while (end < str.length && /\s/.test(str[end])) end++;
+            filter.write(enc.encode(str.slice(0, end)));
             filter.write(enc.encode(bundle));
-            filter.write(enc.encode(str.slice(m[0].length)));
+            filter.write(enc.encode(str.slice(end)));
           } else {
             filter.write(enc.encode(bundle));
             filter.write(event.data);
