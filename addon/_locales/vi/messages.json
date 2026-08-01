@@ -135,7 +135,7 @@
     "message": "Chế độ tạo Worker"
   },
   "settingsWorkerSpawnShadow": {
-    "message": "Shadow URL (mặc định)"
+    "message": "Shadow URL"
   },
   "settingsWorkerSpawnBlob": {
     "message": "Blob + ghi đè CSP"

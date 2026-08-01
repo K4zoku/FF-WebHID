@@ -338,6 +338,14 @@ test.describe('Worker spawn mode detection', () => {
     expect(blobStatus).toBe('blob-ready');
   });
 
+  test('workerSpawnMode default matches the manifest version', async ({ backgroundPage }) => {
+    const mode = await backgroundPage.evaluate(() => {
+      const w = (globalThis as { webhid?: { import(name: string): Record<string, unknown> } }).webhid;
+      return w ? w.import('GLOBAL_DEFAULTS')['workerSpawnMode'] : undefined;
+    });
+    expect(mode).toBe((await isMv2(backgroundPage)) ? 'blob' : 'shadow');
+  });
+
   test('navigating from a CSP page to a no-CSP page clears the entry', async ({ backgroundPage, sharedPage, pageUrl }) => {
     await clearSession(backgroundPage);
     await sharedPage.goto(pageUrl('/worker-spawn-csp'), { waitUntil: 'domcontentloaded', timeout: 15000 });

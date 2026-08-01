@@ -1,6 +1,11 @@
 ;(function () {
   const webhid = globalThis.webhid
 
+  const isMv2 =
+    typeof browser !== 'undefined' &&
+    browser.runtime != null &&
+    browser.runtime.getManifest().manifest_version === 2
+
   /** @type {import("../types.js").SettingsDefaults} */
   const GLOBAL_DEFAULTS = {
     dataPlane: 'ws',
@@ -8,7 +13,7 @@
     daemonAsNmHost: false,
     devicePickerMode: 'modal',
     workerPolyfillEnabled: false,
-    workerSpawnMode: 'shadow'
+    workerSpawnMode: isMv2 ? 'blob' : 'shadow'
   }
 
   /**

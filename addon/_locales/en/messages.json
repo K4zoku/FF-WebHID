@@ -135,7 +135,7 @@
     "message": "Worker Spawn Mode"
   },
   "settingsWorkerSpawnShadow": {
-    "message": "Shadow URL (default)"
+    "message": "Shadow URL"
   },
   "settingsWorkerSpawnBlob": {
     "message": "Blob + CSP rewrite"
