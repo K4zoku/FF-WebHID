@@ -1,5 +1,5 @@
-(function () {
-  const webhid = globalThis.webhid;
+;(function () {
+  const webhid = globalThis.webhid
 
   /**
    * @param {string} key
@@ -7,11 +7,11 @@
    * @returns {string}
    */
   function t(key, subs) {
-    if (typeof browser !== "undefined" && browser.i18n) {
-      const msg = browser.i18n.getMessage(key, subs);
-      if (msg) return msg;
+    if (typeof browser !== 'undefined' && browser.i18n) {
+      const msg = browser.i18n.getMessage(key, subs)
+      if (msg) return msg
     }
-    return key;
+    return key
   }
 
   /**
@@ -19,22 +19,22 @@
    * @returns {void}
    */
   function localizeHTML(root) {
-    const scope = root || document;
-    scope.querySelectorAll("[data-i18n]").forEach((el) => {
-      const key = el.getAttribute("data-i18n");
-      const subs = el.getAttribute("data-i18n-subs");
-      const msg = subs ? t(key, subs.split(",")) : t(key);
-      el.textContent = msg;
-    });
-    scope.querySelectorAll("[data-i18n-attr]").forEach((el) => {
-      const pairs = el.getAttribute("data-i18n-attr").split(";");
+    const scope = root || document
+    scope.querySelectorAll('[data-i18n]').forEach((el) => {
+      const key = el.getAttribute('data-i18n')
+      const subs = el.getAttribute('data-i18n-subs')
+      const msg = subs ? t(key, subs.split(',')) : t(key)
+      el.textContent = msg
+    })
+    scope.querySelectorAll('[data-i18n-attr]').forEach((el) => {
+      const pairs = el.getAttribute('data-i18n-attr').split(';')
       for (const pair of pairs) {
-        const [attr, key] = pair.split(":");
-        if (attr && key) el.setAttribute(attr.trim(), t(key.trim()));
+        const [attr, key] = pair.split(':')
+        if (attr && key) el.setAttribute(attr.trim(), t(key.trim()))
       }
-    });
+    })
   }
 
-  webhid.export("t", t);
-  webhid.export("localizeHTML", localizeHTML);
-})();
+  webhid.export('t', t)
+  webhid.export('localizeHTML', localizeHTML)
+})()

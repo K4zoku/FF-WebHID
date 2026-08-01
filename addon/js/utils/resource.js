@@ -1,21 +1,21 @@
-(function () {
-  const webhid = globalThis.webhid;
+;(function () {
+  const webhid = globalThis.webhid
   /** @type {Map<string, string>} */
-  const cache = new Map();
+  const cache = new Map()
   /**
    * @param {string} path
    * @returns {Promise<string>}
    */
-  webhid.export("fetchResource", async function fetchResource(path) {
-    if (cache.has(path)) return cache.get(path);
+  webhid.export('fetchResource', async function fetchResource(path) {
+    if (cache.has(path)) return cache.get(path)
     const resp = await browser.runtime.sendMessage({
-      action: "fetchResource",
-      path,
-    });
-    if (resp != null && resp.error) throw new Error(resp.error);
-    var text = resp != null ? resp.text : undefined;
-    text = text != null ? text : "";
-    cache.set(path, text);
-    return text;
-  });
-})();
+      action: 'fetchResource',
+      path
+    })
+    if (resp != null && resp.error) throw new Error(resp.error)
+    var text = resp != null ? resp.text : undefined
+    text = text != null ? text : ''
+    cache.set(path, text)
+    return text
+  })
+})()

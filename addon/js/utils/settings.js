@@ -1,14 +1,14 @@
-(function () {
-  const webhid = globalThis.webhid;
+;(function () {
+  const webhid = globalThis.webhid
 
   /** @type {import("../types.js").SettingsDefaults} */
   const GLOBAL_DEFAULTS = {
-    dataPlane: "ws",
+    dataPlane: 'ws',
     logLevel: 1,
     daemonAsNmHost: false,
-    devicePickerMode: "modal",
-    workerPolyfillEnabled: false,
-  };
+    devicePickerMode: 'modal',
+    workerPolyfillEnabled: false
+  }
 
   /**
    * @param {object} defaults
@@ -16,9 +16,9 @@
    */
   function createSettingsStore(defaults) {
     /** @type {{[key: string]: any}} */
-    const values = { ...defaults };
+    const values = { ...defaults }
     /** @type {Map<string, Set<Function>>} */
-    const listeners = new Map();
+    const listeners = new Map()
 
     /**
      * @param {string} key
@@ -26,8 +26,8 @@
      * @returns {void}
      */
     function emit(key, value) {
-      const callbacks = listeners.get(key);
-      if (callbacks) for (const callback of callbacks) callback(value, values);
+      const callbacks = listeners.get(key)
+      if (callbacks) for (const callback of callbacks) callback(value, values)
     }
 
     const api = {
@@ -37,39 +37,39 @@
        * @returns {Function}
        */
       on(keys, callback) {
-        if (!Array.isArray(keys)) keys = [keys];
+        if (!Array.isArray(keys)) keys = [keys]
         for (const k of keys) {
-          if (!listeners.has(k)) listeners.set(k, new Set());
-          listeners.get(k).add(callback);
+          if (!listeners.has(k)) listeners.set(k, new Set())
+          listeners.get(k).add(callback)
         }
         return () => {
           for (const k of keys) {
-            var cbs = listeners.get(k);
-            if (cbs != null) cbs.delete(callback);
+            var cbs = listeners.get(k)
+            if (cbs != null) cbs.delete(callback)
           }
-        };
+        }
       },
       /**
        * @param {object} patch
        * @returns {object}
        */
       set(patch) {
-        const changed = {};
+        const changed = {}
         for (const [k, v] of Object.entries(patch)) {
-          if (k in api || k === "on" || k === "set" || k === "getAll") continue;
+          if (k in api || k === 'on' || k === 'set' || k === 'getAll') continue
           if (values[k] !== v) {
-            values[k] = v;
-            changed[k] = v;
-            emit(k, v);
+            values[k] = v
+            changed[k] = v
+            emit(k, v)
           }
         }
-        return changed;
+        return changed
       },
       /** @returns {object} */
       getAll() {
-        return { ...values };
-      },
-    };
+        return { ...values }
+      }
+    }
 
     return new Proxy(api, {
       /**
@@ -79,8 +79,8 @@
        * @returns {any}
        */
       get(target, prop) {
-        if (prop in target) return target[prop];
-        return values[prop];
+        if (prop in target) return target[prop]
+        return values[prop]
       },
       /**
        * @param {object} target
@@ -91,13 +91,13 @@
        */
       set(target, prop, value) {
         if (prop in target) {
-          target[prop] = value;
-          return true;
+          target[prop] = value
+          return true
         }
-        if (values[prop] === value) return true;
-        values[prop] = value;
-        emit(prop, value);
-        return true;
+        if (values[prop] === value) return true
+        values[prop] = value
+        emit(prop, value)
+        return true
       },
       /**
        * @param {object} target
@@ -105,14 +105,14 @@
        * @returns {boolean}
        */
       has(target, prop) {
-        return prop in target || prop in values;
+        return prop in target || prop in values
       },
       /**
        * @param {object} target
        * @returns {string[]}
        */
       ownKeys(target) {
-        return [...new Set([...Object.keys(target), ...Object.keys(values)])];
+        return [...new Set([...Object.keys(target), ...Object.keys(values)])]
       },
       /**
        * @param {object} target
@@ -120,25 +120,24 @@
        * @returns {PropertyDescriptor|undefined}
        */
       getOwnPropertyDescriptor(target, prop) {
-        if (prop in target)
-          return Object.getOwnPropertyDescriptor(target, prop);
+        if (prop in target) return Object.getOwnPropertyDescriptor(target, prop)
         if (prop in values) {
           return {
             configurable: true,
             enumerable: true,
             value: values[prop],
-            writable: true,
-          };
+            writable: true
+          }
         }
-        return undefined;
-      },
-    });
+        return undefined
+      }
+    })
   }
 
-  webhid.export("GLOBAL_DEFAULTS", GLOBAL_DEFAULTS);
-  webhid.export("createSettingsStore", createSettingsStore);
+  webhid.export('GLOBAL_DEFAULTS', GLOBAL_DEFAULTS)
+  webhid.export('createSettingsStore', createSettingsStore)
 
-  const SETTING_NAMES = Object.keys(GLOBAL_DEFAULTS);
+  const SETTING_NAMES = Object.keys(GLOBAL_DEFAULTS)
 
   /**
    * Builds the storage key for a global setting.
@@ -146,7 +145,7 @@
    * @returns {string}
    */
   function globalSettingKey(name) {
-    return `settings :: ${name}`;
+    return `settings :: ${name}`
   }
 
   /**
@@ -156,7 +155,7 @@
    * @returns {string}
    */
   function siteSettingKey(origin, name) {
-    return `settings :: ${origin} :: ${name}`;
+    return `settings :: ${origin} :: ${name}`
   }
 
   /**
@@ -165,12 +164,11 @@
    * @returns {object|null}
    */
   function parseSettingsKey(key) {
-    const parts = key.split(" :: ");
-    if (parts[0] !== "settings") return null;
-    if (parts.length === 2) return { scope: "global", name: parts[1] };
-    if (parts.length === 3)
-      return { scope: "site", origin: parts[1], name: parts[2] };
-    return null;
+    const parts = key.split(' :: ')
+    if (parts[0] !== 'settings') return null
+    if (parts.length === 2) return { scope: 'global', name: parts[1] }
+    if (parts.length === 3) return { scope: 'site', origin: parts[1], name: parts[2] }
+    return null
   }
 
   /**
@@ -178,14 +176,14 @@
    * @returns {Promise<object>}
    */
   async function loadGlobalSettings() {
-    const keys = SETTING_NAMES.map((n) => globalSettingKey(n));
-    const raw = await browser.storage.local.get(keys);
-    const result = {};
+    const keys = SETTING_NAMES.map((n) => globalSettingKey(n))
+    const raw = await browser.storage.local.get(keys)
+    const result = {}
     for (const name of SETTING_NAMES) {
-      const k = globalSettingKey(name);
-      result[name] = k in raw ? raw[k] : GLOBAL_DEFAULTS[name];
+      const k = globalSettingKey(name)
+      result[name] = k in raw ? raw[k] : GLOBAL_DEFAULTS[name]
     }
-    return result;
+    return result
   }
 
   /**
@@ -194,14 +192,14 @@
    * @returns {Promise<object>}
    */
   async function loadSiteSettings(origin) {
-    const keys = SETTING_NAMES.map((n) => siteSettingKey(origin, n));
-    const raw = await browser.storage.local.get(keys);
-    const result = {};
+    const keys = SETTING_NAMES.map((n) => siteSettingKey(origin, n))
+    const raw = await browser.storage.local.get(keys)
+    const result = {}
     for (const name of SETTING_NAMES) {
-      const k = siteSettingKey(origin, name);
-      if (k in raw) result[name] = raw[k];
+      const k = siteSettingKey(origin, name)
+      if (k in raw) result[name] = raw[k]
     }
-    return result;
+    return result
   }
 
   /**
@@ -211,7 +209,7 @@
    * @returns {Promise<void>}
    */
   async function saveGlobalSetting(name, value) {
-    await browser.storage.local.set({ [globalSettingKey(name)]: value });
+    await browser.storage.local.set({ [globalSettingKey(name)]: value })
   }
 
   /**
@@ -222,15 +220,15 @@
    * @returns {Promise<void>}
    */
   async function saveSiteSetting(origin, name, value) {
-    await browser.storage.local.set({ [siteSettingKey(origin, name)]: value });
+    await browser.storage.local.set({ [siteSettingKey(origin, name)]: value })
   }
 
-  webhid.export("SETTING_NAMES", SETTING_NAMES);
-  webhid.export("globalSettingKey", globalSettingKey);
-  webhid.export("siteSettingKey", siteSettingKey);
-  webhid.export("parseSettingsKey", parseSettingsKey);
-  webhid.export("loadGlobalSettings", loadGlobalSettings);
-  webhid.export("loadSiteSettings", loadSiteSettings);
-  webhid.export("saveGlobalSetting", saveGlobalSetting);
-  webhid.export("saveSiteSetting", saveSiteSetting);
-})();
+  webhid.export('SETTING_NAMES', SETTING_NAMES)
+  webhid.export('globalSettingKey', globalSettingKey)
+  webhid.export('siteSettingKey', siteSettingKey)
+  webhid.export('parseSettingsKey', parseSettingsKey)
+  webhid.export('loadGlobalSettings', loadGlobalSettings)
+  webhid.export('loadSiteSettings', loadSiteSettings)
+  webhid.export('saveGlobalSetting', saveGlobalSetting)
+  webhid.export('saveSiteSetting', saveSiteSetting)
+})()

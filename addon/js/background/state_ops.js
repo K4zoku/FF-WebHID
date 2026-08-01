@@ -1,15 +1,15 @@
-(function () {
-  const logger = webhid.import("logger");
+;(function () {
+  const logger = webhid.import('logger')
   const {
     ACT: _ACT,
     PKG_INPUT_REPORT: _PKG_INPUT_REPORT,
     EVT_CONNECT: _EVT_CONNECT,
-    EVT_DISCONNECT: _EVT_DISCONNECT,
-  } = webhid.import("bgPacked");
-  const { deviceTabMap, deviceCache: _deviceCache } = webhid.import("bgState");
+    EVT_DISCONNECT: _EVT_DISCONNECT
+  } = webhid.import('bgPacked')
+  const { deviceTabMap, deviceCache: _deviceCache } = webhid.import('bgState')
   const { saveDeviceInfo: _saveDeviceInfo, saveDeviceInfoBatch: _saveDeviceInfoBatch } =
-    webhid.import("bgStorage");
-  const _http = webhid.import("http");
+    webhid.import('bgStorage')
+  const _http = webhid.import('http')
 
   /**
    * Returns the list of tab IDs authorized for the device in the given event, or null.
@@ -17,10 +17,10 @@
    * @returns {number[]|null}
    */
   function tabsForEvent(message) {
-    const eventType = message.e;
-    if (eventType === 1 || !message.i) return null;
-    const tabs = deviceTabMap.get(message.i);
-    return tabs && tabs.size > 0 ? [...tabs] : null;
+    const eventType = message.e
+    if (eventType === 1 || !message.i) return null
+    const tabs = deviceTabMap.get(message.i)
+    return tabs && tabs.size > 0 ? [...tabs] : null
   }
 
   /**
@@ -30,14 +30,14 @@
    * @returns {void}
    */
   function registerDeviceTab(deviceId, tabId) {
-    if (!deviceId || tabId == null) return;
-    let tabs = deviceTabMap.get(deviceId);
+    if (!deviceId || tabId == null) return
+    let tabs = deviceTabMap.get(deviceId)
     if (!tabs) {
-      tabs = new Set();
-      deviceTabMap.set(deviceId, tabs);
+      tabs = new Set()
+      deviceTabMap.set(deviceId, tabs)
     }
-    tabs.add(tabId);
-    logger.debug("register device " + deviceId + " tab " + tabId);
+    tabs.add(tabId)
+    logger.debug('register device ' + deviceId + ' tab ' + tabId)
   }
 
   /**
@@ -47,11 +47,11 @@
    * @returns {void}
    */
   function unregisterDeviceTab(deviceId, tabId) {
-    if (!deviceId || tabId == null) return;
-    const tabs = deviceTabMap.get(deviceId);
-    if (!tabs) return;
-    tabs.delete(tabId);
-    if (tabs.size === 0) deviceTabMap.delete(deviceId);
+    if (!deviceId || tabId == null) return
+    const tabs = deviceTabMap.get(deviceId)
+    if (!tabs) return
+    tabs.delete(tabId)
+    if (tabs.size === 0) deviceTabMap.delete(deviceId)
   }
 
   /**
@@ -61,8 +61,8 @@
    * @returns {boolean}
    */
   function isTabAuthorizedForDevice(tabId, deviceId) {
-    const tabs = deviceTabMap.get(deviceId);
-    return !!tabs && tabs.has(tabId);
+    const tabs = deviceTabMap.get(deviceId)
+    return !!tabs && tabs.has(tabId)
   }
 
   /**
@@ -72,13 +72,11 @@
    * @returns {void}
    */
   function purgeTab(tabId, closeDeviceFn) {
-    if (tabId == null) return;
+    if (tabId == null) return
     for (const [deviceId, tabs] of deviceTabMap) {
       if (tabs.delete(tabId) && tabs.size === 0) {
-        deviceTabMap.delete(deviceId);
-        closeDeviceFn(deviceId).catch((e) =>
-          logger.debug("closeDevice failed", e),
-        );
+        deviceTabMap.delete(deviceId)
+        closeDeviceFn(deviceId).catch((e) => logger.debug('closeDevice failed', e))
       }
     }
   }
@@ -92,26 +90,26 @@
       .query({})
       .then((tabs) => {
         for (const tab of tabs) {
-          if (!tab.url) continue;
+          if (!tab.url) continue
           try {
-            new URL(tab.url);
+            new URL(tab.url)
           } catch {
-            continue;
+            continue
           }
           browser.tabs
-            .sendMessage(tab.id, { action: "globalReset" })
-            .catch((e) => logger.debug("globalReset send to tab failed", e));
+            .sendMessage(tab.id, { action: 'globalReset' })
+            .catch((e) => logger.debug('globalReset send to tab failed', e))
         }
       })
-      .catch((e) => logger.debug("broadcastGlobalReset failed", e));
+      .catch((e) => logger.debug('broadcastGlobalReset failed', e))
   }
 
-  webhid.export("bgStateOps", {
+  webhid.export('bgStateOps', {
     tabsForEvent,
     registerDeviceTab,
     unregisterDeviceTab,
     isTabAuthorizedForDevice,
     purgeTab,
-    broadcastGlobalReset,
-  });
-})();
+    broadcastGlobalReset
+  })
+})()
