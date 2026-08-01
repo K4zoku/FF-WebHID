@@ -220,9 +220,13 @@
         (h) => h.name.toLowerCase() === 'sec-fetch-dest'
       )
       record.dest = header && header.value ? header.value : null
+      if (!record.shadow || record.dest !== 'worker') return
+      if (header) header.value = 'document'
+      else (details.requestHeaders ||= []).push({ name: 'Sec-Fetch-Dest', value: 'document' })
+      return { requestHeaders: details.requestHeaders }
     },
     { urls: ['<all_urls>'], types: ['script'] },
-    ['requestHeaders']
+    ['blocking', 'requestHeaders']
   )
 
   /**
@@ -234,7 +238,7 @@
    * @returns {object | undefined}
    */
   function handleShadowUrl(details) {
-    const record = { dest: null }
+    const record = { dest: null, shadow: true }
     scriptDest.set(details.requestId, record)
     const filter = browser.webRequest.filterResponseData(details.requestId)
     const enc = new TextEncoder()
