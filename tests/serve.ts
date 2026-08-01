@@ -50,9 +50,23 @@ const PAGES: Record<string, string> = {
   '/worker-spawn-csp-allowing': loadPage('worker-spawn-csp.html'),
   '/worker-spawn-no-csp': loadPage('worker-spawn-csp.html'),
   '/worker-spawn-csp-meta': loadPage('worker-spawn-csp-meta.html'),
+  '/worker-spawn-csp-both': loadPage('worker-spawn-csp-meta.html'),
+  '/worker-spawn-csp-default-none': loadPage('worker-spawn-csp.html'),
+  '/worker-spawn-csp-script-none': loadPage('worker-spawn-csp.html'),
+  '/worker-spawn-csp-default-self': loadPage('worker-spawn-csp.html'),
+  '/worker-spawn-csp-worker-none': loadPage('worker-spawn-csp.html'),
+  '/worker-spawn-csp-report-only': loadPage('worker-spawn-csp.html'),
+  '/worker-spawn-csp-multi': loadPage('worker-spawn-csp.html'),
+  '/worker-spawn-csp-dup': loadPage('worker-spawn-csp.html'),
+  '/worker-spawn-csp-star': loadPage('worker-spawn-csp.html'),
+  '/worker-spawn-csp-ws-scheme': loadPage('worker-spawn-csp.html'),
+  '/worker-spawn-csp-rewrite-script': loadPage('worker-spawn-csp.html'),
+  '/worker-spawn-csp-rewrite-default': loadPage('worker-spawn-csp.html'),
+  '/worker-spawn-csp-tt-append': loadPage('worker-spawn-csp.html'),
+  '/worker-spawn-csp-tt-new': loadPage('worker-spawn-csp.html'),
 };
 
-const HEADERS: Record<string, Record<string, string>> = {
+const HEADERS: Record<string, Record<string, string | string[]>> = {
   '/policy-check': {},
   '/policy-check-blocked': {
     'Permissions-Policy': 'hid=()',
@@ -77,6 +91,48 @@ const HEADERS: Record<string, Record<string, string>> = {
   },
   '/worker-spawn-csp-allowing': {
     'Content-Security-Policy': "worker-src 'self' blob:; connect-src 'self' ws://127.0.0.1:*",
+  },
+  '/worker-spawn-csp-both': {
+    'Content-Security-Policy': "connect-src 'self'",
+  },
+  '/worker-spawn-csp-default-none': {
+    'Content-Security-Policy': "default-src 'none'",
+  },
+  '/worker-spawn-csp-script-none': {
+    'Content-Security-Policy': "script-src 'none'",
+  },
+  '/worker-spawn-csp-default-self': {
+    'Content-Security-Policy': "default-src 'self'",
+  },
+  '/worker-spawn-csp-worker-none': {
+    'Content-Security-Policy': "worker-src 'none'",
+  },
+  '/worker-spawn-csp-report-only': {
+    'Content-Security-Policy-Report-Only': "worker-src 'none'",
+  },
+  '/worker-spawn-csp-multi': {
+    'Content-Security-Policy': ["worker-src 'self'", "connect-src 'self'"],
+  },
+  '/worker-spawn-csp-dup': {
+    'Content-Security-Policy': "worker-src *; worker-src 'none'",
+  },
+  '/worker-spawn-csp-star': {
+    'Content-Security-Policy': "worker-src *; connect-src *",
+  },
+  '/worker-spawn-csp-ws-scheme': {
+    'Content-Security-Policy': "worker-src 'self' blob:; connect-src ws:",
+  },
+  '/worker-spawn-csp-rewrite-script': {
+    'Content-Security-Policy': "script-src 'self'; connect-src 'self'",
+  },
+  '/worker-spawn-csp-rewrite-default': {
+    'Content-Security-Policy': "default-src 'self'",
+  },
+  '/worker-spawn-csp-tt-append': {
+    'Content-Security-Policy': "require-trusted-types-for 'script'; trusted-types foo; worker-src 'self' blob:; connect-src 'self' ws://127.0.0.1:*",
+  },
+  '/worker-spawn-csp-tt-new': {
+    'Content-Security-Policy': "require-trusted-types-for 'script'; worker-src 'self' blob:; connect-src 'self' ws://127.0.0.1:*",
   },
 };
 

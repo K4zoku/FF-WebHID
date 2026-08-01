@@ -656,7 +656,7 @@
     let workerSrcBlocked = false
     let connectSrcBlocked = false
     let hasTrustedTypesRequire = false
-    for (const csp of cspValues) {
+    for (const csp of cspValues.flatMap((v) => v.split(','))) {
       const { directives } = parseDirectives(csp)
       const effWorker = directives['worker-src'] ?? directives['script-src'] ?? directives['default-src']
       const effConnect = directives['connect-src'] ?? directives['default-src']
