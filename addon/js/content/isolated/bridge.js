@@ -237,6 +237,11 @@
     try {
       const info = await browser.runtime.sendMessage({ action: 'getCspInfo' })
       if (info && info.needsBlobFallback) {
+        const mv2 = browser.runtime.getManifest().manifest_version === 2
+        if (!mv2 && info.headerShadowBlocked) {
+          cachedSpawnMode = 'nm'
+          return 'nm'
+        }
         cachedSpawnMode = 'blob'
         return 'blob'
       }
@@ -283,6 +288,10 @@
     }
     let worker
     let spawnMode = await resolveSpawnMode()
+    if (spawnMode === 'nm') {
+      logger.info('page CSP blocks all worker spawn modes for', deviceId, '; using NM data plane')
+      return false
+    }
     try {
       if (spawnMode === 'blob') {
         worker = await spawnBlobWorker()

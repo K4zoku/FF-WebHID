@@ -9,6 +9,9 @@ interface CspInfo {
   workerSrcBlocked: boolean;
   connectSrcBlocked: boolean;
   hasTrustedTypesRequire: boolean;
+  shadowBlocked: boolean;
+  headerShadowBlocked?: boolean;
+  metaShadowBlocked?: boolean;
   needsBlobFallback: boolean;
   rewrittenCsp?: string[];
 }
@@ -63,6 +66,9 @@ test.describe('Worker spawn mode detection', () => {
     const entries = await readCspEntries(backgroundPage);
     expect(entries.length).toBeGreaterThan(0);
     const cspInfo = entries[0];
+    expect(cspInfo.workerSrcBlocked).toBe(true);
+    expect(cspInfo.connectSrcBlocked).toBe(true);
+    expect(cspInfo.headerShadowBlocked).toBe(true);
     expect(cspInfo.needsBlobFallback).toBe(true);
     if (await isMv2(backgroundPage)) {
       expect(cspInfo.rewrittenCsp).toBeTruthy();
@@ -128,6 +134,8 @@ test.describe('Worker spawn mode detection', () => {
     const cspInfo = entries[0];
     expect(cspInfo.workerSrcBlocked).toBe(true);
     expect(cspInfo.connectSrcBlocked).toBe(true);
+    expect(cspInfo.metaShadowBlocked).toBe(true);
+    expect(cspInfo.headerShadowBlocked).toBeFalsy();
     expect(cspInfo.needsBlobFallback).toBe(true);
     const blobStatus = await waitForStatus(sharedPage, 'blob-status');
     expect(blobStatus).toBe('blob-ready');

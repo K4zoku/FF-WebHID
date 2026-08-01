@@ -423,6 +423,10 @@
             connectSrcBlocked: metaInfos.some((i) => i.connectSrcBlocked) || !!existing?.connectSrcBlocked,
             hasTrustedTypesRequire:
               metaInfos.some((i) => i.hasTrustedTypesRequire) || !!existing?.hasTrustedTypesRequire,
+            shadowBlocked: metaInfos.some((i) => i.shadowBlocked) || !!existing?.shadowBlocked,
+            metaShadowBlocked:
+              metaInfos.some((i) => i.shadowBlocked) || !!existing?.metaShadowBlocked,
+            headerShadowBlocked: !!existing?.headerShadowBlocked,
             needsBlobFallback: metaInfos.some((i) => i.needsBlobFallback) || !!existing?.needsBlobFallback,
           }
           browser.storage.session.set({ [key]: merged }).catch(() => {})
@@ -524,6 +528,7 @@
       }
 
       const cspInfo = parseCspForWorkerSpawn(cspValues, siteSpawnMode, origin)
+      if (cspInfo) cspInfo.headerShadowBlocked = cspInfo.shadowBlocked
       let modified = null
       if (isMv2 && cspInfo && cspInfo.needsBlobFallback) {
         modified = rewriteCspForBlob(details.responseHeaders, cspInfo)
@@ -666,14 +671,15 @@
       const tt = directives['require-trusted-types-for']
       if (tt !== undefined && tt.includes("'script'")) hasTrustedTypesRequire = true
     }
-    const needsBlobFallback = mode === 'blob'
-      || (mode === 'shadow' && (workerSrcBlocked || connectSrcBlocked || hasTrustedTypesRequire))
+    const shadowBlocked = workerSrcBlocked || connectSrcBlocked || hasTrustedTypesRequire
+    const needsBlobFallback = mode === 'blob' || (mode === 'shadow' && shadowBlocked)
     return {
       workerSrc,
       connectSrc,
       workerSrcBlocked,
       connectSrcBlocked,
       hasTrustedTypesRequire,
+      shadowBlocked,
       needsBlobFallback,
     }
   }
