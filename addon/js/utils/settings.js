@@ -7,7 +7,8 @@
     logLevel: 1,
     daemonAsNmHost: false,
     devicePickerMode: 'modal',
-    workerPolyfillEnabled: false
+    workerPolyfillEnabled: false,
+    workerSpawnMode: 'shadow'
   }
 
   /**

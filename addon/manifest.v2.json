@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "WebHID",
-  "version": "2.1.1",
+  "version": "2.2.0",
   "description": "WebHID API implementation for Firefox",
   "icons": {
     "48": "icons/icon.svg"
@@ -11,7 +11,9 @@
     "storage",
     "webRequest",
     "webRequestBlocking",
+    "webRequestFilterResponse",
     "notifications",
+    "theme",
     "<all_urls>"
   ],
   "background": {
@@ -55,6 +57,7 @@
         "<all_urls>"
       ],
       "js": [
+        "js/utils/bootstrap.js",
         "js/utils/i18n.js",
         "js/content/isolated/inject.js"
       ],
@@ -74,6 +77,7 @@
         "js/utils/device.js",
         "js/utils/descriptor-tlv.js",
         "js/utils/settings.js",
+        "js/utils/theme-sync.js",
         "js/content/isolated/picker/index.js",
         "js/content/isolated/bridge.js"
       ],

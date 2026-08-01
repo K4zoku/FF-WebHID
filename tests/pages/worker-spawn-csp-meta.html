@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Worker Spawn CSP Meta Test</title>
+<meta http-equiv="Content-Security-Policy" content="worker-src 'none'; connect-src 'none'">
+</head>
+<body>
+<div id="same-origin-status">loading</div>
+<div id="blob-status">loading</div>
+<script>
+function probe(id, makeWorker) {
+  const el = document.getElementById(id + '-status');
+  try {
+    const w = makeWorker();
+    w.onmessage = () => { el.textContent = id + '-ready'; };
+    w.onerror = () => { el.textContent = id + '-error'; };
+    setTimeout(() => { if (el.textContent === 'loading') el.textContent = id + '-timeout'; }, 5000);
+  } catch (e) { el.textContent = id + '-threw'; }
+}
+probe('same-origin', () => new Worker(location.href + '?worker=1'));
+probe('blob', () => new Worker(URL.createObjectURL(new Blob(["postMessage('ready')"], { type: 'application/javascript' }))));
+</script>
+</body>
+</html>

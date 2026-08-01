@@ -130,5 +130,14 @@
   },
   "pickerInterfaces": {
     "message": "$1 interfaces"
+  },
+  "settingsWorkerSpawnMode": {
+    "message": "Worker Spawn Mode"
+  },
+  "settingsWorkerSpawnShadow": {
+    "message": "Shadow URL (default)"
+  },
+  "settingsWorkerSpawnBlob": {
+    "message": "Blob + CSP rewrite"
   }
 }

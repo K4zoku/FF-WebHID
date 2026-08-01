@@ -7,6 +7,7 @@
   const createSettingsStore = webhid.import('createSettingsStore')
   const loadGlobalSettings = webhid.import('loadGlobalSettings')
   const loadSiteSettings = webhid.import('loadSiteSettings')
+  const siteSettingKey = webhid.import('siteSettingKey')
   const parseSettingsKey = webhid.import('parseSettingsKey')
   const WebHidDevicePicker = webhid.import('WebHidDevicePicker')
   logger.initLogger('bridge')
@@ -217,7 +218,48 @@
     }
   }
 
-  let cachedCspBlocked = null
+  let cachedSpawnMode = null
+  let cachedTtPolicy = null
+
+  async function resolveSpawnMode() {
+    if (cachedSpawnMode) return cachedSpawnMode
+    const origin = window.location.origin
+    let mode = settings.workerSpawnMode
+    if (origin) {
+      const siteKey = siteSettingKey(origin, 'workerSpawnMode')
+      const siteResult = await browser.storage.local.get(siteKey)
+      if (siteResult[siteKey] !== undefined) mode = siteResult[siteKey]
+    }
+    if (mode === 'blob') {
+      cachedSpawnMode = 'blob'
+      return 'blob'
+    }
+    try {
+      const info = await browser.runtime.sendMessage({ action: 'getCspInfo' })
+      if (info && info.needsBlobFallback) {
+        cachedSpawnMode = 'blob'
+        return 'blob'
+      }
+    } catch (e) { logger.debug('getCspInfo failed', e) }
+    cachedSpawnMode = 'shadow'
+    return 'shadow'
+  }
+
+  async function spawnBlobWorker() {
+    const resp = await browser.runtime.sendMessage({ action: 'getWorkerBundle' })
+    if (!resp || !resp.text) throw new Error('worker bundle fetch failed')
+    const blobUrl = URL.createObjectURL(new Blob([resp.text], { type: 'application/javascript' }))
+    let workerUrl = blobUrl
+    if (typeof trustedTypes !== 'undefined' && trustedTypes !== null) {
+      try {
+        if (!cachedTtPolicy) {
+          cachedTtPolicy = trustedTypes.createPolicy('webhid-worker', { createScriptURL: (s) => s })
+        }
+        workerUrl = cachedTtPolicy.createScriptURL(blobUrl)
+      } catch { workerUrl = blobUrl }
+    }
+    return new Worker(workerUrl)
+  }
 
   /**
    * @param {string} deviceId
@@ -239,21 +281,24 @@
       )
       return false
     }
-    if (cachedCspBlocked === null) {
-      try {
-        const info = await browser.runtime.sendMessage({ action: 'getCspInfo' })
-        cachedCspBlocked = !!(info && info.shadowWorkerBlocked)
-      } catch { /* no CSP info for this frame; assume shadow is allowed */ }
-    }
-    if (cachedCspBlocked) {
-      logger.info('page CSP blocks the shadow worker for', deviceId, '; using NM data plane')
-      return false
-    }
     let worker
+    let spawnMode = await resolveSpawnMode()
     try {
-      worker = new Worker(location.href)
+      if (spawnMode === 'blob') {
+        worker = await spawnBlobWorker()
+      } else {
+        worker = new Worker(location.href)
+      }
     } catch (e) {
-      logger.warn('redirect worker failed for', deviceId, ':', e.message)
+      logger.warn('worker spawn failed for', deviceId, '(', spawnMode, '):', e.message)
+      if (spawnMode === 'shadow') {
+        spawnMode = 'blob'
+        try {
+          worker = await spawnBlobWorker()
+        } catch (e2) {
+          logger.warn('worker spawn retry failed for', deviceId, '(', spawnMode, '):', e2.message)
+        }
+      }
     }
     if (!worker) return false
 
@@ -1053,6 +1098,11 @@
   }
 
   settings.on('dataPlane', (dp) => applyDataPlane(dp))
+
+  settings.on('workerSpawnMode', () => {
+    cachedSpawnMode = null
+    applyDataPlane(settings.dataPlane)
+  })
 
   settings.on(['dataPlane', 'logLevel'], () => {
     const all = settings.getAll()

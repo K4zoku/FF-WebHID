@@ -2,12 +2,13 @@
   /** @type {string[]} */
   var scripts = [
     'js/utils/bootstrap.js',
+    'js/utils/i18n.js',
     'js/utils/resource.js',
     'js/utils/http.js',
     'js/utils/logger.js',
     'js/utils/device.js',
+    'js/utils/descriptor-tlv.js',
     'js/utils/settings.js',
-    'js/utils/base64.js',
     'js/content/main/index.js'
   ]
 

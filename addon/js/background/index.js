@@ -350,6 +350,108 @@
     { urls: ['<all_urls>'], types: ['script'] }
   )
 
+  browser.webRequest.onBeforeRequest.addListener(
+    (details) => {
+      if (details.type !== 'main_frame' && details.type !== 'sub_frame') return
+      handleMetaCsp(details)
+    },
+    { urls: ['<all_urls>'], types: ['main_frame', 'sub_frame'] },
+    ['blocking']
+  )
+
+  function handleMetaCsp(details) {
+    const filter = browser.webRequest.filterResponseData(details.requestId)
+    const enc = new TextEncoder()
+    const dec = new TextDecoder()
+    const rawChunks = []
+    let scanText = ''
+    let gaveUp = false
+    let processed = false
+
+    const origin = urlOrigin(details.url)
+
+    const modePromise = (async () => {
+      let mode = settings.workerSpawnMode
+      if (origin) {
+        const siteKey = siteSettingKey(origin, 'workerSpawnMode')
+        const res = await browser.storage.local.get(siteKey).catch(() => ({}))
+        if (res[siteKey] !== undefined) mode = res[siteKey]
+      }
+      return mode
+    })()
+
+    function passthrough() {
+      for (const buf of rawChunks) filter.write(buf)
+      filter.disconnect()
+    }
+
+    async function process(eof) {
+      if (processed) return
+      const headEnd = scanText.toLowerCase().indexOf('</head>')
+      if (headEnd === -1 && !eof && !gaveUp) return
+      processed = true
+      const mode = await modePromise
+      const html = scanText + dec.decode()
+      const end = headEnd === -1 ? html.length : headEnd
+      const head = html.slice(0, end)
+      const metaInfos = []
+      let anyChange = false
+      const rewrittenHead = head.replace(/<meta\s[^>]*>/gi, (tag) => {
+        if (!/http-equiv\s*=\s*["']?\s*content-security-policy\s*["']?/i.test(tag)) return tag
+        const contentMatch = tag.match(/\bcontent\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/i)
+        if (!contentMatch) return tag
+        const quote = contentMatch[2] !== undefined ? '"' : contentMatch[3] !== undefined ? "'" : ''
+        const csp = contentMatch[2] ?? contentMatch[3] ?? contentMatch[4] ?? ''
+        const info = parseCspForWorkerSpawn([csp], mode, origin)
+        if (!info) return tag
+        metaInfos.push(info)
+        if (!info.needsBlobFallback) return tag
+        const { value, modified } = rewriteCspValue(csp, info)
+        if (!modified) return tag
+        anyChange = true
+        return tag.replace(contentMatch[0], 'content=' + (quote || '"') + value + (quote || '"'))
+      })
+
+      if (metaInfos.length) {
+        const key = `csp:${details.tabId}:${details.frameId}`
+        browser.storage.session.get(key).then((r) => {
+          const existing = r[key]
+          const merged = {
+            workerSrc: metaInfos[0].workerSrc ?? existing?.workerSrc,
+            connectSrc: metaInfos[0].connectSrc ?? existing?.connectSrc,
+            workerSrcBlocked: metaInfos.some((i) => i.workerSrcBlocked) || !!existing?.workerSrcBlocked,
+            connectSrcBlocked: metaInfos.some((i) => i.connectSrcBlocked) || !!existing?.connectSrcBlocked,
+            hasTrustedTypesRequire:
+              metaInfos.some((i) => i.hasTrustedTypesRequire) || !!existing?.hasTrustedTypesRequire,
+            needsBlobFallback: metaInfos.some((i) => i.needsBlobFallback) || !!existing?.needsBlobFallback,
+          }
+          browser.storage.session.set({ [key]: merged }).catch(() => {})
+        }).catch(() => {})
+      }
+
+      if (!anyChange) {
+        passthrough()
+        return
+      }
+      filter.write(enc.encode(rewrittenHead + html.slice(end)))
+      filter.close()
+    }
+
+    filter.ondata = (e) => {
+      rawChunks.push(e.data)
+      if (processed) return
+      if (scanText.length < 262144) scanText += dec.decode(e.data, { stream: true })
+      else gaveUp = true
+      process(false)
+    }
+    filter.onstop = () => {
+      process(true)
+    }
+    filter.onerror = () => {
+      try { filter.disconnect() } catch { return }
+    }
+  }
+
   browser.webRequest.onHeadersReceived.addListener(
     (details) => {
       if (
@@ -400,24 +502,44 @@
     ['blocking', 'responseHeaders']
   )
 
+  const isMv2 = browser.runtime.getManifest().manifest_version === 2
+
   browser.webRequest.onHeadersReceived.addListener(
-    (details) => {
+    async (details) => {
       if (details.type !== 'main_frame' && details.type !== 'sub_frame') return
       const cspValues = (details.responseHeaders || [])
         .filter((h) => h.name.toLowerCase() === 'content-security-policy')
         .map((h) => h.value || '')
       const key = `csp:${details.tabId}:${details.frameId}`
 
-      let origin = ''
-      try { origin = new URL(details.url).origin } catch { /* non-http(s) URL */ }
+      const origin = urlOrigin(details.url)
 
-      const cspInfo = parseCspForWorkerSpawn(cspValues, origin)
+      let siteSpawnMode = settings.workerSpawnMode
+      if (origin) {
+        const siteKey = siteSettingKey(origin, 'workerSpawnMode')
+        const siteResult = await browser.storage.local.get(siteKey)
+        if (siteResult[siteKey] !== undefined) {
+          siteSpawnMode = siteResult[siteKey]
+        }
+      }
+
+      const cspInfo = parseCspForWorkerSpawn(cspValues, siteSpawnMode, origin)
+      let modified = null
+      if (isMv2 && cspInfo && cspInfo.needsBlobFallback) {
+        modified = rewriteCspForBlob(details.responseHeaders, cspInfo)
+        if (modified) {
+          cspInfo.rewrittenCsp = modified
+            .filter((h) => h.name.toLowerCase() === 'content-security-policy')
+            .map((h) => h.value)
+        }
+      }
       if (cspInfo) {
         browser.storage.session.set({ [key]: cspInfo })
           .catch((e) => logger.debug('csp session store failed', e))
       } else {
         browser.storage.session.remove(key).catch(() => {})
       }
+      if (modified) return { responseHeaders: modified }
     },
     { urls: ['<all_urls>'], types: ['main_frame', 'sub_frame'] },
     ['blocking', 'responseHeaders']
@@ -430,8 +552,74 @@
     })
   })
 
+  function urlOrigin(url) {
+    try {
+      return new URL(url).origin
+    } catch {
+      return ''
+    }
+  }
+
+  function rewriteCspValue(csp, cspInfo) {
+    const { directives, order } = parseDirectives(csp || '')
+    let modified = false
+
+    if (directives['worker-src'] !== undefined) {
+      if (!directives['worker-src'].includes('blob:')) {
+        directives['worker-src'] = directives['worker-src'] + ' blob:'
+        modified = true
+      }
+    } else {
+      const fallback = directives['script-src'] ?? directives['default-src']
+      if (fallback !== undefined) {
+        directives['worker-src'] = fallback + ' blob:'
+        order.push('worker-src')
+        modified = true
+      }
+    }
+
+    if (directives['connect-src'] !== undefined) {
+      if (!sourceListAllowsDaemonWs(directives['connect-src'])) {
+        directives['connect-src'] = directives['connect-src'] + ' ws://127.0.0.1:*'
+        modified = true
+      }
+    } else if (directives['default-src'] !== undefined) {
+      directives['connect-src'] = directives['default-src'] + ' ws://127.0.0.1:*'
+      order.push('connect-src')
+      modified = true
+    }
+
+    if (cspInfo.hasTrustedTypesRequire) {
+      const ttList = directives['trusted-types']
+      if (ttList === undefined) {
+        directives['trusted-types'] = 'webhid-worker'
+        order.push('trusted-types')
+        modified = true
+      } else if (!ttList.includes('webhid-worker')) {
+        directives['trusted-types'] = ttList + ' webhid-worker'
+        modified = true
+      }
+    }
+
+    const rebuilt = order.map((name) => name + (directives[name] ? ' ' + directives[name] : '')).join('; ')
+    return { value: rebuilt, modified }
+  }
+
+  function rewriteCspForBlob(headers, cspInfo) {
+    if (!headers) return null
+    let modified = false
+    const newHeaders = headers.map((h) => {
+      if (h.name.toLowerCase() !== 'content-security-policy') return h
+      const { value, modified: changed } = rewriteCspValue(h.value || '', cspInfo)
+      if (changed) modified = true
+      return { name: h.name, value }
+    })
+    return modified ? newHeaders : null
+  }
+
   function parseDirectives(csp) {
     const directives = {}
+    const order = []
     for (const raw of csp.split(';')) {
       const trimmed = raw.trim()
       if (!trimmed) continue
@@ -439,8 +627,9 @@
       const name = parts[0].toLowerCase()
       if (directives[name] !== undefined) continue
       directives[name] = parts.slice(1).join(' ')
+      order.push(name)
     }
-    return directives
+    return { directives, order }
   }
 
   function sourceListAllowsWorker(list, origin) {
@@ -454,15 +643,20 @@
     return tokens.includes('*') || tokens.includes('ws:') || tokens.includes('ws://127.0.0.1:*')
   }
 
-  function parseCspForWorkerSpawn(cspValues, pageOrigin) {
+  function parseCspForWorkerSpawn(cspValues, spawnMode, pageOrigin) {
+    const mode = spawnMode || settings.workerSpawnMode
     if (!cspValues || cspValues.length === 0) return null
+    let workerSrc
+    let connectSrc
     let workerSrcBlocked = false
     let connectSrcBlocked = false
     let hasTrustedTypesRequire = false
     for (const csp of cspValues) {
-      const directives = parseDirectives(csp)
+      const { directives } = parseDirectives(csp)
       const effWorker = directives['worker-src'] ?? directives['script-src'] ?? directives['default-src']
       const effConnect = directives['connect-src'] ?? directives['default-src']
+      if (workerSrc === undefined) workerSrc = effWorker
+      if (connectSrc === undefined) connectSrc = effConnect
       if (effWorker !== undefined && !sourceListAllowsWorker(effWorker, pageOrigin)) {
         workerSrcBlocked = true
       }
@@ -472,11 +666,15 @@
       const tt = directives['require-trusted-types-for']
       if (tt !== undefined && tt.includes("'script'")) hasTrustedTypesRequire = true
     }
+    const needsBlobFallback = mode === 'blob'
+      || (mode === 'shadow' && (workerSrcBlocked || connectSrcBlocked || hasTrustedTypesRequire))
     return {
+      workerSrc,
+      connectSrc,
       workerSrcBlocked,
       connectSrcBlocked,
       hasTrustedTypesRequire,
-      shadowWorkerBlocked: workerSrcBlocked || connectSrcBlocked || hasTrustedTypesRequire,
+      needsBlobFallback,
     }
   }
 
@@ -858,6 +1056,12 @@
           .catch(() => sendResponse(null))
         return true
       }
+
+      case 'getWorkerBundle':
+        ensureWorkerBundle()
+          .then((text) => sendResponse({ text }))
+          .catch((e) => sendResponse({ error: e.message || String(e) }))
+        return true
 
       case 'showPicker': {
         const tabId = sender.tab != null ? sender.tab.id : undefined

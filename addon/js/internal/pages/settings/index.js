@@ -24,6 +24,8 @@
   dataPlaneSelect.value = current.dataPlane
   const devicePickerModeSelect = document.getElementById('devicePickerMode')
   devicePickerModeSelect.value = current.devicePickerMode || 'modal'
+  const workerSpawnModeSelect = document.getElementById('workerSpawnMode')
+  workerSpawnModeSelect.value = current.workerSpawnMode || 'shadow'
 
   /**
    * Displays a temporary status message in the settings page.
@@ -57,5 +59,9 @@
   devicePickerModeSelect.addEventListener('change', async (e) => {
     await saveGlobalSetting('devicePickerMode', e.target.value)
     showStatus(`devicePickerMode = ${e.target.value}`)
+  })
+  workerSpawnModeSelect.addEventListener('change', async (e) => {
+    await saveGlobalSetting('workerSpawnMode', e.target.value)
+    showStatus(`workerSpawnMode = ${e.target.value}`)
   })
 })()
