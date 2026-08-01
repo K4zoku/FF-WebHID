@@ -1,6 +1,6 @@
 ;(function () {
   /** @type {string[]} */
-  var scripts = webhid.import('bundleFiles').main
+  var scripts = webhid.import('bundleFiles').mv2MainWorld
 
   /**
    * @param {string} path

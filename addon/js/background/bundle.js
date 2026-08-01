@@ -38,7 +38,7 @@
   async function ensureWorkerPolyfillBundle() {
     if (workerPolyfillBundle) return workerPolyfillBundle
     if (workerPolyfillBundlePromise) return workerPolyfillBundlePromise
-    const files = webhid.import('bundleFiles').polyfill
+    const files = webhid.import('bundleFiles').workerPolyfill
     workerPolyfillBundlePromise = (async () => {
       const texts = await Promise.all(
         files.map((f) =>

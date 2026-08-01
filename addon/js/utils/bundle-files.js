@@ -1,4 +1,11 @@
 ;(function () {
+  /**
+   * worker: data worker spawned per device (shadow URL or blob fallback).
+   * workerPolyfill: WebHID polyfill injected into page-created workers.
+   * mv2MainWorld: MAIN-world page polyfill, used only by the MV2 injector
+   * (js/content/isolated/inject.js); MV3 loads the same scripts via the
+   * "world": "MAIN" content script instead.
+   */
   const BUNDLE_FILES = {
     worker: [
       'js/utils/bootstrap.js',
@@ -7,7 +14,7 @@
       'js/utils/websocket.js',
       'js/content/isolated/worker/index.js'
     ],
-    polyfill: [
+    workerPolyfill: [
       'js/utils/bootstrap.js',
       'js/utils/logger.js',
       'js/utils/http.js',
@@ -15,7 +22,7 @@
       'js/utils/device.js',
       'js/content/main/index.js'
     ],
-    main: [
+    mv2MainWorld: [
       'js/utils/bootstrap.js',
       'js/utils/i18n.js',
       'js/utils/resource.js',
