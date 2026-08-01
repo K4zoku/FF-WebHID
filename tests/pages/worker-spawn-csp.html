@@ -5,31 +5,20 @@
 <title>Worker Spawn CSP Test</title>
 </head>
 <body>
-<div id="status">loading</div>
+<div id="same-origin-status">loading</div>
+<div id="blob-status">loading</div>
 <script>
-(async () => {
-  const status = document.getElementById('status');
+function probe(id, makeWorker) {
+  const el = document.getElementById(id + '-status');
   try {
-    const w = new Worker(location.href + '?worker=1');
-    w.onmessage = (e) => {
-      if (e.data && e.data.type === 'ready') {
-        status.textContent = 'worker-ready';
-      } else {
-        status.textContent = 'worker-message:' + JSON.stringify(e.data);
-      }
-    };
-    w.onerror = (e) => {
-      status.textContent = 'worker-error:' + (e.message || 'unknown');
-    };
-    setTimeout(() => {
-      if (status.textContent === 'loading') {
-        status.textContent = 'worker-timeout';
-      }
-    }, 5000);
-  } catch (e) {
-    status.textContent = 'worker-threw:' + e.message;
-  }
-})();
+    const w = makeWorker();
+    w.onmessage = () => { el.textContent = id + '-ready'; };
+    w.onerror = () => { el.textContent = id + '-error'; };
+    setTimeout(() => { if (el.textContent === 'loading') el.textContent = id + '-timeout'; }, 5000);
+  } catch (e) { el.textContent = id + '-threw'; }
+}
+probe('same-origin', () => new Worker(location.href + '?worker=1'));
+probe('blob', () => new Worker(URL.createObjectURL(new Blob(["postMessage('ready')"], { type: 'application/javascript' }))));
 </script>
 </body>
 </html>

@@ -46,6 +46,8 @@ const PAGES: Record<string, string> = {
   '/worker-spawn-csp': loadPage('worker-spawn-csp.html'),
   '/worker-spawn-csp-restrictive': loadPage('worker-spawn-csp.html'),
   '/worker-spawn-csp-trusted-types': loadPage('worker-spawn-csp.html'),
+  '/worker-spawn-csp-connect': loadPage('worker-spawn-csp.html'),
+  '/worker-spawn-csp-allowing': loadPage('worker-spawn-csp.html'),
   '/worker-spawn-no-csp': loadPage('worker-spawn-csp.html'),
 };
 
@@ -69,7 +71,12 @@ const HEADERS: Record<string, Record<string, string>> = {
   '/worker-spawn-csp-trusted-types': {
     'Content-Security-Policy': "require-trusted-types-for 'script'; trusted-types webhid-worker",
   },
-  '/worker-spawn-no-csp': {},
+  '/worker-spawn-csp-connect': {
+    'Content-Security-Policy': "connect-src 'self'",
+  },
+  '/worker-spawn-csp-allowing': {
+    'Content-Security-Policy': "worker-src 'self' blob:; connect-src 'self' ws://127.0.0.1:*",
+  },
 };
 
 export async function startPolicyServer(port = 0): Promise<ServerHandle> {

@@ -83,7 +83,8 @@
   "web_accessible_resources": [],
   "applications": {
     "gecko": {
-      "id": "webhid@k4zoku.dev"
+      "id": "webhid@k4zoku.dev",
+      "strict_min_version": "115.0"
     }
   },
   "default_locale": "en"

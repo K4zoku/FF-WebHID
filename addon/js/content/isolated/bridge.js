@@ -234,39 +234,26 @@
       return 'blob'
     }
     try {
-      const result = await browser.storage.session.get(null)
-      for (const [, v] of Object.entries(result)) {
-        if (v && v.needsBlobFallback) {
-          cachedSpawnMode = 'blob'
-          return 'blob'
-        }
+      const info = await browser.runtime.sendMessage({ action: 'getCspInfo' })
+      if (info && info.needsBlobFallback) {
+        cachedSpawnMode = 'blob'
+        return 'blob'
       }
-    } catch {}
+    } catch (e) { logger.debug('getCspInfo failed', e) }
     cachedSpawnMode = 'shadow'
     return 'shadow'
   }
 
   async function spawnBlobWorker() {
-    const bundle = await browser.runtime.sendMessage({ action: 'fetchResource', path: 'js/content/isolated/worker/index.js' })
-    if (!bundle || !bundle.text) throw new Error('worker bundle fetch failed')
-    const utilsFiles = [
-      'js/utils/bootstrap.js',
-      'js/utils/logger.js',
-      'js/utils/settings.js',
-      'js/utils/websocket.js',
-    ]
-    const utilsTexts = await Promise.all(
-      utilsFiles.map((f) =>
-        browser.runtime.sendMessage({ action: 'fetchResource', path: f }).then((r) => r.text),
-      ),
-    )
-    const fullBundle = utilsTexts.join('\n') + '\n' + bundle.text
-    let workerUrl
-    try {
-      workerUrl = URL.createObjectURL(new Blob([fullBundle], { type: 'application/javascript' }))
-    } catch {
-      const ttPolicy = trustedTypes.createPolicy('webhid-worker', { createScriptURL: (s) => s })
-      workerUrl = ttPolicy.createScriptURL(URL.createObjectURL(new Blob([fullBundle], { type: 'application/javascript' })))
+    const resp = await browser.runtime.sendMessage({ action: 'getWorkerBundle' })
+    if (!resp || !resp.text) throw new Error('worker bundle fetch failed')
+    const blobUrl = URL.createObjectURL(new Blob([resp.text], { type: 'application/javascript' }))
+    let workerUrl = blobUrl
+    if (typeof trustedTypes !== 'undefined' && trustedTypes !== null) {
+      try {
+        const policy = trustedTypes.createPolicy('webhid-worker', { createScriptURL: (s) => s })
+        workerUrl = policy.createScriptURL(blobUrl)
+      } catch { workerUrl = blobUrl }
     }
     return new Worker(workerUrl)
   }
@@ -292,7 +279,7 @@
       return false
     }
     let worker
-    const spawnMode = await resolveSpawnMode()
+    let spawnMode = await resolveSpawnMode()
     try {
       if (spawnMode === 'blob') {
         worker = await spawnBlobWorker()
@@ -301,6 +288,14 @@
       }
     } catch (e) {
       logger.warn('worker spawn failed for', deviceId, '(', spawnMode, '):', e.message)
+      if (spawnMode === 'shadow') {
+        spawnMode = 'blob'
+        try {
+          worker = await spawnBlobWorker()
+        } catch (e2) {
+          logger.warn('worker spawn retry failed for', deviceId, '(', spawnMode, '):', e2.message)
+        }
+      }
     }
     if (!worker) return false
 
@@ -1100,6 +1095,11 @@
   }
 
   settings.on('dataPlane', (dp) => applyDataPlane(dp))
+
+  settings.on('workerSpawnMode', () => {
+    cachedSpawnMode = null
+    applyDataPlane(settings.dataPlane)
+  })
 
   settings.on(['dataPlane', 'logLevel'], () => {
     const all = settings.getAll()

@@ -400,17 +400,17 @@
     ['blocking', 'responseHeaders']
   )
 
+  const isMv2 = browser.runtime.getManifest().manifest_version === 2
+
   browser.webRequest.onHeadersReceived.addListener(
     async (details) => {
       if (details.type !== 'main_frame' && details.type !== 'sub_frame') return
-      const cspHeader = details.responseHeaders?.find(
-        (h) => h.name.toLowerCase() === 'content-security-policy'
-      )?.value || ''
-      const tabId = details.tabId
-      const frameId = details.frameId
+      const cspValues = (details.responseHeaders || [])
+        .filter((h) => h.name.toLowerCase() === 'content-security-policy')
+        .map((h) => h.value || '')
+      const key = `csp:${details.tabId}:${details.frameId}`
 
-      let origin = ''
-      try { origin = new URL(details.url).origin } catch {}
+      const origin = urlOrigin(details.url)
 
       let siteSpawnMode = settings.workerSpawnMode
       if (origin) {
@@ -421,46 +421,72 @@
         }
       }
 
-      const cspInfo = parseCspForWorkerSpawn(cspHeader, siteSpawnMode)
+      const cspInfo = parseCspForWorkerSpawn(cspValues, siteSpawnMode, origin)
+      let modified = null
+      if (isMv2 && cspInfo && cspInfo.needsBlobFallback) {
+        modified = rewriteCspForBlob(details.responseHeaders, cspInfo)
+        if (modified) {
+          cspInfo.rewrittenCsp = modified
+            .filter((h) => h.name.toLowerCase() === 'content-security-policy')
+            .map((h) => h.value)
+        }
+      }
       if (cspInfo) {
-        browser.storage.session.set({
-          [`csp:${tabId}:${frameId}`]: cspInfo,
-        }).catch(() => {})
+        browser.storage.session.set({ [key]: cspInfo })
+          .catch((e) => logger.debug('csp session store failed', e))
+      } else {
+        browser.storage.session.remove(key).catch(() => {})
       }
-      if (cspInfo && cspInfo.needsBlobFallback) {
-        const modified = rewriteCspForBlob(details.responseHeaders, cspInfo)
-        if (modified) return { responseHeaders: modified }
-      }
+      if (modified) return { responseHeaders: modified }
     },
     { urls: ['<all_urls>'], types: ['main_frame', 'sub_frame'] },
     ['blocking', 'responseHeaders']
   )
+
+  browser.tabs.onRemoved.addListener((tabId) => {
+    browser.storage.session.get(null).then((all) => {
+      const keys = Object.keys(all).filter((k) => k.startsWith(`csp:${tabId}:`))
+      if (keys.length) browser.storage.session.remove(keys).catch(() => {})
+    })
+  })
+
+  function urlOrigin(url) {
+    try {
+      return new URL(url).origin
+    } catch {
+      return ''
+    }
+  }
 
   function rewriteCspForBlob(headers, cspInfo) {
     if (!headers) return null
     let modified = false
     const newHeaders = headers.map((h) => {
       if (h.name.toLowerCase() !== 'content-security-policy') return h
-      let csp = h.value
-      const directives = {}
-      const order = []
-      for (const raw of csp.split(';')) {
-        const parts = raw.trim().split(/\s+/)
-        if (!parts.length) continue
-        const name = parts[0].toLowerCase()
-        directives[name] = parts.slice(1).join(' ')
-        order.push(name)
-      }
+      const { directives, order } = parseDirectives(h.value || '')
 
-      for (const dirName of ['worker-src', 'script-src', 'default-src']) {
-        if (directives[dirName] !== undefined && !directives[dirName].includes('blob:')) {
-          directives[dirName] = directives[dirName] + ' blob:'
+      if (directives['worker-src'] !== undefined) {
+        if (!directives['worker-src'].includes('blob:')) {
+          directives['worker-src'] = directives['worker-src'] + ' blob:'
+          modified = true
+        }
+      } else {
+        const fallback = directives['script-src'] ?? directives['default-src']
+        if (fallback !== undefined) {
+          directives['worker-src'] = fallback + ' blob:'
+          order.push('worker-src')
           modified = true
         }
       }
 
-      if (directives['connect-src'] !== undefined && !directives['connect-src'].includes('ws://127.0.0.1')) {
-        directives['connect-src'] = directives['connect-src'] + ' ws://127.0.0.1:*'
+      if (directives['connect-src'] !== undefined) {
+        if (!sourceListAllowsDaemonWs(directives['connect-src'])) {
+          directives['connect-src'] = directives['connect-src'] + ' ws://127.0.0.1:*'
+          modified = true
+        }
+      } else if (directives['default-src'] !== undefined) {
+        directives['connect-src'] = directives['default-src'] + ' ws://127.0.0.1:*'
+        order.push('connect-src')
         modified = true
       }
 
@@ -482,30 +508,63 @@
     return modified ? newHeaders : null
   }
 
-  function parseCspForWorkerSpawn(csp, spawnMode) {
-    const mode = spawnMode || settings.workerSpawnMode
-    if (!csp) return null
+  function parseDirectives(csp) {
     const directives = {}
+    const order = []
     for (const raw of csp.split(';')) {
-      const parts = raw.trim().split(/\s+/)
-      if (!parts.length || !parts[0]) continue
-      directives[parts[0].toLowerCase()] = parts.slice(1).join(' ')
+      const trimmed = raw.trim()
+      if (!trimmed) continue
+      const parts = trimmed.split(/\s+/)
+      const name = parts[0].toLowerCase()
+      if (directives[name] !== undefined) continue
+      directives[name] = parts.slice(1).join(' ')
+      order.push(name)
     }
-    const workerSrc = directives['worker-src'] || directives['script-src'] || directives['default-src'] || ''
-    const connectSrc = directives['connect-src'] || directives['default-src'] || ''
-    const hasTrustedTypesRequire = !!directives['require-trusted-types-for']?.includes("'script'")
-    const trustedTypesAllowlist = directives['trusted-types']
-    const workerSrcBlocks = !!workerSrc && !workerSrc.includes('blob:') && !workerSrc.includes('*')
+    return { directives, order }
+  }
+
+  function sourceListAllowsWorker(list, origin) {
+    const tokens = list.split(/\s+/)
+    return tokens.includes('*') || tokens.includes("'self'") || tokens.includes(origin)
+      || tokens.includes('http:') || tokens.includes('https:')
+  }
+
+  function sourceListAllowsDaemonWs(list) {
+    const tokens = list.split(/\s+/)
+    return tokens.includes('*') || tokens.includes('ws:') || tokens.includes('ws://127.0.0.1:*')
+  }
+
+  function parseCspForWorkerSpawn(cspValues, spawnMode, pageOrigin) {
+    const mode = spawnMode || settings.workerSpawnMode
+    if (!cspValues || cspValues.length === 0) return null
+    let workerSrc
+    let connectSrc
+    let workerSrcBlocked = false
+    let connectSrcBlocked = false
+    let hasTrustedTypesRequire = false
+    for (const csp of cspValues) {
+      const { directives } = parseDirectives(csp)
+      const effWorker = directives['worker-src'] ?? directives['script-src'] ?? directives['default-src']
+      const effConnect = directives['connect-src'] ?? directives['default-src']
+      if (workerSrc === undefined) workerSrc = effWorker
+      if (connectSrc === undefined) connectSrc = effConnect
+      if (effWorker !== undefined && !sourceListAllowsWorker(effWorker, pageOrigin)) {
+        workerSrcBlocked = true
+      }
+      if (effConnect !== undefined && !sourceListAllowsDaemonWs(effConnect)) {
+        connectSrcBlocked = true
+      }
+      const tt = directives['require-trusted-types-for']
+      if (tt !== undefined && tt.includes("'script'")) hasTrustedTypesRequire = true
+    }
     const needsBlobFallback = mode === 'blob'
-      || (mode === 'shadow' && (
-        workerSrcBlocks
-        || hasTrustedTypesRequire
-      ))
+      || (mode === 'shadow' && (workerSrcBlocked || connectSrcBlocked || hasTrustedTypesRequire))
     return {
       workerSrc,
       connectSrc,
+      workerSrcBlocked,
+      connectSrcBlocked,
       hasTrustedTypesRequire,
-      trustedTypesAllowlist,
       needsBlobFallback,
     }
   }
@@ -875,6 +934,25 @@
           .catch((e) => sendResponse({ error: e.message || String(e) }))
         return true
       }
+
+      case 'getCspInfo': {
+        const tabId = sender.tab != null ? sender.tab.id : undefined
+        if (tabId == null) {
+          sendResponse(null)
+          return false
+        }
+        const key = `csp:${tabId}:${sender.frameId ?? 0}`
+        browser.storage.session.get(key)
+          .then((r) => sendResponse(r[key] ?? null))
+          .catch(() => sendResponse(null))
+        return true
+      }
+
+      case 'getWorkerBundle':
+        ensureWorkerBundle()
+          .then((text) => sendResponse({ text }))
+          .catch((e) => sendResponse({ error: e.message || String(e) }))
+        return true
 
       case 'showPicker': {
         const tabId = sender.tab != null ? sender.tab.id : undefined
