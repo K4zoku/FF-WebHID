@@ -61,6 +61,18 @@ const HEADERS: Record<string, Record<string, string>> = {
 export async function startPolicyServer(port = 0): Promise<ServerHandle> {
   const server = http.createServer((req, res) => {
     const pathname = (req.url ?? '/').split('?')[0];
+    if (pathname === '/self-script') {
+      const dest = (req.headers['sec-fetch-dest'] || '').toLowerCase();
+      const isDocument =
+        dest === 'document' ||
+        (!dest && (req.headers.accept || '').includes('text/html'));
+      res.writeHead(200, {
+        'Content-Type': isDocument ? 'text/html' : 'application/javascript',
+        'Cache-Control': 'no-store',
+      });
+      res.end(isDocument ? loadPage('self-script.html') : 'self.selfScriptRan = true;\n');
+      return;
+    }
     const body = PAGES[pathname];
     if (!body) {
       res.writeHead(404, { 'Content-Type': 'text/plain' });

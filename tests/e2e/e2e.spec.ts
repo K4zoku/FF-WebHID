@@ -119,4 +119,20 @@ test.describe.serial("Switch Pro Gamepad E2E", () => {
     // Daemon prepends report ID (0x01) to payload when writing
     expect(output.data[0]).toBe(0x01);
   });
+
+  test("WS data plane works when the page URL has a fragment", async ({
+    sharedPage,
+    webhidMock,
+    testApi,
+  }) => {
+    const url = sharedPage.url();
+    await sharedPage.goto(url + "#frag", { waitUntil: "domcontentloaded", timeout: 15000 });
+    const devices = await ensureDevicePaired(sharedPage, testApi);
+    await testApi.open(devices[0].index);
+    const reportPromise = testApi.onInputReport(devices[0].index);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    sendInput(webhidMock, 0x30, new Array<number>(PACKET_SIZE).fill(0));
+    const event = await reportPromise;
+    expect(event.reportId).toBe(0x30);
+  });
 });
