@@ -217,6 +217,8 @@
     }
   }
 
+  let cachedCspBlocked = null
+
   /**
    * @param {string} deviceId
    * @param {string} sessionToken
@@ -235,6 +237,16 @@
         deviceId,
         '; wsNonce missing — falling back to NM'
       )
+      return false
+    }
+    if (cachedCspBlocked === null) {
+      try {
+        const info = await browser.runtime.sendMessage({ action: 'getCspInfo' })
+        cachedCspBlocked = !!(info && info.shadowWorkerBlocked)
+      } catch { /* no CSP info for this frame; assume shadow is allowed */ }
+    }
+    if (cachedCspBlocked) {
+      logger.info('page CSP blocks the shadow worker for', deviceId, '; using NM data plane')
       return false
     }
     let worker

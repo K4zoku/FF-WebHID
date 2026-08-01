@@ -400,6 +400,86 @@
     ['blocking', 'responseHeaders']
   )
 
+  browser.webRequest.onHeadersReceived.addListener(
+    (details) => {
+      if (details.type !== 'main_frame' && details.type !== 'sub_frame') return
+      const cspValues = (details.responseHeaders || [])
+        .filter((h) => h.name.toLowerCase() === 'content-security-policy')
+        .map((h) => h.value || '')
+      const key = `csp:${details.tabId}:${details.frameId}`
+
+      let origin = ''
+      try { origin = new URL(details.url).origin } catch { /* non-http(s) URL */ }
+
+      const cspInfo = parseCspForWorkerSpawn(cspValues, origin)
+      if (cspInfo) {
+        browser.storage.session.set({ [key]: cspInfo })
+          .catch((e) => logger.debug('csp session store failed', e))
+      } else {
+        browser.storage.session.remove(key).catch(() => {})
+      }
+    },
+    { urls: ['<all_urls>'], types: ['main_frame', 'sub_frame'] },
+    ['blocking', 'responseHeaders']
+  )
+
+  browser.tabs.onRemoved.addListener((tabId) => {
+    browser.storage.session.get(null).then((all) => {
+      const keys = Object.keys(all).filter((k) => k.startsWith(`csp:${tabId}:`))
+      if (keys.length) browser.storage.session.remove(keys).catch(() => {})
+    })
+  })
+
+  function parseDirectives(csp) {
+    const directives = {}
+    for (const raw of csp.split(';')) {
+      const trimmed = raw.trim()
+      if (!trimmed) continue
+      const parts = trimmed.split(/\s+/)
+      const name = parts[0].toLowerCase()
+      if (directives[name] !== undefined) continue
+      directives[name] = parts.slice(1).join(' ')
+    }
+    return directives
+  }
+
+  function sourceListAllowsWorker(list, origin) {
+    const tokens = list.split(/\s+/)
+    return tokens.includes('*') || tokens.includes("'self'") || tokens.includes(origin)
+      || tokens.includes('http:') || tokens.includes('https:')
+  }
+
+  function sourceListAllowsDaemonWs(list) {
+    const tokens = list.split(/\s+/)
+    return tokens.includes('*') || tokens.includes('ws:') || tokens.includes('ws://127.0.0.1:*')
+  }
+
+  function parseCspForWorkerSpawn(cspValues, pageOrigin) {
+    if (!cspValues || cspValues.length === 0) return null
+    let workerSrcBlocked = false
+    let connectSrcBlocked = false
+    let hasTrustedTypesRequire = false
+    for (const csp of cspValues) {
+      const directives = parseDirectives(csp)
+      const effWorker = directives['worker-src'] ?? directives['script-src'] ?? directives['default-src']
+      const effConnect = directives['connect-src'] ?? directives['default-src']
+      if (effWorker !== undefined && !sourceListAllowsWorker(effWorker, pageOrigin)) {
+        workerSrcBlocked = true
+      }
+      if (effConnect !== undefined && !sourceListAllowsDaemonWs(effConnect)) {
+        connectSrcBlocked = true
+      }
+      const tt = directives['require-trusted-types-for']
+      if (tt !== undefined && tt.includes("'script'")) hasTrustedTypesRequire = true
+    }
+    return {
+      workerSrcBlocked,
+      connectSrcBlocked,
+      hasTrustedTypesRequire,
+      shadowWorkerBlocked: workerSrcBlocked || connectSrcBlocked || hasTrustedTypesRequire,
+    }
+  }
+
   browser.runtime.onStartup.addListener(() => {
     loadNmHostSetting().then(() => NativeMessaging.connect())
   })
@@ -763,6 +843,19 @@
           .then((r) => r.text())
           .then((text) => sendResponse({ text }))
           .catch((e) => sendResponse({ error: e.message || String(e) }))
+        return true
+      }
+
+      case 'getCspInfo': {
+        const tabId = sender.tab != null ? sender.tab.id : undefined
+        if (tabId == null) {
+          sendResponse(null)
+          return false
+        }
+        const key = `csp:${tabId}:${sender.frameId ?? 0}`
+        browser.storage.session.get(key)
+          .then((r) => sendResponse(r[key] ?? null))
+          .catch(() => sendResponse(null))
         return true
       }
 
