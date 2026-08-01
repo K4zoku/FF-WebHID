@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>self-worker</title></head>
+<body>
+<script>
+window.workerResult = 'pending';
+try {
+  const w = new Worker(location.href);
+  w.onmessage = (e) => { window.workerResult = e.data; };
+  w.onerror = () => { window.workerResult = 'error'; };
+} catch (e) {
+  window.workerResult = 'thrown';
+}
+setTimeout(() => {
+  if (window.workerResult === 'pending') window.workerResult = 'timeout';
+}, 3000);
+</script>
+</body>
+</html>

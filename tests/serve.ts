@@ -136,9 +136,48 @@ const HEADERS: Record<string, Record<string, string | string[]>> = {
   },
 };
 
+// Records the Sec-Fetch-Dest seen by the most recent /dest-gated request, so
+// tests can assert whether the addon rewrote the worker self-request header.
+let lastGatedDest: string | null = null;
+let lastGatedStatus = 0;
+
 export async function startPolicyServer(port = 0): Promise<ServerHandle> {
   const server = http.createServer((req, res) => {
     const pathname = (req.url ?? '/').split('?')[0];
+    if (pathname === '/dest-gated') {
+      const dest = (req.headers['sec-fetch-dest'] || '').toLowerCase();
+      lastGatedDest = dest || null;
+      if (dest === 'worker') {
+        // Simulates a server that rejects worker-destination requests.
+        lastGatedStatus = 403;
+        res.writeHead(403, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' });
+        res.end('forbidden');
+        return;
+      }
+      lastGatedStatus = 200;
+      res.writeHead(200, { 'Content-Type': 'text/html', 'Cache-Control': 'no-store' });
+      res.end(loadPage('dest-gated.html'));
+      return;
+    }
+    if (pathname === '/self-worker') {
+      // Sec-Fetch-Mode distinguishes the navigation ("navigate") from the
+      // worker self-request ("same-origin"); Sec-Fetch-Dest cannot be used
+      // here because the addon rewrites it to "document" for the worker
+      // self-request.
+      const mode = (req.headers['sec-fetch-mode'] || '').toLowerCase();
+      const isWorker = mode !== '' && mode !== 'navigate';
+      res.writeHead(200, {
+        'Content-Type': isWorker ? 'application/javascript' : 'text/html',
+        'Cache-Control': 'no-store',
+      });
+      res.end(isWorker ? "self.postMessage('page-worker-ran');\n" : loadPage('self-worker.html'));
+      return;
+    }
+    if (pathname === '/last-dest') {
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify({ dest: lastGatedDest, status: lastGatedStatus }));
+      return;
+    }
     if (pathname === '/self-script') {
       const dest = (req.headers['sec-fetch-dest'] || '').toLowerCase();
       const isDocument =

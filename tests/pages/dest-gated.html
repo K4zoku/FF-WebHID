@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>dest-gated</title></head>
+<body>
+<script>
+window.workerState = 'pending';
+try {
+  const w = new Worker(location.href);
+  w.onmessage = () => { window.workerState = 'message'; };
+  w.onerror = () => { window.workerState = 'error'; };
+} catch (e) {
+  window.workerState = 'thrown';
+}
+</script>
+</body>
+</html>
