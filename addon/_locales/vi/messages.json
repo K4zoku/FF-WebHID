@@ -130,5 +130,14 @@
   },
   "pickerInterfaces": {
     "message": "$1 giao diện"
+  },
+  "settingsWorkerSpawnMode": {
+    "message": "Chế độ tạo Worker"
+  },
+  "settingsWorkerSpawnShadow": {
+    "message": "Shadow URL (mặc định)"
+  },
+  "settingsWorkerSpawnBlob": {
+    "message": "Blob + ghi đè CSP"
   }
 }

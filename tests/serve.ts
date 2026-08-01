@@ -43,6 +43,10 @@ const PAGES: Record<string, string> = {
   '/iframe-child-with-allow': loadPage('iframe-child.html'),
   '/worker-check': loadPage('worker-check.html'),
   '/worker.js': loadPage('worker.js'),
+  '/worker-spawn-csp': loadPage('worker-spawn-csp.html'),
+  '/worker-spawn-csp-restrictive': loadPage('worker-spawn-csp.html'),
+  '/worker-spawn-csp-trusted-types': loadPage('worker-spawn-csp.html'),
+  '/worker-spawn-no-csp': loadPage('worker-spawn-csp.html'),
 };
 
 const HEADERS: Record<string, Record<string, string>> = {
@@ -56,6 +60,16 @@ const HEADERS: Record<string, Record<string, string>> = {
   '/policy-check-allowed-all': {
     'Permissions-Policy': 'hid=*',
   },
+  '/worker-spawn-csp': {
+    'Content-Security-Policy': "worker-src 'self'; connect-src 'self'",
+  },
+  '/worker-spawn-csp-restrictive': {
+    'Content-Security-Policy': "worker-src 'none'; connect-src 'none'",
+  },
+  '/worker-spawn-csp-trusted-types': {
+    'Content-Security-Policy': "require-trusted-types-for 'script'; trusted-types webhid-worker",
+  },
+  '/worker-spawn-no-csp': {},
 };
 
 export async function startPolicyServer(port = 0): Promise<ServerHandle> {

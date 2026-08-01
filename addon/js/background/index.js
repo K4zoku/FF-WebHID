@@ -400,6 +400,51 @@
     ['blocking', 'responseHeaders']
   )
 
+  browser.webRequest.onHeadersReceived.addListener(
+    (details) => {
+      if (details.type !== 'main_frame' && details.type !== 'sub_frame') return
+      const cspHeader = details.responseHeaders?.find(
+        (h) => h.name.toLowerCase() === 'content-security-policy'
+      )?.value || ''
+      const tabId = details.tabId
+      const frameId = details.frameId
+      const cspInfo = parseCspForWorkerSpawn(cspHeader)
+      if (cspInfo) {
+        browser.storage.session.set({
+          [`csp:${tabId}:${frameId}`]: cspInfo,
+        }).catch(() => {})
+      }
+    },
+    { urls: ['<all_urls>'], types: ['main_frame', 'sub_frame'] },
+    ['responseHeaders']
+  )
+
+  function parseCspForWorkerSpawn(csp) {
+    if (!csp) return null
+    const directives = {}
+    for (const raw of csp.split(';')) {
+      const parts = raw.trim().split(/\s+/)
+      if (!parts.length) continue
+      directives[parts[0].toLowerCase()] = parts.slice(1).join(' ')
+    }
+    const workerSrc = directives['worker-src'] || directives['script-src'] || directives['default-src'] || ''
+    const connectSrc = directives['connect-src'] || directives['default-src'] || ''
+    const hasTrustedTypesRequire = directives['require-trusted-types-for']?.includes("'script'")
+    const trustedTypesAllowlist = directives['trusted-types']
+    const needsBlobFallback = settings.workerSpawnMode === 'blob'
+      || (settings.workerSpawnMode === 'shadow' && (
+        (workerSrc && !workerSrc.includes('blob:') && !workerSrc.includes('*'))
+        || hasTrustedTypesRequire
+      ))
+    return {
+      workerSrc,
+      connectSrc,
+      hasTrustedTypesRequire,
+      trustedTypesAllowlist,
+      needsBlobFallback,
+    }
+  }
+
   browser.runtime.onStartup.addListener(() => {
     loadNmHostSetting().then(() => NativeMessaging.connect())
   })

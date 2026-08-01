@@ -217,6 +217,53 @@
     }
   }
 
+  let cachedSpawnMode = null
+
+  async function resolveSpawnMode() {
+    if (cachedSpawnMode) return cachedSpawnMode
+    if (settings.workerSpawnMode === 'blob') {
+      cachedSpawnMode = 'blob'
+      return 'blob'
+    }
+    try {
+      const key = `csp:${undefined}:${0}`
+      const result = await browser.storage.session.get(null)
+      for (const [k, v] of Object.entries(result)) {
+        if (k.startsWith('csp:') && v && v.needsBlobFallback) {
+          cachedSpawnMode = 'blob'
+          return 'blob'
+        }
+      }
+    } catch {}
+    cachedSpawnMode = 'shadow'
+    return 'shadow'
+  }
+
+  async function spawnBlobWorker() {
+    const bundle = await browser.runtime.sendMessage({ action: 'fetchResource', path: 'js/content/isolated/worker/index.js' })
+    if (!bundle || !bundle.text) throw new Error('worker bundle fetch failed')
+    const utilsFiles = [
+      'js/utils/bootstrap.js',
+      'js/utils/logger.js',
+      'js/utils/settings.js',
+      'js/utils/websocket.js',
+    ]
+    const utilsTexts = await Promise.all(
+      utilsFiles.map((f) =>
+        browser.runtime.sendMessage({ action: 'fetchResource', path: f }).then((r) => r.text),
+      ),
+    )
+    const fullBundle = utilsTexts.join('\n') + '\n' + bundle.text
+    let workerUrl
+    try {
+      workerUrl = URL.createObjectURL(new Blob([fullBundle], { type: 'application/javascript' }))
+    } catch {
+      const ttPolicy = trustedTypes.createPolicy('webhid-worker', { createScriptURL: (s) => s })
+      workerUrl = ttPolicy.createScriptURL(URL.createObjectURL(new Blob([fullBundle], { type: 'application/javascript' })))
+    }
+    return new Worker(workerUrl)
+  }
+
   /**
    * @param {string} deviceId
    * @param {string} sessionToken
@@ -238,10 +285,15 @@
       return false
     }
     let worker
+    const spawnMode = await resolveSpawnMode()
     try {
-      worker = new Worker(location.href)
+      if (spawnMode === 'blob') {
+        worker = await spawnBlobWorker()
+      } else {
+        worker = new Worker(location.href)
+      }
     } catch (e) {
-      logger.warn('redirect worker failed for', deviceId, ':', e.message)
+      logger.warn('worker spawn failed for', deviceId, '(', spawnMode, '):', e.message)
     }
     if (!worker) return false
 
