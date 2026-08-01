@@ -71,7 +71,9 @@ type Servers = { main: { port: number; server: Server }; cross: { port: number; 
 
 const defaultRouteHandler: RouteHandler = (route) => { route.continue(); };
 
-const EXTENSION_PATH = resolve(__dirname, '..', '..', 'addon');
+const EXTENSION_PATH = process.env.EXTENSION_PATH
+  ? resolve(process.env.EXTENSION_PATH)
+  : resolve(__dirname, '..', '..', 'addon');
 
 export const test = base.extend<
   PlaywrightTestArgs & PlaywrightTestOptions,

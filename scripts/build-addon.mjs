@@ -253,26 +253,21 @@ function transformHtml(html, htmlRel) {
  */
 function transformInjectJs(code) {
   return code.replace(
-    /const files = \[[\s\S]*?\];\n/,
+    /const files = \[[\s\S]*?\];?\n/,
     '  const files = [\n    "js/utils/common.js",\n    "js/content/main/index.js",\n  ];\n'
   ).replace(
-    /var scripts = \[[\s\S]*?\];\n/,
+    /var scripts = \[[\s\S]*?\];?\n/,
     '  var scripts = [\n    "js/utils/common.js",\n    "js/content/main/index.js",\n  ];\n'
   );
 }
 
 function transformBundleJs(code) {
-  // Polyfill worker first (main/index.js), then data worker (worker/index.js)
-  // Order matters: after replacing one, the other's const files= becomes the first match
-  return code
-    .replace(
-      /const files = \[[\s\S]*?"js\/content\/main\/index\.js",?\s*\];/,
-      `    const files = [\n      "js/utils/common.js",\n      "js/content/main/index.js",\n    ];`
-    )
-    .replace(
-      /const files = \[[\s\S]*?"js\/content\/isolated\/worker\/index\.js",?\s*\];/,
-      `    const files = [\n      "js/utils/common.js",\n      "js/utils/websocket.js",\n      "js/content/isolated/worker/index.js",\n    ];`
-    );
+  return code.replace(/const files = \[[^\]]*\];?/g, (match) => {
+    if (match.includes('js/content/main/index.js')) {
+      return `const files = [\n      "js/utils/common.js",\n      "js/content/main/index.js",\n    ];`
+    }
+    return `const files = [\n      "js/utils/common.js",\n      "js/utils/websocket.js",\n      "js/content/isolated/worker/index.js",\n    ];`
+  });
 }
 
 function transformFile(rel, code) {
