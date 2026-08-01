@@ -350,6 +350,108 @@
     { urls: ['<all_urls>'], types: ['script'] }
   )
 
+  browser.webRequest.onBeforeRequest.addListener(
+    (details) => {
+      if (details.type !== 'main_frame' && details.type !== 'sub_frame') return
+      handleMetaCsp(details)
+    },
+    { urls: ['<all_urls>'], types: ['main_frame', 'sub_frame'] },
+    ['blocking']
+  )
+
+  function handleMetaCsp(details) {
+    const filter = browser.webRequest.filterResponseData(details.requestId)
+    const enc = new TextEncoder()
+    const dec = new TextDecoder()
+    const rawChunks = []
+    let scanText = ''
+    let gaveUp = false
+    let processed = false
+
+    const origin = urlOrigin(details.url)
+
+    const modePromise = (async () => {
+      let mode = settings.workerSpawnMode
+      if (origin) {
+        const siteKey = siteSettingKey(origin, 'workerSpawnMode')
+        const res = await browser.storage.local.get(siteKey).catch(() => ({}))
+        if (res[siteKey] !== undefined) mode = res[siteKey]
+      }
+      return mode
+    })()
+
+    function passthrough() {
+      for (const buf of rawChunks) filter.write(buf)
+      filter.disconnect()
+    }
+
+    async function process(eof) {
+      if (processed) return
+      const headEnd = scanText.toLowerCase().indexOf('</head>')
+      if (headEnd === -1 && !eof && !gaveUp) return
+      processed = true
+      const mode = await modePromise
+      const html = scanText + dec.decode()
+      const end = headEnd === -1 ? html.length : headEnd
+      const head = html.slice(0, end)
+      const metaInfos = []
+      let anyChange = false
+      const rewrittenHead = head.replace(/<meta\s[^>]*>/gi, (tag) => {
+        if (!/http-equiv\s*=\s*["']?\s*content-security-policy\s*["']?/i.test(tag)) return tag
+        const contentMatch = tag.match(/\bcontent\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/i)
+        if (!contentMatch) return tag
+        const quote = contentMatch[2] !== undefined ? '"' : contentMatch[3] !== undefined ? "'" : ''
+        const csp = contentMatch[2] ?? contentMatch[3] ?? contentMatch[4] ?? ''
+        const info = parseCspForWorkerSpawn([csp], mode, origin)
+        if (!info) return tag
+        metaInfos.push(info)
+        if (!info.needsBlobFallback) return tag
+        const { value, modified } = rewriteCspValue(csp, info)
+        if (!modified) return tag
+        anyChange = true
+        return tag.replace(contentMatch[0], 'content=' + (quote || '"') + value + (quote || '"'))
+      })
+
+      if (metaInfos.length) {
+        const key = `csp:${details.tabId}:${details.frameId}`
+        browser.storage.session.get(key).then((r) => {
+          const existing = r[key]
+          const merged = {
+            workerSrc: metaInfos[0].workerSrc ?? existing?.workerSrc,
+            connectSrc: metaInfos[0].connectSrc ?? existing?.connectSrc,
+            workerSrcBlocked: metaInfos.some((i) => i.workerSrcBlocked) || !!existing?.workerSrcBlocked,
+            connectSrcBlocked: metaInfos.some((i) => i.connectSrcBlocked) || !!existing?.connectSrcBlocked,
+            hasTrustedTypesRequire:
+              metaInfos.some((i) => i.hasTrustedTypesRequire) || !!existing?.hasTrustedTypesRequire,
+            needsBlobFallback: metaInfos.some((i) => i.needsBlobFallback) || !!existing?.needsBlobFallback,
+          }
+          browser.storage.session.set({ [key]: merged }).catch(() => {})
+        }).catch(() => {})
+      }
+
+      if (!anyChange) {
+        passthrough()
+        return
+      }
+      filter.write(enc.encode(rewrittenHead + html.slice(end)))
+      filter.close()
+    }
+
+    filter.ondata = (e) => {
+      rawChunks.push(e.data)
+      if (processed) return
+      if (scanText.length < 262144) scanText += dec.decode(e.data, { stream: true })
+      else gaveUp = true
+      process(false)
+    }
+    filter.onstop = () => {
+      process(true)
+    }
+    filter.onerror = () => {
+      try { filter.disconnect() } catch { return }
+    }
+  }
+
   browser.webRequest.onHeadersReceived.addListener(
     (details) => {
       if (
@@ -458,52 +560,59 @@
     }
   }
 
+  function rewriteCspValue(csp, cspInfo) {
+    const { directives, order } = parseDirectives(csp || '')
+    let modified = false
+
+    if (directives['worker-src'] !== undefined) {
+      if (!directives['worker-src'].includes('blob:')) {
+        directives['worker-src'] = directives['worker-src'] + ' blob:'
+        modified = true
+      }
+    } else {
+      const fallback = directives['script-src'] ?? directives['default-src']
+      if (fallback !== undefined) {
+        directives['worker-src'] = fallback + ' blob:'
+        order.push('worker-src')
+        modified = true
+      }
+    }
+
+    if (directives['connect-src'] !== undefined) {
+      if (!sourceListAllowsDaemonWs(directives['connect-src'])) {
+        directives['connect-src'] = directives['connect-src'] + ' ws://127.0.0.1:*'
+        modified = true
+      }
+    } else if (directives['default-src'] !== undefined) {
+      directives['connect-src'] = directives['default-src'] + ' ws://127.0.0.1:*'
+      order.push('connect-src')
+      modified = true
+    }
+
+    if (cspInfo.hasTrustedTypesRequire) {
+      const ttList = directives['trusted-types']
+      if (ttList === undefined) {
+        directives['trusted-types'] = 'webhid-worker'
+        order.push('trusted-types')
+        modified = true
+      } else if (!ttList.includes('webhid-worker')) {
+        directives['trusted-types'] = ttList + ' webhid-worker'
+        modified = true
+      }
+    }
+
+    const rebuilt = order.map((name) => name + (directives[name] ? ' ' + directives[name] : '')).join('; ')
+    return { value: rebuilt, modified }
+  }
+
   function rewriteCspForBlob(headers, cspInfo) {
     if (!headers) return null
     let modified = false
     const newHeaders = headers.map((h) => {
       if (h.name.toLowerCase() !== 'content-security-policy') return h
-      const { directives, order } = parseDirectives(h.value || '')
-
-      if (directives['worker-src'] !== undefined) {
-        if (!directives['worker-src'].includes('blob:')) {
-          directives['worker-src'] = directives['worker-src'] + ' blob:'
-          modified = true
-        }
-      } else {
-        const fallback = directives['script-src'] ?? directives['default-src']
-        if (fallback !== undefined) {
-          directives['worker-src'] = fallback + ' blob:'
-          order.push('worker-src')
-          modified = true
-        }
-      }
-
-      if (directives['connect-src'] !== undefined) {
-        if (!sourceListAllowsDaemonWs(directives['connect-src'])) {
-          directives['connect-src'] = directives['connect-src'] + ' ws://127.0.0.1:*'
-          modified = true
-        }
-      } else if (directives['default-src'] !== undefined) {
-        directives['connect-src'] = directives['default-src'] + ' ws://127.0.0.1:*'
-        order.push('connect-src')
-        modified = true
-      }
-
-      if (cspInfo.hasTrustedTypesRequire) {
-        const ttList = directives['trusted-types']
-        if (ttList === undefined) {
-          directives['trusted-types'] = 'webhid-worker'
-          order.push('trusted-types')
-          modified = true
-        } else if (!ttList.includes('webhid-worker')) {
-          directives['trusted-types'] = ttList + ' webhid-worker'
-          modified = true
-        }
-      }
-
-      const rebuilt = order.map((name) => name + (directives[name] ? ' ' + directives[name] : '')).join('; ')
-      return { name: h.name, value: rebuilt }
+      const { value, modified: changed } = rewriteCspValue(h.value || '', cspInfo)
+      if (changed) modified = true
+      return { name: h.name, value }
     })
     return modified ? newHeaders : null
   }

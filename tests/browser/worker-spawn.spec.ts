@@ -120,6 +120,21 @@ test.describe('Worker spawn mode detection', () => {
     expect(cspInfo.needsBlobFallback).toBe(true);
   });
 
+  test('meta CSP: rewritten via StreamFilter, blob worker runs', async ({ backgroundPage, sharedPage, pageUrl }) => {
+    await clearSession(backgroundPage);
+    await sharedPage.goto(pageUrl('/worker-spawn-csp-meta'), { waitUntil: 'domcontentloaded', timeout: 15000 });
+    const entries = await readCspEntries(backgroundPage);
+    expect(entries.length).toBeGreaterThan(0);
+    const cspInfo = entries[0];
+    expect(cspInfo.workerSrcBlocked).toBe(true);
+    expect(cspInfo.connectSrcBlocked).toBe(true);
+    expect(cspInfo.needsBlobFallback).toBe(true);
+    const blobStatus = await waitForStatus(sharedPage, 'blob-status');
+    expect(blobStatus).toBe('blob-ready');
+    const sameOriginStatus = await waitForStatus(sharedPage, 'same-origin-status');
+    expect(sameOriginStatus).toMatch(/^same-origin-(error|threw|timeout)/);
+  });
+
   test('site setting blob forces fallback and rewrite', async ({ backgroundPage, sharedPage, pageUrl, servers }) => {
     const origin = `http://localhost:${servers.main.port}`;
     const siteKey = `settings :: ${origin} :: workerSpawnMode`;

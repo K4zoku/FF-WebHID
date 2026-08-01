@@ -49,6 +49,7 @@ const PAGES: Record<string, string> = {
   '/worker-spawn-csp-connect': loadPage('worker-spawn-csp.html'),
   '/worker-spawn-csp-allowing': loadPage('worker-spawn-csp.html'),
   '/worker-spawn-no-csp': loadPage('worker-spawn-csp.html'),
+  '/worker-spawn-csp-meta': loadPage('worker-spawn-csp-meta.html'),
 };
 
 const HEADERS: Record<string, Record<string, string>> = {

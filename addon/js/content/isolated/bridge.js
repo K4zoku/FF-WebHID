@@ -219,6 +219,7 @@
   }
 
   let cachedSpawnMode = null
+  let cachedTtPolicy = null
 
   async function resolveSpawnMode() {
     if (cachedSpawnMode) return cachedSpawnMode
@@ -251,8 +252,10 @@
     let workerUrl = blobUrl
     if (typeof trustedTypes !== 'undefined' && trustedTypes !== null) {
       try {
-        const policy = trustedTypes.createPolicy('webhid-worker', { createScriptURL: (s) => s })
-        workerUrl = policy.createScriptURL(blobUrl)
+        if (!cachedTtPolicy) {
+          cachedTtPolicy = trustedTypes.createPolicy('webhid-worker', { createScriptURL: (s) => s })
+        }
+        workerUrl = cachedTtPolicy.createScriptURL(blobUrl)
       } catch { workerUrl = blobUrl }
     }
     return new Worker(workerUrl)
