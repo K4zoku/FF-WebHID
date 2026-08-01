@@ -126,7 +126,7 @@ function collectManifestFiles(manifestPath) {
     for (const f of readdirSync(resDir)) files.add(join("res", f));
   }
   // Runtime-fetched bundles (worker/polyfill/main lists live in one module)
-  const bundleFilesPath = join(SRC, "js/bundle-files.js");
+  const bundleFilesPath = join(SRC, "js/utils/bundle-files.js");
   if (existsSync(bundleFilesPath)) {
     const src = readFileSync(bundleFilesPath, "utf-8");
     for (const m of src.matchAll(/["'](js\/[^"']+\.js)["']/g)) files.add(m[1]);
