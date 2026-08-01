@@ -2,7 +2,7 @@
 
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { mkdir, readFile, writeFile, rm } from "node:fs/promises";
-import { join, dirname, relative } from "node:path";
+import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { minify } from "terser";
@@ -125,11 +125,12 @@ function collectManifestFiles(manifestPath) {
   if (existsSync(resDir)) {
     for (const f of readdirSync(resDir)) files.add(join("res", f));
   }
-  // Dynamically loaded by bundle.js for data worker
-  const workerIndex = "js/content/isolated/worker/index.js";
-  if (existsSync(join(SRC, workerIndex))) files.add(workerIndex);
-  const websocketUtil = "js/utils/websocket.js";
-  if (existsSync(join(SRC, websocketUtil))) files.add(websocketUtil);
+  // Runtime-fetched bundles (worker/polyfill/main lists live in one module)
+  const bundleFilesPath = join(SRC, "js/bundle-files.js");
+  if (existsSync(bundleFilesPath)) {
+    const src = readFileSync(bundleFilesPath, "utf-8");
+    for (const m of src.matchAll(/["'](js\/[^"']+\.js)["']/g)) files.add(m[1]);
+  }
   const fragment = "js/content/isolated/picker/fragment.html";
   if (existsSync(join(SRC, fragment))) files.add(fragment);
 
@@ -177,103 +178,6 @@ function collectAllFiles(manifestFiles) {
   return all;
 }
 
-// ── utils bundled into common.js (derived from manifest at build time) ────────
-
-/** @type {string[]} */
-let UTIL_FILES = [];
-/** @type {Set<string>} */
-let BUNDLED_UTILS = new Set();
-
-/**
- * Concatenates and minifies all utils into common.js, writing to outDir.
- * @param {string} srcDir source addon root
- * @param {string} outDir target directory
- * @returns {Promise<void>}
- */
-async function buildCommonJs(srcDir, outDir) {
-  const codes = [];
-  for (const f of UTIL_FILES) {
-    const fp = join(srcDir, "js/utils", f);
-    if (existsSync(fp)) codes.push(await readFile(fp, "utf-8"));
-  }
-  if (codes.length === 0) return;
-  const result = await minify(codes.join("\n"), TERSER_OPTS);
-  if (result.error) throw new Error(`terser failed on common.js: ${result.error}`);
-  const commonPath = join(outDir, "js/utils/common.js");
-  await mkdir(dirname(commonPath), { recursive: true });
-  await writeFile(commonPath, result.code ?? "", "utf-8");
-}
-
-/**
- * Replaces individual util references in a manifest JSON string with common.js.
- */
-function transformManifest(json) {
-  const m = JSON.parse(json);
-  if (m.background && Array.isArray(m.background.scripts)) {
-    m.background.scripts = replaceUtilScripts(m.background.scripts);
-  }
-  if (Array.isArray(m.content_scripts)) {
-    for (const cs of m.content_scripts) {
-      if (Array.isArray(cs.js)) cs.js = replaceUtilScripts(cs.js);
-    }
-  }
-  return JSON.stringify(m, null, 2) + "\n";
-}
-
-function replaceUtilScripts(arr) {
-  const hasCommon = arr.some(s => BUNDLED_UTILS.has(s));
-  if (!hasCommon) return arr;
-  const nonUtils = arr.filter(s => !BUNDLED_UTILS.has(s) && s !== "js/utils/common.js");
-  return ["js/utils/common.js", ...nonUtils];
-}
-
-/**
- * Replaces individual util <script> tags in HTML with a single common.js tag.
- * @param {string} html - HTML content
- * @param {string} htmlRel - path relative to addon root (e.g. "js/internal/pages/popup/index.html")
- */
-function transformHtml(html, htmlRel) {
-  const commonRel = relative(dirname(htmlRel), 'js/utils/common.js');
-  let inserted = false;
-  return html.replace(
-    /<script[^<]*src="([^"]*)"[^<]*><\/script\s*>\s*/gi,
-    (match, src) => {
-      if (src.includes('/js/utils/')) return '';
-      if (!inserted) {
-        inserted = true;
-        return `<script src="${commonRel}"></script>\n    ` + match;
-      }
-      return match;
-    }
-  );
-}
-
-/**
- * Replaces individual util paths in inject.js with common.js.
- */
-function transformBundleFilesJs(code) {
-  return code
-    .replace(
-      /worker: \[[^\]]*\]/,
-      `worker: [\n      "js/utils/common.js",\n      "js/utils/websocket.js",\n      "js/content/isolated/worker/index.js",\n    ]`
-    )
-    .replace(
-      /polyfill: \[[^\]]*\]/,
-      `polyfill: [\n      "js/utils/common.js",\n      "js/content/main/index.js",\n    ]`
-    )
-    .replace(
-      /main: \[[^\]]*\]/,
-      `main: [\n      "js/utils/common.js",\n      "js/content/main/index.js",\n    ]`
-    );
-}
-
-function transformFile(rel, code) {
-  if (rel === "manifest.json") return transformManifest(code);
-  if (rel.endsWith(".html") && code.includes('/js/utils/')) return transformHtml(code, rel);
-  if (rel === "js/bundle-files.js") return transformBundleFilesJs(code);
-  return code;
-}
-
 async function build() {
   console.log("==> Linting addon source…");
   const lintResult = await webExt.cmd.lint({
@@ -300,56 +204,25 @@ async function build() {
     process.exit(1);
   }
 
-  // Collect files from manifest + HTML scan (source references individual utils)
+  // Collect files from manifest + HTML scan + runtime-fetched bundles
   const manifestFiles = collectManifestFiles(manifestPath);
   const allowedFiles = collectAllFiles(manifestFiles);
   console.log(`Source manifest references ${allowedFiles.size} files`);
 
-  // Read manifest to find utils shared across 2+ context arrays (the "common" ones)
-  const rawManifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
-  const contextArrays = [];
-  if (rawManifest.background?.scripts) contextArrays.push(rawManifest.background.scripts);
-  if (Array.isArray(rawManifest.content_scripts)) {
-    for (const cs of rawManifest.content_scripts) {
-      if (Array.isArray(cs.js)) contextArrays.push(cs.js);
-    }
-  }
-  const utilCounts = new Map();
-  for (const arr of contextArrays) {
-    const seen = new Set();
-    for (const p of arr) {
-      if (p.startsWith("js/utils/") && p.endsWith(".js") && !seen.has(p)) {
-        utilCounts.set(p, (utilCounts.get(p) || 0) + 1);
-        seen.add(p);
-      }
-    }
-  }
-  const bundledUtils = new Set([...utilCounts].filter(([_, c]) => c >= 2).map(([p]) => p));
-
-  // Derive bundled util list from manifest script intersection
-  UTIL_FILES = [...bundledUtils].map(p => p.replace("js/utils/", ""));
-  BUNDLED_UTILS = bundledUtils;
   if (existsSync(DIST)) {
     await rm(DIST, { recursive: true, force: true });
   }
   await mkdir(DIST, { recursive: true });
 
-  // Generate common.js into dist
-  await buildCommonJs(SRC, DIST);
-  let jsCount = 1; // common.js
+  let jsCount = 0;
   let cssCount = 0;
   let htmlCount = 0;
   let copyCount = 0;
 
-  // Filter out bundled utils (they're replaced by common.js at build time)
-  const filteredFiles = [...allowedFiles].filter(rel => !BUNDLED_UTILS.has(rel));
-
-  for (const rel of filteredFiles) {
+  for (const rel of allowedFiles) {
     if (rel === "") {
-      // Manifest: transform (replace utils with common.js) before writing
       const manifestContent = await readFile(manifestPath, "utf-8");
-      const transformed = transformFile("manifest.json", manifestContent);
-      await writeFile(join(DIST, "manifest.json"), transformed, "utf-8");
+      await writeFile(join(DIST, "manifest.json"), manifestContent, "utf-8");
       copyCount++;
       continue;
     }
@@ -363,7 +236,6 @@ async function build() {
     } catch {
       continue; // skip files that don't exist
     }
-    code = transformFile(rel, code);
     if (rel.endsWith(".js")) {
       const result = await minify(code, TERSER_OPTS);
       if (result.error) {
