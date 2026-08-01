@@ -30,6 +30,7 @@
       "js/background/storage.js",
       "js/background/packed.js",
       "js/background/state_ops.js",
+      "js/bundle-files.js",
       "js/background/bundle.js",
       "js/background/nm.js",
       "js/background/index.js"
@@ -58,6 +59,7 @@
       ],
       "js": [
         "js/utils/bootstrap.js",
+        "js/bundle-files.js",
         "js/utils/i18n.js",
         "js/content/isolated/inject.js"
       ],

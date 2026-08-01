@@ -11,13 +11,7 @@
   async function ensureWorkerBundle() {
     if (workerBundle) return workerBundle
     if (workerBundlePromise) return workerBundlePromise
-    const files = [
-      'js/utils/bootstrap.js',
-      'js/utils/logger.js',
-      'js/utils/settings.js',
-      'js/utils/websocket.js',
-      'js/content/isolated/worker/index.js'
-    ]
+    const files = webhid.import('bundleFiles').worker
     workerBundlePromise = (async () => {
       const texts = await Promise.all(
         files.map((f) =>
@@ -44,14 +38,7 @@
   async function ensureWorkerPolyfillBundle() {
     if (workerPolyfillBundle) return workerPolyfillBundle
     if (workerPolyfillBundlePromise) return workerPolyfillBundlePromise
-    const files = [
-      'js/utils/bootstrap.js',
-      'js/utils/logger.js',
-      'js/utils/http.js',
-      'js/utils/settings.js',
-      'js/utils/device.js',
-      'js/content/main/index.js'
-    ]
+    const files = webhid.import('bundleFiles').polyfill
     workerPolyfillBundlePromise = (async () => {
       const texts = await Promise.all(
         files.map((f) =>

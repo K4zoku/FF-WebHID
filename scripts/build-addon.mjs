@@ -251,30 +251,26 @@ function transformHtml(html, htmlRel) {
 /**
  * Replaces individual util paths in inject.js with common.js.
  */
-function transformInjectJs(code) {
-  return code.replace(
-    /const files = \[[\s\S]*?\];?\n/,
-    '  const files = [\n    "js/utils/common.js",\n    "js/content/main/index.js",\n  ];\n'
-  ).replace(
-    /var scripts = \[[\s\S]*?\];?\n/,
-    '  var scripts = [\n    "js/utils/common.js",\n    "js/content/main/index.js",\n  ];\n'
-  );
-}
-
-function transformBundleJs(code) {
-  return code.replace(/const files = \[[^\]]*\];?/g, (match) => {
-    if (match.includes('js/content/main/index.js')) {
-      return `const files = [\n      "js/utils/common.js",\n      "js/content/main/index.js",\n    ];`
-    }
-    return `const files = [\n      "js/utils/common.js",\n      "js/utils/websocket.js",\n      "js/content/isolated/worker/index.js",\n    ];`
-  });
+function transformBundleFilesJs(code) {
+  return code
+    .replace(
+      /worker: \[[^\]]*\]/,
+      `worker: [\n      "js/utils/common.js",\n      "js/utils/websocket.js",\n      "js/content/isolated/worker/index.js",\n    ]`
+    )
+    .replace(
+      /polyfill: \[[^\]]*\]/,
+      `polyfill: [\n      "js/utils/common.js",\n      "js/content/main/index.js",\n    ]`
+    )
+    .replace(
+      /main: \[[^\]]*\]/,
+      `main: [\n      "js/utils/common.js",\n      "js/content/main/index.js",\n    ]`
+    );
 }
 
 function transformFile(rel, code) {
   if (rel === "manifest.json") return transformManifest(code);
   if (rel.endsWith(".html") && code.includes('/js/utils/')) return transformHtml(code, rel);
-  if (rel === "js/content/isolated/inject.js") return transformInjectJs(code);
-  if (rel === "js/background/bundle.js") return transformBundleJs(code);
+  if (rel === "js/bundle-files.js") return transformBundleFilesJs(code);
   return code;
 }
 
