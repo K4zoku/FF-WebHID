@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 use tokio::net::UnixStream;
 
 /// Syscall allow-list for the daemon process.
-#[cfg(all(target_os = "linux", not(debug_assertions)))]
+#[cfg(all(feature = "hardening", target_os = "linux", not(debug_assertions)))]
 pub const DAEMON_SYSCALLS: &[libc::c_long] = &[
     libc::SYS_read,
     libc::SYS_write,
@@ -20,12 +20,18 @@ pub const DAEMON_SYSCALLS: &[libc::c_long] = &[
     libc::SYS_ioctl,
     libc::SYS_lseek,
     libc::SYS_openat,
+    libc::SYS_mkdir,
+    libc::SYS_unlink,
+    libc::SYS_chmod,
     libc::SYS_fstat,
+    libc::SYS_fstatfs,
     libc::SYS_newfstatat,
     libc::SYS_statx,
     libc::SYS_getdents64,
+    libc::SYS_readlink,
     libc::SYS_readlinkat,
     libc::SYS_faccessat,
+    libc::SYS_faccessat2,
     #[cfg(target_arch = "x86_64")]
     libc::SYS_access,
     libc::SYS_truncate,
@@ -36,6 +42,10 @@ pub const DAEMON_SYSCALLS: &[libc::c_long] = &[
     libc::SYS_brk,
     libc::SYS_mremap,
     libc::SYS_madvise,
+    #[cfg(target_arch = "x86_64")]
+    libc::SYS_arch_prctl,
+    libc::SYS_prlimit64,
+    libc::SYS_poll,
     libc::SYS_socket,
     libc::SYS_bind,
     libc::SYS_listen,
@@ -89,13 +99,16 @@ pub const DAEMON_SYSCALLS: &[libc::c_long] = &[
     libc::SYS_prctl,
     libc::SYS_pipe2,
     libc::SYS_uname,
+    libc::SYS_sched_getaffinity,
     libc::SYS_sched_yield,
     libc::SYS_fsync,
     libc::SYS_fdatasync,
 ];
 
 /// Fallback: empty list for debug / non-Linux (seccomp is a no-op).
-#[cfg(not(all(target_os = "linux", not(debug_assertions))))]
+/// Only referenced when the `hardening` feature is enabled; unused in default builds.
+#[cfg(not(all(feature = "hardening", target_os = "linux", not(debug_assertions))))]
+#[allow(dead_code)]
 pub const DAEMON_SYSCALLS: &[()] = &[];
 
 #[cfg(target_os = "linux")]

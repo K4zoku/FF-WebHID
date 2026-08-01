@@ -11,5 +11,8 @@ anyhow = { version = "1", default-features = false, features = ["std"] }
 log = { version = "0.4", features = ["std"] }
 serde_json = "1"
 
+[features]
+hardening = ["webhid/hardening"]
+
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"

@@ -4,6 +4,9 @@ version = "2.2.0"
 edition = "2024"
 license = "MIT"
 
+[features]
+hardening = ["webhid/hardening"]
+
 [dependencies]
 webhid = { path = "../webhid" }
 serde = { version = "1", features = ["derive"] }

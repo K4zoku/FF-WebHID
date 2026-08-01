@@ -106,8 +106,11 @@ async fn main() -> anyhow::Result<()> {
 
     webhid::logging::init_logger();
 
-    webhid::security::apply_prctl_hardening();
-    webhid::security::apply_seccomp_filter(crate::security::DAEMON_SYSCALLS);
+    #[cfg(feature = "hardening")]
+    {
+        webhid::security::apply_prctl_hardening();
+        webhid::security::apply_seccomp_filter(crate::security::DAEMON_SYSCALLS);
+    }
 
     let nm_host_info = detect_nm_host_mode();
     let nm_host_mode = nm_host_info.is_some();

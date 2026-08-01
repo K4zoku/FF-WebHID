@@ -1,9 +1,9 @@
 /// No-op on non-Linux or debug builds.
-#[cfg(not(all(target_os = "linux", not(debug_assertions))))]
+#[cfg(not(all(feature = "hardening", target_os = "linux", not(debug_assertions))))]
 pub fn apply_prctl_hardening() {}
 
 /// Apply process-wide hardening via prctl (Linux, release-only).
-#[cfg(all(target_os = "linux", not(debug_assertions)))]
+#[cfg(all(feature = "hardening", target_os = "linux", not(debug_assertions)))]
 pub fn apply_prctl_hardening() {
     let ret = unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0) };
     if ret != 0 {
@@ -23,12 +23,12 @@ pub fn apply_prctl_hardening() {
 }
 
 /// No-op on non-Linux or debug builds.
-#[cfg(not(all(target_os = "linux", not(debug_assertions))))]
+#[cfg(not(all(feature = "hardening", target_os = "linux", not(debug_assertions))))]
 pub fn apply_seccomp_filter<T>(_syscalls: &[T]) {}
 
 /// Apply a strict seccomp BPF allow-list filter (Linux, release-only).
 /// Panics via `exit(1)` if installation fails (security-critical).
-#[cfg(all(target_os = "linux", not(debug_assertions)))]
+#[cfg(all(feature = "hardening", target_os = "linux", not(debug_assertions)))]
 pub fn apply_seccomp_filter(syscalls: &[libc::c_long]) {
     let filter = build_filter(syscalls);
     let mut prog = libc::sock_fprog {
@@ -57,7 +57,7 @@ pub fn apply_seccomp_filter(syscalls: &[libc::c_long]) {
     log::info!("[security] seccomp BPF filter applied");
 }
 
-#[cfg(all(target_os = "linux", not(debug_assertions)))]
+#[cfg(all(feature = "hardening", target_os = "linux", not(debug_assertions)))]
 fn build_filter(syscalls: &[libc::c_long]) -> Vec<libc::sock_filter> {
     use libc::*;
 
@@ -72,11 +72,15 @@ fn build_filter(syscalls: &[libc::c_long]) -> Vec<libc::sock_filter> {
             (BPF_LD | BPF_W | BPF_ABS) as u16,
             SECCOMP_DATA_ARCH_OFFSET,
         ));
+        // Arch mismatch kills. Classic BPF jt/jf are "skip N" counts: on a match
+        // (jt=1) skip the KILL below and fall into the per-syscall checks; on a
+        // mismatch (jf=0) execute the KILL. Swapping these inverts the check and
+        // kills every syscall on the native arch.
         insns.push(BPF_JUMP(
             (BPF_JMP | BPF_JEQ) as u16,
             AUDIT_ARCH,
-            0,
             1,
+            0,
         ));
         insns.push(BPF_STMT(
             (BPF_RET | BPF_K) as u16,
@@ -107,10 +111,10 @@ fn build_filter(syscalls: &[libc::c_long]) -> Vec<libc::sock_filter> {
     insns
 }
 
-#[cfg(all(target_os = "linux", not(debug_assertions)))]
+#[cfg(all(feature = "hardening", target_os = "linux", not(debug_assertions)))]
 #[cfg(target_arch = "x86_64")]
 const AUDIT_ARCH: u32 = 0xC000_003E; // AUDIT_ARCH_X86_64
 
-#[cfg(all(target_os = "linux", not(debug_assertions)))]
+#[cfg(all(feature = "hardening", target_os = "linux", not(debug_assertions)))]
 #[cfg(target_arch = "aarch64")]
 const AUDIT_ARCH: u32 = 0xC000_00B7; // AUDIT_ARCH_AARCH64

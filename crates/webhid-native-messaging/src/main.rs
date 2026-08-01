@@ -19,7 +19,7 @@ const MAX_FRAME_SIZE: usize = 1024 * 1024;
 const CONNECT_TIMEOUT_MS: u64 = 5000;
 
 /// Syscall allow-list for the NM forwarder (pure byte pipe, no server).
-#[cfg(all(target_os = "linux", not(debug_assertions)))]
+#[cfg(all(feature = "hardening", target_os = "linux", not(debug_assertions)))]
 const NM_SYSCALLS: &[libc::c_long] = &[
     libc::SYS_read,
     libc::SYS_write,
@@ -41,6 +41,10 @@ const NM_SYSCALLS: &[libc::c_long] = &[
     libc::SYS_mprotect,
     libc::SYS_brk,
     libc::SYS_madvise,
+    #[cfg(target_arch = "x86_64")]
+    libc::SYS_arch_prctl,
+    libc::SYS_prlimit64,
+    libc::SYS_poll,
     libc::SYS_socket,
     libc::SYS_connect,
     libc::SYS_getsockname,
@@ -63,6 +67,7 @@ const NM_SYSCALLS: &[libc::c_long] = &[
     libc::SYS_exit_group,
     libc::SYS_exit,
     libc::SYS_getpid,
+    libc::SYS_getppid,
     libc::SYS_gettid,
     libc::SYS_getuid,
     libc::SYS_getgid,
@@ -80,11 +85,14 @@ const NM_SYSCALLS: &[libc::c_long] = &[
     libc::SYS_prctl,
     libc::SYS_pipe2,
     libc::SYS_uname,
+    libc::SYS_sched_getaffinity,
     libc::SYS_sched_yield,
 ];
 
 /// Fallback: empty list for debug / non-Linux (seccomp is a no-op).
-#[cfg(not(all(target_os = "linux", not(debug_assertions))))]
+/// Only referenced when the `hardening` feature is enabled; unused in default builds.
+#[cfg(not(all(feature = "hardening", target_os = "linux", not(debug_assertions))))]
+#[allow(dead_code)]
 const NM_SYSCALLS: &[()] = &[];
 
 /// Write a JSON error frame to the NM host's stdout (→ addon). Format: `{"s":503,"E":"<msg>"}`.
@@ -176,8 +184,11 @@ async fn main() -> anyhow::Result<()> {
 
     webhid::logging::init_logger();
 
-    webhid::security::apply_prctl_hardening();
-    webhid::security::apply_seccomp_filter(&NM_SYSCALLS);
+    #[cfg(feature = "hardening")]
+    {
+        webhid::security::apply_prctl_hardening();
+        webhid::security::apply_seccomp_filter(&NM_SYSCALLS);
+    }
 
     #[cfg(unix)]
     let daemon = {
