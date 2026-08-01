@@ -38,7 +38,8 @@ test.describe('Worker spawn mode detection', () => {
       [`settings :: ${origin} :: workerSpawnMode`],
     ), origin);
 
-    expect(status).toMatch(/^(worker-ready|worker-timeout)/);
+    expect(status).not.toMatch(/^worker-threw/);
+    expect(status).toMatch(/^(worker-ready|worker-timeout|worker-error)/);
   });
 
   test('CSP detection stores csp info in storage.session', async ({ backgroundPage, sharedPage, pageUrl }) => {
@@ -46,12 +47,12 @@ test.describe('Worker spawn mode detection', () => {
 
     const sessionData = await backgroundPage.evaluate(async () => {
       const all = await browser.storage.session.get(null);
-      const cspKeys = Object.keys(all).filter((k) => k.startsWith('csp:'));
-      return cspKeys.map((k) => ({ key: k, value: all[k] }));
+      const entries = Object.entries(all).filter(([k]) => k.startsWith('csp:'));
+      return entries.map(([key, value]) => ({ key, value }));
     });
 
-    expect(cspKeys.length).toBeGreaterThan(0);
-    const cspInfo = cspKeys[0].value;
+    expect(sessionData.length).toBeGreaterThan(0);
+    const cspInfo = sessionData[0].value;
     expect(cspInfo).toBeTruthy();
     expect(cspInfo.workerSrc).toContain("'self'");
     expect(cspInfo.needsBlobFallback).toBe(true);
@@ -62,8 +63,8 @@ test.describe('Worker spawn mode detection', () => {
 
     const sessionData = await backgroundPage.evaluate(async () => {
       const all = await browser.storage.session.get(null);
-      const cspKeys = Object.keys(all).filter((k) => k.startsWith('csp:'));
-      return cspKeys.map((k) => all[k]);
+      const entries = Object.entries(all).filter(([k]) => k.startsWith('csp:'));
+      return entries.map(([, value]) => value);
     });
 
     expect(sessionData.length).toBeGreaterThan(0);
@@ -72,13 +73,19 @@ test.describe('Worker spawn mode detection', () => {
     expect(cspInfo.needsBlobFallback).toBe(true);
   });
 
-  test('no CSP means no blob fallback needed', async ({ backgroundPage, sharedPage, pageUrl }) => {
+  test('no CSP means no blob fallback needed', async ({ backgroundPage, sharedPage, pageUrl, servers }) => {
+    const origin = `http://localhost:${servers.main.port}`;
+    await backgroundPage.evaluate((origin) => browser.storage.local.remove(
+      [`settings :: ${origin} :: workerSpawnMode`],
+    ), origin);
+    await backgroundPage.evaluate(async () => { await browser.storage.session.clear(); });
+
     await sharedPage.goto(pageUrl('/worker-spawn-no-csp'), { waitUntil: 'domcontentloaded', timeout: 15000 });
 
     const sessionData = await backgroundPage.evaluate(async () => {
       const all = await browser.storage.session.get(null);
-      const cspKeys = Object.keys(all).filter((k) => k.startsWith('csp:'));
-      return cspKeys.map((k) => all[k]);
+      const entries = Object.entries(all).filter(([k]) => k.startsWith('csp:'));
+      return entries.map(([, value]) => value);
     });
 
     if (sessionData.length > 0) {

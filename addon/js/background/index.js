@@ -401,39 +401,104 @@
   )
 
   browser.webRequest.onHeadersReceived.addListener(
-    (details) => {
+    async (details) => {
       if (details.type !== 'main_frame' && details.type !== 'sub_frame') return
       const cspHeader = details.responseHeaders?.find(
         (h) => h.name.toLowerCase() === 'content-security-policy'
       )?.value || ''
       const tabId = details.tabId
       const frameId = details.frameId
-      const cspInfo = parseCspForWorkerSpawn(cspHeader)
+
+      let origin = ''
+      try { origin = new URL(details.url).origin } catch {}
+
+      let siteSpawnMode = settings.workerSpawnMode
+      if (origin) {
+        const siteKey = siteSettingKey(origin, 'workerSpawnMode')
+        const siteResult = await browser.storage.local.get(siteKey)
+        if (siteResult[siteKey] !== undefined) {
+          siteSpawnMode = siteResult[siteKey]
+        }
+      }
+
+      const cspInfo = parseCspForWorkerSpawn(cspHeader, siteSpawnMode)
       if (cspInfo) {
         browser.storage.session.set({
           [`csp:${tabId}:${frameId}`]: cspInfo,
         }).catch(() => {})
       }
+      if (cspInfo && cspInfo.needsBlobFallback) {
+        const modified = rewriteCspForBlob(details.responseHeaders, cspInfo)
+        if (modified) return { responseHeaders: modified }
+      }
     },
     { urls: ['<all_urls>'], types: ['main_frame', 'sub_frame'] },
-    ['responseHeaders']
+    ['blocking', 'responseHeaders']
   )
 
-  function parseCspForWorkerSpawn(csp) {
+  function rewriteCspForBlob(headers, cspInfo) {
+    if (!headers) return null
+    let modified = false
+    const newHeaders = headers.map((h) => {
+      if (h.name.toLowerCase() !== 'content-security-policy') return h
+      let csp = h.value
+      const directives = {}
+      const order = []
+      for (const raw of csp.split(';')) {
+        const parts = raw.trim().split(/\s+/)
+        if (!parts.length) continue
+        const name = parts[0].toLowerCase()
+        directives[name] = parts.slice(1).join(' ')
+        order.push(name)
+      }
+
+      for (const dirName of ['worker-src', 'script-src', 'default-src']) {
+        if (directives[dirName] !== undefined && !directives[dirName].includes('blob:')) {
+          directives[dirName] = directives[dirName] + ' blob:'
+          modified = true
+        }
+      }
+
+      if (directives['connect-src'] !== undefined && !directives['connect-src'].includes('ws://127.0.0.1')) {
+        directives['connect-src'] = directives['connect-src'] + ' ws://127.0.0.1:*'
+        modified = true
+      }
+
+      if (cspInfo.hasTrustedTypesRequire) {
+        const ttList = directives['trusted-types']
+        if (ttList === undefined) {
+          directives['trusted-types'] = 'webhid-worker'
+          order.push('trusted-types')
+          modified = true
+        } else if (!ttList.includes('webhid-worker')) {
+          directives['trusted-types'] = ttList + ' webhid-worker'
+          modified = true
+        }
+      }
+
+      const rebuilt = order.map((name) => name + (directives[name] ? ' ' + directives[name] : '')).join('; ')
+      return { name: h.name, value: rebuilt }
+    })
+    return modified ? newHeaders : null
+  }
+
+  function parseCspForWorkerSpawn(csp, spawnMode) {
+    const mode = spawnMode || settings.workerSpawnMode
     if (!csp) return null
     const directives = {}
     for (const raw of csp.split(';')) {
       const parts = raw.trim().split(/\s+/)
-      if (!parts.length) continue
+      if (!parts.length || !parts[0]) continue
       directives[parts[0].toLowerCase()] = parts.slice(1).join(' ')
     }
     const workerSrc = directives['worker-src'] || directives['script-src'] || directives['default-src'] || ''
     const connectSrc = directives['connect-src'] || directives['default-src'] || ''
-    const hasTrustedTypesRequire = directives['require-trusted-types-for']?.includes("'script'")
+    const hasTrustedTypesRequire = !!directives['require-trusted-types-for']?.includes("'script'")
     const trustedTypesAllowlist = directives['trusted-types']
-    const needsBlobFallback = settings.workerSpawnMode === 'blob'
-      || (settings.workerSpawnMode === 'shadow' && (
-        (workerSrc && !workerSrc.includes('blob:') && !workerSrc.includes('*'))
+    const workerSrcBlocks = !!workerSrc && !workerSrc.includes('blob:') && !workerSrc.includes('*')
+    const needsBlobFallback = mode === 'blob'
+      || (mode === 'shadow' && (
+        workerSrcBlocks
         || hasTrustedTypesRequire
       ))
     return {

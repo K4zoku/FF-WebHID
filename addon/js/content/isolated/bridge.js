@@ -7,6 +7,7 @@
   const createSettingsStore = webhid.import('createSettingsStore')
   const loadGlobalSettings = webhid.import('loadGlobalSettings')
   const loadSiteSettings = webhid.import('loadSiteSettings')
+  const siteSettingKey = webhid.import('siteSettingKey')
   const parseSettingsKey = webhid.import('parseSettingsKey')
   const WebHidDevicePicker = webhid.import('WebHidDevicePicker')
   logger.initLogger('bridge')
@@ -221,15 +222,21 @@
 
   async function resolveSpawnMode() {
     if (cachedSpawnMode) return cachedSpawnMode
-    if (settings.workerSpawnMode === 'blob') {
+    const origin = window.location.origin
+    let mode = settings.workerSpawnMode
+    if (origin) {
+      const siteKey = siteSettingKey(origin, 'workerSpawnMode')
+      const siteResult = await browser.storage.local.get(siteKey)
+      if (siteResult[siteKey] !== undefined) mode = siteResult[siteKey]
+    }
+    if (mode === 'blob') {
       cachedSpawnMode = 'blob'
       return 'blob'
     }
     try {
-      const key = `csp:${undefined}:${0}`
       const result = await browser.storage.session.get(null)
-      for (const [k, v] of Object.entries(result)) {
-        if (k.startsWith('csp:') && v && v.needsBlobFallback) {
+      for (const [, v] of Object.entries(result)) {
+        if (v && v.needsBlobFallback) {
           cachedSpawnMode = 'blob'
           return 'blob'
         }
