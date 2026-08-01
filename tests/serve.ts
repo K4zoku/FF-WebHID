@@ -43,6 +43,12 @@ const PAGES: Record<string, string> = {
   '/iframe-child-with-allow': loadPage('iframe-child.html'),
   '/worker-check': loadPage('worker-check.html'),
   '/worker.js': loadPage('worker.js'),
+  '/worker-spawn-csp': loadPage('worker-spawn-csp.html'),
+  '/worker-spawn-csp-restrictive': loadPage('worker-spawn-csp.html'),
+  '/worker-spawn-csp-trusted-types': loadPage('worker-spawn-csp.html'),
+  '/worker-spawn-csp-connect': loadPage('worker-spawn-csp.html'),
+  '/worker-spawn-csp-allowing': loadPage('worker-spawn-csp.html'),
+  '/worker-spawn-no-csp': loadPage('worker-spawn-csp.html'),
 };
 
 const HEADERS: Record<string, Record<string, string>> = {
@@ -55,6 +61,21 @@ const HEADERS: Record<string, Record<string, string>> = {
   },
   '/policy-check-allowed-all': {
     'Permissions-Policy': 'hid=*',
+  },
+  '/worker-spawn-csp': {
+    'Content-Security-Policy': "worker-src 'self'; connect-src 'self'",
+  },
+  '/worker-spawn-csp-restrictive': {
+    'Content-Security-Policy': "worker-src 'none'; connect-src 'none'",
+  },
+  '/worker-spawn-csp-trusted-types': {
+    'Content-Security-Policy': "require-trusted-types-for 'script'; trusted-types webhid-worker",
+  },
+  '/worker-spawn-csp-connect': {
+    'Content-Security-Policy': "connect-src 'self'",
+  },
+  '/worker-spawn-csp-allowing': {
+    'Content-Security-Policy': "worker-src 'self' blob:; connect-src 'self' ws://127.0.0.1:*",
   },
 };
 
