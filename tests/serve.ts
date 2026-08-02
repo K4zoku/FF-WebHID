@@ -136,25 +136,74 @@ const HEADERS: Record<string, Record<string, string | string[]>> = {
   },
 };
 
-// Records the Sec-Fetch-Dest seen by the most recent /dest-gated request, so
-// tests can assert whether the addon rewrote the worker self-request header.
-let lastGatedDest: string | null = null;
-let lastGatedStatus = 0;
+interface GatedRecord {
+  dest: string | null;
+  mode: string | null;
+  site: string | null;
+  user: string | null;
+  accept: string | null;
+  status: number;
+}
+
+// Records the Sec-Fetch-* headers and Accept seen by the most recent gated
+// request (/dest-gated or a shadow-redirect chain final hop), so tests can
+// assert the addon faked a top-level navigation for the worker self-request.
+let lastGated: GatedRecord = { dest: null, mode: null, site: null, user: null, accept: null, status: 0 };
+
+// Per-token request counts for /shadow-redirect-chain endpoints (see handler).
+const shadowRedirectCounts = new Map<string, number>();
+
+function recordGated(req: http.IncomingMessage, status: number): GatedRecord {
+  return {
+    dest: ((req.headers['sec-fetch-dest'] || '') as string).toLowerCase() || null,
+    mode: ((req.headers['sec-fetch-mode'] || '') as string).toLowerCase() || null,
+    site: ((req.headers['sec-fetch-site'] || '') as string).toLowerCase() || null,
+    user: (req.headers['sec-fetch-user'] as string | undefined) || null,
+    accept: (req.headers['accept'] as string | undefined) || null,
+    status,
+  };
+}
 
 export async function startPolicyServer(port = 0): Promise<ServerHandle> {
   const server = http.createServer((req, res) => {
     const pathname = (req.url ?? '/').split('?')[0];
     if (pathname === '/dest-gated') {
       const dest = (req.headers['sec-fetch-dest'] || '').toLowerCase();
-      lastGatedDest = dest || null;
       if (dest === 'worker') {
         // Simulates a server that rejects worker-destination requests.
-        lastGatedStatus = 403;
+        lastGated = recordGated(req, 403);
         res.writeHead(403, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' });
         res.end('forbidden');
         return;
       }
-      lastGatedStatus = 200;
+      lastGated = recordGated(req, 200);
+      res.writeHead(200, { 'Content-Type': 'text/html', 'Cache-Control': 'no-store' });
+      res.end(loadPage('dest-gated.html'));
+      return;
+    }
+    const redirectChain = /^\/shadow-redirect-chain\/([^/]+)\/(\d+)$/.exec(pathname);
+    if (redirectChain) {
+      const [, token, stepsStr] = redirectChain;
+      const steps = Number(stepsStr);
+      // First request to a token serves the page; every later request to it is
+      // the page's worker self-request or one of its redirect hops. Each token
+      // is unique per test, so runs never interfere.
+      const count = (shadowRedirectCounts.get(token) || 0) + 1;
+      shadowRedirectCounts.set(token, count);
+      if (count === 1) {
+        res.writeHead(200, { 'Content-Type': 'text/html', 'Cache-Control': 'no-store' });
+        res.end(loadPage('dest-gated.html'));
+        return;
+      }
+      if (steps > 0) {
+        res.writeHead(302, {
+          Location: `/shadow-redirect-chain/${token}/${steps - 1}`,
+          'Cache-Control': 'no-store',
+        });
+        res.end();
+        return;
+      }
+      lastGated = recordGated(req, 200);
       res.writeHead(200, { 'Content-Type': 'text/html', 'Cache-Control': 'no-store' });
       res.end(loadPage('dest-gated.html'));
       return;
@@ -163,7 +212,10 @@ export async function startPolicyServer(port = 0): Promise<ServerHandle> {
       // Sec-Fetch-Mode distinguishes the navigation ("navigate") from the
       // worker self-request ("same-origin"); Sec-Fetch-Dest cannot be used
       // here because the addon rewrites it to "document" for the worker
-      // self-request.
+      // self-request. The addon fakes Sec-Fetch-Mode too, so a shadow-URL
+      // worker request now arrives as "navigate" and gets the page HTML,
+      // which the addon then replaces with the worker bundle; the mode check
+      // only discriminates when the addon is absent.
       const mode = (req.headers['sec-fetch-mode'] || '').toLowerCase();
       const isWorker = mode !== '' && mode !== 'navigate';
       res.writeHead(200, {
@@ -175,7 +227,7 @@ export async function startPolicyServer(port = 0): Promise<ServerHandle> {
     }
     if (pathname === '/last-dest') {
       res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
-      res.end(JSON.stringify({ dest: lastGatedDest, status: lastGatedStatus }));
+      res.end(JSON.stringify(lastGated));
       return;
     }
     if (pathname === '/self-script') {

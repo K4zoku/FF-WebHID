@@ -196,6 +196,62 @@
   const scriptDest = new Map()
 
   /**
+   * Firefox's default Accept header for top-level document navigations, keyed
+   * by the first Firefox major version that introduced each value. Source:
+   * MDN "List of default Accept values" (navigation row).
+   * @type {Array<[number, string]>}
+   */
+  const NAVIGATION_ACCEPT_BY_VERSION = [
+    [132, 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'],
+    [
+      128,
+      'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/png,image/svg+xml,*/*;q=0.8'
+    ],
+    [92, 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8']
+  ]
+
+  /** Accept header matching the current Firefox's navigation default. */
+  let navigationAccept = NAVIGATION_ACCEPT_BY_VERSION[0][1]
+
+  browser.runtime
+    .getBrowserInfo()
+    .then((info) => {
+      const major = Number.parseInt(info.version, 10)
+      for (const [since, value] of NAVIGATION_ACCEPT_BY_VERSION) {
+        if (major >= since) {
+          navigationAccept = value
+          break
+        }
+      }
+    })
+    .catch(() => {})
+
+  /**
+   * Sets a request header, replacing an existing header of the same name
+   * (case-insensitively) or appending a new one.
+   * @param {object[]} headers
+   * @param {string} name
+   * @param {string} value
+   * @returns {object[]}
+   */
+  function setRequestHeader(headers, name, value) {
+    const existing = headers.find((h) => h.name.toLowerCase() === name.toLowerCase())
+    if (existing) existing.value = value
+    else headers.push({ name, value })
+    return headers
+  }
+
+  /**
+   * Strips the fragment from a URL string.
+   * @param {string} u
+   * @returns {string}
+   */
+  function stripFragment(u) {
+    const i = u.indexOf('#')
+    return i === -1 ? u : u.slice(0, i)
+  }
+
+  /**
    * Compares two URLs ignoring their fragment. Firefox strips fragments from
    * the worker-script request URL but keeps them in documentUrl, so a page at
    * "/page#sec" spawning `new Worker(location.href)` would otherwise never
@@ -205,11 +261,7 @@
    * @returns {boolean}
    */
   function sameUrlModuloFragment(a, b) {
-    const strip = (u) => {
-      const i = u.indexOf('#')
-      return i === -1 ? u : u.slice(0, i)
-    }
-    return strip(a) === strip(b)
+    return stripFragment(a) === stripFragment(b)
   }
 
   browser.webRequest.onBeforeSendHeaders.addListener(
@@ -221,19 +273,52 @@
       )
       record.dest = header && header.value ? header.value : null
       if (!record.shadow || record.dest !== 'worker') return
-      if (header) header.value = 'document'
-      else (details.requestHeaders ||= []).push({ name: 'Sec-Fetch-Dest', value: 'document' })
-      return { requestHeaders: details.requestHeaders }
+      const headers = details.requestHeaders || (details.requestHeaders = [])
+      // Fake a top-level user navigation so the server treats the shadow-URL
+      // request as a plain page load instead of a worker fetch.
+      setRequestHeader(headers, 'Sec-Fetch-Dest', 'document')
+      setRequestHeader(headers, 'Sec-Fetch-Mode', 'navigate')
+      setRequestHeader(headers, 'Sec-Fetch-Site', 'none')
+      setRequestHeader(headers, 'Sec-Fetch-User', '?1')
+      setRequestHeader(headers, 'Accept', navigationAccept)
+      return { requestHeaders: headers }
     },
     { urls: ['<all_urls>'], types: ['script'] },
     ['blocking', 'requestHeaders']
   )
 
   /**
+   * Redirect targets that continue a shadow-URL chain. Firefox keeps the same
+   * requestId across a redirect chain, so the follow-up request cannot be told
+   * apart by id; the onBeforeRequest listener matches it by URL instead and
+   * keeps treating it as shadow. The chain is followed to the end: the browser
+   * itself aborts after its own redirect limit (~20), which also bounds this
+   * set.
+   * @type {Set<string>}
+   */
+  const shadowRedirectTargets = new Set()
+
+  browser.webRequest.onBeforeRedirect.addListener(
+    (details) => {
+      const record = scriptDest.get(details.requestId)
+      if (!record || !record.shadow || !details.redirectUrl) return
+      // A redirect to the request's own URL is not a useful hop: Firefox can
+      // report one (self) firing alongside the real redirect target for the
+      // first shadow request. Skip it entirely.
+      if (stripFragment(details.redirectUrl) === stripFragment(details.url)) return
+      scriptDest.delete(details.requestId)
+      shadowRedirectTargets.add(stripFragment(details.redirectUrl))
+    },
+    { urls: ['<all_urls>'], types: ['script'] }
+  )
+
+  /**
    * Serves the worker bundle for the polyfill's own `new Worker(location.href)`
    * self-request (the shadow URL). When Sec-Fetch-Dest is observable and is not
    * "worker", the request is a page script whose URL merely equals the document
-   * URL, and the response passes through untouched.
+   * URL, and the response passes through untouched. Server redirects on the
+   * shadow URL are followed to the end of the chain, with each hop treated the
+   * same way.
    * @param {object} details
    * @returns {object | undefined}
    */
@@ -338,6 +423,11 @@
   browser.webRequest.onBeforeRequest.addListener(
     (details) => {
       if (details.type !== 'script') return
+      const urlKey = stripFragment(details.url)
+      if (shadowRedirectTargets.has(urlKey)) {
+        shadowRedirectTargets.delete(urlKey)
+        return handleShadowUrl(details)
+      }
       const isShadowUrl =
         details.documentUrl !== undefined && sameUrlModuloFragment(details.url, details.documentUrl)
       if (isShadowUrl) return handleShadowUrl(details)
