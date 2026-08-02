@@ -8,33 +8,19 @@ R.hasTrustedTypes = typeof trustedTypes !== 'undefined';
 if (!R.hasTrustedTypes) {
   R.skipped = true;
 } else {
-  var nativeCreatePolicy = trustedTypes.createPolicy.bind(trustedTypes);
-  var extPolicy = null;
-  var usedOnce = false;
-  try {
-    extPolicy = nativeCreatePolicy('webhid-worker', { createScriptURL: function (s) { return s; } });
-    R.extCreated = 'ok';
-  } catch (e) { R.extCreated = e.name; }
-  try {
-    nativeCreatePolicy('webhid-worker', { createScriptURL: function (s) { return s; } });
-    R.collision = 'no-throw';
-  } catch (e) { R.collision = e.name; }
-  trustedTypes.createPolicy = function (name, pageRules) {
-    if (name === 'webhid-worker' && !usedOnce) {
-      usedOnce = true;
-      pageRules = pageRules || {};
-      return {
-        createHTML: function (s) { return extPolicy.createHTML(pageRules.createHTML ? pageRules.createHTML(s) : s); },
-        createScript: function (s) { return extPolicy.createScript(pageRules.createScript ? pageRules.createScript(s) : s); },
-        createScriptURL: function (s) { return extPolicy.createScriptURL(pageRules.createScriptURL ? pageRules.createScriptURL(s) : s); }
-      };
-    }
-    return nativeCreatePolicy(name, pageRules);
-  };
+  R.extClaimed = typeof (navigator.hid && navigator.hid[Symbol.for('webhid.createTtUrl')]);
+  R.factoryUrl = typeof navigator.hid[Symbol.for('webhid.createTtUrl')] === 'function'
+    ? String(navigator.hid[Symbol.for('webhid.createTtUrl')]('https://x/worker.js'))
+    : '';
   try {
     var pagePolicy = trustedTypes.createPolicy('webhid-worker', { createScriptURL: function (s) { return s + '#page'; } });
     R.swallowedType = typeof pagePolicy.createScriptURL;
     R.swallowedChain = String(pagePolicy.createScriptURL('https://x/worker.js'));
+    R.wrappedInstanceof = pagePolicy instanceof TrustedTypePolicy;
+    R.wrappedName = pagePolicy.name;
+    R.wrappedHasOwnScriptURL = Object.prototype.hasOwnProperty.call(pagePolicy, 'createScriptURL');
+    R.wrappedHasOwnHtml = Object.prototype.hasOwnProperty.call(pagePolicy, 'createHTML');
+    R.wrappedHasOwnScript = Object.prototype.hasOwnProperty.call(pagePolicy, 'createScript');
   } catch (e) { R.swallowedType = e.name; }
   try {
     trustedTypes.createPolicy('webhid-worker', {});

@@ -800,6 +800,7 @@
     let workerSrcBlocked = false
     let connectSrcBlocked = false
     let hasTrustedTypesRequire = false
+    const trustedTypesNames = []
     for (const csp of cspValues.flatMap((v) => v.split(','))) {
       const { directives } = parseDirectives(csp)
       const effWorker = directives['worker-src'] ?? directives['script-src'] ?? directives['default-src']
@@ -814,6 +815,13 @@
       }
       const tt = directives['require-trusted-types-for']
       if (tt !== undefined && tt.includes("'script'")) hasTrustedTypesRequire = true
+      const ttList = directives['trusted-types']
+      if (ttList !== undefined) {
+        for (const token of ttList.split(/\s+/)) {
+          if (token === "'none'" || token === "'allow-duplicates'") continue
+          if (!trustedTypesNames.includes(token)) trustedTypesNames.push(token)
+        }
+      }
     }
     const shadowBlocked = workerSrcBlocked || connectSrcBlocked || hasTrustedTypesRequire
     const needsBlobFallback = mode === 'blob' || (mode === 'shadow' && shadowBlocked)
@@ -823,6 +831,7 @@
       workerSrcBlocked,
       connectSrcBlocked,
       hasTrustedTypesRequire,
+      trustedTypesNames,
       shadowBlocked,
       needsBlobFallback,
     }

@@ -77,6 +77,7 @@ export default tseslint.config(
         location: "readonly",
         navigator: "readonly",
         trustedTypes: "readonly",
+        TrustedTypePolicy: "readonly",
         Node: "readonly",
         NodeList: "readonly",
         AbortSignal: "readonly",

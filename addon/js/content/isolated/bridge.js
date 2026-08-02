@@ -258,22 +258,41 @@
   }
 
   /**
+   * @param {string} url
+   * @returns {string|object}
+   */
+  function toTrustedUrl(url) {
+    const w = window.wrappedJSObject
+    const hid = w && w.navigator && w.navigator.hid
+    const make = hid && hid[Symbol.for('webhid.createTtUrl')]
+    if (typeof make === 'function') {
+      try {
+        return make(url)
+      } catch (e) {
+        logger.debug('tt factory failed, falling back', e)
+      }
+    }
+    if (typeof trustedTypes !== 'undefined' && trustedTypes !== null) {
+      try {
+        if (!cachedTtPolicy) {
+          cachedTtPolicy = trustedTypes.createPolicy('webhid-worker', { createScriptURL: (s) => s })
+        }
+        return cachedTtPolicy.createScriptURL(url)
+      } catch {
+        /* fall through to plain url */
+      }
+    }
+    return url
+  }
+
+  /**
    * @returns {Promise<Worker>}
    */
   async function spawnBlobWorker() {
     const resp = await browser.runtime.sendMessage({ action: 'getWorkerBundle' })
     if (!resp || !resp.text) throw new Error('worker bundle fetch failed')
     const blobUrl = URL.createObjectURL(new Blob([resp.text], { type: 'application/javascript' }))
-    let workerUrl = blobUrl
-    if (typeof trustedTypes !== 'undefined' && trustedTypes !== null) {
-      try {
-        if (!cachedTtPolicy) {
-          cachedTtPolicy = trustedTypes.createPolicy('webhid-worker', { createScriptURL: (s) => s })
-        }
-        workerUrl = cachedTtPolicy.createScriptURL(blobUrl)
-      } catch { workerUrl = blobUrl }
-    }
-    return new Worker(workerUrl)
+    return new Worker(toTrustedUrl(blobUrl))
   }
 
   /**
@@ -306,7 +325,7 @@
       if (spawnMode === 'blob') {
         worker = await spawnBlobWorker()
       } else {
-        worker = new Worker(location.href)
+        worker = new Worker(toTrustedUrl(location.href))
       }
     } catch (e) {
       logger.warn('worker spawn failed for', deviceId, '(', spawnMode, '):', e.message)
@@ -667,6 +686,18 @@
       } else {
         port.onmessage = (event) => onDataPortMessage(deviceId, event.data)
       }
+      return
+    }
+
+    if (action === 'getCspInfo') {
+      ;(async () => {
+        try {
+          const resp = await browser.runtime.sendMessage({ action: 'getCspInfo' })
+          replyToPage({ type: 'response', id, result: resp || {} })
+        } catch {
+          replyToPage({ type: 'response', id, result: {} })
+        }
+      })()
       return
     }
 

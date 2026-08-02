@@ -18,6 +18,110 @@
 
   logger.initLogger('polyfill')
 
+  /** @type {Function|null} */
+  let ttFactory = null
+  /** @type {object|null} */
+  let hidInstance = null
+
+  /** @returns {void} */
+  function attachTtFactory() {
+    if (!ttFactory || !hidInstance) return
+    Object.defineProperty(hidInstance, Symbol.for('webhid.createTtUrl'), {
+      value: ttFactory,
+      configurable: true,
+    })
+  }
+
+  if (!isWorker) {
+    setupTrustedTypesSharing()
+  }
+
+  /** @returns {void} */
+  function setupTrustedTypesSharing() {
+    if (typeof trustedTypes === 'undefined' || trustedTypes === null) return
+    const nativeCreatePolicy = trustedTypes.createPolicy.bind(trustedTypes)
+    const claim = (name) => {
+      try {
+        return nativeCreatePolicy(name, { createScriptURL: (s) => s })
+      } catch {
+        return null
+      }
+    }
+    let policy = claim('webhid-worker')
+    if (policy) {
+      installTtSharing('webhid-worker', policy, nativeCreatePolicy)
+      return
+    }
+    sendRequest('getCspInfo')
+      .then((info) => {
+        const names = (info && info.trustedTypesNames) || []
+        for (const name of ['default', ...names]) {
+          if (name === 'webhid-worker') continue
+          const p = claim(name)
+          if (p) {
+            installTtSharing(name, p, nativeCreatePolicy)
+            return
+          }
+        }
+      })
+      .catch(() => {})
+  }
+
+  /**
+   * @param {object} policy
+   * @param {string} name
+   * @param {object} [pageRules]
+   * @returns {object}
+   */
+  function makeWrappedPolicy(policy, name, pageRules) {
+    const proto = typeof TrustedTypePolicy !== 'undefined' ? TrustedTypePolicy.prototype : Object.prototype
+    const wrapper = Object.create(proto)
+    const rules = pageRules || {}
+    const define = (prop, value) => {
+      Object.defineProperty(wrapper, prop, {
+        value,
+        writable: false,
+        enumerable: false,
+        configurable: false,
+      })
+    }
+    define('name', name)
+    const origScriptURL = policy.createScriptURL.bind(policy)
+    if (typeof rules.createScriptURL === 'function') {
+      const pageFn = rules.createScriptURL
+      define('createScriptURL', (s) => origScriptURL(pageFn(s)))
+    } else {
+      define('createScriptURL', origScriptURL)
+    }
+    for (const m of ['createHTML', 'createScript']) {
+      if (typeof rules[m] === 'function') {
+        const pageFn = rules[m]
+        const orig = policy[m].bind(policy)
+        define(m, (s) => orig(pageFn(s)))
+      }
+    }
+    return wrapper
+  }
+
+  /**
+   * @param {string} name
+   * @param {object} policy
+   * @param {Function} nativeCreatePolicy
+   * @returns {void}
+   */
+  function installTtSharing(name, policy, nativeCreatePolicy) {
+    let usedOnce = false
+    trustedTypes.createPolicy = function (claimedName, pageRules) {
+      if (claimedName === name && !usedOnce) {
+        usedOnce = true
+        return makeWrappedPolicy(policy, name, pageRules)
+      }
+      return nativeCreatePolicy(claimedName, pageRules)
+    }
+    ttFactory = (url) => policy.createScriptURL(url)
+    attachTtFactory()
+  }
+
   let OriginalError
   let stackDescriptor
   let getOriginalStack
@@ -277,8 +381,6 @@
   const irState = Symbol('webhid_ir')
   /** @type {Map<string, object>} */
   const deviceRegistry = new Map()
-  /** @type {object | null} */
-  let hidInstance = null
 
   /**
    * @constructor
@@ -1220,6 +1322,7 @@
   }
 
   hidInstance = createHID()
+  attachTtFactory()
   if (!isWorker) {
     Object.defineProperty(Navigator.prototype, 'hid', {
       get() {
