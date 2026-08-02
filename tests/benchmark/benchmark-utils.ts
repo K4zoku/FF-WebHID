@@ -71,6 +71,21 @@ export async function setDataPlane(
   )
 }
 
+export async function setWorkerSpawnMode(
+  bg: { evaluate: Page['evaluate'] },
+  origin: string,
+  mode: 'shadow' | 'blob'
+): Promise<void> {
+  await bg.evaluate(
+    ({ origin, mode }: { origin: string; mode: string }) =>
+      browser.storage.local.set({
+        'settings :: workerSpawnMode': mode,
+        [`settings :: ${origin} :: workerSpawnMode`]: mode
+      }),
+    { origin, mode }
+  )
+}
+
 export function chunkImage(img: Buffer): number[][] {
   const chunks: number[][] = []
   for (let seq = 0; seq * PAYLOAD < img.length; seq++) {
@@ -169,6 +184,10 @@ export async function benchmarkMode(
   }
 
   await setDataPlane(backgroundPage, origin, mode)
+  const spawnMode = process.env.BENCHMARK_WORKER_SPAWN
+  if (spawnMode === 'blob' || spawnMode === 'shadow') {
+    await setWorkerSpawnMode(backgroundPage, origin, spawnMode)
+  }
 
   await page.goto(`${origin}/tests/test-page.html`, {
     waitUntil: 'domcontentloaded',
