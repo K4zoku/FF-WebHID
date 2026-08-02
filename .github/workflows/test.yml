@@ -68,7 +68,7 @@ jobs:
       - name: Build Rust binaries
         run: npm run build:rs:debug
       - name: Run unit tests
-        run: npm run test:rsu
+        run: npm run test:rs
       - name: Setup uhid + udev rules + webhid group
         run: |
           sudo groupadd --system webhid
