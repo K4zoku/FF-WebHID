@@ -42,6 +42,7 @@ const PAGES: Record<string, string> = {
   '/iframe-child-no-allow': loadPage('iframe-child.html'),
   '/iframe-child-with-allow': loadPage('iframe-child.html'),
   '/worker-check': loadPage('worker-check.html'),
+  '/tt-policy': loadPage('tt-policy.html'),
   '/worker.js': loadPage('worker.js'),
   '/worker-spawn-csp': loadPage('worker-spawn-csp.html'),
   '/worker-spawn-csp-restrictive': loadPage('worker-spawn-csp.html'),
@@ -133,6 +134,9 @@ const HEADERS: Record<string, Record<string, string | string[]>> = {
   },
   '/worker-spawn-csp-tt-new': {
     'Content-Security-Policy': "require-trusted-types-for 'script'; worker-src 'self' blob:; connect-src 'self' ws://127.0.0.1:*",
+  },
+  '/tt-policy': {
+    'Content-Security-Policy': "trusted-types webhid-worker default",
   },
 };
 

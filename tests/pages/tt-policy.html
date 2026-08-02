@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Trusted Types Policy</title></head>
+<body>
+<script>
+window.tests = window.tests || { helper: {}, results: {} };
+var R = window.tests.results;
+R.hasTrustedTypes = typeof trustedTypes !== 'undefined';
+if (!R.hasTrustedTypes) {
+  R.skipped = true;
+} else {
+  var nativeCreatePolicy = trustedTypes.createPolicy.bind(trustedTypes);
+  var extPolicy = null;
+  var usedOnce = false;
+  try {
+    extPolicy = nativeCreatePolicy('webhid-worker', { createScriptURL: function (s) { return s; } });
+    R.extCreated = 'ok';
+  } catch (e) { R.extCreated = e.name; }
+  try {
+    nativeCreatePolicy('webhid-worker', { createScriptURL: function (s) { return s; } });
+    R.collision = 'no-throw';
+  } catch (e) { R.collision = e.name; }
+  trustedTypes.createPolicy = function (name, pageRules) {
+    if (name === 'webhid-worker' && !usedOnce) {
+      usedOnce = true;
+      pageRules = pageRules || {};
+      return {
+        createHTML: function (s) { return extPolicy.createHTML(pageRules.createHTML ? pageRules.createHTML(s) : s); },
+        createScript: function (s) { return extPolicy.createScript(pageRules.createScript ? pageRules.createScript(s) : s); },
+        createScriptURL: function (s) { return extPolicy.createScriptURL(pageRules.createScriptURL ? pageRules.createScriptURL(s) : s); }
+      };
+    }
+    return nativeCreatePolicy(name, pageRules);
+  };
+  try {
+    var pagePolicy = trustedTypes.createPolicy('webhid-worker', { createScriptURL: function (s) { return s + '#page'; } });
+    R.swallowedType = typeof pagePolicy.createScriptURL;
+    R.swallowedChain = String(pagePolicy.createScriptURL('https://x/worker.js'));
+  } catch (e) { R.swallowedType = e.name; }
+  try {
+    trustedTypes.createPolicy('webhid-worker', {});
+    R.secondCall = 'no-throw';
+  } catch (e) { R.secondCall = e.name; }
+  try {
+    trustedTypes.createPolicy('default', { createScriptURL: function (s) { return s; } });
+    R.defaultCreated = 'ok';
+  } catch (e) { R.defaultCreated = e.name; }
+  try {
+    trustedTypes.createPolicy('default', {});
+    R.defaultDup = 'no-throw';
+  } catch (e) { R.defaultDup = e.name; }
+}
+</script>
+</body></html>
