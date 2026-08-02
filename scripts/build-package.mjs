@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
-import { readFileSync, writeFileSync, mkdirSync, cpSync, rmSync, existsSync } from 'fs';
-import { resolve, join, dirname } from 'path';
+import { readFileSync, writeFileSync, mkdirSync, cpSync, rmSync, existsSync, chmodSync } from 'fs';
+import { resolve, join, dirname, basename } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
 
@@ -110,6 +110,8 @@ function buildDeb(ver, arch) {
     'systemctl disable webhid-daemon.service 2>/dev/null || true',
     '',
   ].join('\n'));
+  chmodSync(join(DEBIAN, 'postinst'), 0o755);
+  chmodSync(join(DEBIAN, 'prerm'), 0o755);
 
   // Files
   const usr = join(stage, 'usr');
@@ -165,6 +167,7 @@ function buildRpm(ver, arch) {
     `%install`,
     `install -Dm755 ${binDir}/webhid-daemon %{buildroot}/usr/bin/webhid-daemon`,
     `install -Dm755 ${binDir}/webhid-native-messaging %{buildroot}/usr/bin/webhid-native-messaging`,
+    `install -d %{buildroot}/usr/lib/systemd/system`,
     `sed 's|{{DAEMON_BIN}}|/usr/bin/webhid-daemon|g' ${MANIFESTS}/webhid-daemon.service > %{buildroot}/usr/lib/systemd/system/webhid-daemon.service`,
     `for d in mozilla librewolf waterfox; do`,
     `  install -Dm644 ${MANIFESTS}/webhid.forwarder_nm_host.json %{buildroot}/usr/lib/$d/native-messaging-hosts/webhid.forwarder_nm_host.json`,
@@ -212,7 +215,7 @@ function buildRpm(ver, arch) {
     .trim().split('\n').filter(Boolean);
   let last = '';
   for (const rpm of rpms) {
-    cpSync(rpm, join(DIST, ''));
+    cpSync(rpm, join(DIST, basename(rpm)));
     last = rpm;
   }
   log(`Done: ${last || '(no rpm produced)'}`);
