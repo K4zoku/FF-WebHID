@@ -31,6 +31,7 @@ declare global {
         attempt?: number,
         maxAttempts?: number
       ): Promise<boolean>
+      warmup(): Promise<boolean>
       chunkCount(): number
       paints(): number
       getMeasure(): number | null
@@ -132,6 +133,22 @@ async function runOnceWithRetry(
   throw lastErr instanceof Error ? lastErr : new Error(String(lastErr))
 }
 
+async function runWarmupWithRetry(page: Page, mock: WebhidMockProcess): Promise<void> {
+  let lastErr: unknown
+  for (let attempt = 0; attempt < RUN_RETRIES; attempt++) {
+    const relay = startStreamingRelay(mock)
+    try {
+      await page.evaluate(() => window.webhidBenchmark!.warmup())
+      return
+    } catch (err) {
+      lastErr = err
+    } finally {
+      relay.stop()
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr))
+}
+
 export function median(vals: number[]): number {
   const s = [...vals].sort((a, b) => a - b)
   return s[Math.floor(s.length / 2)]
@@ -184,7 +201,7 @@ export async function runBenchmark(page: Page, mock: WebhidMockProcess): Promise
   let warmup: number | null = null
   try {
     const warmupStart = Date.now()
-    await runOnceWithRetry(page, mock, true, 0)
+    await runWarmupWithRetry(page, mock)
     warmup = Date.now() - warmupStart
   } catch {}
 

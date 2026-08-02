@@ -505,10 +505,9 @@ Three optimizations landed:
 
 ## Automated image-pipeline benchmark (2026-08)
 
-A Playwright-driven end-to-end benchmark measures the full data-plane
-round-trip automatically, replacing the manual profiler click-timing runs for
-routine ws-vs-nm comparison. The profiler methodology above stays as the
-deep-dive tool for regressions, not a required step per run.
+A Playwright-driven end-to-end benchmark measuring the full data-plane
+round-trip automatically across three modes: Firefox ws, Firefox nm and
+Chromium native WebHID.
 
 **Scenario**: a benchmark page fetches a small PNG fixture
 (`tests/fixtures/images/sample.png`, the project icon, ~32KB), chunks it into
@@ -519,14 +518,13 @@ chunk, the vendor report size), and sends every chunk with ack-wait. A
 straight back through the mock's `input` command, so input reports flow to
 the page while it is still sending instead of arriving in one burst at the
 end. The image decode
-(`createImageBitmap`) runs inside the measured window, matching the manual
-benchmark where the sayodevice page logs image decode as part of the
-pipeline, and incoming chunks trigger **batched row-slice repaints** (a few
+(`createImageBitmap`) runs inside the measured window, and incoming chunks
+trigger **batched row-slice repaints** (a few
 pixel rows per paint, so the image fills in progressively), keeping rendering
 a real part of
 the measured window instead of a single ~6ms final decode. That makes CPU
-contention between the data plane and page rendering (the profiler-confirmed
-ws-vs-nm gap) visible in the numbers: if WS receive/parse on a dedicated
+contention between the data plane and page rendering (the ws-vs-nm gap)
+visible in the numbers: if WS receive/parse on a dedicated
 worker really stays off the main thread, the render-heavy load should not
 slow ws as much as nm. The measured window is
 `performance.measure('roundtrip', 'send-start', 'image-painted')`,
@@ -571,9 +569,10 @@ headed: `npx playwright test --project=chromium-benchmark`. Chromium coarsens
 benchmark page is served cross-origin-isolated (COOP/COEP, `tests/serve.ts`)
 to get 5us timestamps instead.
 
-The Chromium mode runs
-one unmeasured warm-up burst (no painting; the page shows "Warming up...")
-to absorb the lossy first burst (see AGENTS.md), then the measured runs (the
+All modes run
+one unmeasured warm-up (no painting; the page shows "Warming up..."), an
+awaited 128-report priming burst so run #1 starts with a clear path,
+then the measured runs (the
 count is the `BENCHMARK_RUNS` env var, falling back to the project's
 `benchmarkRuns` use option, default 5) with run-level retries (a dropped or
 late report invalidates the run, it does not produce a bogus number). The
@@ -585,84 +584,101 @@ default 5 runs p90 and p95 collapse onto max).
 ## Automated benchmark results (2026-08-02, 10 runs per mode)
 
 Fresh run per mode: separate cold Firefox worker for ws and nm, headed
-Chromium with a human grant click for native. `BENCHMARK_RUNS=10`.
+Chromium with a human grant click for native. `BENCHMARK_RUNS=10`. Each
+mode opens the mock device cold, runs one warm-up burst (an awaited
+128-report prime, so run #1 starts with a clear path), then 10 measured
+runs; a dropped or late report invalidates a run and it is retried.
 
-Per-report round-trip latency (send to the report arriving back), per run, with whole-run walltime:
+Init time per mode (open = device open through data-plane ready; warmup =
+wall time of the warm-up; total = page load through run #1's send-start):
 
-**nm** (Firefox, daemon-nm deployment) — open 19.1ms, warmup 1130.0ms, total 1221.7ms
+| mode   | open (ms) | warmup (ms) | total (ms) |
+| ------ | --------- | ----------- | ---------- |
+| nm     | 18.9      | 227.0       | 315.5      |
+| ws     | 22.9      | 116.0       | 203.6      |
+| native | 5.2       | 21.0        | 62.4       |
 
-| run | min  | p50  | p90  | p95  | max   | walltime |
-| --- | ---- | ---- | ---- | ---- | ----- | -------- |
-| #1  | 1.36 | 2.32 | 2.78 | 3.00 | 16.28 | 1107.8   |
-| #2  | 1.48 | 2.32 | 3.00 | 4.56 | 14.08 | 1162.5   |
-| #3  | 1.52 | 2.12 | 2.54 | 2.74 | 21.26 | 998.0    |
-| #4  | 1.22 | 2.10 | 2.60 | 2.86 | 9.36  | 1000.0   |
-| #5  | 1.46 | 2.28 | 3.34 | 4.26 | 10.74 | 1150.1   |
-| #6  | 1.30 | 1.98 | 2.52 | 2.78 | 9.96  | 946.8    |
-| #7  | 1.42 | 2.04 | 2.52 | 2.88 | 10.82 | 979.0    |
-| #8  | 1.22 | 2.04 | 2.54 | 2.84 | 7.10  | 964.9    |
-| #9  | 1.50 | 2.20 | 2.86 | 3.22 | 9.72  | 1084.8   |
-| #10 | 1.24 | 2.08 | 2.58 | 2.80 | 12.72 | 1012.3   |
+Warm-up primes by awaiting a 128-report burst (per-send time-box, so a
+slow-but-working prime under machine load completes instead of failing and
+run #1 never waits behind in-flight prime reports). Per-report round-trip
+latency (send to the report arriving back), per run, with whole-run walltime:
 
-**ws** (Firefox, daemon-nm deployment) — open 15.0ms, warmup 10414.0ms, total 10484.5ms
-
-| run | min  | p50  | p90  | p95  | max   | walltime |
-| --- | ---- | ---- | ---- | ---- | ----- | -------- |
-| #1  | 0.62 | 0.96 | 1.28 | 1.56 | 7.00  | 419.5    |
-| #2  | 0.50 | 0.94 | 1.26 | 1.50 | 4.72  | 418.0    |
-| #3  | 0.60 | 0.94 | 1.18 | 1.42 | 6.04  | 399.0    |
-| #4  | 0.62 | 0.96 | 1.34 | 1.72 | 5.94  | 431.7    |
-| #5  | 0.64 | 1.00 | 1.78 | 2.56 | 20.86 | 510.8    |
-| #6  | 0.58 | 0.92 | 1.22 | 1.52 | 5.62  | 402.2    |
-| #7  | 0.54 | 0.94 | 1.22 | 1.46 | 4.78  | 398.5    |
-| #8  | 0.56 | 0.92 | 1.22 | 1.58 | 7.06  | 402.4    |
-| #9  | 0.58 | 0.94 | 1.22 | 1.56 | 5.46  | 403.3    |
-| #10 | 0.52 | 0.98 | 1.44 | 1.68 | 14.30 | 448.6    |
-
-**native** (Chromium, no addon, semi-auto grant) — open 7.1ms, warmup 72.0ms, total 114.5ms
+**nm** (Firefox, daemon-nm deployment)
 
 | run | min  | p50  | p90  | p95  | max   | walltime |
 | --- | ---- | ---- | ---- | ---- | ----- | -------- |
-| #1  | 0.08 | 0.59 | 3.73 | 5.75 | 11.18 | 296.1    |
-| #2  | 0.09 | 0.29 | 1.05 | 1.52 | 6.59  | 159.3    |
-| #3  | 0.09 | 0.27 | 0.92 | 1.78 | 6.70  | 152.5    |
-| #4  | 0.09 | 0.32 | 1.04 | 1.54 | 6.88  | 134.8    |
-| #5  | 0.07 | 0.26 | 0.84 | 1.40 | 9.23  | 123.0    |
-| #6  | 0.09 | 0.34 | 1.18 | 2.50 | 15.23 | 163.2    |
-| #7  | 0.09 | 0.36 | 3.02 | 4.35 | 9.11  | 157.7    |
-| #8  | 0.09 | 0.36 | 1.48 | 3.55 | 9.00  | 155.1    |
-| #9  | 0.08 | 0.29 | 1.06 | 2.29 | 9.95  | 143.9    |
-| #10 | 0.08 | 0.37 | 3.09 | 5.25 | 10.69 | 170.3    |
+| #1  | 1.58 | 2.24 | 2.60 | 2.78 | 4.64  | 1024.5   |
+| #2  | 1.40 | 2.10 | 2.44 | 2.54 | 11.40 | 985.7    |
+| #3  | 1.24 | 1.90 | 2.30 | 2.46 | 16.88 | 886.4    |
+| #4  | 1.08 | 1.74 | 2.32 | 3.12 | 7.40  | 870.0    |
+| #5  | 1.08 | 1.78 | 2.18 | 2.36 | 16.10 | 838.7    |
+| #6  | 1.06 | 1.76 | 3.64 | 4.00 | 16.28 | 994.9    |
+| #7  | 1.14 | 1.74 | 2.16 | 2.34 | 9.68  | 826.9    |
+| #8  | 1.22 | 1.82 | 2.18 | 2.26 | 18.58 | 861.9    |
+| #9  | 0.98 | 1.64 | 2.08 | 2.26 | 6.38  | 775.9    |
+| #10 | 0.84 | 1.64 | 2.30 | 3.60 | 9.66  | 847.8    |
+
+**ws** (Firefox, daemon-nm deployment)
+
+| run | min  | p50  | p90  | p95  | max   | walltime |
+| --- | ---- | ---- | ---- | ---- | ----- | -------- |
+| #1  | 0.56 | 0.88 | 1.12 | 1.26 | 6.26  | 378.9    |
+| #2  | 0.46 | 0.82 | 0.98 | 1.04 | 4.54  | 339.1    |
+| #3  | 0.54 | 0.82 | 1.00 | 1.06 | 5.36  | 338.0    |
+| #4  | 0.50 | 0.78 | 0.98 | 1.06 | 15.16 | 341.0    |
+| #5  | 0.48 | 0.82 | 1.56 | 1.92 | 5.86  | 410.8    |
+| #6  | 0.44 | 0.78 | 0.96 | 1.02 | 4.20  | 330.6    |
+| #7  | 0.50 | 0.78 | 0.96 | 1.04 | 6.14  | 332.8    |
+| #8  | 0.50 | 0.78 | 0.92 | 0.96 | 7.24  | 324.3    |
+| #9  | 0.50 | 0.78 | 0.94 | 1.02 | 6.22  | 331.1    |
+| #10 | 0.44 | 0.76 | 0.96 | 1.04 | 4.90  | 325.7    |
+
+**native** (Chromium, no addon, semi-auto grant)
+
+| run | min  | p50  | p90  | p95  | max  | walltime |
+| --- | ---- | ---- | ---- | ---- | ---- | -------- |
+| #1  | 0.09 | 0.36 | 2.32 | 2.93 | 7.73 | 184.9    |
+| #2  | 0.09 | 0.27 | 0.83 | 1.52 | 4.33 | 108.2    |
+| #3  | 0.09 | 0.24 | 0.89 | 1.43 | 4.39 | 113.9    |
+| #4  | 0.09 | 0.30 | 1.12 | 1.87 | 4.54 | 114.1    |
+| #5  | 0.09 | 0.27 | 0.80 | 1.93 | 3.45 | 112.7    |
+| #6  | 0.08 | 0.23 | 0.87 | 1.59 | 4.03 | 116.0    |
+| #7  | 0.09 | 0.23 | 0.68 | 1.09 | 4.20 | 112.5    |
+| #8  | 0.08 | 0.23 | 0.87 | 1.13 | 3.16 | 114.3    |
+| #9  | 0.08 | 0.25 | 0.86 | 1.28 | 3.14 | 106.6    |
+| #10 | 0.10 | 0.50 | 1.97 | 2.22 | 4.59 | 168.0    |
 
 Whole-run walltime summary across modes (10 runs each):
 
-| mode   | runs | min   | p50   | p90    | p95    | max    |
-| ------ | ---- | ----- | ----- | ------ | ------ | ------ |
-| nm     | 10   | 946.7 | 999.9 | 1150.0 | 1162.4 | 1162.4 |
-| ws     | 10   | 398.5 | 403.2 | 448.5  | 510.7  | 510.7  |
-| native | 10   | 122.9 | 155.0 | 170.3  | 296.1  | 296.1  |
+| mode   | runs | min   | p50   | p90   | p95    | max    | total  |
+| ------ | ---- | ----- | ----- | ----- | ------ | ------ | ------ |
+| nm     | 10   | 775.8 | 861.9 | 994.8 | 1024.4 | 1024.4 | 8912.7 |
+| ws     | 10   | 324.3 | 332.7 | 378.8 | 410.7  | 410.7  | 3452.3 |
+| native | 10   | 106.6 | 113.8 | 167.9 | 184.8  | 184.8  | 1251.2 |
 
 Delta vs the native baseline (per-report p50 is the median of the 10
-per-run p50 values; walltime p50 as in the table above):
+per-run p50 values; walltime p50 and total as in the table above; total is
+the sum of the 10 whole-run walltimes):
 
-| mode         | per-report p50 | vs native    | walltime p50 | vs native     |
-| ------------ | -------------- | ------------ | ------------ | ------------- |
-| native       | 0.33           | —            | 155.0        | —             |
-| ws (Firefox) | 0.94           | +0.61 (2.8x) | 403.2        | +248.2 (2.6x) |
-| nm (Firefox) | 2.11           | +1.78 (6.4x) | 999.9        | +844.9 (6.5x) |
+| mode         | per-report p50 | vs native    | walltime p50 | vs native     | total  | vs native      |
+| ------------ | -------------- | ------------ | ------------ | ------------- | ------ | -------------- |
+| native       | 0.26           | —            | 113.8        | —             | 1251.2 | —              |
+| ws (Firefox) | 0.78           | +0.52 (3.0x) | 332.7        | +218.9 (2.9x) | 3452.3 | +2201.1 (2.8x) |
+| nm (Firefox) | 1.77           | +1.51 (6.8x) | 861.9        | +748.1 (7.6x) | 8912.7 | +7661.5 (7.1x) |
 
 Reading the numbers:
 
 - **Per-report round-trip latency p50** (send to the report arriving back):
-  native Chromium ~0.26-0.59ms, Firefox ws ~0.92-1.00ms, Firefox nm
-  ~1.98-2.32ms.
-- **Whole-run walltime p50**: native 155ms, ws 403ms, nm 1000ms. The
-  ws-vs-nm gap (~2.5x) matches the profiler-confirmed direction in the
-  manual results below.
-- **ws warmup 10.4s**: one warm-up attempt hit the 10s hung-ack timeout and
-  retried; the reported warmup is the total wall time including retries.
+  native Chromium ~0.23-0.50ms, Firefox ws ~0.76-0.88ms, Firefox nm
+  ~1.64-2.24ms.
+- **Whole-run walltime p50**: native 114ms, ws 333ms, nm 862ms. The
+  ws-vs-nm gap (~2.6x) is consistent with the per-report gap.
+- **Total (sum of 10 runs)**: native 1.25s, ws 3.45s, nm 8.91s. The total
+  gap vs native (2.8x ws, 7.1x nm) mirrors the p50 gap, so the overhead is
+  uniform across runs rather than concentrated in outliers.
+- **Init time**: warm-up is a 128-report prime, 21-227ms depending on mode;
+  total (load to run #1) is 62-316ms.
 - These are not a polyfill-vs-native comparison: Firefox runs the polyfill
   over the daemon (daemon-nm deployment), Chromium runs native WebHID on the
   same mock; the engine, transport and grant path all differ. The
-  polyfill-vs-native question still needs the Chromium testbed approach
-  (same engine, both implementations).
+  polyfill-vs-native question still needs a same-engine testbed.

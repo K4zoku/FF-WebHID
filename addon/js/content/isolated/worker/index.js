@@ -31,7 +31,11 @@ self.onmessage = ({ data: msg, ports }) => {
     transport = createWsTransport({
       tag: 'worker',
       onReady: () => self.postMessage({ type: 'ready' }),
-      onClosed: () => self.postMessage({ type: 'closed' }),
+      onClosed: () => {
+        self.postMessage({ type: 'closed' })
+        for (const [, entry] of pending) entry.reject(new Error('ws closed'))
+        pending.clear()
+      },
       onAuthFailed: (code) => self.postMessage({ type: 'auth-failed', code }),
       onBinary: (batch) => {
         if (batch.length > 0 && batch[0] === MSG_INPUT_BATCH) return pushInputBatch(batch, 1)

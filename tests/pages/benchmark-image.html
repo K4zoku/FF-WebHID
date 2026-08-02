@@ -19,6 +19,9 @@
         const STALL_TIMEOUT_MS = 3000
         const PAINT_SCALE = 1
         const ROWS_PER_PAINT = 4
+        const PRIME_REPORTS = 96
+        const CONFIRM_REPORTS = 4
+        const CONFIRM_TIMEOUT_MS = 1500
 
         let device = null
         let imageBytes = null
@@ -179,12 +182,25 @@
             try {
               performance.mark('send-start')
               sendTimes.set(0, performance.now())
-              await device.sendReport(1, chunks[0])
+              const ackGate = Promise.withResolvers()
+              const ackTimer = setTimeout(
+                () => ackGate.reject(new Error('sendReport ack timeout')),
+                2000
+              )
+              try {
+                await Promise.race([device.sendReport(1, chunks[0]), ackGate.promise])
+              } finally {
+                clearTimeout(ackTimer)
+              }
               break
             } catch (err) {
+              const msg = String(err && err.message)
               if (
                 tries++ >= 100 ||
-                !String(err && err.message).includes('data port not connected')
+                (!msg.includes('data port not connected') &&
+                  !msg.includes('ws not open') &&
+                  !msg.includes('ws closed') &&
+                  !msg.includes('ack timeout'))
               ) {
                 throw err
               }
@@ -204,7 +220,7 @@
           const burstGate = Promise.withResolvers()
           const burstTimer = setTimeout(
             () => burstGate.reject(new Error('send burst timeout')),
-            10000
+            3000
           )
           try {
             bitmap = await createImageBitmap(new Blob([imageBytes], { type: 'image/png' }))
@@ -233,6 +249,70 @@
           return true
         }
 
+        async function warmup() {
+          if (!device) throw new Error('device not open; call open() first')
+          resetRun()
+          warmupRun = true
+          statusEl.textContent = 'Warming up...'
+          let tries = 0
+          for (;;) {
+            try {
+              sendTimes.set(0, performance.now())
+              const ackGate = Promise.withResolvers()
+              const ackTimer = setTimeout(
+                () => ackGate.reject(new Error('sendReport ack timeout')),
+                2000
+              )
+              try {
+                await Promise.race([device.sendReport(1, chunks[0]), ackGate.promise])
+              } finally {
+                clearTimeout(ackTimer)
+              }
+              break
+            } catch (err) {
+              const msg = String(err && err.message)
+              if (
+                tries++ >= 100 ||
+                (!msg.includes('data port not connected') &&
+                  !msg.includes('ws not open') &&
+                  !msg.includes('ws closed') &&
+                  !msg.includes('ack timeout'))
+              ) {
+                throw err
+              }
+              await sleep(25)
+            }
+          }
+          if (!dataReadyMarked) {
+            performance.mark('data-ready')
+            dataReadyMarked = true
+          }
+          const prime = Math.min(PRIME_REPORTS, chunks.length - 1)
+          for (let i = 1; i <= prime; i++) {
+            sendTimes.set(i, performance.now())
+            const gate = Promise.withResolvers()
+            const t = setTimeout(() => gate.reject(new Error('warmup send timeout')), 2000)
+            try {
+              await Promise.race([device.sendReport(1, chunks[i]), gate.promise])
+            } finally {
+              clearTimeout(t)
+            }
+          }
+          const confirmGate = Promise.withResolvers()
+          const confirmTimer = setTimeout(() => confirmGate.resolve(), CONFIRM_TIMEOUT_MS)
+          const check = setInterval(() => {
+            if (received.size >= CONFIRM_REPORTS) confirmGate.resolve()
+          }, 10)
+          try {
+            await confirmGate.promise
+          } finally {
+            clearTimeout(confirmTimer)
+            clearInterval(check)
+          }
+          statusEl.textContent = ''
+          return true
+        }
+
         function markTime(name) {
           const entries = performance.getEntriesByName(name)
           return entries.length > 0 ? entries[entries.length - 1].startTime : null
@@ -249,6 +329,7 @@
         window.webhidBenchmark = {
           open,
           run,
+          warmup,
           chunkCount: () => chunkCount,
           paints: () => paintCount,
           getLatencies: () => [...latencies],
