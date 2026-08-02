@@ -62,6 +62,7 @@ pub async fn start_server(
     }
 }
 
+#[allow(clippy::result_large_err)]
 async fn handle_websocket(
     stream: tokio::net::TcpStream,
     event_tx: broadcast::Sender<webhid::IpcResponse>,

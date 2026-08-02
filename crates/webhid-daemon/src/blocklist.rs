@@ -94,16 +94,16 @@ pub fn device_is_blocked(
         if r.report_id.is_some() || r.report_type.is_some() {
             return false;
         }
-        if r.vendor.map_or(false, |v| v != vendor_id) {
+        if r.vendor.is_some_and(|v| v != vendor_id) {
             return false;
         }
-        if r.product.map_or(false, |p| p != product_id) {
+        if r.product.is_some_and(|p| p != product_id) {
             return false;
         }
         if r.usage_page.is_some() || r.usage.is_some() {
             top_level_collections.iter().any(|(up, u)| {
-                r.usage_page.map_or(true, |rp| Some(rp) == *up)
-                    && r.usage.map_or(true, |ru| Some(ru) == *u)
+                r.usage_page.is_none_or(|rp| Some(rp) == *up)
+                    && r.usage.is_none_or(|ru| Some(ru) == *u)
             })
         } else {
             true
@@ -121,22 +121,24 @@ pub fn is_report_blocked(
     report_type: ReportType,
 ) -> bool {
     rules.iter().any(|r| {
-        if r.vendor.map_or(false, |v| v != vendor_id) {
+        if r.vendor.is_some_and(|v| v != vendor_id) {
             return false;
         }
-        if r.product.map_or(false, |p| p != product_id) {
+        if r.product.is_some_and(|p| p != product_id) {
             return false;
         }
-        if r.usage_page.map_or(false, |up| Some(up) != collection_usage_page) {
+        if r.usage_page
+            .is_some_and(|up| Some(up) != collection_usage_page)
+        {
             return false;
         }
-        if r.usage.map_or(false, |u| Some(u) != collection_usage) {
+        if r.usage.is_some_and(|u| Some(u) != collection_usage) {
             return false;
         }
-        if r.report_id.map_or(false, |ri| ri != report_id) {
+        if r.report_id.is_some_and(|ri| ri != report_id) {
             return false;
         }
-        if r.report_type.map_or(false, |rt| rt != report_type) {
+        if r.report_type.is_some_and(|rt| rt != report_type) {
             return false;
         }
         true
@@ -197,16 +199,40 @@ mod tests {
     fn test_jabra_report_blocked() {
         let rules = blocklist_rules();
         assert!(is_report_blocked(
-            rules, 0x0b0e, 0x0000, Some(0xFF00), Some(0x0001), 0x05, ReportType::Output,
+            rules,
+            0x0b0e,
+            0x0000,
+            Some(0xFF00),
+            Some(0x0001),
+            0x05,
+            ReportType::Output,
         ));
         assert!(!is_report_blocked(
-            rules, 0x0b0e, 0x0000, Some(0xFF00), Some(0x0001), 0x05, ReportType::Input,
+            rules,
+            0x0b0e,
+            0x0000,
+            Some(0xFF00),
+            Some(0x0001),
+            0x05,
+            ReportType::Input,
         ));
         assert!(!is_report_blocked(
-            rules, 0x0b0e, 0x0000, Some(0xFF00), Some(0x0001), 0x06, ReportType::Output,
+            rules,
+            0x0b0e,
+            0x0000,
+            Some(0xFF00),
+            Some(0x0001),
+            0x06,
+            ReportType::Output,
         ));
         assert!(!is_report_blocked(
-            rules, 0x9999, 0x0000, Some(0xFF00), Some(0x0001), 0x05, ReportType::Output,
+            rules,
+            0x9999,
+            0x0000,
+            Some(0xFF00),
+            Some(0x0001),
+            0x05,
+            ReportType::Output,
         ));
     }
 

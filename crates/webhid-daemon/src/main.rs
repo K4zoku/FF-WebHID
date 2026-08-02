@@ -54,16 +54,16 @@ fn resolve_socket_path() -> String {
             return "@webhid".to_string();
         }
         // User-mode: filesystem socket (parent dir is 0700, no cross-user symlink risk)
-        if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
-            if !dir.is_empty() {
-                let p = std::path::Path::new(&dir);
-                if p.is_absolute() && !dir.contains("..") {
-                    return format!("{dir}/webhid/webhid.sock");
-                }
+        if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR")
+            && !dir.is_empty()
+        {
+            let p = std::path::Path::new(&dir);
+            if p.is_absolute() && !dir.contains("..") {
+                return format!("{dir}/webhid/webhid.sock");
             }
         }
         let uid = unsafe { libc::getuid() };
-        return format!("/run/user/{uid}/webhid/webhid.sock");
+        format!("/run/user/{uid}/webhid/webhid.sock")
     }
     #[cfg(not(target_os = "linux"))]
     DEFAULT_SOCKET.to_string()
@@ -194,7 +194,7 @@ async fn main() -> anyhow::Result<()> {
             {
                 use std::os::linux::net::SocketAddrExt;
                 use std::os::unix::net::SocketAddr;
-                let name = socket_path[1..].as_bytes();
+                let name = &socket_path.as_bytes()[1..];
                 let addr = SocketAddr::from_abstract_name(name).with_context(|| {
                     format!("invalid abstract socket name '{}'", &socket_path[1..])
                 })?;

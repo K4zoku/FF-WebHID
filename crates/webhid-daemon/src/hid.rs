@@ -41,12 +41,11 @@ fn resolve_linux_syspath(devnode: &str) -> Option<String> {
     let parent = realpath.parent()?;
     let mut base = parent.to_string_lossy().into_owned();
 
-    if base.ends_with("/misc/uhid") {
-        if let Some(dir) = realpath.file_name().and_then(|n| n.to_str()) {
-            if let Some(id_part) = dir.split('.').next() {
-                base = format!("{base}/{id_part}");
-            }
-        }
+    if base.ends_with("/misc/uhid")
+        && let Some(dir) = realpath.file_name().and_then(|n| n.to_str())
+        && let Some(id_part) = dir.split('.').next()
+    {
+        base = format!("{base}/{id_part}");
     }
     Some(base)
 }
@@ -253,12 +252,7 @@ pub fn is_blocked_by_collections(info: &webhid::DeviceInfo) -> bool {
         .iter()
         .map(|c| (c.usage_page, c.usage))
         .collect();
-    crate::blocklist::device_is_blocked(
-        rules,
-        info.vendor_id,
-        info.product_id,
-        &top_level,
-    )
+    crate::blocklist::device_is_blocked(rules, info.vendor_id, info.product_id, &top_level)
 }
 
 // ---------------------------------------------------------------------------
@@ -333,7 +327,7 @@ pub fn read_with_timeout(
         buf.resize(size, 0);
         let n = dev
             .read_timeout(&mut buf, timeout_ms)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
         if n == 0 {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::TimedOut,
@@ -353,7 +347,7 @@ pub fn write_report(dev: &HidDevice, report_id: u8, payload: &[u8]) -> std::io::
         buf.extend_from_slice(payload);
         let n = dev
             .write(&buf)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
         if n != buf.len() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::WriteZero,
@@ -373,7 +367,7 @@ pub fn read_feature_report(dev: &HidDevice, report_id: u8) -> std::io::Result<Ve
         buf[0] = report_id;
         let n = dev
             .get_feature_report(&mut buf)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
         Ok(buf[..n].to_vec())
     })
 }
@@ -387,7 +381,7 @@ pub fn write_feature_report(dev: &HidDevice, report_id: u8, payload: &[u8]) -> s
         buf.push(report_id);
         buf.extend_from_slice(payload);
         dev.send_feature_report(&buf)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
         Ok(())
     })
 }

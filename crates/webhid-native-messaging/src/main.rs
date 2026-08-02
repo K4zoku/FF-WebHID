@@ -381,7 +381,7 @@ mod tests {
         let mut buf = Vec::new();
         let result = read_frame(&mut reader, &mut buf).await;
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), true);
+        assert!(result.unwrap());
         assert_eq!(buf, payload);
     }
 
@@ -391,7 +391,7 @@ mod tests {
         let mut buf = Vec::new();
         let result = read_frame(&mut empty, &mut buf).await;
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), false);
+        assert!(!result.unwrap());
     }
 
     #[tokio::test]
@@ -401,7 +401,7 @@ mod tests {
         let mut buf = Vec::new();
         let result = read_frame(&mut partial, &mut buf).await;
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), false);
+        assert!(!result.unwrap());
     }
 
     #[tokio::test]
@@ -423,7 +423,7 @@ mod tests {
         let mut buf = Vec::new();
         let result = read_frame(&mut reader, &mut buf).await;
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), true);
+        assert!(result.unwrap());
         assert_eq!(buf.len(), MAX_FRAME_SIZE);
         assert_eq!(buf[0], 0xAB);
     }
@@ -435,7 +435,7 @@ mod tests {
         let mut buf = Vec::new();
         let result = read_frame(&mut reader, &mut buf).await;
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), true);
+        assert!(result.unwrap());
         assert!(buf.is_empty());
     }
 
@@ -449,8 +449,7 @@ mod tests {
         assert!(output.len() >= 4, "should have length prefix");
         let json_len = u32::from_le_bytes([output[0], output[1], output[2], output[3]]) as usize;
         assert_eq!(output.len(), 4 + json_len);
-        let json: serde_json::Value =
-            serde_json::from_slice(&output[4..]).expect("valid JSON");
+        let json: serde_json::Value = serde_json::from_slice(&output[4..]).expect("valid JSON");
         assert_eq!(json["s"], 503);
         assert_eq!(json["E"], "test error");
     }

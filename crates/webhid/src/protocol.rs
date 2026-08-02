@@ -37,36 +37,36 @@ pub async fn read_nm_request<R: AsyncRead + Unpin>(reader: &mut R) -> io::Result
     // Packed messages: {"d":"<b64>"} with no "a" field. msgType byte inside
     // TLV discriminates send_report (0x02) vs send_feature_report (0x04).
     // reqId is inside the TLV, not the JSON "n" field.
-    if let Some(d) = v.get("d").and_then(|x| x.as_str()) {
-        if v.get("a").is_none() {
-            let packed = base64::engine::general_purpose::STANDARD
-                .decode(d)
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("bad b64: {e}")))?;
-            if packed.is_empty() {
+    if let Some(d) = v.get("d").and_then(|x| x.as_str())
+        && v.get("a").is_none()
+    {
+        let packed = base64::engine::general_purpose::STANDARD
+            .decode(d)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("bad b64: {e}")))?;
+        if packed.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "empty packed TLV",
+            ));
+        }
+        return Ok(match packed[0] {
+            PKG_SEND_REPORT => NmRequest::SendReport { id: None, packed },
+            PKG_SEND_FEATURE_REPORT => {
+                let (req_id, device_id, report_id, data) = parse_packed_send(&packed)?;
+                NmRequest::SendFeatureReport {
+                    id: Some(req_id),
+                    device_id,
+                    report_id,
+                    data: data.to_vec(),
+                }
+            }
+            other => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
-                    "empty packed TLV",
+                    format!("unknown packed msgType: {other:#x}"),
                 ));
             }
-            return Ok(match packed[0] {
-                PKG_SEND_REPORT => NmRequest::SendReport { id: None, packed },
-                PKG_SEND_FEATURE_REPORT => {
-                    let (req_id, device_id, report_id, data) = parse_packed_send(&packed)?;
-                    NmRequest::SendFeatureReport {
-                        id: Some(req_id),
-                        device_id,
-                        report_id,
-                        data: data.to_vec(),
-                    }
-                }
-                other => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        format!("unknown packed msgType: {other:#x}"),
-                    ));
-                }
-            });
-        }
+        });
     }
 
     // Non-packed messages: dispatch by "a" field.
@@ -235,7 +235,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_read_nm_request_numeric_action() {
-use crate::NmRequest;
+        use crate::NmRequest;
         // Enumerate: {"a":1}
         let mut buf = Vec::new();
         write_message(&mut buf, &serde_json::json!({"a": 1}))

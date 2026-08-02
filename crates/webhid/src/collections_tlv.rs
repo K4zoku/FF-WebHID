@@ -265,12 +265,8 @@ fn decode_field(data: &[u8], off: &mut usize, end: usize) -> Field {
     }
     macro_rules! read_u32 {
         () => {{
-            let v = i32::from_le_bytes([
-                data[*off],
-                data[*off + 1],
-                data[*off + 2],
-                data[*off + 3],
-            ]);
+            let v =
+                i32::from_le_bytes([data[*off], data[*off + 1], data[*off + 2], data[*off + 3]]);
             *off += 4;
             v
         }};
@@ -316,19 +312,9 @@ fn decode_field(data: &[u8], off: &mut usize, end: usize) -> Field {
             *off = end;
             return Field::default();
         }
-        let min = u32::from_le_bytes([
-            data[*off],
-            data[*off + 1],
-            data[*off + 2],
-            data[*off + 3],
-        ]);
+        let min = u32::from_le_bytes([data[*off], data[*off + 1], data[*off + 2], data[*off + 3]]);
         *off += 4;
-        let max = u32::from_le_bytes([
-            data[*off],
-            data[*off + 1],
-            data[*off + 2],
-            data[*off + 3],
-        ]);
+        let max = u32::from_le_bytes([data[*off], data[*off + 1], data[*off + 2], data[*off + 3]]);
         *off += 4;
         (None, Some(min), Some(max))
     } else {
@@ -444,10 +430,10 @@ pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<Collection>, D
         while off < bytes.len() {
             let tag = bytes[off];
             let node = decode_node(&bytes, &mut off);
-            if tag == TAG_COLLECTION {
-                if let Node::Collection(c) = node {
-                    roots.push(c);
-                }
+            if tag == TAG_COLLECTION
+                && let Node::Collection(c) = node
+            {
+                roots.push(c);
             }
         }
         Ok(roots)
@@ -516,10 +502,10 @@ mod tests {
         while off < buf.len() {
             let tag = buf[off];
             let node = decode_node(&buf, &mut off);
-            if tag == TAG_COLLECTION {
-                if let Node::Collection(c) = node {
-                    decoded.push(c);
-                }
+            if tag == TAG_COLLECTION
+                && let Node::Collection(c) = node
+            {
+                decoded.push(c);
             }
         }
         assert_eq!(decoded.len(), original.len());
@@ -607,10 +593,10 @@ mod tests {
         while off < buf.len() {
             let tag = buf[off];
             let node = decode_node(&buf, &mut off);
-            if tag == TAG_COLLECTION {
-                if let Node::Collection(c) = node {
-                    decoded.push(c);
-                }
+            if tag == TAG_COLLECTION
+                && let Node::Collection(c) = node
+            {
+                decoded.push(c);
             }
         }
         assert_eq!(decoded.len(), 1);
@@ -652,10 +638,10 @@ mod tests {
         while off < full.len() {
             let tag = full[off];
             let node = decode_node(&full, &mut off);
-            if tag == TAG_COLLECTION {
-                if let Node::Collection(_) = node {
-                    count += 1;
-                }
+            if tag == TAG_COLLECTION
+                && let Node::Collection(_) = node
+            {
+                count += 1;
             }
         }
         assert_eq!(count, 2);

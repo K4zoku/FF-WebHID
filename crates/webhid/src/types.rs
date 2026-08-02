@@ -469,6 +469,7 @@ impl NmResponse {
 /// Outbound NM message: either a structured control response/event,
 /// or a pre-encoded packed data frame `{"d":"<base64>"}`.
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum NmMessage {
     Control(NmResponse),
     PackedData(Vec<u8>),
@@ -622,7 +623,9 @@ mod tests {
     fn test_nm_request_id_send_report() {
         let req = NmRequest::SendReport {
             id: Some(40),
-            packed: vec![0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00],
+            packed: vec![
+                0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00,
+            ],
         };
         assert_eq!(req.id(), Some(40));
     }
@@ -639,10 +642,17 @@ mod tests {
     fn test_parse_packed_send_truncated_payload() {
         let mut buf = vec![
             PKG_SEND_REPORT,
-            0x00, 0x00, 0x00, 0x00, // req_id
-            0x00, 0x00, 0x00, 0x00, // dev_id
-            0x01,                   // report_id
-            0x10, 0x00,             // payload_len = 16
+            0x00,
+            0x00,
+            0x00,
+            0x00, // req_id
+            0x00,
+            0x00,
+            0x00,
+            0x00, // dev_id
+            0x01, // report_id
+            0x10,
+            0x00, // payload_len = 16
         ];
         // Only 5 bytes of payload instead of 16
         buf.extend_from_slice(&[0; 5]);
@@ -654,10 +664,17 @@ mod tests {
     fn test_parse_packed_send_zero_length_payload() {
         let buf = vec![
             PKG_SEND_REPORT,
-            0xEF, 0xBE, 0xAD, 0xDE, // req_id = 0xDEADBEEF
-            0x78, 0x56, 0x34, 0x12, // dev_id = 0x12345678
-            0x00,                   // report_id = 0
-            0x00, 0x00,             // payload_len = 0
+            0xEF,
+            0xBE,
+            0xAD,
+            0xDE, // req_id = 0xDEADBEEF
+            0x78,
+            0x56,
+            0x34,
+            0x12, // dev_id = 0x12345678
+            0x00, // report_id = 0
+            0x00,
+            0x00, // payload_len = 0
         ];
         let (req_id, dev_id, report_id, data) = parse_packed_send(&buf).unwrap();
         assert_eq!(req_id, 0xDEADBEEF);

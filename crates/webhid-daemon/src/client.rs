@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
+use crate::blocklist::ReportType;
 use tokio::io::{AsyncRead, BufReader};
 use tokio::sync::{broadcast, mpsc};
-use crate::blocklist::ReportType;
 use webhid::{IpcResponse, NmMessage, NmRequest, NmResponse, parse_packed_send, protocol};
 
 use crate::{device_mgr::DeviceManager, hid, webtransport::WtState};
@@ -34,22 +34,18 @@ pub async fn handle(
         loop {
             match event_rx.recv().await {
                 Ok(ev) => {
-                    if let webhid::IpcResponse::DeviceDisconnected {
-                        ref device,
-                        ..
-                    } = ev
-                    {
+                    if let webhid::IpcResponse::DeviceDisconnected { ref device, .. } = ev {
                         device_mgr_for_events.force_close(device.device_id);
                     }
-                    if let webhid::IpcResponse::InputReport { ref device_id, .. } = ev {
-                        if !device_mgr_for_events.has_nm_session(*device_id) {
-                            continue;
-                        }
+                    if let webhid::IpcResponse::InputReport { ref device_id, .. } = ev
+                        && !device_mgr_for_events.has_nm_session(*device_id)
+                    {
+                        continue;
                     }
-                    if let Some(nm_ev) = ipc_event_to_nm(ev) {
-                        if tx_events.send(nm_ev).await.is_err() {
-                            break;
-                        }
+                    if let Some(nm_ev) = ipc_event_to_nm(ev)
+                        && tx_events.send(nm_ev).await.is_err()
+                    {
+                        break;
                     }
                 }
                 Err(broadcast::error::RecvError::Lagged(n)) => {
@@ -90,7 +86,12 @@ pub async fn handle(
     Ok(())
 }
 
-async fn dispatch(device_mgr: &DeviceManager, req: NmRequest, ws_port: u16, wt_state: &WtState) -> NmMessage {
+async fn dispatch(
+    device_mgr: &DeviceManager,
+    req: NmRequest,
+    ws_port: u16,
+    wt_state: &WtState,
+) -> NmMessage {
     let req_id = req.id();
     let resp: NmResponse = match req {
         NmRequest::Enumerate { .. } => match device_mgr.enumerate() {
@@ -113,7 +114,11 @@ async fn dispatch(device_mgr: &DeviceManager, req: NmRequest, ws_port: u16, wt_s
             }
         },
 
-        NmRequest::Close { device_id, session_token, .. } => match device_mgr.close(device_id, session_token.as_deref()) {
+        NmRequest::Close {
+            device_id,
+            session_token,
+            ..
+        } => match device_mgr.close(device_id, session_token.as_deref()) {
             Ok(()) => NmResponse::ok(),
             Err(e) => {
                 let code = if e.to_string().contains("not open") {
@@ -127,27 +132,27 @@ async fn dispatch(device_mgr: &DeviceManager, req: NmRequest, ws_port: u16, wt_s
 
         NmRequest::SendReport { packed, .. } => match parse_packed_send(&packed) {
             Ok((req_id, device_id, report_id, data)) => {
-                let mut r = if device_mgr.is_report_blocked(device_id, report_id, ReportType::Output)
-                {
-                    NmResponse::err(403)
-                } else {
-                    match device_mgr.get_file(device_id) {
-                        Err(_) => NmResponse::err(404),
-                        Ok(dev_arc) => {
-                            let data_owned = data.to_vec();
-                            let result = tokio::task::spawn_blocking(move || {
-                                let dev = dev_arc.lock().unwrap_or_else(|e| e.into_inner());
-                                hid::write_report(&dev, report_id, &data_owned)
-                            })
-                            .await;
-                            match result {
-                                Ok(Ok(())) => NmResponse::ok(),
-                                Ok(Err(_)) => NmResponse::err(500),
-                                Err(_) => NmResponse::err(500),
+                let mut r =
+                    if device_mgr.is_report_blocked(device_id, report_id, ReportType::Output) {
+                        NmResponse::err(403)
+                    } else {
+                        match device_mgr.get_file(device_id) {
+                            Err(_) => NmResponse::err(404),
+                            Ok(dev_arc) => {
+                                let data_owned = data.to_vec();
+                                let result = tokio::task::spawn_blocking(move || {
+                                    let dev = dev_arc.lock().unwrap_or_else(|e| e.into_inner());
+                                    hid::write_report(&dev, report_id, &data_owned)
+                                })
+                                .await;
+                                match result {
+                                    Ok(Ok(())) => NmResponse::ok(),
+                                    Ok(Err(_)) => NmResponse::err(500),
+                                    Err(_) => NmResponse::err(500),
+                                }
                             }
                         }
-                    }
-                };
+                    };
                 r.id = Some(req_id);
                 r
             }
@@ -208,7 +213,10 @@ async fn dispatch(device_mgr: &DeviceManager, req: NmRequest, ws_port: u16, wt_s
         }
 
         NmRequest::SetDataPlane {
-            device_id, mode, session_token, ..
+            device_id,
+            mode,
+            session_token,
+            ..
         } => {
             if let Some(ref token) = session_token {
                 device_mgr.set_dataplane_mode(device_id, token, &mode);
@@ -229,7 +237,7 @@ async fn dispatch(device_mgr: &DeviceManager, req: NmRequest, ws_port: u16, wt_s
                 wt_cert_hash,
                 ..Default::default()
             }
-        },
+        }
     };
     let mut resp = resp;
     if resp.id.is_none() {
@@ -265,7 +273,10 @@ fn ipc_event_to_nm(ev: IpcResponse) -> Option<NmMessage> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use webhid::{DeviceInfo, types::{EVT_CONNECT, EVT_DISCONNECT, PKG_INPUT_REPORT}};
+    use webhid::{
+        DeviceInfo,
+        types::{EVT_CONNECT, EVT_DISCONNECT, PKG_INPUT_REPORT},
+    };
 
     fn dummy_device(id: u32) -> DeviceInfo {
         DeviceInfo {

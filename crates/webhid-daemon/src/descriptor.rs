@@ -58,7 +58,8 @@ fn decode_unit_safe(unit: Option<&hidreport::Unit>) -> (String, i32, i32, i32, i
     if let Some(u) = unit {
         let raw: u32 = u32::from(*u);
         let sys_nibble = (raw & 0x0F) as u8;
-        let nibble_signed = |i: u32| -> i32 { nibble_as_i8(((raw >> (i * 4)) & 0x0F) as u8) as i32 };
+        let nibble_signed =
+            |i: u32| -> i32 { nibble_as_i8(((raw >> (i * 4)) & 0x0F) as u8) as i32 };
         (
             unit_system_from_nibble(sys_nibble).to_string(),
             nibble_signed(1),
@@ -248,14 +249,15 @@ fn convert_fields_aggregate(fields: &[Field]) -> Vec<WebHidField> {
                 let mut prev_end = v.bits.end;
                 let mut j = i + 1;
                 while j < fields.len() {
-                    if let Field::Variable(v2) = &fields[j] {
-                        if v2.bits.start == prev_end && var_signature(v2) == sig {
-                            usages.push(pack_usage(&v2.usage));
-                            count += 1;
-                            prev_end = v2.bits.end;
-                            j += 1;
-                            continue;
-                        }
+                    if let Field::Variable(v2) = &fields[j]
+                        && v2.bits.start == prev_end
+                        && var_signature(v2) == sig
+                    {
+                        usages.push(pack_usage(&v2.usage));
+                        count += 1;
+                        prev_end = v2.bits.end;
+                        j += 1;
+                        continue;
                     }
                     break;
                 }
@@ -319,10 +321,10 @@ impl CollectionTreeBuilder {
                 }
                 if i > 0 {
                     let pid = Self::col_key(&chain[i - 1]);
-                    if let Some(p) = self.nodes.get_mut(&pid) {
-                        if !p.children.contains(&id_str) {
-                            p.children.push(id_str.clone());
-                        }
+                    if let Some(p) = self.nodes.get_mut(&pid)
+                        && !p.children.contains(&id_str)
+                    {
+                        p.children.push(id_str.clone());
                     }
                 }
                 let collection_type: u8 = col.collection_type().into();
@@ -517,7 +519,6 @@ mod tests {
         assert_eq!(unit_system_from_nibble(8), "reserved");
         assert_eq!(unit_system_from_nibble(14), "reserved");
     }
-
 
     #[test]
     fn test_nibble_as_i8_positive() {
@@ -749,7 +750,7 @@ mod tests {
             0x05, 0x01, // Usage Page (Generic Desktop)
             0x09, 0x02, // Usage (Mouse)
             0xA1, 0x01, // Collection (Application)
-            0xC0,       // End Collection
+            0xC0, // End Collection
         ];
         let collections = parse_report_descriptor(&desc);
         // hidreport should parse this as a valid descriptor, but with 0 reports,
@@ -769,10 +770,13 @@ mod tests {
             0x75, 0x08, // Report Size (8)
             0x95, 0x03, // Report Count (3)
             0x81, 0x02, // Input (Data,Var,Abs)
-            0xC0,       // End Collection
+            0xC0, // End Collection
         ];
         let collections = parse_report_descriptor(&desc);
-        assert!(!collections.is_empty(), "should produce at least one collection");
+        assert!(
+            !collections.is_empty(),
+            "should produce at least one collection"
+        );
         let app = &collections[0];
         assert_eq!(app.collection_type, 1);
         assert_eq!(app.usage_page, Some(1)); // Generic Desktop
@@ -800,7 +804,7 @@ mod tests {
             0x75, 0x08, // Report Size (8)
             0x95, 0x04, // Report Count (4)
             0x81, 0x02, // Input (Data,Var,Abs)
-            0xC0,       // End Collection
+            0xC0, // End Collection
         ];
         let collections = parse_report_descriptor(&desc);
         // 8*1 + 8*4 = 40 bits = 5 bytes of input
@@ -974,7 +978,11 @@ mod tests {
         let path = fixture_path("gamepad.bin");
         let bytes = std::fs::read(&path).unwrap();
         let collections = parse_report_descriptor(&bytes);
-        assert_eq!(collections.len(), 1, "should parse into exactly one collection");
+        assert_eq!(
+            collections.len(),
+            1,
+            "should parse into exactly one collection"
+        );
 
         let app = &collections[0];
         assert_eq!(app.collection_type, 1); // Application

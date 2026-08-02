@@ -117,7 +117,7 @@ pub const DAEMON_SYSCALLS: &[()] = &[];
 fn resolve_webhid_gid() -> Option<libc::gid_t> {
     static GID: OnceLock<Option<libc::gid_t>> = OnceLock::new();
     *GID.get_or_init(|| {
-        let name = b"webhid\0".as_ptr() as *const libc::c_char;
+        let name = c"webhid".as_ptr();
         let grp = unsafe { libc::getgrnam(name) };
         if grp.is_null() {
             log::warn!("[security] 'webhid' group not found on system");
@@ -194,10 +194,10 @@ fn check_supplementary_groups(pid: libc::pid_t, target_gid: libc::gid_t) -> bool
         };
         if let Some(groups_str) = line.strip_prefix("Groups:\t") {
             for gid_str in groups_str.split_whitespace() {
-                if let Ok(gid) = gid_str.parse::<libc::gid_t>() {
-                    if gid == target_gid {
-                        return true;
-                    }
+                if let Ok(gid) = gid_str.parse::<libc::gid_t>()
+                    && gid == target_gid
+                {
+                    return true;
                 }
             }
             return false;
@@ -205,5 +205,3 @@ fn check_supplementary_groups(pid: libc::pid_t, target_gid: libc::gid_t) -> bool
     }
     false
 }
-
-

@@ -18,6 +18,7 @@ const MODE_NM: &str = "nm";
 const MODE_WS: &str = "ws";
 const MODE_WT: &str = "wt";
 
+type ReportCollectionMap = HashMap<(u8, u8), (Option<u16>, Option<u16>)>;
 
 struct Entry {
     device: Arc<Mutex<HidDevice>>,
@@ -29,7 +30,7 @@ struct Entry {
     wt_generation: AtomicU64,
     vendor_id: u16,
     product_id: u16,
-    report_to_collection: Arc<HashMap<(u8, u8), (Option<u16>, Option<u16>)>>,
+    report_to_collection: Arc<ReportCollectionMap>,
 }
 
 fn random_hex_token(n: usize) -> Result<String, getrandom::Error> {
@@ -38,9 +39,7 @@ fn random_hex_token(n: usize) -> Result<String, getrandom::Error> {
     Ok(hex::encode(&buf))
 }
 
-fn build_report_collection_map(
-    info: &DeviceInfo,
-) -> HashMap<(u8, u8), (Option<u16>, Option<u16>)> {
+fn build_report_collection_map(info: &DeviceInfo) -> ReportCollectionMap {
     let mut map = HashMap::new();
     for col in &info.collections {
         let up = col.usage_page;
@@ -58,10 +57,7 @@ fn build_report_collection_map(
     map
 }
 
-fn compute_blocked_input_ids(
-    info: &DeviceInfo,
-    report_map: &HashMap<(u8, u8), (Option<u16>, Option<u16>)>,
-) -> HashSet<u8> {
+fn compute_blocked_input_ids(info: &DeviceInfo, report_map: &ReportCollectionMap) -> HashSet<u8> {
     let rules = blocklist::blocklist_rules();
     let mut ids = HashSet::new();
     for col in &info.collections {
@@ -91,7 +87,7 @@ fn compute_ws_auth_hash(token: &str, nonce: &str) -> String {
     hasher.update(token.as_bytes());
     hasher.update(nonce.as_bytes());
     let digest = hasher.finalize();
-    hex::encode(&digest)
+    hex::encode(digest)
 }
 
 pub struct DeviceManager {
@@ -102,8 +98,7 @@ pub struct DeviceManager {
 }
 impl DeviceManager {
     pub fn new(event_tx: broadcast::Sender<IpcResponse>) -> Self {
-        let ws_nonce = random_hex_token(16)
-            .expect("getrandom should not fail on modern kernels");
+        let ws_nonce = random_hex_token(16).expect("getrandom should not fail on modern kernels");
         Self {
             devices: Mutex::new(HashMap::new()).into(),
             ws_auth_hashes: Mutex::new(HashMap::new()).into(),
@@ -120,7 +115,6 @@ impl DeviceManager {
         hid::enumerate()
     }
 
-
     pub fn open(&self, device_id: u32) -> anyhow::Result<(u32, Option<String>)> {
         let session_token = random_hex_token(16)?;
         let ws_auth_hash = compute_ws_auth_hash(&session_token, &self.ws_nonce);
@@ -130,7 +124,10 @@ impl DeviceManager {
             if let Some(entry) = map.get_mut(&device_id) {
                 entry.refcount += 1;
                 let rc = entry.refcount;
-                entry.dataplane_modes.lock().unwrap_or_else(|e| e.into_inner())
+                entry
+                    .dataplane_modes
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
                     .insert(session_token.clone(), MODE_NM.to_string());
                 drop(map);
                 self.ws_auth_hashes
@@ -163,7 +160,10 @@ impl DeviceManager {
         if let Some(entry) = map.get_mut(&id) {
             entry.refcount += 1;
             let rc = entry.refcount;
-            entry.dataplane_modes.lock().unwrap_or_else(|e| e.into_inner())
+            entry
+                .dataplane_modes
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
                 .insert(session_token.clone(), MODE_NM.to_string());
             drop(map);
             self.ws_auth_hashes
@@ -181,7 +181,10 @@ impl DeviceManager {
             refcount: 1,
             ws_generation: AtomicU64::new(0),
             wt_generation: AtomicU64::new(0),
-            dataplane_modes: Mutex::new(HashMap::from([(session_token.clone(), MODE_NM.to_string())])),
+            dataplane_modes: Mutex::new(HashMap::from([(
+                session_token.clone(),
+                MODE_NM.to_string(),
+            )])),
             vendor_id: info.vendor_id,
             product_id: info.product_id,
             report_to_collection: Arc::clone(&report_map),
@@ -274,7 +277,10 @@ impl DeviceManager {
             .get_mut(&device_id)
             .ok_or_else(|| anyhow!("'{device_id:#x}' not open"))?;
         if let Some(token) = session_token {
-            entry.dataplane_modes.lock().unwrap_or_else(|e| e.into_inner())
+            entry
+                .dataplane_modes
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
                 .remove(token);
         }
         if entry.refcount > 1 {
@@ -294,7 +300,10 @@ impl DeviceManager {
         }
         drop(map);
 
-        let mut hashes = self.ws_auth_hashes.lock().unwrap_or_else(|e| e.into_inner());
+        let mut hashes = self
+            .ws_auth_hashes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         hashes.retain(|_, (dev_id, _)| *dev_id != device_id);
         log::info!("[device_mgr] {device_id:#x} closed (refcount → 0)");
         Ok(())
@@ -311,7 +320,10 @@ impl DeviceManager {
     pub fn set_dataplane_mode(&self, device_id: u32, session_token: &str, mode: &str) {
         let map = self.devices.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(entry) = map.get(&device_id) {
-            entry.dataplane_modes.lock().unwrap_or_else(|e| e.into_inner())
+            entry
+                .dataplane_modes
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
                 .insert(session_token.to_string(), mode.to_string());
             log::info!("[device_mgr] {device_id:#x} session dataplane mode → {mode}");
         }
@@ -321,7 +333,10 @@ impl DeviceManager {
         let map = self.devices.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(entry) = map.get(&device_id) {
             let g = entry.ws_generation.fetch_add(1, Ordering::SeqCst) + 1;
-            entry.dataplane_modes.lock().unwrap_or_else(|e| e.into_inner())
+            entry
+                .dataplane_modes
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
                 .insert(session_token.to_string(), MODE_WS.to_string());
             log::info!("[device_mgr] {device_id:#x} WS connect gen={g}");
             g
@@ -335,7 +350,10 @@ impl DeviceManager {
         if let Some(entry) = map.get(&device_id) {
             let current = entry.ws_generation.load(Ordering::SeqCst);
             if current == generation {
-                entry.dataplane_modes.lock().unwrap_or_else(|e| e.into_inner())
+                entry
+                    .dataplane_modes
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
                     .insert(session_token.to_string(), MODE_NM.to_string());
                 log::info!("[device_mgr] {device_id:#x} WS disconnect gen={generation} → nm");
             } else {
@@ -350,7 +368,10 @@ impl DeviceManager {
         let map = self.devices.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(entry) = map.get(&device_id) {
             let g = entry.wt_generation.fetch_add(1, Ordering::SeqCst) + 1;
-            entry.dataplane_modes.lock().unwrap_or_else(|e| e.into_inner())
+            entry
+                .dataplane_modes
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
                 .insert(session_token.to_string(), MODE_WT.to_string());
             log::info!("[device_mgr] {device_id:#x} WT connect gen={g}");
             g
@@ -364,7 +385,10 @@ impl DeviceManager {
         if let Some(entry) = map.get(&device_id) {
             let current = entry.wt_generation.load(Ordering::SeqCst);
             if current == generation {
-                entry.dataplane_modes.lock().unwrap_or_else(|e| e.into_inner())
+                entry
+                    .dataplane_modes
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
                     .insert(session_token.to_string(), MODE_NM.to_string());
                 log::info!("[device_mgr] {device_id:#x} WT disconnect gen={generation} → nm");
             } else {
@@ -378,7 +402,10 @@ impl DeviceManager {
     pub fn has_nm_session(&self, device_id: u32) -> bool {
         let map = self.devices.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(entry) = map.get(&device_id) {
-            let modes = entry.dataplane_modes.lock().unwrap_or_else(|e| e.into_inner());
+            let modes = entry
+                .dataplane_modes
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             modes.values().any(|m| m == MODE_NM)
         } else {
             false
@@ -413,7 +440,10 @@ impl DeviceManager {
             handle.abort();
         }
         drop(map);
-        let mut hashes = self.ws_auth_hashes.lock().unwrap_or_else(|e| e.into_inner());
+        let mut hashes = self
+            .ws_auth_hashes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         hashes.retain(|_, (dev_id, _)| *dev_id != device_id);
         log::info!("[device_mgr] {device_id:#x} force-closed (hotplug removal)");
     }
@@ -452,13 +482,14 @@ impl DeviceManager {
 
     pub fn get_device_by_ws_auth(&self, hash: &str) -> Option<(u32, String)> {
         use subtle::ConstantTimeEq;
-        let hashes = self.ws_auth_hashes.lock().unwrap_or_else(|e| e.into_inner());
+        let hashes = self
+            .ws_auth_hashes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let hash_bytes = hash.as_bytes();
         for (stored_hash, (dev_id, token)) in hashes.iter() {
             let stored_bytes = stored_hash.as_bytes();
-            if stored_bytes.len() == hash_bytes.len()
-                && stored_bytes.ct_eq(hash_bytes).into()
-            {
+            if stored_bytes.len() == hash_bytes.len() && stored_bytes.ct_eq(hash_bytes).into() {
                 return Some((*dev_id, token.clone()));
             }
         }
@@ -470,8 +501,12 @@ mod tests {
     use super::*;
     use tokio::sync::broadcast;
 
-    fn test_token(seed: u8) -> String { hex::encode(&[seed; 16]) }
-    fn test_nonce(seed: u8) -> String { hex::encode(&[seed; 16]) }
+    fn test_token(seed: u8) -> String {
+        hex::encode([seed; 16])
+    }
+    fn test_nonce(seed: u8) -> String {
+        hex::encode([seed; 16])
+    }
 
     #[test]
     fn test_has_nm_session_no_device() {
@@ -506,10 +541,7 @@ mod tests {
 
     #[test]
     fn test_compute_ws_auth_hash_is_64_hex_chars() {
-        let hash = compute_ws_auth_hash(
-            &test_token(0xa1),
-            &test_nonce(0x01),
-        );
+        let hash = compute_ws_auth_hash(&test_token(0xa1), &test_nonce(0x01));
         assert_eq!(hash.len(), 64);
         assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
     }
