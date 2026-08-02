@@ -95,8 +95,14 @@
   "settingsDaemonAsNmHost": {
     "message": "Daemon as NM host"
   },
+  "settingsDaemonAsNmHostDesc": {
+    "message": "Talk to the daemon directly over native messaging (skip the `webhid-native-messaging` forwarder and Unix socket). Requires the `webhid.daemon_nm_host` native-messaging manifest to be installed and the daemon to run as your user (with the udev rule). Lower latency, but no root-daemon fallback. The addon reconnects automatically when toggled."
+  },
   "settingsDataPlane": {
     "message": "Data Plane"
+  },
+  "settingsDataPlaneDesc": {
+    "message": "**WebSocket**: spawn a Web Worker that owns the WS connection to the daemon. Input reports are forwarded to the page via `postMessage` with ArrayBuffer transfer (off-main-thread, zero-copy). No SAB, no COOP/COEP.\n**WebTransport**: same worker architecture, but over QUIC with a self-signed cert pinned via `serverCertificateHashes` (TLS/QUIC CPU cost on loopback).\n**Native Messaging**: route all data (sendReport, input reports, feature reports) through the NM host via the content-script bridge. No WS. Fallback when WS is blocked."
   },
   "settingsDataPlaneWs": {
     "message": "WebSocket"
@@ -110,6 +116,9 @@
   "settingsDevicePickerMode": {
     "message": "Device Picker Mode"
   },
+  "settingsDevicePickerModeDesc": {
+    "message": "**Modal**: show a shadow DOM overlay on the page when `requestDevice()` is called (default, matches native WebHID behavior).\n**Page Action**: switch the url bar icon to alert mode and open the device picker as a popup. User must click the icon to open the picker. Firefox only, Chromium will fall back to modal."
+  },
   "settingsDevicePickerModal": {
     "message": "Modal (overlay)"
   },
@@ -122,8 +131,14 @@
   "settingsWorkerPolyfill": {
     "message": "Worker Polyfill"
   },
+  "settingsWorkerPolyfillDesc": {
+    "message": "Inject WebHID API stubs into Web Worker scripts (`new Worker()`, `new SharedWorker()`). Workers get `navigator.hid`, `HIDDevice`, and related constructors. Methods throw `NotSupportedError` until full worker communication is implemented. Can be overridden per-site from the popup. Reload pages after changing."
+  },
   "settingsLogLevel": {
     "message": "Log Level"
+  },
+  "settingsLogLevelDesc": {
+    "message": "Controls console output verbosity. Error = errors only, Warn = +warnings, Info = +info, Debug = +debug (includes performance timing). Reload pages after changing."
   },
   "pickerTitle": {
     "message": "Select a HID Device"
@@ -151,6 +166,9 @@
   },
   "settingsWorkerSpawnMode": {
     "message": "Worker Spawn Mode"
+  },
+  "settingsWorkerSpawnModeDesc": {
+    "message": "**Shadow URL** (default on MV3): spawns the data worker via `new Worker(location.href)` with a StreamFilter intercepting the synthetic self-request. Touches nothing about the page except one synthetic request. Fails if the server rejects that request or if `require-trusted-types-for` is active with a restrictive allow-list.\n**Blob + CSP rewrite** (default on MV2): spawns the worker from a `blob:` URL created from the extension's worker bundle. No network dependency, but relaxes the page's `worker-src` and `connect-src` CSP directives to allow `blob:` and `ws://127.0.0.1:*`."
   },
   "settingsWorkerSpawnShadow": {
     "message": "Shadow URL"

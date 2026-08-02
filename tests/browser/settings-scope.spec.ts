@@ -1,6 +1,34 @@
 import { test, expect } from '../helpers/browser.js'
 
 test.describe('settings scope', () => {
+  test('applyMarkdown renders bold, code, and line breaks as DOM nodes', async ({
+    backgroundPage
+  }) => {
+    const children = await backgroundPage.evaluate(() => {
+      const w = globalThis.webhid as { import(name: string): unknown }
+      const applyMarkdown = w.import('applyMarkdown') as (el: HTMLElement, text: string) => void
+      const el = document.createElement('p')
+      applyMarkdown(el, '**Bold** and `code` here\n**Next**: line')
+      return Array.from(el.childNodes).map((n) => `${n.nodeName}:${n.textContent ?? ''}`)
+    })
+    expect(children).toEqual([
+      'STRONG:Bold',
+      '#text: and ',
+      'CODE:code',
+      '#text: here',
+      'BR:',
+      'STRONG:Next',
+      '#text:: line'
+    ])
+    const literal = await backgroundPage.evaluate(() => {
+      const w = globalThis.webhid as { import(name: string): unknown }
+      const applyMarkdown = w.import('applyMarkdown') as (el: HTMLElement, text: string) => void
+      const el = document.createElement('p')
+      applyMarkdown(el, 'unmatched ** stays literal')
+      return el.textContent
+    })
+    expect(literal).toBe('unmatched ** stays literal')
+  })
   test('SITE_SETTING_NAMES excludes daemonAsNmHost; loadSiteSettings ignores site daemonAsNmHost', async ({
     backgroundPage,
     pageUrl
@@ -58,8 +86,6 @@ test.describe('settings scope', () => {
     harnessCtx,
     pageUrl
   }) => {
-    // Seed non-first-option GLOBAL values so the default-value assertions are
-    // meaningful (a dead page would show the first <option> either way).
     await backgroundPage.evaluate(() =>
       browser.storage.local.set({
         'settings :: devicePickerMode': 'pageAction',
@@ -73,26 +99,32 @@ test.describe('settings scope', () => {
       timeout: 15000
     })
 
-    // tabs.create lands the popup tab in the content page's window with
-    // active:false. The harness reports tab active state unreliably, but the
-    // popup's `tabs.query({active:true, currentWindow:true})[0]` resolves to the
-    // content tab, so the popup picks up the content origin.
     const popupUrl = await backgroundPage.evaluate(() =>
       browser.runtime.getURL('js/internal/pages/popup/index.html')
     )
-    await backgroundPage.evaluate((url) => browser.tabs.create({ url, active: false }), popupUrl)
+    const created = await backgroundPage.evaluate(
+      async (arg: { url: string; contentUrl: string }) => {
+        const ts = await browser.tabs.query({})
+        const content = ts.find((t) => t.url === arg.contentUrl)
+        if (!content || content.windowId === undefined) return false
+        await browser.tabs.create({ url: arg.url, active: false, windowId: content.windowId })
+        return true
+      },
+      { url: popupUrl, contentUrl: pageUrl('/worker-check') }
+    )
+    expect(created).toBe(true)
 
     const popupPage = harnessCtx.pages().find((p) => p.url().includes('/popup/index.html'))
     expect(popupPage).toBeTruthy()
-    await popupPage.waitForSelector('#devicePickerMode')
-    await popupPage.waitForSelector('#workerSpawnMode')
+    await popupPage!.waitForSelector('#devicePickerMode')
+    await popupPage!.waitForSelector('#workerSpawnMode')
 
-    await expect.poll(() => popupPage.inputValue('#devicePickerMode')).toBe('pageAction')
-    await expect.poll(() => popupPage.inputValue('#workerSpawnMode')).toBe('blob')
-    expect(await popupPage.$('#daemonAsNmHost')).toBeNull()
+    await expect.poll(() => popupPage!.inputValue('#devicePickerMode')).toBe('pageAction')
+    await expect.poll(() => popupPage!.inputValue('#workerSpawnMode')).toBe('blob')
+    expect(await popupPage!.$('#daemonAsNmHost')).toBeNull()
 
-    await popupPage.selectOption('#devicePickerMode', 'window')
-    await popupPage.selectOption('#workerSpawnMode', 'shadow')
+    await popupPage!.selectOption('#devicePickerMode', 'window')
+    await popupPage!.selectOption('#workerSpawnMode', 'shadow')
 
     const origin = pageUrl('').replace(/\/$/, '')
     const siteKeys = [
@@ -109,10 +141,6 @@ test.describe('settings scope', () => {
       .toBe('window|shadow')
 
     await backgroundPage.evaluate((k) => browser.storage.local.remove(k), siteKeys)
-    // Restore defaults rather than remove: the background's storage.onChanged
-    // applies `change.newValue` (undefined for removals) into its store, which
-    // would poison `settings.workerSpawnMode` for later specs sharing this
-    // worker-scoped context.
     await backgroundPage.evaluate(async () => {
       const w = globalThis.webhid as { import(name: string): unknown }
       const defaults = w.import('GLOBAL_DEFAULTS') as {

@@ -93,10 +93,16 @@
     "message": "Cài đặt WebHID"
   },
   "settingsDaemonAsNmHost": {
-    "message": "Daemon làm NM host"
+    "message": "Daemon as NM host"
+  },
+  "settingsDaemonAsNmHostDesc": {
+    "message": "Nói chuyện trực tiếp với daemon qua native messaging (bỏ qua forwarder `webhid-native-messaging` và Unix socket). Yêu cầu cài manifest `webhid.daemon_nm_host` và daemon chạy dưới user của bạn (kèm udev rule). Độ trễ thấp hơn, nhưng không có fallback daemon root. Addon tự kết nối lại khi bật tắt."
   },
   "settingsDataPlane": {
     "message": "Kênh dữ liệu"
+  },
+  "settingsDataPlaneDesc": {
+    "message": "**WebSocket**: tạo một Web Worker sở hữu kết nối WS tới daemon. Report đầu vào được chuyển tới trang qua `postMessage` với ArrayBuffer transfer (ngoài main thread, zero-copy). Không SAB, không COOP/COEP.\n**WebTransport**: cùng kiến trúc worker, nhưng qua QUIC với cert tự ký được pin qua `serverCertificateHashes` (tốn CPU TLS/QUIC trên loopback).\n**Native Messaging**: đưa toàn bộ dữ liệu (sendReport, input reports, feature reports) qua NM host thông qua content-script bridge. Không dùng WS. Fallback khi WS bị chặn."
   },
   "settingsDataPlaneWs": {
     "message": "WebSocket"
@@ -110,6 +116,9 @@
   "settingsDevicePickerMode": {
     "message": "Chế độ chọn thiết bị"
   },
+  "settingsDevicePickerModeDesc": {
+    "message": "**Modal**: hiện overlay shadow DOM trên trang khi gọi `requestDevice()` (mặc định, khớp hành vi WebHID gốc).\n**Page Action**: chuyển icon thanh URL sang chế độ báo và mở device picker dạng popup. Người dùng phải bấm icon để mở picker. Chỉ Firefox, Chromium sẽ fallback về modal."
+  },
   "settingsDevicePickerModal": {
     "message": "Modal (overlay)"
   },
@@ -122,8 +131,14 @@
   "settingsWorkerPolyfill": {
     "message": "Worker Polyfill"
   },
+  "settingsWorkerPolyfillDesc": {
+    "message": "Chèn stub WebHID API vào Web Worker scripts (`new Worker()`, `new SharedWorker()`). Worker có `navigator.hid`, `HIDDevice` và các constructor liên quan. Các method ném `NotSupportedError` cho tới khi giao tiếp worker đầy đủ được triển khai. Có thể ghi đè per-site từ popup. Reload trang sau khi thay đổi."
+  },
   "settingsLogLevel": {
     "message": "Mức độ log"
+  },
+  "settingsLogLevelDesc": {
+    "message": "Kiểm soát độ chi tiết console output. Error = chỉ lỗi, Warn = +cảnh báo, Info = +thông tin, Debug = +debug (bao gồm timing hiệu năng). Reload trang sau khi thay đổi."
   },
   "pickerTitle": {
     "message": "Chọn thiết bị"
@@ -151,6 +166,9 @@
   },
   "settingsWorkerSpawnMode": {
     "message": "Chế độ tạo Worker"
+  },
+  "settingsWorkerSpawnModeDesc": {
+    "message": "**Shadow URL** (mặc định trên MV3): tạo data worker qua `new Worker(location.href)` với StreamFilter chặn request tự tham chiếu. Không đụng gì tới trang ngoài một request tổng hợp. Thất bại nếu server từ chối request đó hoặc nếu `require-trusted-types-for` đang bật với allow-list hạn chế.\n**Blob + CSP rewrite** (mặc định trên MV2): tạo worker từ URL `blob:` được tạo từ extension worker bundle. Không phụ thuộc network, nhưng nới lỏng directive CSP `worker-src` và `connect-src` của trang để cho phép `blob:` và `ws://127.0.0.1:*`."
   },
   "settingsWorkerSpawnShadow": {
     "message": "Shadow URL"
