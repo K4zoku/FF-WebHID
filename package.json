@@ -53,7 +53,7 @@
     "commit-and-tag-version": "^13.1.0",
     "eslint": "^10.8.0",
     "eslint-plugin-jsdoc": "^63.3.2",
-    "firefox-webext-playwright-harness": "github:duckduckgo/firefox-webext-playwright-harness#0.3.0",
+    "firefox-webext-playwright-harness": "github:duckduckgo/firefox-webext-playwright-harness#c339f623db3b4ee464e6460e32287ca2ee588115",
     "jiti": "^2.7.0",
     "jszip": "^3.10.1",
     "prettier": "^3.9.6",
@@ -62,8 +62,7 @@
     "web-ext": "^10.5.0"
   },
   "dependencies": {
-    "tslib": "^2.8.1",
-    "ws": "^8.21.1"
+    "tslib": "^2.8.1"
   },
   "allowScripts": {
     "core-js@2.6.12": true,
@@ -76,9 +75,10 @@
   },
   "devEngines": {
     "packageManager": {
-      "name": "nub",
-      "version": "^0.6.0",
+      "name": "npm",
+      "version": "^12.0.2",
       "onFail": "warn"
     }
-  }
+  },
+  "packageManager": "npm@12.0.2+sha512.b885e890b9418fa1693544d05f53e64f9a73ec194837d4258b15fecdd692347b1dd2a517b1b0cbaf9d31cd8e92c3b70956bd2ecc72833a57b4b3098f5bfa7943"
 }
