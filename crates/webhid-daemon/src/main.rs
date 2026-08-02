@@ -1,3 +1,4 @@
+mod batching;
 mod blocklist;
 mod client;
 mod descriptor;
@@ -6,6 +7,7 @@ mod hid;
 mod hotplug;
 mod security;
 mod websocket;
+mod webtransport;
 
 use std::sync::Arc;
 
@@ -145,6 +147,23 @@ async fn main() -> anyhow::Result<()> {
         port_rx.await.unwrap_or(DEFAULT_WS_PORT)
     };
 
+    let wt_state = Arc::new(webtransport::WtState::new(
+        event_tx.clone(),
+        Arc::clone(&device_mgr),
+    ));
+    {
+        let (wt_ready_tx, wt_ready_rx) = tokio::sync::oneshot::channel();
+        wt_state.init(wt_ready_tx);
+        match wt_ready_rx.await {
+            Ok((wt_port, _hash)) => {
+                log::info!("WebTransport server on port {wt_port}");
+            }
+            Err(_) => {
+                log::error!("WebTransport server failed to start; WT data plane unavailable");
+            }
+        }
+    }
+
     if let Some((manifest_path, addon_id)) = &nm_host_info {
         log::info!("running in NM-host mode (stdin/stdout, no IPC socket)");
         log::info!("started by add-on '{addon_id}' (manifest: {manifest_path})");
@@ -153,7 +172,15 @@ async fn main() -> anyhow::Result<()> {
         let stdin = tokio::io::stdin();
         let stdout = tokio::io::stdout();
         let rx = event_tx.subscribe();
-        client::handle(stdin, stdout, device_mgr, rx, actual_ws_port).await?;
+        client::handle(
+            stdin,
+            stdout,
+            device_mgr,
+            rx,
+            actual_ws_port,
+            Arc::clone(&wt_state),
+        )
+        .await?;
         return Ok(());
     }
 
@@ -168,8 +195,9 @@ async fn main() -> anyhow::Result<()> {
                 use std::os::linux::net::SocketAddrExt;
                 use std::os::unix::net::SocketAddr;
                 let name = socket_path[1..].as_bytes();
-                let addr = SocketAddr::from_abstract_name(name)
-                    .with_context(|| format!("invalid abstract socket name '{}'", &socket_path[1..]))?;
+                let addr = SocketAddr::from_abstract_name(name).with_context(|| {
+                    format!("invalid abstract socket name '{}'", &socket_path[1..])
+                })?;
                 let std_listener = std::os::unix::net::UnixListener::bind_addr(&addr)
                     .with_context(|| format!("bind abstract socket '{socket_path}'"))?;
                 std_listener.set_nonblocking(true)?;
@@ -211,11 +239,19 @@ async fn main() -> anyhow::Result<()> {
                     }
                     let mgr = Arc::clone(&device_mgr);
                     let rx = event_tx.subscribe();
+                    let wt_state_for_client = Arc::clone(&wt_state);
                     tokio::spawn(async move {
                         log::info!("[client] connected");
                         let (reader, writer) = tokio::io::split(stream);
-                        if let Err(e) =
-                            client::handle(reader, writer, mgr, rx, actual_ws_port).await
+                        if let Err(e) = client::handle(
+                            reader,
+                            writer,
+                            mgr,
+                            rx,
+                            actual_ws_port,
+                            wt_state_for_client,
+                        )
+                        .await
                         {
                             log::warn!("[client] error: {e:#}");
                         }
@@ -246,10 +282,14 @@ async fn main() -> anyhow::Result<()> {
             server.connect().await?;
             let mgr = Arc::clone(&device_mgr);
             let rx = event_tx.subscribe();
+            let wt_state_for_client = Arc::clone(&wt_state);
             tokio::spawn(async move {
                 log::info!("[client] connected");
                 let (reader, writer) = tokio::io::split(server);
-                if let Err(e) = client::handle(reader, writer, mgr, rx, actual_ws_port).await {
+                if let Err(e) =
+                    client::handle(reader, writer, mgr, rx, actual_ws_port, wt_state_for_client)
+                        .await
+                {
                     log::warn!("[client] error: {e:#}");
                 }
                 log::info!("[client] disconnected");

@@ -394,6 +394,10 @@ pub struct NmResponse {
     pub ws_port: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "N")]
     pub ws_nonce: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "W")]
+    pub wt_port: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "H")]
+    pub wt_cert_hash: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "e")]
     pub event_type: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "v")]

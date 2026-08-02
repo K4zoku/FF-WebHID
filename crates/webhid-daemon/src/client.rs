@@ -5,7 +5,7 @@ use tokio::sync::{broadcast, mpsc};
 use crate::blocklist::ReportType;
 use webhid::{IpcResponse, NmMessage, NmRequest, NmResponse, parse_packed_send, protocol};
 
-use crate::{device_mgr::DeviceManager, hid};
+use crate::{device_mgr::DeviceManager, hid, webtransport::WtState};
 
 pub async fn handle(
     reader: impl AsyncRead + Unpin + Send + 'static,
@@ -13,6 +13,7 @@ pub async fn handle(
     device_mgr: Arc<DeviceManager>,
     mut event_rx: broadcast::Receiver<IpcResponse>,
     ws_port: u16,
+    wt_state: Arc<WtState>,
 ) -> anyhow::Result<()> {
     let mut reader = BufReader::new(reader);
     let (tx, mut rx) = mpsc::channel::<NmMessage>(1024);
@@ -77,7 +78,7 @@ pub async fn handle(
                 break;
             }
         };
-        let response = dispatch(&device_mgr, request, ws_port).await;
+        let response = dispatch(&device_mgr, request, ws_port, &wt_state).await;
         if tx.send(response).await.is_err() {
             break;
         }
@@ -89,7 +90,7 @@ pub async fn handle(
     Ok(())
 }
 
-async fn dispatch(device_mgr: &DeviceManager, req: NmRequest, ws_port: u16) -> NmMessage {
+async fn dispatch(device_mgr: &DeviceManager, req: NmRequest, ws_port: u16, wt_state: &WtState) -> NmMessage {
     let req_id = req.id();
     let resp: NmResponse = match req {
         NmRequest::Enumerate { .. } => match device_mgr.enumerate() {
@@ -215,11 +216,19 @@ async fn dispatch(device_mgr: &DeviceManager, req: NmRequest, ws_port: u16) -> N
             NmResponse::ok()
         }
 
-        NmRequest::Handshake { .. } => NmResponse {
-            status: Some(200),
-            ws_port: Some(ws_port),
-            ws_nonce: Some(device_mgr.ws_nonce().to_string()),
-            ..Default::default()
+        NmRequest::Handshake { .. } => {
+            let (wt_port, wt_cert_hash) = match wt_state.ensure_current() {
+                Some((port, hash)) => (Some(port), Some(hash)),
+                None => (None, None),
+            };
+            NmResponse {
+                status: Some(200),
+                ws_port: Some(ws_port),
+                ws_nonce: Some(device_mgr.ws_nonce().to_string()),
+                wt_port,
+                wt_cert_hash,
+                ..Default::default()
+            }
         },
     };
     let mut resp = resp;

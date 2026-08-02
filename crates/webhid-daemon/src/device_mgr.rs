@@ -16,6 +16,7 @@ use crate::blocklist::{self, ReportType};
 use crate::hid;
 const MODE_NM: &str = "nm";
 const MODE_WS: &str = "ws";
+const MODE_WT: &str = "wt";
 
 
 struct Entry {
@@ -25,6 +26,7 @@ struct Entry {
     refcount: u32,
     dataplane_modes: Mutex<HashMap<String, String>>,
     ws_generation: AtomicU64,
+    wt_generation: AtomicU64,
     vendor_id: u16,
     product_id: u16,
     report_to_collection: Arc<HashMap<(u8, u8), (Option<u16>, Option<u16>)>>,
@@ -178,6 +180,7 @@ impl DeviceManager {
             handle: None,
             refcount: 1,
             ws_generation: AtomicU64::new(0),
+            wt_generation: AtomicU64::new(0),
             dataplane_modes: Mutex::new(HashMap::from([(session_token.clone(), MODE_NM.to_string())])),
             vendor_id: info.vendor_id,
             product_id: info.product_id,
@@ -338,6 +341,35 @@ impl DeviceManager {
             } else {
                 log::info!(
                     "[device_mgr] {device_id:#x} WS disconnect gen={generation} stale (current={current}), keeping ws"
+                );
+            }
+        }
+    }
+
+    pub fn wt_connect(&self, device_id: u32, session_token: &str) -> u64 {
+        let map = self.devices.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(entry) = map.get(&device_id) {
+            let g = entry.wt_generation.fetch_add(1, Ordering::SeqCst) + 1;
+            entry.dataplane_modes.lock().unwrap_or_else(|e| e.into_inner())
+                .insert(session_token.to_string(), MODE_WT.to_string());
+            log::info!("[device_mgr] {device_id:#x} WT connect gen={g}");
+            g
+        } else {
+            0
+        }
+    }
+
+    pub fn wt_disconnect(&self, device_id: u32, session_token: &str, generation: u64) {
+        let map = self.devices.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(entry) = map.get(&device_id) {
+            let current = entry.wt_generation.load(Ordering::SeqCst);
+            if current == generation {
+                entry.dataplane_modes.lock().unwrap_or_else(|e| e.into_inner())
+                    .insert(session_token.to_string(), MODE_NM.to_string());
+                log::info!("[device_mgr] {device_id:#x} WT disconnect gen={generation} → nm");
+            } else {
+                log::info!(
+                    "[device_mgr] {device_id:#x} WT disconnect gen={generation} stale (current={current}), keeping wt"
                 );
             }
         }

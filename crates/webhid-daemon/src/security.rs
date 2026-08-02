@@ -61,6 +61,8 @@ pub const DAEMON_SYSCALLS: &[libc::c_long] = &[
     libc::SYS_recvmsg,
     libc::SYS_shutdown,
     libc::SYS_socketpair,
+    libc::SYS_fcntl,
+    libc::SYS_recvmmsg,
     libc::SYS_epoll_create1,
     libc::SYS_epoll_ctl,
     #[cfg(target_arch = "x86_64")]

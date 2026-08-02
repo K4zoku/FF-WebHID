@@ -14,6 +14,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "sync", "net", "io-util"
 anyhow = { version = "1", default-features = false, features = ["std"] }
 log = { version = "0.4", features = ["std"] }
 tokio-tungstenite = "0.26"
+wtransport = "0.7"
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
 getrandom = "0.4"
 subtle = "2"

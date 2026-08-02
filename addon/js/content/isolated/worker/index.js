@@ -4,6 +4,7 @@ const logger = webhid.import('logger')
 const createSettingsStore = webhid.import('createSettingsStore')
 const GLOBAL_DEFAULTS = webhid.import('GLOBAL_DEFAULTS')
 const createWsTransport = webhid.import('createWsTransport')
+const createWtTransport = webhid.import('createWtTransport')
 logger.initLogger('worker')
 const MSG_SEND_REPORT = 0x01
 const MSG_SEND_FEATURE_REPORT = 0x02
@@ -17,7 +18,7 @@ settings.on('logLevel', (v) => logger.applyLevel(v))
 let nextReqId = 1
 /** @type {Map<number, {resolve: Function, reject: Function}>} */
 const pending = new Map()
-/** @type {import("./types.js").WsTransport|null} */
+/** @type {import("./types.js").WsTransport | import("./types.js").WtTransport | null} */
 let transport = null
 /** @type {MessagePort|null} */
 let dataPort = null
@@ -28,7 +29,11 @@ let dataPort = null
  */
 self.onmessage = ({ data: msg, ports }) => {
   if (msg.type === 'connect') {
-    transport = createWsTransport({
+    const factory =
+      msg.transport === 'wt'
+        ? createWtTransport
+        : createWsTransport
+    transport = factory({
       tag: 'worker',
       onReady: () => self.postMessage({ type: 'ready' }),
       onClosed: () => {

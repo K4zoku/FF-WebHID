@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::Context as _;
 use futures_util::{SinkExt, StreamExt};
@@ -10,65 +9,12 @@ use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
 use tokio_tungstenite::tungstenite::http::StatusCode;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 
-// Custom WebSocket close codes (4xxx range = application-defined).
-// 4401: token unknown (daemon restarted / session invalidated)
-// 4402: token missing or malformed
 const WS_CLOSE_UNKNOWN_TOKEN: u16 = 4401;
 const WS_CLOSE_BAD_TOKEN: u16 = 4402;
 
-use crate::blocklist::ReportType;
+use crate::batching;
 use crate::device_mgr::DeviceManager;
-use crate::hid;
 
-use bytes::Bytes;
-
-/// Default flush policy: `0` = adaptive (drain + burst coalescing).
-/// Set `WEBHID_WS_BATCH_MS=N` (N > 0) to use a fixed N ms timer instead.
-const DEFAULT_BATCH_FLUSH_MS: u64 = 0;
-
-/// Coalescing window for adaptive burst batching (microseconds).
-/// When a burst is detected (>1 report drained in one cycle), the sender
-/// waits up to this duration for additional reports before flushing.
-const ADAPTIVE_COALESCE_US: u64 = 25;
-
-// ---------------------------------------------------------------------------
-// Wire format for client → daemon binary frames (page → device hot path)
-// ---------------------------------------------------------------------------
-//
-// First byte is the message type:
-//
-//   0x01  SendReport (output report)
-//         [0x01][req_id_u32 LE][report_id_u8][...payload]
-//         Daemon writes via hidraw `write(2)` and sends back:
-//         [0x81][req_id_u32 LE][status_u8]   (status: 0=ok, 1=err)
-//
-//   0x02  SendFeatureReport
-//         [0x02][req_id_u32 LE][report_id_u8][...payload]
-//         Daemon issues HIDIOCSFEATURE and sends back:
-//         [0x82][req_id_u32 LE][status_u8]
-//
-//   0x03  ReceiveFeatureReport
-//         [0x03][req_id_u32 LE][report_id_u8]
-//         Daemon issues HIDIOCGFEATURE and sends back:
-//         [0x83][req_id_u32 LE][status_u8][len_u16 LE][...data]
-//         (data length = 0 on error)
-//
-// Frames from daemon → page that are NOT in this scheme are input-report
-// batches (format: `[0x00][len_u16 LE][report_id][payload]` repeated).
-
-const MSG_SEND_REPORT: u8 = 0x01;
-const MSG_SEND_FEATURE_REPORT: u8 = 0x02;
-const MSG_RECEIVE_FEATURE_REPORT: u8 = 0x03;
-
-const RESP_SEND_REPORT: u8 = 0x81;
-const RESP_SEND_FEATURE_REPORT: u8 = 0x82;
-const RESP_RECEIVE_FEATURE_REPORT: u8 = 0x83;
-
-/// Prefix byte for input-report batch frames (daemon → page).
-/// Distinguishes batch frames from control-response frames (0x81-0x83).
-const MSG_INPUT_BATCH: u8 = 0x00;
-
-/// Start the WebSocket server on the given port.
 pub async fn start_server(
     port: u16,
     event_tx: broadcast::Sender<webhid::IpcResponse>,
@@ -116,7 +62,6 @@ pub async fn start_server(
     }
 }
 
-/// Handle a single WebSocket connection.
 async fn handle_websocket(
     stream: tokio::net::TcpStream,
     event_tx: broadcast::Sender<webhid::IpcResponse>,
@@ -190,7 +135,7 @@ async fn handle_websocket(
 
     log::info!("[ws] authenticated hash for device_id={device_id:#x}");
 
-    let mut event_rx = event_tx.subscribe();
+    let event_rx = event_tx.subscribe();
 
     let ws_gen = device_mgr.ws_connect(device_id, &session_token);
 
@@ -206,7 +151,6 @@ async fn handle_websocket(
         }
     });
 
-    // --- Receiver task: handle incoming client frames (ping, close, hot-path writes) ---
     let tx_for_receiver = tx.clone();
     let device_mgr_for_receiver = Arc::clone(&device_mgr);
     let device_id_for_receiver = device_id;
@@ -224,7 +168,10 @@ async fn handle_websocket(
                     let mgr = Arc::clone(&device_mgr_for_receiver);
                     let dev_id = device_id_for_receiver;
                     tokio::spawn(async move {
-                        handle_client_binary(&frame, &mgr, dev_id, tx_clone).await;
+                        batching::handle_client_message(&frame, &mgr, dev_id, |resp| {
+                            let _ = tx_clone.send(Message::Binary(resp.into()));
+                        })
+                        .await;
                     });
                 }
                 Err(e) => {
@@ -236,85 +183,14 @@ async fn handle_websocket(
         }
     });
 
-    // --- Sender task ---
     let tx_for_sender = tx.clone();
     let device_id_for_sender = device_id;
-    let batch_ms = std::env::var("WEBHID_WS_BATCH_MS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(DEFAULT_BATCH_FLUSH_MS);
 
-    let mut sender_task = tokio::spawn(async move {
-        let mut batch: Vec<(u8, Bytes)> = Vec::with_capacity(8);
-        let mut frame_buf: Vec<u8> = Vec::with_capacity(256);
-
-        // Fixed-timer mode.
-        if batch_ms > 0 {
-            let mut flush_interval = tokio::time::interval(Duration::from_millis(batch_ms));
-            loop {
-                tokio::select! {
-                    _ = flush_interval.tick() => {
-                        if !batch.is_empty() {
-                            write_batch_frame(&mut frame_buf, &batch);
-                            let frame = std::mem::take(&mut frame_buf);
-                            if tx_for_sender.send(Message::Binary(frame.into())).is_err() {
-                                break;
-                            }
-                            batch.clear();
-                        }
-                    }
-                    event_result = event_rx.recv() => {
-                        if !handle_event(event_result, device_id_for_sender, &mut batch, &tx_for_sender) {
-                            break;
-                        }
-                    }
-                }
-            }
-            return;
-        }
-
-        // Adaptive mode.
-        let coalesce = Duration::from_micros(ADAPTIVE_COALESCE_US);
-        loop {
-            let event_result = event_rx.recv().await;
-            if !handle_event(
-                event_result,
-                device_id_for_sender,
-                &mut batch,
-                &tx_for_sender,
-            ) {
-                break;
-            }
-
-            drain_available(
-                &mut event_rx,
-                device_id_for_sender,
-                &mut batch,
-                &tx_for_sender,
-            );
-
-            if batch.len() > 1 {
-                tokio::select! {
-                    _ = tokio::time::sleep(coalesce) => {}
-                    event_result = event_rx.recv() => {
-                        if !handle_event(event_result, device_id_for_sender, &mut batch, &tx_for_sender) {
-                            break;
-                        }
-                        drain_available(&mut event_rx, device_id_for_sender, &mut batch, &tx_for_sender);
-                    }
-                }
-            }
-
-            if !batch.is_empty() {
-                write_batch_frame(&mut frame_buf, &batch);
-                let frame = std::mem::take(&mut frame_buf);
-                if tx_for_sender.send(Message::Binary(frame.into())).is_err() {
-                    break;
-                }
-                batch.clear();
-            }
-        }
-    });
+    let mut sender_task = tokio::spawn(batching::run_sender(
+        event_rx,
+        device_id_for_sender,
+        move |frame: Vec<u8>| tx_for_sender.send(Message::Binary(frame.into())).is_ok(),
+    ));
 
     tokio::select! {
         _ = &mut outgoing_task => {},
@@ -330,263 +206,6 @@ async fn handle_websocket(
     Ok(())
 }
 
-/// Append matching `InputReport`s to `batch`; flush on `Lagged`.
-/// Returns `false` when the channel is closed.
-fn handle_event(
-    event_result: Result<webhid::IpcResponse, broadcast::error::RecvError>,
-    device_id: u32,
-    batch: &mut Vec<(u8, Bytes)>,
-    tx: &mpsc::UnboundedSender<Message>,
-) -> bool {
-    match event_result {
-        Ok(webhid::IpcResponse::InputReport {
-            device_id: evt_device_id,
-            report_id,
-            data,
-            ..
-        }) => {
-            if evt_device_id == device_id {
-                log::trace!(
-                    "[ws] InputReport device={:#x} report_id={} len={}",
-                    device_id,
-                    report_id,
-                    data.len(),
-                );
-                batch.push((report_id, data));
-            }
-        }
-        Ok(_) => {}
-        Err(broadcast::error::RecvError::Lagged(n)) => {
-            log::warn!("[ws] broadcast lagged by {n} events, flushing batch");
-            if !batch.is_empty() {
-                let mut tmp = Vec::with_capacity(256);
-                write_batch_frame(&mut tmp, batch);
-                if tx.send(Message::Binary(tmp.into())).is_err() {
-                    return false;
-                }
-                batch.clear();
-            }
-        }
-        Err(broadcast::error::RecvError::Closed) => return false,
-    }
-    true
-}
-
-/// Drain all immediately-available events from the broadcast channel without
-/// blocking. Used by the adaptive sender to coalesce reports that arrived
-/// during the same poll iteration.
-fn drain_available(
-    rx: &mut broadcast::Receiver<webhid::IpcResponse>,
-    device_id: u32,
-    batch: &mut Vec<(u8, Bytes)>,
-    tx: &mpsc::UnboundedSender<Message>,
-) {
-    loop {
-        match rx.try_recv() {
-            Ok(ev) => {
-                if !handle_event(Ok(ev), device_id, batch, tx) {
-                    break;
-                }
-            }
-            Err(broadcast::error::TryRecvError::Empty) => break,
-            Err(broadcast::error::TryRecvError::Closed) => break,
-            Err(broadcast::error::TryRecvError::Lagged(n)) => {
-                log::warn!("[ws] drain lagged by {n} events");
-                if !batch.is_empty() {
-                    let mut tmp = Vec::with_capacity(256);
-                    write_batch_frame(&mut tmp, batch);
-                    if tx.send(Message::Binary(tmp.into())).is_err() {
-                        break;
-                    }
-                    batch.clear();
-                }
-            }
-        }
-    }
-}
-
-/// Write the batch frame into `out`, prefixed with MSG_INPUT_BATCH.
-/// Format: [0x00][len_u16 LE][report_id][payload] repeated.
-fn write_batch_frame(out: &mut Vec<u8>, reports: &[(u8, Bytes)]) {
-    out.clear();
-    let total_size: usize = 1 + reports.iter().map(|(_, d)| 2 + 1 + d.len()).sum::<usize>();
-    out.reserve(total_size);
-    out.push(MSG_INPUT_BATCH);
-    for (report_id, data) in reports {
-        let len = (1 + data.len()) as u16;
-        out.push((len & 0xFF) as u8);
-        out.push(((len >> 8) & 0xFF) as u8);
-        out.push(*report_id);
-        out.extend_from_slice(data);
-    }
-}
-
-/// Build a fresh batch frame (allocates).
-#[cfg(test)]
-fn create_batch_frame(reports: &[(u8, Bytes)]) -> Vec<u8> {
-    let mut out = Vec::new();
-    write_batch_frame(&mut out, reports);
-    out
-}
-
-/// Parse a client-sent binary frame (page → daemon hot path) and dispatch it
-/// to hidraw.  Sends the response back via the outgoing `tx` channel as a
-/// binary frame so the page can resolve the corresponding Promise.
-async fn handle_client_binary(
-    frame: &[u8],
-    device_mgr: &Arc<DeviceManager>,
-    device_id: u32,
-    tx: mpsc::UnboundedSender<Message>,
-) {
-    if frame.is_empty() {
-        log::warn!("[ws] empty binary frame from client");
-        return;
-    }
-    let msg_type = frame[0];
-
-    if frame.len() < 5 {
-        log::warn!(
-            "[ws] short frame (len={}, need ≥5 for type+req_id)",
-            frame.len()
-        );
-        return;
-    }
-    let req_id = u32::from_le_bytes([frame[1], frame[2], frame[3], frame[4]]);
-
-    match msg_type {
-        MSG_SEND_REPORT | MSG_SEND_FEATURE_REPORT => {
-            // [type][req_id_u32 LE][report_id_u8][...payload]
-            if frame.len() < 6 {
-                let resp_type = if msg_type == MSG_SEND_REPORT {
-                    RESP_SEND_REPORT
-                } else {
-                    RESP_SEND_FEATURE_REPORT
-                };
-                let _ = tx.send(make_status_resp(resp_type, req_id, 1));
-                return;
-            }
-            let report_id = frame[5];
-            let report_type = if msg_type == MSG_SEND_REPORT {
-                ReportType::Output
-            } else {
-                ReportType::Feature
-            };
-            if device_mgr.is_report_blocked(device_id, report_id, report_type) {
-                let resp_type = if msg_type == MSG_SEND_REPORT {
-                    RESP_SEND_REPORT
-                } else {
-                    RESP_SEND_FEATURE_REPORT
-                };
-                let _ = tx.send(make_status_resp(resp_type, req_id, 2));
-                return;
-            }
-            let payload: Arc<[u8]> = Arc::from(&frame[6..]);
-
-            let dev_arc = match device_mgr.get_file(device_id) {
-                Ok(f) => f,
-                Err(e) => {
-                    log::warn!("[ws] get_file '{device_id}': {e}");
-                    let resp_type = if msg_type == MSG_SEND_REPORT {
-                        RESP_SEND_REPORT
-                    } else {
-                        RESP_SEND_FEATURE_REPORT
-                    };
-                    let _ = tx.send(make_status_resp(resp_type, req_id, 1));
-                    return;
-                }
-            };
-
-            let result = tokio::task::spawn_blocking(move || {
-                let dev = dev_arc.lock().unwrap_or_else(|e| e.into_inner());
-                if msg_type == MSG_SEND_REPORT {
-                    hid::write_report(&dev, report_id, &payload)
-                } else {
-                    hid::write_feature_report(&dev, report_id, &payload)
-                }
-            })
-            .await;
-
-            let status = match result {
-                Ok(Ok(())) => 0u8,
-                _ => 1u8,
-            };
-            let resp_type = if msg_type == MSG_SEND_REPORT {
-                RESP_SEND_REPORT
-            } else {
-                RESP_SEND_FEATURE_REPORT
-            };
-            let _ = tx.send(make_status_resp(resp_type, req_id, status));
-        }
-
-        MSG_RECEIVE_FEATURE_REPORT => {
-            // [type][req_id_u32 LE][report_id_u8]
-            if frame.len() < 6 {
-                let _ = tx.send(make_feature_read_resp(req_id, 1, &[]));
-                return;
-            }
-            let report_id = frame[5];
-            if device_mgr.is_report_blocked(device_id, report_id, ReportType::Feature) {
-                let _ = tx.send(make_feature_read_resp(req_id, 2, &[]));
-                return;
-            }
-
-            let dev_arc = match device_mgr.get_file(device_id) {
-                Ok(f) => f,
-                Err(e) => {
-                    log::warn!("[ws] get_file '{device_id}': {e}");
-                    let _ = tx.send(make_feature_read_resp(req_id, 1, &[]));
-                    return;
-                }
-            };
-
-            let result = tokio::task::spawn_blocking(move || {
-                let dev = dev_arc.lock().unwrap_or_else(|e| e.into_inner());
-                hid::read_feature_report(&dev, report_id)
-            })
-            .await;
-
-            match result {
-                Ok(Ok(data)) => {
-                    let _ = tx.send(make_feature_read_resp(req_id, 0, &data));
-                }
-                _ => {
-                    let _ = tx.send(make_feature_read_resp(req_id, 1, &[]));
-                }
-            }
-        }
-
-        other => {
-            log::warn!("[ws] rejecting unknown binary msg_type=0x{other:02x}");
-            let _ = tx.send(make_status_resp(0xFF, req_id, 1));
-        }
-    }
-}
-
-/// Build a `[resp_type][req_id_u32 LE][status_u8]` response frame.
-fn make_status_resp(resp_type: u8, req_id: u32, status: u8) -> Message {
-    let mut buf = Vec::with_capacity(6);
-    buf.push(resp_type);
-    buf.extend_from_slice(&req_id.to_le_bytes());
-    buf.push(status);
-    Message::Binary(buf.into())
-}
-
-/// Build a `[0x83][req_id_u32 LE][status_u8][len_u16 LE][...data]` response
-/// for ReceiveFeatureReport.  `data` is empty on error.
-fn make_feature_read_resp(req_id: u32, status: u8, data: &[u8]) -> Message {
-    let mut buf = Vec::with_capacity(8 + data.len());
-    buf.push(RESP_RECEIVE_FEATURE_REPORT);
-    buf.extend_from_slice(&req_id.to_le_bytes());
-    buf.push(status);
-    let len = data.len().min(0xFFFF) as u16;
-    buf.extend_from_slice(&len.to_le_bytes());
-    buf.extend_from_slice(&data[..len as usize]);
-    Message::Binary(buf.into())
-}
-
-/// Send a close frame with a custom code + reason, then close the stream.
-/// Used to signal token-auth failures so the client can distinguish them
-/// from network errors and trigger a token refresh instead of blind retry.
 async fn send_close(
     ws_stream: tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
     code: u16,
@@ -600,7 +219,6 @@ async fn send_close(
             reason: reason.into(),
         })))
         .await;
-    // Drain any incoming frames until the client acknowledges the close.
     while receiver.next().await.is_some() {}
     Ok(())
 }
@@ -608,8 +226,14 @@ async fn send_close(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::batching::{MSG_INPUT_BATCH, write_batch_frame};
+    use bytes::Bytes;
 
-    // ── create_batch_frame ──────────────────────────────────────────────
+    fn create_batch_frame(reports: &[(u8, Bytes)]) -> Vec<u8> {
+        let mut out = Vec::new();
+        write_batch_frame(&mut out, reports);
+        out
+    }
 
     #[test]
     fn test_batch_frame_empty() {
@@ -621,7 +245,6 @@ mod tests {
     fn test_batch_frame_single_report() {
         let reports: Vec<(u8, Bytes)> = vec![(0x01, Bytes::from(&[0xAA, 0xBB][..]))];
         let frame = create_batch_frame(&reports);
-        // [0x00][len_u16 LE = 3][report_id=0x01][payload 0xAA, 0xBB]
         assert_eq!(frame, vec![0x00, 0x03, 0x00, 0x01, 0xAA, 0xBB]);
     }
 
@@ -632,7 +255,6 @@ mod tests {
             (0x02, Bytes::from(&[0xBB, 0xCC][..])),
         ];
         let frame = create_batch_frame(&reports);
-        // [0x00][2, 0, 0x01, 0xAA, 3, 0, 0x02, 0xBB, 0xCC]
         assert_eq!(
             frame,
             vec![0x00, 0x02, 0x00, 0x01, 0xAA, 0x03, 0x00, 0x02, 0xBB, 0xCC]
@@ -643,18 +265,14 @@ mod tests {
     fn test_batch_frame_empty_report() {
         let reports: Vec<(u8, Bytes)> = vec![(0x05, Bytes::from(&[][..]))];
         let frame = create_batch_frame(&reports);
-        // [0x00][len=1, 0, report_id=0x05]
         assert_eq!(frame, vec![0x00, 0x01, 0x00, 0x05]);
     }
 
     #[test]
     fn test_batch_frame_large_payload() {
-        // Payload >= 128 bytes: len = 1 + 128 = 129 = 0x81
-        // Without the 0x00 prefix, this would be misinterpreted as a control response.
         let payload = vec![0xAA; 128];
         let reports: Vec<(u8, Bytes)> = vec![(0x01, Bytes::from(payload))];
         let frame = create_batch_frame(&reports);
-        // [0x00][0x81, 0x00][report_id=0x01][128 bytes of 0xAA]
         assert_eq!(frame[0], 0x00);
         assert_eq!(frame[1], 0x81);
         assert_eq!(frame[2], 0x00);
@@ -662,59 +280,51 @@ mod tests {
         assert_eq!(frame.len(), 4 + 128);
     }
 
-    // ── make_status_resp ────────────────────────────────────────────────
-
     #[test]
     fn test_status_resp_success() {
-        let msg = make_status_resp(0x81, 42, 0);
-        let expected = vec![0x81, 42, 0, 0, 0, 0];
-        assert_eq!(msg, Message::Binary(expected.into()));
+        let buf = batching::make_status_resp(0x81, 42, 0);
+        assert_eq!(buf, vec![0x81, 42, 0, 0, 0, 0]);
     }
 
     #[test]
     fn test_status_resp_error() {
-        let msg = make_status_resp(0x82, 1, 1);
-        assert_eq!(msg, Message::Binary(vec![0x82, 1, 0, 0, 0, 1].into()));
+        let buf = batching::make_status_resp(0x82, 1, 1);
+        assert_eq!(buf, vec![0x82, 1, 0, 0, 0, 1]);
     }
 
     #[test]
     fn test_status_resp_large_req_id() {
-        let msg = make_status_resp(0x81, 0xDEAD, 0);
-        assert_eq!(
-            msg,
-            Message::Binary(vec![0x81, 0xAD, 0xDE, 0x00, 0x00, 0x00].into())
-        );
+        let buf = batching::make_status_resp(0x81, 0xDEAD, 0);
+        assert_eq!(buf, vec![0x81, 0xAD, 0xDE, 0x00, 0x00, 0x00]);
     }
-
-    // ── make_feature_read_resp ──────────────────────────────────────────
 
     #[test]
     fn test_feature_read_resp_success() {
-        let msg = make_feature_read_resp(42, 0, &[0xAA, 0xBB]);
-        assert_eq!(
-            msg,
-            Message::Binary(vec![0x83, 42, 0, 0, 0, 0, 2, 0, 0xAA, 0xBB].into())
-        );
+        let buf = batching::make_feature_read_resp(42, 0, &[0xAA, 0xBB]);
+        assert_eq!(buf, vec![0x83, 42, 0, 0, 0, 0, 2, 0, 0xAA, 0xBB]);
     }
 
     #[test]
     fn test_feature_read_resp_error() {
-        let msg = make_feature_read_resp(7, 1, &[]);
-        assert_eq!(msg, Message::Binary(vec![0x83, 7, 0, 0, 0, 1, 0, 0].into()));
+        let buf = batching::make_feature_read_resp(7, 1, &[]);
+        assert_eq!(buf, vec![0x83, 7, 0, 0, 0, 1, 0, 0]);
     }
 
     #[test]
     fn test_feature_read_resp_large_data() {
         let data = vec![0xFF; 300];
-        let msg = make_feature_read_resp(0, 0, &data);
-        if let Message::Binary(buf) = &msg {
-            assert_eq!(buf[0], 0x83);
-            assert_eq!(buf[5], 0);
-            let len = u16::from_le_bytes([buf[6], buf[7]]);
-            assert_eq!(len as usize, data.len().min(0xFFFF));
-            assert_eq!(&buf[8..], &data[..len as usize]);
-        } else {
-            panic!("expected Binary message");
-        }
+        let buf = batching::make_feature_read_resp(0, 0, &data);
+        assert_eq!(buf[0], 0x83);
+        assert_eq!(buf[5], 0);
+        let len = u16::from_le_bytes([buf[6], buf[7]]);
+        assert_eq!(len as usize, data.len().min(0xFFFF));
+        assert_eq!(&buf[8..], &data[..len as usize]);
+    }
+
+    #[test]
+    fn test_batch_frame_uses_shared_writer() {
+        let reports: Vec<(u8, Bytes)> = vec![(0x01, Bytes::from(&[0xAA][..]))];
+        let frame = create_batch_frame(&reports);
+        assert_eq!(frame[0], MSG_INPUT_BATCH);
     }
 }

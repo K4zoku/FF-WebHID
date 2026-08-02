@@ -48,6 +48,14 @@
  */
 
 /**
+ * @typedef {object} WtTransport
+ * @property {(msg: {wtPort: number, wtCertHash?: string, token: string, logLevel?: number}) => void} connect
+ * @property {(frame: Uint8Array | string) => boolean} send
+ * @property {() => boolean} isOpen
+ * @property {() => void} disconnect
+ */
+
+/**
  * @typedef {object} HIDDevice
  * @property {() => Promise<void>} open
  * @property {() => Promise<void>} close

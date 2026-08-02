@@ -678,12 +678,14 @@
     }
 
     if (directives['connect-src'] !== undefined) {
-      if (!sourceListAllowsDaemonWs(directives['connect-src'])) {
-        directives['connect-src'] = directives['connect-src'] + ' ws://127.0.0.1:*'
+      if (!sourceListAllowsDaemonConnects(directives['connect-src'])) {
+        directives['connect-src'] =
+          directives['connect-src'] + ' ws://127.0.0.1:* https://127.0.0.1:*'
         modified = true
       }
     } else if (directives['default-src'] !== undefined) {
-      directives['connect-src'] = directives['default-src'] + ' ws://127.0.0.1:*'
+      directives['connect-src'] =
+        directives['default-src'] + ' ws://127.0.0.1:* https://127.0.0.1:*'
       order.push('connect-src')
       modified = true
     }
@@ -737,9 +739,15 @@
       || tokens.includes('http:') || tokens.includes('https:')
   }
 
-  function sourceListAllowsDaemonWs(list) {
+  function sourceListAllowsDaemonConnects(list) {
     const tokens = list.split(/\s+/)
-    return tokens.includes('*') || tokens.includes('ws:') || tokens.includes('ws://127.0.0.1:*')
+    return (
+      tokens.includes('*') ||
+      tokens.includes('ws:') ||
+      tokens.includes('ws://127.0.0.1:*') ||
+      tokens.includes('https:') ||
+      tokens.includes('https://127.0.0.1:*')
+    )
   }
 
   function parseCspForWorkerSpawn(cspValues, spawnMode, pageOrigin) {
@@ -759,7 +767,7 @@
       if (effWorker !== undefined && !sourceListAllowsWorker(effWorker, pageOrigin)) {
         workerSrcBlocked = true
       }
-      if (effConnect !== undefined && !sourceListAllowsDaemonWs(effConnect)) {
+      if (effConnect !== undefined && !sourceListAllowsDaemonConnects(effConnect)) {
         connectSrcBlocked = true
       }
       const tt = directives['require-trusted-types-for']

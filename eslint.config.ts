@@ -11,7 +11,8 @@ const browserTypes = [
   "Element", "Document", "MessageEvent", "setTimeout",
   "HTMLIFrameElement", "MutationObserver", "MutationRecord",
   "TextEncoder", "TextDecoder", "URL", "Headers", "AbortSignal",
-  "Node", "NodeList",
+  "Node", "NodeList", "WebTransport", "WebTransportError",
+  "WebTransportBidirectionalStream", "ReadableStream", "ReadableStreamDefaultReader",
 ];
 
 const testGlobals = {
@@ -54,6 +55,8 @@ export default tseslint.config(
         MessageChannel: "readonly",
         MessagePort: "readonly",
         WebSocket: "readonly",
+        WebTransport: "readonly",
+        WebTransportError: "readonly",
         Uint8Array: "readonly",
         ArrayBuffer: "readonly",
         DataView: "readonly",

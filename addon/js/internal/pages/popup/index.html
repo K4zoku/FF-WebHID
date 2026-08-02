@@ -34,12 +34,15 @@
           <div class="setting-info">
             <h3 data-i18n="popupDataPlane">Data Plane</h3>
             <p data-i18n="popupDataPlaneDesc">
-              WebSocket (Worker) or Native Messaging
+              WebSocket, WebTransport, or Native Messaging
             </p>
           </div>
           <select id="dataPlane" aria-labelledby="popupDataPlane">
             <option value="ws" data-i18n="popupDataPlaneWs">
               WebSocket (Worker)
+            </option>
+            <option value="wt" data-i18n="popupDataPlaneWt">
+              WebTransport (Worker)
             </option>
             <option value="nm" data-i18n="popupDataPlaneNm">
               Native Messaging

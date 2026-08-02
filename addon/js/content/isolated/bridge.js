@@ -41,6 +41,10 @@
   let wsPort = null
   /** @type {string|null} */
   let wsNonce = null
+  /** @type {number|null} */
+  let wtPort = null
+  /** @type {string|null} */
+  let wtCertHash = null
   /** @type {import("./types.js").SettingsStore} */
   const settings = createSettingsStore(webhid.import('GLOBAL_DEFAULTS'))
   settings.on('logLevel', (v) => logger.applyLevel(v))
@@ -458,7 +462,10 @@
 
       worker.postMessage({
         type: 'connect',
-        wsPort,
+        transport: opts.wtPort != null ? 'wt' : 'ws',
+        wsPort: opts.wtPort != null ? undefined : wsPort,
+        wtPort: opts.wtPort != null ? opts.wtPort : undefined,
+        wtCertHash: opts.wtPort != null ? opts.wtCertHash : undefined,
         token: wsAuthHash,
         reportSize: opts.reportSize || 64,
         logLevel: logger.level
@@ -496,6 +503,8 @@
       if (http.isOk(resp.s) && resp.w) {
         wsPort = resp.w
         wsNonce = resp.N || null
+        wtPort = resp.W || null
+        wtCertHash = resp.H || null
         if (!wsNonce) {
           logger.warn(
             'handshake: daemon did not send ws_nonce (old version?); ' +
@@ -905,6 +914,12 @@
         const dataPlane = settings.dataPlane
         if (dataPlane === 'ws') {
           spawnDataPlane(deviceId, response.t, response.w || wsPort)
+        } else if (dataPlane === 'wt') {
+          if (wtPort != null) {
+            spawnDataPlane(deviceId, response.t, null, { wtPort, wtCertHash })
+          } else {
+            spawnDataPlane(deviceId, response.t, response.w || wsPort)
+          }
         }
       }
 
@@ -1085,6 +1100,17 @@
       for (const id of openDevices) {
         const token = sessionTokens.get(id)
         if (token) spawnDataPlane(id, token, wsPort)
+      }
+    } else if (dp === 'wt') {
+      for (const id of openDevices) {
+        const token = sessionTokens.get(id)
+        if (token) {
+          if (wtPort != null) {
+            spawnDataPlane(id, token, null, { wtPort, wtCertHash })
+          } else {
+            spawnDataPlane(id, token, wsPort)
+          }
+        }
       }
     } else {
       for (const id of openDevices) {

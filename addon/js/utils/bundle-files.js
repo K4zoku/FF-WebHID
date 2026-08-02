@@ -12,6 +12,7 @@
       'js/utils/logger.js',
       'js/utils/settings.js',
       'js/utils/websocket.js',
+      'js/utils/webtransport.js',
       'js/content/isolated/worker/index.js'
     ],
     workerPolyfill: [

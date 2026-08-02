@@ -21,10 +21,13 @@
     "message": "Data Plane"
   },
   "popupDataPlaneDesc": {
-    "message": "WebSocket or Native Messaging"
+    "message": "WebSocket, WebTransport, or Native Messaging"
   },
   "popupDataPlaneWs": {
     "message": "WebSocket"
+  },
+  "popupDataPlaneWt": {
+    "message": "WebTransport"
   },
   "popupDataPlaneNm": {
     "message": "Native Messaging"
@@ -85,6 +88,9 @@
   },
   "settingsDataPlaneWs": {
     "message": "WebSocket"
+  },
+  "settingsDataPlaneWt": {
+    "message": "WebTransport"
   },
   "settingsDataPlaneNm": {
     "message": "Native Messaging"
