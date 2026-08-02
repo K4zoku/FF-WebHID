@@ -403,6 +403,12 @@ test.describe.serial('WebHID E2E (WebTransport data plane)', () => {
           for (let i = 0; i < b.length; i++) b[i] = parseInt(s.substr(i * 2, 2), 16)
           return b
         }
+        const concat = (a, b) => {
+          const out = new Uint8Array(a.length + b.length)
+          out.set(a, 0)
+          out.set(b, a.length)
+          return out
+        }
         const report = (m) => self.postMessage(m)
         const connect = (path) =>
           new Promise((resolve, reject) => {
@@ -414,31 +420,35 @@ test.describe.serial('WebHID E2E (WebTransport data plane)', () => {
         ;(async () => {
           try {
             const wt1 = await connect(auth)
+            const stream = await wt1.createBidirectionalStream()
+            const writer = stream.writable.getWriter()
+            const reader = stream.readable.getReader()
             report('connected')
             const acks = []
             const ackLoop = (async () => {
-              const reader = wt1.incomingBidirectionalStreams.getReader()
+              let buf = new Uint8Array(0)
               while (true) {
-                const { value: stream, done } = await reader.read()
+                const { value, done } = await reader.read()
                 if (done) break
-                ;(async () => {
-                  const r = stream.readable.getReader()
-                  const chunks = []
-                  while (true) {
-                    const x = await r.read()
-                    if (x.done) break
-                    chunks.push(...Array.from(new Uint8Array(x.value)))
-                  }
-                  acks.push(chunks)
-                })()
+                if (!value) continue
+                buf = concat(buf, new Uint8Array(value))
+                while (buf.length >= 4) {
+                  const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength)
+                  const len = dv.getUint32(0, true)
+                  if (buf.length < 4 + len) break
+                  const frame = buf.subarray(4, 4 + len)
+                  buf = buf.subarray(4 + len)
+                  acks.push(Array.from(frame))
+                }
               }
             })()
             const sendFrame = async (marker) => {
               const before = acks.length
-              const stream = await wt1.createBidirectionalStream()
-              const writer = stream.writable.getWriter()
-              await writer.write(new Uint8Array([0xff, marker, 0, 0, 0, 9]))
-              await writer.close()
+              const frame = new Uint8Array([0xff, marker, 0, 0, 0, 9])
+              const header = new Uint8Array(4)
+              new DataView(header.buffer).setUint32(0, frame.length, true)
+              await writer.write(header)
+              await writer.write(frame)
               for (let i = 0; i < 100; i++) {
                 if (acks.length > before) return JSON.stringify(acks[acks.length - 1])
                 await new Promise((r) => setTimeout(r, 100))

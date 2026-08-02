@@ -16,6 +16,8 @@ use crate::device_mgr::DeviceManager;
 
 const DEFAULT_CERT_VALIDITY_SECS: u64 = 14 * 24 * 60 * 60;
 
+const MAX_FRAME_LEN: usize = 1024 * 1024;
+
 struct WtGeneration {
     port: u16,
     cert_hash_hex: String,
@@ -224,23 +226,19 @@ async fn run_session(
     _session_token: String,
     _wt_gen: u64,
 ) -> anyhow::Result<()> {
+    let (mut send, mut recv) = conn.accept_bi().await?;
+
     let (frame_tx, frame_rx) = mpsc::unbounded_channel::<Bytes>();
 
-    let writer_conn = conn.clone();
     let writer_task = tokio::spawn(async move {
         let mut rx = frame_rx;
         while let Some(frame) = rx.recv().await {
-            let (mut send, _recv) = match writer_conn.open_bi().await {
-                Ok(opening) => match opening.await {
-                    Ok(pair) => pair,
-                    Err(_) => break,
-                },
-                Err(_) => break,
-            };
-            if send.write_all(&frame).await.is_err() {
+            let mut header = [0u8; 4];
+            header.copy_from_slice(&(frame.len() as u32).to_le_bytes());
+            if send.write_all(&header).await.is_err() {
                 break;
             }
-            if send.finish().await.is_err() {
+            if send.write_all(&frame).await.is_err() {
                 break;
             }
         }
@@ -254,35 +252,31 @@ async fn run_session(
         move |frame: Vec<u8>| flush_tx.send(Bytes::from(frame)).is_ok(),
     ));
 
+    let mut len_buf = [0u8; 4];
     loop {
-        match conn.accept_bi().await {
-            Ok((_send, mut recv)) => {
-                let frame_tx2 = frame_tx.clone();
-                let mgr = Arc::clone(&device_mgr);
-                tokio::spawn(async move {
-                    let mut buf: Vec<u8> = Vec::new();
-                    let mut chunk = [0u8; 4096];
-                    loop {
-                        match recv.read(&mut chunk).await {
-                            Ok(Some(n)) => buf.extend_from_slice(&chunk[..n]),
-                            Ok(None) => break,
-                            Err(_) => return,
-                        }
-                    }
-                    if buf.is_empty() {
-                        return;
-                    }
-                    batching::handle_client_message(&buf, &mgr, device_id, move |resp| {
-                        let _ = frame_tx2.send(Bytes::from(resp));
-                    })
-                    .await;
-                });
-            }
-            Err(e) => {
-                log::debug!("[wt] accept_bi error: {e}; session ending");
-                break;
-            }
+        if recv.read_exact(&mut len_buf).await.is_err() {
+            break;
         }
+        let len = u32::from_le_bytes(len_buf) as usize;
+        if len > MAX_FRAME_LEN {
+            log::warn!("[wt] oversized frame len={len}; session ending");
+            break;
+        }
+        let mut frame = vec![0u8; len];
+        if recv.read_exact(&mut frame).await.is_err() {
+            break;
+        }
+        let frame_tx2 = frame_tx.clone();
+        let mgr = Arc::clone(&device_mgr);
+        tokio::spawn(async move {
+            if frame.is_empty() {
+                return;
+            }
+            batching::handle_client_message(&frame, &mgr, device_id, move |resp| {
+                let _ = frame_tx2.send(Bytes::from(resp));
+            })
+            .await;
+        });
     }
 
     drop(frame_tx);

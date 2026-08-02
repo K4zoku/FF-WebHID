@@ -13,6 +13,7 @@ const browserTypes = [
   "TextEncoder", "TextDecoder", "URL", "Headers", "AbortSignal",
   "Node", "NodeList", "WebTransport", "WebTransportError",
   "WebTransportBidirectionalStream", "ReadableStream", "ReadableStreamDefaultReader",
+  "WritableStreamDefaultWriter",
 ];
 
 const testGlobals = {

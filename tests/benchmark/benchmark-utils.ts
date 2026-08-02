@@ -59,7 +59,7 @@ export interface BenchmarkResult {
 export async function setDataPlane(
   bg: { evaluate: Page['evaluate'] },
   origin: string,
-  mode: 'ws' | 'nm'
+  mode: 'ws' | 'wt' | 'nm'
 ): Promise<void> {
   await bg.evaluate(
     ({ origin, mode }: { origin: string; mode: string }) =>
@@ -156,7 +156,7 @@ export function median(vals: number[]): number {
 
 export async function benchmarkMode(
   fixtures: BenchmarkFixtures,
-  mode: 'ws' | 'nm'
+  mode: 'ws' | 'wt' | 'nm'
 ): Promise<BenchmarkResult> {
   const { harnessCtx, backgroundPage, vendorDevice, httpPort, daemonMode } = fixtures
   const page = await harnessCtx.newPage()
@@ -167,6 +167,8 @@ export async function benchmarkMode(
       .evaluate(() => browser.storage.local.set({ 'settings :: daemonAsNmHost': true }))
       .catch(() => {})
   }
+
+  await setDataPlane(backgroundPage, origin, mode)
 
   await page.goto(`${origin}/tests/test-page.html`, {
     waitUntil: 'domcontentloaded',
@@ -191,7 +193,6 @@ export async function benchmarkMode(
     throw new Error('page chunk count does not match file-based chunking')
   }
 
-  await setDataPlane(backgroundPage, origin, mode)
   return runBenchmark(page, vendorDevice)
 }
 

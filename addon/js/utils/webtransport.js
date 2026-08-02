@@ -14,6 +14,18 @@
   }
 
   /**
+   * @param {Uint8Array} a
+   * @param {Uint8Array} b
+   * @returns {Uint8Array}
+   */
+  function concatBytes(a, b) {
+    const out = new Uint8Array(a.length + b.length)
+    out.set(a, 0)
+    out.set(b, a.length)
+    return out
+  }
+
+  /**
    * @param {import("../types.js").WsTransportOpts} opts
    * @returns {import("../types.js").WtTransport}
    */
@@ -24,6 +36,8 @@
     let wt = null
     /** @type {{wtPort: number, wtCertHash?: string, token: string, logLevel?: number}|null} */
     let connectMsg = null
+    /** @type {WritableStreamDefaultWriter|null} */
+    let streamWriter = null
     /** @type {ReadableStreamDefaultReader|null} */
     let streamReader = null
     /** @type {ReturnType<typeof setTimeout>|null} */
@@ -48,6 +62,7 @@
       const wasReady = open
       open = false
       wt = null
+      streamWriter = null
       streamReader = null
       if (!wasReady || authPending) {
         log(
@@ -62,67 +77,53 @@
     }
 
     /**
-     * @param {WebTransportBidirectionalStream} stream
+     * @param {ReadableStream} stream
      * @returns {Promise<void>}
      */
-    async function handleIncomingStream(stream) {
-      if (authTimer) {
-        clearTimeout(authTimer)
-        authTimer = null
-      }
+    async function readFrames(stream) {
       try {
         const reader = stream.readable.getReader()
-        const chunks = []
-        let total = 0
+        streamReader = reader
+        let buf = new Uint8Array(0)
         while (true) {
           const { value, done } = await reader.read()
           if (done) break
-          if (value) {
-            const view = value instanceof Uint8Array ? value : new Uint8Array(value)
-            chunks.push(view)
-            total += view.length
+          if (!value) continue
+          buf = concatBytes(buf, value instanceof Uint8Array ? value : new Uint8Array(value))
+          while (buf.length >= 4) {
+            const dataView = new DataView(buf.buffer, buf.byteOffset, buf.byteLength)
+            const len = dataView.getUint32(0, true)
+            if (buf.length < 4 + len) break
+            const frame = buf.subarray(4, 4 + len)
+            buf = buf.subarray(4 + len)
+            if (opts.onBinary) opts.onBinary(frame)
           }
         }
-        try {
-          reader.releaseLock()
-        } catch (e) {
-          log('debug', 'WT stream releaseLock failed', e)
-        }
-        if (total === 0) return
-        let msg
-        if (chunks.length === 1) {
-          msg = chunks[0]
-        } else {
-          msg = new Uint8Array(total)
-          let off = 0
-          for (const chunk of chunks) {
-            msg.set(chunk, off)
-            off += chunk.length
-          }
-        }
-        if (opts.onBinary) opts.onBinary(msg)
       } catch (e) {
         log('debug', 'WT stream read error: ' + (e.message || e))
+      } finally {
+        streamReader = null
       }
     }
 
     /**
      * @returns {Promise<void>}
      */
-    async function readStreams() {
+    async function attachStream() {
       if (!wt) return
       try {
-        const reader = wt.incomingBidirectionalStreams.getReader()
-        streamReader = reader
-        while (true) {
-          const { value: stream, done } = await reader.read()
-          if (done) break
-          handleIncomingStream(stream)
+        const stream = await wt.createBidirectionalStream()
+        if (!wt) return
+        if (authTimer) {
+          clearTimeout(authTimer)
+          authTimer = null
         }
+        streamWriter = stream.writable.getWriter()
+        log('debug', 'WT persistent stream attached')
+        readFrames(stream)
+        opts.onReady && opts.onReady()
       } catch (e) {
-        log('debug', 'WT incoming streams reader ended: ' + (e.message || e))
-      } finally {
-        streamReader = null
+        log('warn', 'WT stream attach failed: ' + (e.message || e))
       }
     }
 
@@ -155,14 +156,14 @@
           authTimer = setTimeout(() => {
             authTimer = null
           }, 1000)
-          opts.onReady && opts.onReady()
-          readStreams()
+          attachStream()
         })
         .catch((e) => {
           log('warn', 'WT ready rejected: ' + (e.message || e))
           closedHandled = true
           open = false
           wt = null
+          streamWriter = null
           streamReader = null
           opts.onAuthFailed && opts.onAuthFailed(0)
         })
@@ -184,20 +185,17 @@
        * @returns {boolean}
        */
       send(frame) {
-        if (!wt || !open) return false
+        if (!wt || !open || !streamWriter) return false
         const data = frame instanceof Uint8Array ? frame : new TextEncoder().encode(frame)
-        wt
-          .createBidirectionalStream()
-          .then((stream) => {
-            const writer = stream.writable.getWriter()
-            return writer.write(data).then(() => writer.close())
-          })
-          .catch((e) => log('debug', 'WT send failed: ' + (e.message || e)))
+        const header = new Uint8Array(4)
+        new DataView(header.buffer).setUint32(0, data.length, true)
+        streamWriter.write(header).catch((e) => log('debug', 'WT send failed: ' + (e.message || e)))
+        streamWriter.write(data).catch((e) => log('debug', 'WT send failed: ' + (e.message || e)))
         return true
       },
       /** @returns {boolean} */
       isOpen() {
-        return open
+        return open && streamWriter != null
       },
       /** @returns {void} */
       disconnect() {
@@ -208,6 +206,14 @@
             log('debug', 'WT stream reader cancel failed', e)
           }
           streamReader = null
+        }
+        if (streamWriter) {
+          try {
+            streamWriter.close()
+          } catch (e) {
+            log('debug', 'WT stream writer close failed', e)
+          }
+          streamWriter = null
         }
         if (authTimer) {
           clearTimeout(authTimer)

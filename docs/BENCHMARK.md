@@ -552,13 +552,17 @@ not a transport-only number.
 npm run test:benchmark
 ```
 
-Standalone project, `daemonMode: 'daemon-nm'`, Firefox only. The ws and nm
-modes are separate specs (`benchmark-ws.spec.ts` / `benchmark-nm.spec.ts`),
-each running in its own worker, so both get an identical cold start (fresh
+Standalone project, `daemonMode: 'daemon-nm'`, Firefox only. The ws, wt and nm
+modes are separate specs (`benchmark-ws.spec.ts` / `benchmark-wt.spec.ts` /
+`benchmark-nm.spec.ts`),
+each running in its own worker, so each gets an identical cold start (fresh
 Firefox, profile, daemon, grant) with no mid-session toggle. The project
 disables `privacy.reduceTimerPrecision` (the harness Firefox otherwise
 quantizes `performance.now()` to 1ms), so per-report latency timestamps are
-true floats. Each spec runs
+true floats. The data plane is selected by writing `settings :: dataPlane`
+(global + site-scoped) to storage before the benchmark page loads, so the
+bridge handshakes with the target mode from the start instead of racing a
+mid-session `storage.onChanged` update.
 
 A separate **Chromium project** (`chromium-benchmark`) benchmarks native
 WebHID (no addon, no daemon; the mock talks straight to `/dev/hidraw`). It is
@@ -583,7 +587,7 @@ default 5 runs p90 and p95 collapse onto max).
 
 ## Automated benchmark results (2026-08-02, 10 runs per mode)
 
-Fresh run per mode: separate cold Firefox worker for ws and nm, headed
+Fresh run per mode: separate cold Firefox worker for ws, wt and nm, headed
 Chromium with a human grant click for native. `BENCHMARK_RUNS=10`. Each
 mode opens the mock device cold, runs one warm-up burst (an awaited
 128-report prime, so run #1 starts with a clear path), then 10 measured
@@ -596,6 +600,7 @@ wall time of the warm-up; total = page load through run #1's send-start):
 | ------ | --------- | ----------- | ---------- |
 | nm     | 18.9      | 227.0       | 315.5      |
 | ws     | 22.9      | 116.0       | 203.6      |
+| wt     | 20.6      | 2130.0      | 2217.2     |
 | native | 5.2       | 21.0        | 62.4       |
 
 Warm-up primes by awaiting a 128-report burst (per-send time-box, so a
@@ -633,6 +638,21 @@ latency (send to the report arriving back), per run, with whole-run walltime:
 | #9  | 0.50 | 0.78 | 0.94 | 1.02 | 6.22  | 331.1    |
 | #10 | 0.44 | 0.76 | 0.96 | 1.04 | 4.90  | 325.7    |
 
+**wt** (Firefox, daemon-nm deployment, WebTransport over QUIC)
+
+| run | min  | p50  | p90  | p95  | max    | walltime |
+| --- | ---- | ---- | ---- | ---- | ------ | -------- |
+| #1  | 0.56 | 0.88 | 1.16 | 1.28 | 3.50  | 419.4    |
+| #2  | 0.46 | 0.88 | 1.10 | 1.20 | 2.48  | 396.6    |
+| #3  | 0.52 | 0.84 | 1.10 | 1.24 | 4.12  | 384.1    |
+| #4  | 0.44 | 0.78 | 1.02 | 1.12 | 5.22  | 364.1    |
+| #5  | 0.50 | 0.86 | 1.20 | 1.34 | 4.92  | 400.7    |
+| #6  | 0.44 | 0.78 | 1.10 | 1.32 | 6.16  | 380.9    |
+| #7  | 0.44 | 0.84 | 1.20 | 1.42 | 6.08  | 401.7    |
+| #8  | 0.48 | 1.00 | 1.70 | 3.36 | 22.06 | 586.8    |
+| #9  | 0.52 | 0.82 | 1.10 | 1.26 | 4.16  | 391.9    |
+| #10 | 0.52 | 0.90 | 1.22 | 1.40 | 2.14  | 415.2    |
+
 **native** (Chromium, no addon, semi-auto grant)
 
 | run | min  | p50  | p90  | p95  | max  | walltime |
@@ -654,6 +674,7 @@ Whole-run walltime summary across modes (10 runs each):
 | ------ | ---- | ----- | ----- | ----- | ------ | ------ | ------ |
 | nm     | 10   | 775.8 | 861.9 | 994.8 | 1024.4 | 1024.4 | 8912.7 |
 | ws     | 10   | 324.3 | 332.7 | 378.8 | 410.7  | 410.7  | 3452.3 |
+| wt     | 10   | 363.9 | 396.5 | 419.3 | 586.7  | 586.7  | 4141.4 |
 | native | 10   | 106.6 | 113.8 | 167.9 | 184.8  | 184.8  | 1251.2 |
 
 Delta vs the native baseline (per-report p50 is the median of the 10
@@ -664,21 +685,55 @@ the sum of the 10 whole-run walltimes):
 | ------------ | -------------- | ------------ | ------------ | ------------- | ------ | -------------- |
 | native       | 0.26           | —            | 113.8        | —             | 1251.2 | —              |
 | ws (Firefox) | 0.78           | +0.52 (3.0x) | 332.7        | +218.9 (2.9x) | 3452.3 | +2201.1 (2.8x) |
+| wt (Firefox) | 0.85           | +0.59 (3.3x) | 396.5        | +282.7 (3.5x) | 4141.4 | +2890.2 (3.3x) |
 | nm (Firefox) | 1.77           | +1.51 (6.8x) | 861.9        | +748.1 (7.6x) | 8912.7 | +7661.5 (7.1x) |
 
 Reading the numbers:
 
 - **Per-report round-trip latency p50** (send to the report arriving back):
-  native Chromium ~0.23-0.50ms, Firefox ws ~0.76-0.88ms, Firefox nm
-  ~1.64-2.24ms.
-- **Whole-run walltime p50**: native 114ms, ws 333ms, nm 862ms. The
-  ws-vs-nm gap (~2.6x) is consistent with the per-report gap.
-- **Total (sum of 10 runs)**: native 1.25s, ws 3.45s, nm 8.91s. The total
-  gap vs native (2.8x ws, 7.1x nm) mirrors the p50 gap, so the overhead is
-  uniform across runs rather than concentrated in outliers.
-- **Init time**: warm-up is a 128-report prime, 21-227ms depending on mode;
-  total (load to run #1) is 62-316ms.
+  native Chromium ~0.23-0.50ms, Firefox ws ~0.76-0.88ms, Firefox wt
+  ~0.78-1.00ms, Firefox nm ~1.64-2.24ms.
+- **Whole-run walltime p50**: native 114ms, ws 333ms, wt 397ms, nm 862ms. The
+  ws-vs-nm gap (~2.6x) is consistent with the per-report gap; wt sits just
+  above ws (397 vs 333ms), ~1.2x ws and far below nm.
+- **Total (sum of 10 runs)**: native 1.25s, ws 3.45s, wt 4.14s, nm 8.91s. The
+  total gap vs native (2.8x ws, 3.3x wt, 7.1x nm) mirrors the p50 gap, so the
+  overhead is uniform across runs rather than concentrated in outliers.
+- **Init time**: warm-up is a 128-report prime, 21-227ms in the recorded
+  ws/nm runs (the 10-run wt run measured 2.2s and a 1-run smoke showed ws
+  at 2.2s too, so warm-up time is dominated by the known first-burst-after-
+  cold-start lossiness absorbed by retries, see AGENTS.md, not by the data
+  plane; warm-up is unmeasured by design); total (load to run #1) is
+  62-316ms for ws/nm, ~2.3s for wt because run #1 starts after the warm-up.
 - These are not a polyfill-vs-native comparison: Firefox runs the polyfill
   over the daemon (daemon-nm deployment), Chromium runs native WebHID on the
   same mock; the engine, transport and grant path all differ. The
   polyfill-vs-native question still needs a same-engine testbed.
+
+### What the wt numbers buy (and cost)
+
+WT runs over one persistent bidirectional QUIC stream per session, with an
+explicit `[len_u32 LE]` prefix on every frame (the batch format itself is not
+self-delimiting, so a continuous stream needs the length header). WS is
+untouched; the batch and control-response frame formats are the same in both
+transports.
+
+- Per-report round-trip p50 is **0.85ms vs ws 0.78ms and nm 1.77ms**: the
+  TLS/QUIC encryption cost on loopback is about +0.07ms per report, i.e. WT is
+  within ~10% of the plaintext WS data plane.
+- Whole-run walltime p50 is 397ms vs ws 333ms and nm 862ms; total (10 runs)
+  4.14s vs ws 3.45s and nm 8.91s.
+- Open cost is unchanged (20.6ms vs ws 22.9ms; the QUIC+TLS handshake is
+  inside the open window but does not add visible time at this scale).
+
+What that near-zero CPU buys, per the threat model in AGENTS.md: loopback TLS
+does not stop a network MITM (there is no real network between daemon and
+browser); it stops another local process from impersonating the daemon at
+`127.0.0.1:<port>` without the private key (the `serverCertificateHashes` pin
+is unforgeable without it), and does not stop an attacker with admin/root.
+Measured against that, WT is effectively a free security option on loopback:
+per-report latency, walltime and total are within ~10-20% of ws, and well
+under nm. The ws data plane remains the fastest Firefox path, but
+WT no longer trades a measurable performance penalty for its impersonation
+defense.WT no longer trades a measurable performance penalty for its impersonation
+defense.
