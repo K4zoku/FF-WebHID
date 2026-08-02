@@ -1,4 +1,10 @@
-import { test as base, expect, type Page, type BrowserContext, type WorkerFixture } from '@playwright/test'
+import {
+  test as base,
+  expect,
+  type Page,
+  type BrowserContext,
+  type WorkerFixture
+} from '@playwright/test'
 import type {
   PlaywrightTestArgs,
   PlaywrightTestOptions,
@@ -60,7 +66,7 @@ interface RdpPortHandle {
 
 interface CreateFirefoxContextOptions {
   routeHandler?: (route: { continue(): void }) => void
-  playwrightOptions?: { headless?: boolean }
+  playwrightOptions?: { headless?: boolean; launchOptions?: object }
 }
 
 type RouteHandler = (route: { continue(): void }) => void
@@ -141,7 +147,9 @@ interface MockDeviceFixture {
 // ends, so the paired device is reused across the serial chain. Teardown
 // stops the current process, surviving a hot-plug swap from the disconnect
 // test (stopWebhidMock tolerates an already-dead process).
-function deviceFixture(key: DeviceKey): Record<string, [WorkerFixture<MockDeviceFixture, any>, { scope: 'worker' }]> {
+function deviceFixture(
+  key: DeviceKey
+): Record<string, [WorkerFixture<MockDeviceFixture, any>, { scope: 'worker' }]> {
   const def = DEVICES[key]
   const descriptorPath = resolve(__dirname, '..', 'fixtures', 'descriptors', def.descriptor)
   return {
@@ -171,7 +179,6 @@ const deviceFixtures = {
   ...deviceFixture('mouse'),
   ...deviceFixture('keyboard')
 }
-
 
 export const test = base.extend<
   PlaywrightTestArgs & PlaywrightTestOptions,
@@ -257,9 +264,14 @@ export const test = base.extend<
   // exactly the per-test re-pairing this avoids.
   harnessCtx: [
     async ({ rdpPort, headless }, use) => {
+      // Forward the project's Playwright launch options (e.g. the benchmark
+      // project disables privacy.reduceTimerPrecision for float performance
+      // timestamps) so consumer firefoxUserPrefs apply on top of the
+      // harness's required ones.
+      const projectUse = test.info().project?.use as { launchOptions?: object } | undefined
       const { context } = await createFirefoxContext(rdpPort, EXTENSION_PATH, {
         routeHandler: defaultRouteHandler,
-        playwrightOptions: { headless }
+        playwrightOptions: { headless, launchOptions: projectUse?.launchOptions }
       })
 
       let bridge: NetworkEventBridge | undefined

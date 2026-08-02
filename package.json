@@ -41,6 +41,7 @@
     "test:browser:src": "npx playwright test --config $npm_package_config_playwrightConfig --project=firefox-browser",
     "test:debug": "npx playwright test --config $npm_package_config_playwrightConfig --debug",
     "test:e2e": "npx playwright test --config $npm_package_config_playwrightConfig --project=firefox-e2e",
+    "test:benchmark": "npx playwright test --config $npm_package_config_playwrightConfig --project=firefox-benchmark",
     "test:headed": "npx playwright test --config $npm_package_config_playwrightConfig --headed",
     "test:rs": "cargo test --manifest-path $npm_package_config_cargoManifest"
   },

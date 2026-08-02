@@ -1,11 +1,11 @@
-import { defineConfig } from '@playwright/test';
-import { fileURLToPath } from 'url';
-import { dirname, resolve } from 'path';
+import { defineConfig } from '@playwright/test'
+import { fileURLToPath } from 'url'
+import { dirname, resolve } from 'path'
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = dirname(__filename)
 
-type PlaywrightUseOptions = Exclude<Parameters<typeof defineConfig>[0], undefined>['use'];
+type PlaywrightUseOptions = Exclude<Parameters<typeof defineConfig>[0], undefined>['use']
 
 export default defineConfig({
   timeout: 120000,
@@ -17,13 +17,13 @@ export default defineConfig({
   use: {
     headless: true,
     screenshot: 'only-on-failure',
-    trace: 'retain-on-failure',
+    trace: 'retain-on-failure'
   },
   projects: [
     {
       name: 'firefox-browser',
       testDir: './browser',
-      use: { browserName: 'firefox' },
+      use: { browserName: 'firefox' }
     },
     {
       name: 'firefox-e2e',
@@ -31,10 +31,13 @@ export default defineConfig({
       use: {
         browserName: 'firefox',
         firefoxHarnessConfig: {
-          extensionPath: resolve(__dirname, '..', 'addon'),
+          extensionPath: resolve(__dirname, '..', 'addon')
         },
-        daemonMode: 'forwarder',
-      } as PlaywrightUseOptions & { firefoxHarnessConfig: { extensionPath: string }; daemonMode: string },
+        daemonMode: 'forwarder'
+      } as PlaywrightUseOptions & {
+        firefoxHarnessConfig: { extensionPath: string }
+        daemonMode: string
+      }
     },
     {
       name: 'firefox-e2e-daemon-nm',
@@ -42,10 +45,36 @@ export default defineConfig({
       use: {
         browserName: 'firefox',
         firefoxHarnessConfig: {
-          extensionPath: resolve(__dirname, '..', 'addon'),
+          extensionPath: resolve(__dirname, '..', 'addon')
+        },
+        daemonMode: 'daemon-nm'
+      } as PlaywrightUseOptions & {
+        firefoxHarnessConfig: { extensionPath: string }
+        daemonMode: string
+      }
+    },
+    {
+      name: 'firefox-benchmark',
+      testDir: './benchmark',
+      use: {
+        browserName: 'firefox',
+        firefoxHarnessConfig: {
+          extensionPath: resolve(__dirname, '..', 'addon')
         },
         daemonMode: 'daemon-nm',
-      } as PlaywrightUseOptions & { firefoxHarnessConfig: { extensionPath: string }; daemonMode: string },
-    },
-  ],
-});
+        benchmarkRuns: 5,
+        // The harness Firefox quantizes performance.now() to 1ms via
+        // privacy.reduceTimerPrecision (default 1000us); disable it so the
+        // benchmark's per-report latency timestamps are true floats.
+        launchOptions: {
+          firefoxUserPrefs: { 'privacy.reduceTimerPrecision': false }
+        }
+      } as PlaywrightUseOptions & {
+        firefoxHarnessConfig: { extensionPath: string }
+        daemonMode: string
+        benchmarkRuns: number
+        launchOptions: { firefoxUserPrefs: { [key: string]: boolean } }
+      }
+    }
+  ]
+})

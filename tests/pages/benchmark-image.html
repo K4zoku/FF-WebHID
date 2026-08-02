@@ -1,0 +1,274 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>WebHID Image Pipeline Benchmark</title>
+  </head>
+  <body>
+    <div id="bench-status" style="font: 14px sans-serif; padding: 8px"></div>
+    <canvas id="bench-canvas" width="1" height="1"></canvas>
+    <script>
+      ;(function () {
+        'use strict'
+        performance.mark('load-start')
+
+        const PAYLOAD = 62
+        const VENDOR_VID = 0x16c0
+        const VENDOR_PID = 0x0001
+        const REASSEMBLY_TIMEOUT_MS = 15000
+        const STALL_TIMEOUT_MS = 3000
+        const PAINT_SCALE = 1
+        const ROWS_PER_PAINT = 4
+
+        let device = null
+        let imageBytes = null
+        let bitmap = null
+        let chunks = []
+        let chunkCount = 0
+        let received = new Set()
+        let chunkBuf = new Map()
+        let paintedRows = 0
+        let paintCount = 0
+        let firstReportMarked = false
+        let resolvePainted = null
+        let rejectPainted = null
+        let paintedPromise = null
+        let rejectStall = null
+        let stallPromise = null
+        let stallTimer = null
+        let warmupRun = false
+        let dataReadyMarked = false
+        let sendTimes = new Map()
+        let latencies = []
+        const canvas = document.getElementById('bench-canvas')
+        const ctx = canvas.getContext('2d')
+        const statusEl = document.getElementById('bench-status')
+
+        function sleep(ms) {
+          const { promise, resolve } = Promise.withResolvers()
+          setTimeout(resolve, ms)
+          return promise
+        }
+
+        async function loadImage() {
+          statusEl.textContent = 'Loading...'
+          const resp = await fetch('../fixtures/images/sample.png')
+          if (!resp.ok) throw new Error('image fetch failed: ' + resp.status)
+          const buf = await resp.arrayBuffer()
+          imageBytes = new Uint8Array(buf)
+          chunkCount = Math.ceil(imageBytes.length / PAYLOAD)
+          chunks = []
+          for (let seq = 0; seq < chunkCount; seq++) {
+            const chunk = new Uint8Array(PAYLOAD + 2)
+            chunk[0] = (seq >> 8) & 0xff
+            chunk[1] = seq & 0xff
+            chunk.set(imageBytes.subarray(seq * PAYLOAD, (seq + 1) * PAYLOAD), 2)
+            chunks.push(chunk)
+          }
+        }
+
+        function paintProgress() {
+          if (warmupRun) return
+          const rows = Math.min(
+            bitmap.height,
+            Math.floor((received.size * PAYLOAD * bitmap.height) / imageBytes.length)
+          )
+          if (rows < paintedRows + ROWS_PER_PAINT) return
+          const h = Math.min(rows, paintedRows + ROWS_PER_PAINT) - paintedRows
+          if (h <= 0) return
+          ctx.drawImage(
+            bitmap,
+            0,
+            paintedRows,
+            bitmap.width,
+            h,
+            0,
+            paintedRows * PAINT_SCALE,
+            bitmap.width * PAINT_SCALE,
+            h * PAINT_SCALE
+          )
+          paintedRows += h
+          paintCount++
+        }
+
+        function resetRun() {
+          received = new Set()
+          chunkBuf = new Map()
+          paintedRows = 0
+          paintCount = 0
+          firstReportMarked = false
+          sendTimes = new Map()
+          latencies = []
+          clearTimeout(stallTimer)
+          const gate = Promise.withResolvers()
+          resolvePainted = gate.resolve
+          rejectPainted = gate.reject
+          paintedPromise = gate.promise
+          const stall = Promise.withResolvers()
+          rejectStall = stall.reject
+          stallPromise = stall.promise
+        }
+
+        function armStall() {
+          clearTimeout(stallTimer)
+          stallTimer = setTimeout(
+            () => rejectStall(new Error(`input stall: got ${received.size}/${chunkCount} reports`)),
+            STALL_TIMEOUT_MS
+          )
+        }
+
+        async function open() {
+          const ds = await navigator.hid.getDevices()
+          const d = ds.find((x) => x.vendorId === VENDOR_VID && x.productId === VENDOR_PID)
+          if (!d) throw new Error('vendor device not paired')
+          statusEl.textContent = 'Opening device...'
+          performance.mark('open-start')
+          await d.open()
+          device = d
+          d.oninputreport = (event) => {
+            const data = new Uint8Array(event.data.buffer)
+            const seq = (data[0] << 8) | data[1]
+            if (seq >= chunkCount || received.has(seq)) return
+            const sent = sendTimes.get(seq)
+            if (sent != null) {
+              latencies.push(performance.now() - sent)
+              sendTimes.delete(seq)
+            }
+            if (!firstReportMarked) {
+              performance.mark('hid-first-report')
+              firstReportMarked = true
+            }
+            armStall()
+            received.add(seq)
+            chunkBuf.set(seq, data.subarray(2))
+            paintProgress()
+            if (received.size === chunkCount) void assemble()
+          }
+        }
+
+        async function assemble() {
+          const buf = new Uint8Array(chunkCount * PAYLOAD)
+          for (let i = 0; i < chunkCount; i++) buf.set(chunkBuf.get(i), i * PAYLOAD)
+          const image = buf.subarray(0, imageBytes.length)
+          let ok = image.length === imageBytes.length
+          if (ok) {
+            for (let i = 0; i < image.length; i++) {
+              if (image[i] !== imageBytes[i]) {
+                ok = false
+                break
+              }
+            }
+          }
+          if (!ok) {
+            rejectPainted(new Error('reassembled image differs from original'))
+            return
+          }
+          requestAnimationFrame(() => {
+            performance.mark('image-painted')
+            resolvePainted(true)
+          })
+        }
+
+        async function run(warmup, runNumber, attempt, maxAttempts) {
+          if (!device) throw new Error('device not open; call open() first')
+          performance.mark('run-start')
+          resetRun()
+          warmupRun = !!warmup
+          let tries = 0
+          for (;;) {
+            try {
+              performance.mark('send-start')
+              sendTimes.set(0, performance.now())
+              await device.sendReport(1, chunks[0])
+              break
+            } catch (err) {
+              if (
+                tries++ >= 100 ||
+                !String(err && err.message).includes('data port not connected')
+              ) {
+                throw err
+              }
+              await sleep(25)
+            }
+          }
+          if (!dataReadyMarked) {
+            performance.mark('data-ready')
+            dataReadyMarked = true
+          }
+
+          statusEl.textContent = warmupRun
+            ? attempt > 1
+              ? `Warming up... (attempt ${attempt}/${maxAttempts})`
+              : 'Warming up...'
+            : `Running #${runNumber}...`
+          const burstGate = Promise.withResolvers()
+          const burstTimer = setTimeout(
+            () => burstGate.reject(new Error('send burst timeout')),
+            10000
+          )
+          try {
+            bitmap = await createImageBitmap(new Blob([imageBytes], { type: 'image/png' }))
+            performance.mark('image-decoded')
+            canvas.width = bitmap.width * PAINT_SCALE
+            canvas.height = bitmap.height * PAINT_SCALE
+            for (let i = 1; i < chunks.length; i++) {
+              sendTimes.set(i, performance.now())
+              await Promise.race([device.sendReport(1, chunks[i]), burstGate.promise])
+            }
+          } finally {
+            clearTimeout(burstTimer)
+          }
+          const timeout = Promise.withResolvers()
+          setTimeout(
+            () =>
+              timeout.reject(
+                new Error(`reassembly timeout: got ${received.size}/${chunkCount} reports`)
+              ),
+            REASSEMBLY_TIMEOUT_MS
+          )
+          await Promise.race([paintedPromise, timeout.promise, stallPromise])
+          clearTimeout(stallTimer)
+          if (warmupRun) statusEl.textContent = ''
+          performance.mark('run-end')
+          return true
+        }
+
+        function markTime(name) {
+          const entries = performance.getEntriesByName(name)
+          return entries.length > 0 ? entries[entries.length - 1].startTime : null
+        }
+
+        function measureRoundtrip() {
+          try {
+            return performance.measure('roundtrip', 'send-start', 'image-painted').duration
+          } catch {
+            return null
+          }
+        }
+
+        window.webhidBenchmark = {
+          open,
+          run,
+          chunkCount: () => chunkCount,
+          paints: () => paintCount,
+          getLatencies: () => [...latencies],
+          getMeasure: () => measureRoundtrip(),
+          getMarks: () => ({
+            loadStart: markTime('load-start'),
+            openStart: markTime('open-start'),
+            dataReady: markTime('data-ready'),
+            runStart: markTime('run-start'),
+            runEnd: markTime('run-end'),
+            sendStart: markTime('send-start'),
+            decoded: markTime('image-decoded'),
+            firstReport: markTime('hid-first-report'),
+            painted: markTime('image-painted'),
+            roundtrip: measureRoundtrip()
+          })
+        }
+
+        loadImage().catch((e) => console.error('benchmark image load failed', e))
+      })()
+    </script>
+  </body>
+</html>

@@ -30,7 +30,77 @@
 - **WebTransport/QUIC data plane** explored on a curiosity-driven branch (a spec-sanctioned way to avoid the faketls/wildcard-cert trick): self-signed cert with `serverCertificateHashes`, rotated at most every 14 days. Expected latency gain on a localhost daemon connection is near-zero (QUIC's 0-RTT/resilience advantages don't apply to lossless loopback); pursued for architectural cleanliness, not speed.
 - **Cold-start benchmark methodology matured**: a local clone of the test site (sayodevice.com) with URLs patched to load locally removed network-load timing variance, which had been causing GCMajor to intrude into benchmark windows unpredictably. Planned next step: Playwright automation to remove the last variance source (human click timing).
 
----
+## Automated image-pipeline benchmark (2026-08)
+
+A Playwright-driven end-to-end benchmark measures the full data-plane
+round-trip automatically, replacing the manual profiler click-timing runs for
+routine ws-vs-nm comparison. The profiler methodology above stays as the
+deep-dive tool for regressions, not a required step per run.
+
+**Scenario**: a benchmark page fetches a small PNG fixture
+(`tests/fixtures/images/sample.png`, the project icon, ~32KB), chunks it into
+62-byte
+payloads behind a 2-byte sequence header (64-byte `sendReport(1, chunk)` per
+chunk, the vendor report size), and sends every chunk with ack-wait. A
+**streaming relay** injects every output report the `uhid-mock` echoes
+straight back through the mock's `input` command, so input reports flow to
+the page while it is still sending instead of arriving in one burst at the
+end. The image decode
+(`createImageBitmap`) runs inside the measured window, matching the manual
+benchmark where the sayodevice page logs image decode as part of the
+pipeline, and incoming chunks trigger **batched row-slice repaints** (a few
+pixel rows per paint, so the image fills in progressively), keeping rendering
+a real part of
+the measured window instead of a single ~6ms final decode. That makes CPU
+contention between the data plane and page rendering (the profiler-confirmed
+ws-vs-nm gap) visible in the numbers: if WS receive/parse on a dedicated
+worker really stays off the main thread, the render-heavy load should not
+slow ws as much as nm. The measured window is
+`performance.measure('roundtrip', 'send-start', 'image-painted')`,
+5 runs per mode, printed with open (open call through data-plane ready),
+warm-up (total wall time from warm-up start until a retry succeeds, so
+failed attempts are included) and total (page load through run #1's
+send-start) durations. Then a per-run table where each run's ~520 reports
+are summarized as min/p50/p90/p95/max of per-report round-trip latency
+(send to the report arriving back) plus the run's walltime (whole-run
+roundtrip), followed by a min/p50/p90/p95/max summary of the whole-run
+round-trip durations.
+
+**What the numbers mean**: the round-trip includes an artificial relay hop
+(mock stdout → test script → mock stdin), because a real HID device does not
+echo output reports as input reports. The relay adds a roughly constant term
+to every run, so it does not skew the ws-vs-nm comparison, but the absolute
+values are not comparable to hardware latency. The measured window also
+includes the page's own send phase (sendReport is ack-wait, so the burst is
+serialized) and image decode/render, so it is an end-to-end pipeline number,
+not a transport-only number.
+
+**Run**:
+
+```
+npx playwright test --config tests/playwright.config.ts --project=firefox-benchmark
+```
+
+Standalone project, `daemonMode: 'daemon-nm'`, Firefox only. The ws and nm
+modes are separate specs (`benchmark-ws.spec.ts` / `benchmark-nm.spec.ts`),
+each running in its own worker, so both get an identical cold start (fresh
+Firefox, profile, daemon, grant) with no mid-session toggle. The project
+disables `privacy.reduceTimerPrecision` (the harness Firefox otherwise
+quantizes `performance.now()` to 1ms), so per-report latency timestamps are
+true floats. Each spec runs
+one unmeasured warm-up burst (no painting; the page shows "Warming up...")
+to absorb the lossy first burst (see AGENTS.md), then the measured runs (the
+count is the `BENCHMARK_RUNS` env var, falling back to the project's
+`benchmarkRuns` use option, default 5) with run-level retries (a dropped or
+late report invalidates the run, it does not produce a bogus number). The
+summary row reports min/p50/p90/p95/max (nearest-rank percentiles; with the
+default 5 runs p90 and p95 collapse onto max).
+Chromium is deliberately out of scope for the
+automated benchmark: Chromium's WebHID device chooser lives outside Blink and
+has no CDP/Playwright permission grant, and its test-only grant mechanism
+(`web-hid-test.js`) only runs inside Chromium's own test harness, not a
+Playwright Chrome for Testing binary. Native-Chromium comparison still uses
+the manual profiler methodology above.
 
 ---
 
