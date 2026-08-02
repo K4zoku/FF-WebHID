@@ -25,8 +25,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: nubjs/setup-nub@v0
-
       - name: Define variables
         id: variables
         shell: bash
@@ -35,11 +33,11 @@ jobs:
           echo "VERSION=$(git describe --tags | sed 's/^v//;s/_/./;s/\([^-]*-g\)/r\1/;s/-/./g')" >> "$GITHUB_OUTPUT"
 
       - name: Install dependencies
-        run: nub ci
+        run: npm ci
 
       - name: Build Addon XPI
         run: |
-          nub run build:addon
+          npm run build:addon
           mv dist/webhid-addon.xpi dist/webhid-addon-v${{ steps.variables.outputs.VERSION }}.xpi
 
       - name: Upload artifact

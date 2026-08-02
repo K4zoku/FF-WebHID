@@ -20,8 +20,8 @@ permissions:
   contents: read
 
 jobs:
-  unit:
-    name: Unit Tests
+  test:
+    name: Tests
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -30,61 +30,20 @@ jobs:
         with:
           workspaces: crates -> target
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y libudev-dev
-      - name: Run tests
-        run: cargo test --manifest-path crates/Cargo.toml
-
-  test-browser:
-    name: Browser-only Tests
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-      - uses: nubjs/setup-nub@v0
-      - name: Build addon
         run: |
-          nub ci
-          nub run build:addon
-      - name: Install Playwright
-        working-directory: tests
-        run: |
-          nub ci
-          nubx playwright install firefox --with-deps
-      - name: Run browser-only tests
-        working-directory: tests
-        run: nubx playwright test --project=firefox-browser
-
-  e2e:
-    name: E2E Tests
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-      - uses: nubjs/setup-nub@v0
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: crates -> target
-      - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y libudev-dev
-      - name: Build Rust binaries
-        run: cargo build --manifest-path crates/Cargo.toml
+            sudo apt-get update
+            sudo apt-get install -y libudev-dev linux-modules-extra-$(uname -r)
+            npm ci
+            npx playwright install firefox --with-deps
+      - name: Run unit tests
+        run: npm run test:rs
       - name: Setup uhid + udev rules + webhid group
         run: |
-          sudo groupadd --system webhid || true
+          sudo groupadd --system webhid
           sudo usermod -aG webhid "$(whoami)"
           sudo install -Dm644 manifests/99-webhid-e2e.rules /etc/udev/rules.d/99-webhid-e2e.rules
-          sudo apt-get install -y linux-modules-extra-$(uname -r)
           sudo modprobe uhid
           sudo udevadm control --reload-rules
           sudo udevadm trigger
-      - name: Build addon
-        run: |
-          nub ci
-          nub run build:addon
-      - name: Install Playwright
-        working-directory: tests
-        run: |
-          nub ci
-          nubx playwright install firefox --with-deps
       - name: Run E2E tests
-        working-directory: tests
-        run: sg webhid -c "nubx playwright test --project=firefox-e2e"
+        run: sg webhid -c "npm run test"
