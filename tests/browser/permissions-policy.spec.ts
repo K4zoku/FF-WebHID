@@ -16,10 +16,6 @@ test.describe('Permissions Policy', () => {
   });
 
   test('B1/B3: hid=() blocks hid', async ({ page, pageUrl }) => {
-    const t0 = performance.now();
-    page.on('console', (msg) => {
-      console.log(`[+${(performance.now() - t0).toFixed(0)}ms] [BROWSER]`, msg.text());
-    });
     await page.goto(pageUrl('/policy-check-blocked'), { waitUntil: 'domcontentloaded', timeout: 15000 });
     const r = await waitForPermResult(page);
     expect(r).not.toBeNull();
