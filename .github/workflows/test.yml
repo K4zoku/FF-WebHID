@@ -62,7 +62,9 @@ jobs:
       - name: Install kernel modules
         run: sudo apt-get install -y linux-modules-extra-$(uname -r)
       - name: Install dependencies
-        run: npm ci
+        run: |
+          npm ci
+          npx playwright install firefox
       - name: Run unit tests
         run: npm run test:rs
       - name: Build webhid-mock
