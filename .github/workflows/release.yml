@@ -88,12 +88,12 @@ jobs:
           sudo apt-get install -y ${{ matrix.apt_deps }}
           npm ci
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           targets: ${{ matrix.rust_target }}
 
       - name: Rust Cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
           workspaces: crates -> target
 
@@ -405,7 +405,7 @@ jobs:
             rpms-aarch64/*.rpm
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@c12583777ecdfd3be55c69cf75464299dc01057e # v3
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           files: |
@@ -419,7 +419,7 @@ jobs:
             rpms-aarch64/*.rpm
 
       # - name: Upload to AMO
-      #   uses: kewisch/action-web-ext@v2
+      #   uses: kewisch/action-web-ext@84a13bb9e1b6108c43788ba091c41ca1dba6ad45 # v2
       #   with:
       #     cmd: sign
       #     source: dist/webhid-addon-v${{ steps.variables.outputs.VERSION }}.xpi
