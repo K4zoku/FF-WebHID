@@ -223,6 +223,15 @@ function buildRpm(ver, arch) {
 
 // ── msi ──────────────────────────────────────────────────────────────────────
 
+// WiX/MSI versions must be numeric major.minor.build[.revision] (max 4 parts),
+// while package versions may be git-derived (e.g. 2.2.0.r148.g62b6c84).
+// Strip each dot-separated part to digits and keep at most 4 parts.
+function toMsiVersion(ver) {
+  const parts = ver.split('.').map((p) => p.replace(/\D/g, '')).filter((p) => p !== '');
+  while (parts.length < 3) parts.push('0');
+  return parts.slice(0, 4).join('.');
+}
+
 function buildMsi(ver, arch) {
   log(`Packaging msi ${ver} [${arch}]`);
   const rustTarget = arch === 'aarch64' ? 'aarch64-pc-windows-msvc' : 'x86_64-pc-windows-msvc';
@@ -249,7 +258,7 @@ function buildMsi(ver, arch) {
     'build',
     '-ext', 'WixToolset.UI.wixext',
     '-arch', wixArch,
-    '-d', `Version=${ver}`,
+    '-d', `Version=${toMsiVersion(ver)}`,
     '-d', `BuildDir=${stage}`,
     '-o', out,
     join(PACKAGING, 'windows/webhid.wxs'),
