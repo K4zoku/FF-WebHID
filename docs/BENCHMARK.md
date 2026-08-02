@@ -88,6 +88,17 @@ Firefox, profile, daemon, grant) with no mid-session toggle. The project
 disables `privacy.reduceTimerPrecision` (the harness Firefox otherwise
 quantizes `performance.now()` to 1ms), so per-report latency timestamps are
 true floats. Each spec runs
+
+A separate **Chromium project** (`chromium-benchmark`) benchmarks native
+WebHID (no addon, no daemon; the mock talks straight to `/dev/hidraw`). It is
+semi-auto: Chromium has no CDP way to grant HID permission, so the spec opens
+the native chooser and waits for a human click on the mock device. Run it
+headed: `npx playwright test --project=chromium-benchmark`. Chromium coarsens
+`performance.now()` to 100us with no flag to disable that clamp, so the
+benchmark page is served cross-origin-isolated (COOP/COEP, `tests/serve.ts`)
+to get 5us timestamps instead.
+
+The Chromium mode runs
 one unmeasured warm-up burst (no painting; the page shows "Warming up...")
 to absorb the lossy first burst (see AGENTS.md), then the measured runs (the
 count is the `BENCHMARK_RUNS` env var, falling back to the project's
@@ -95,12 +106,77 @@ count is the `BENCHMARK_RUNS` env var, falling back to the project's
 late report invalidates the run, it does not produce a bogus number). The
 summary row reports min/p50/p90/p95/max (nearest-rank percentiles; with the
 default 5 runs p90 and p95 collapse onto max).
-Chromium is deliberately out of scope for the
-automated benchmark: Chromium's WebHID device chooser lives outside Blink and
-has no CDP/Playwright permission grant, and its test-only grant mechanism
-(`web-hid-test.js`) only runs inside Chromium's own test harness, not a
-Playwright Chrome for Testing binary. Native-Chromium comparison still uses
-the manual profiler methodology above.
+
+### Results (2026-08-02, 10 runs per mode)
+
+Fresh run per mode: separate cold Firefox worker for ws and nm, headed
+Chromium with a human grant click for native. `BENCHMARK_RUNS=10`.
+
+```
+=== nm (Firefox, daemon-nm deployment): per-report round-trip ms ===
+open: 19.1ms   warmup: 1130.0ms   total: 1221.7ms
+run   min    p50    p90    p95    max   walltime
+#1    1.36   2.32   2.78   3.00  16.28   1107.8
+#2    1.48   2.32   3.00   4.56  14.08   1162.5
+#3    1.52   2.12   2.54   2.74  21.26    998.0
+#4    1.22   2.10   2.60   2.86   9.36   1000.0
+#5    1.46   2.28   3.34   4.26  10.74   1150.1
+#6    1.30   1.98   2.52   2.78   9.96    946.8
+#7    1.42   2.04   2.52   2.88  10.82    979.0
+#8    1.22   2.04   2.54   2.84   7.10    964.9
+#9    1.50   2.20   2.86   3.22   9.72   1084.8
+#10   1.24   2.08   2.58   2.80  12.72   1012.3
+mode runs    min    p50    p90    p95    max
+nm    10  946.7  999.9 1150.0 1162.4 1162.4
+
+=== ws (Firefox, daemon-nm deployment): per-report round-trip ms ===
+open: 15.0ms   warmup: 10414.0ms   total: 10484.5ms
+run   min    p50    p90    p95    max   walltime
+#1    0.62   0.96   1.28   1.56   7.00    419.5
+#2    0.50   0.94   1.26   1.50   4.72    418.0
+#3    0.60   0.94   1.18   1.42   6.04    399.0
+#4    0.62   0.96   1.34   1.72   5.94    431.7
+#5    0.64   1.00   1.78   2.56  20.86    510.8
+#6    0.58   0.92   1.22   1.52   5.62    402.2
+#7    0.54   0.94   1.22   1.46   4.78    398.5
+#8    0.56   0.92   1.22   1.58   7.06    402.4
+#9    0.58   0.94   1.22   1.56   5.46    403.3
+#10   0.52   0.98   1.44   1.68  14.30    448.6
+mode runs    min    p50    p90    p95    max
+ws    10  398.5  403.2  448.5  510.7  510.7
+
+=== native (Chromium, no addon, semi-auto grant): per-report round-trip ms ===
+open: 7.1ms   warmup: 72.0ms   total: 114.5ms
+run   min    p50    p90    p95    max   walltime
+#1    0.08   0.59   3.73   5.75  11.18    296.1
+#2    0.09   0.29   1.05   1.52   6.59    159.3
+#3    0.09   0.27   0.92   1.78   6.70    152.5
+#4    0.09   0.32   1.04   1.54   6.88    134.8
+#5    0.07   0.26   0.84   1.40   9.23    123.0
+#6    0.09   0.34   1.18   2.50  15.23    163.2
+#7    0.09   0.36   3.02   4.35   9.11    157.7
+#8    0.09   0.36   1.48   3.55   9.00    155.1
+#9    0.08   0.29   1.06   2.29   9.95    143.9
+#10   0.08   0.37   3.09   5.25  10.69    170.3
+mode runs    min    p50    p90    p95    max
+native 10 122.9 155.0 170.3 296.1 296.1
+```
+
+Reading the numbers:
+
+- **Per-report round-trip latency p50** (send to the report arriving back):
+  native Chromium ~0.26-0.59ms, Firefox ws ~0.92-1.00ms, Firefox nm
+  ~1.98-2.32ms.
+- **Whole-run walltime p50**: native 155ms, ws 403ms, nm 1000ms. The
+  ws-vs-nm gap (~2.5x) matches the profiler-confirmed direction in the
+  manual results below.
+- **ws warmup 10.4s**: one warm-up attempt hit the 10s hung-ack timeout and
+  retried; the reported warmup is the total wall time including retries.
+- These are not a polyfill-vs-native comparison: Firefox runs the polyfill
+  over the daemon (daemon-nm deployment), Chromium runs native WebHID on the
+  same mock; the engine, transport and grant path all differ. The
+  polyfill-vs-native question still needs the Chromium testbed approach
+  (same engine, both implementations).
 
 ---
 

@@ -56,6 +56,9 @@ export default defineConfig({
     {
       name: 'firefox-benchmark',
       testDir: './benchmark',
+      // The Chromium semi-auto spec lives under ./benchmark/chromium and runs
+      // in its own project.
+      testIgnore: '**/chromium/**',
       use: {
         browserName: 'firefox',
         firefoxHarnessConfig: {
@@ -63,9 +66,6 @@ export default defineConfig({
         },
         daemonMode: 'daemon-nm',
         benchmarkRuns: 5,
-        // The harness Firefox quantizes performance.now() to 1ms via
-        // privacy.reduceTimerPrecision (default 1000us); disable it so the
-        // benchmark's per-report latency timestamps are true floats.
         launchOptions: {
           firefoxUserPrefs: { 'privacy.reduceTimerPrecision': false }
         }
@@ -75,6 +75,16 @@ export default defineConfig({
         benchmarkRuns: number
         launchOptions: { firefoxUserPrefs: { [key: string]: boolean } }
       }
+    },
+    {
+      name: 'chromium-benchmark',
+      testDir: './benchmark/chromium',
+      timeout: 600000,
+      use: {
+        browserName: 'chromium',
+        headless: false,
+        benchmarkRuns: 5
+      } as PlaywrightUseOptions & { benchmarkRuns: number }
     }
   ]
 })

@@ -286,7 +286,15 @@ export async function startStaticServer(port = 0): Promise<ServerHandle> {
         res.end('Not found');
         return;
       }
-      res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+      const headers: Record<string, string> = {
+        'Content-Type': MIME[ext] || 'application/octet-stream',
+      };
+
+      if (req.url === '/tests/pages/benchmark-image.html') {
+        headers['Cross-Origin-Opener-Policy'] = 'same-origin';
+        headers['Cross-Origin-Embedder-Policy'] = 'require-corp';
+      }
+      res.writeHead(200, headers);
       res.end(data);
     });
   });

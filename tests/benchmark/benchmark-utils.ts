@@ -175,12 +175,16 @@ export async function benchmarkMode(
   }
 
   await setDataPlane(backgroundPage, origin, mode)
+  return runBenchmark(page, vendorDevice)
+}
+
+export async function runBenchmark(page: Page, mock: WebhidMockProcess): Promise<BenchmarkResult> {
   await page.evaluate(() => window.webhidBenchmark!.open())
 
   let warmup: number | null = null
   try {
     const warmupStart = Date.now()
-    await runOnceWithRetry(page, vendorDevice, true, 0)
+    await runOnceWithRetry(page, mock, true, 0)
     warmup = Date.now() - warmupStart
   } catch {}
 
@@ -197,7 +201,7 @@ export async function benchmarkMode(
   let failures = 0
   for (let run = 0; run < runs; run++) {
     try {
-      const { duration, latencies } = await runOnceWithRetry(page, vendorDevice, false, run + 1)
+      const { duration, latencies } = await runOnceWithRetry(page, mock, false, run + 1)
       const marks = await page.evaluate(() => window.webhidBenchmark!.getMarks())
       runsOut.push({ duration, latencies, marks })
     } catch {
@@ -220,7 +224,7 @@ export function percentile(vals: number[], p: number): number {
   return s[Math.max(0, Math.ceil((p / 100) * s.length) - 1)]
 }
 
-export function printResults(mode: 'ws' | 'nm', result: BenchmarkResult): void {
+export function printResults(mode: string, result: BenchmarkResult): void {
   const { runs, failures } = result
   const fmt = (v: number | null) => (v == null ? 'n/a' : v.toFixed(1))
   const pct = (vals: number[], p: number) => percentile(vals, p).toFixed(2)
@@ -255,10 +259,10 @@ export function printResults(mode: 'ws' | 'nm', result: BenchmarkResult): void {
   const durations = runs.map((r) => r.duration)
   const pct1 = (vals: number[], p: number) => percentile(vals, p).toFixed(1)
   console.log(
-    `${'mode'.padEnd(5)}${'runs'.padStart(5)}${'min'.padStart(7)}${'p50'.padStart(7)}${'p90'.padStart(7)}${'p95'.padStart(7)}${'max'.padStart(7)}`
+    `${'mode'.padEnd(6)}${'runs'.padStart(5)}${'min'.padStart(7)}${'p50'.padStart(7)}${'p90'.padStart(7)}${'p95'.padStart(7)}${'max'.padStart(7)}`
   )
   console.log(
-    `${mode.padEnd(5)}${String(runs.length).padStart(5)}${pct1(durations, 0).padStart(7)}${pct1(
+    `${mode.padEnd(6)}${String(runs.length).padStart(5)}${pct1(durations, 0).padStart(7)}${pct1(
       durations,
       50
     ).padStart(7)}${pct1(durations, 90).padStart(7)}${pct1(durations, 95).padStart(7)}${pct1(
