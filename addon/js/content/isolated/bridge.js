@@ -1,4 +1,4 @@
-;(function () {
+(function () {
   'use strict'
 
   /** @type {import("./types.js").Logger} */
@@ -503,7 +503,7 @@
     }
   }
 
-  ;(async () => {
+  (async () => {
     try {
       const resp = await browser.runtime.sendMessage({ action: 'handshake' })
       if (http.isOk(resp.s) && resp.w) {

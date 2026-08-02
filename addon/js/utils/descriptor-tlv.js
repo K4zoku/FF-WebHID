@@ -1,4 +1,4 @@
-;(function () {
+(function () {
   const webhid = globalThis.webhid
 
   const TAG_COLLECTION = 0x01

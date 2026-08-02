@@ -1,4 +1,4 @@
-;(function () {
+(function () {
   const webhid = globalThis.webhid
   /**
    * @param {number} s

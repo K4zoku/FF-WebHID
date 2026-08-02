@@ -1,4 +1,4 @@
-;(function () {
+(function () {
   const logger = webhid.import('logger')
   const { deviceCache } = webhid.import('bgState')
 

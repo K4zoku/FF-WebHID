@@ -1,4 +1,4 @@
-;(function () {
+(function () {
   /** @type {string[]} */
   var scripts = webhid.import('bundleFiles').mv2MainWorld
 
@@ -19,7 +19,7 @@
         return r.text
       })
       var s = document.createElement('script')
-      s.textContent = codes.join('\n')
+      s.textContent = codes.join(';\n')
       document.documentElement.appendChild(s)
     })
     .catch(function (e) {

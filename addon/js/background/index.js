@@ -1,4 +1,4 @@
-;(function () {
+(function () {
   const logger = webhid.import('logger')
   const http = webhid.import('http')
   const decodeCollectionsTlv = webhid.import('decodeCollectionsTlv')
@@ -939,7 +939,7 @@
       }
 
       case 'revokeDevice': {
-        ;(async () => {
+        (async () => {
           try {
             const origin = request.origin
             if (!origin) {

@@ -1,4 +1,4 @@
-;(function () {
+(function () {
   const webhid = globalThis.webhid
   const LEVEL_ERROR = 0
   const LEVEL_WARN = 1

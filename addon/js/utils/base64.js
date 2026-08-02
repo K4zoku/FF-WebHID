@@ -1,4 +1,4 @@
-;(function () {
+(function () {
   if (typeof Uint8Array === 'undefined') return
   if (
     typeof Uint8Array.fromBase64 === 'function' &&

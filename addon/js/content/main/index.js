@@ -1,4 +1,4 @@
-;(function () {
+(function () {
   const isWorker = typeof window === 'undefined' || !(window instanceof Window)
   if (!isWorker && !window.isSecureContext) {
     console.debug('NO POLYFILL')

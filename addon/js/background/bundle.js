@@ -1,4 +1,4 @@
-;(function () {
+(function () {
   const _logger = webhid.import('logger')
 
   let workerBundle = null
@@ -21,7 +21,7 @@
           })
         )
       )
-      workerBundle = texts.join('\n')
+      workerBundle = texts.join(';\n')
       return workerBundle
     })()
     return workerBundlePromise
@@ -48,7 +48,7 @@
           })
         )
       )
-      workerPolyfillBundle = texts.join('\n')
+      workerPolyfillBundle = texts.join(';\n')
       return workerPolyfillBundle
     })()
     return workerPolyfillBundlePromise

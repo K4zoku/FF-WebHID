@@ -1,4 +1,4 @@
-;(async () => {
+(async () => {
   const { logger } = webhid
   const localizeHTML = webhid.import('localizeHTML')
   const loadGlobalSettings = webhid.import('loadGlobalSettings')

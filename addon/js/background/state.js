@@ -1,4 +1,4 @@
-;(function () {
+(function () {
   const deviceCache = []
   const deviceTabMap = new Map()
   const permissionsPolicy = new Map()

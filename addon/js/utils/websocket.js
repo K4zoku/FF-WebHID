@@ -1,4 +1,4 @@
-;(function () {
+(function () {
   const webhid = globalThis.webhid
   const WS_CLOSE_UNKNOWN_TOKEN = 4401
   const WS_CLOSE_BAD_TOKEN = 4402

@@ -1,4 +1,4 @@
-;(function () {
+(function () {
   if (typeof globalThis === 'undefined') {
     var getGlobal = function () {
       if (typeof window !== 'undefined') return window

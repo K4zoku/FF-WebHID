@@ -208,5 +208,5 @@ worker-ws       5    1757.0ms  1704.2ms 1874.9ms 1866.7ms     0
 
 ## See Also
 
-- Firefox Profiler schema: https://profiler.firefox.com/docs/
-- Chromium DevTools Timeline model: https://developer.chrome.com/docs/devtools/performance/reference
+- Firefox Profiler schema: <https://profiler.firefox.com/docs/>
+- Chromium DevTools Timeline model: <https://developer.chrome.com/docs/devtools/performance/reference>
