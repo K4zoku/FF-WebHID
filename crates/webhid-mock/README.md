@@ -6,11 +6,11 @@ userspace HID interface to instantiate HID devices that real clients
 
 Platform backends:
 
-| Platform | Backend | Notes |
-|----------|---------|-------|
+| Platform | Backend                      | Notes                                    |
+| -------- | ---------------------------- | ---------------------------------------- |
 | Linux    | `/dev/uhid` kernel interface | needs write permission (udev rule below) |
-| macOS    | `IOHIDUserDevice` (IOKit)    | no root, no entitlement needed |
-| Windows  | —                            | unsupported, see "Why not Windows" |
+| macOS    | `IOHIDUserDevice` (IOKit)    | no root, no entitlement needed           |
+| Windows  | —                            | unsupported, see "Why not Windows"       |
 
 ## Why
 
@@ -133,11 +133,11 @@ Tests consume these with a simple line-buffered stdout parser.
 `tests/fixtures/descriptors/` ships pre-built report descriptors for the most
 common test scenarios:
 
-| File | Top-level collection(s) | Use case |
-|------|-------------------------|----------|
-| `mouse.bin`    | Generic Desktop / Mouse                          | Basic filter `{usagePage:1, usage:2}` test |
-| `keyboard.bin` | Generic Desktop / Keyboard                       | Basic filter `{usagePage:1, usage:6}` test |
-| `gamepad.bin`  | Generic Desktop / Joystick                       | `guessDeviceType() == "controller"` test |
+| File           | Top-level collection(s)                                | Use case                                                      |
+| -------------- | ------------------------------------------------------ | ------------------------------------------------------------- |
+| `mouse.bin`    | Generic Desktop / Mouse                                | Basic filter `{usagePage:1, usage:2}` test                    |
+| `keyboard.bin` | Generic Desktop / Keyboard                             | Basic filter `{usagePage:1, usage:6}` test                    |
+| `gamepad.bin`  | Generic Desktop / Joystick                             | `guessDeviceType() == "controller"` test                      |
 | `vendor.bin`   | Mouse **+** Vendor-defined 0xff1c/0x92 (2 collections) | Issue #2 regression: filter must iterate `device.collections` |
 
 Regenerate with `node scripts/gen-descriptors.mjs`.

@@ -2,9 +2,13 @@
 name: agent-perf-analysis
 slug: perf-analysis
 version: 1.0.0
-description: "Performance analysis methodology + Python helper for web-extension / browser-feature latency benchmarking. Captures click-to-paint measurement, multi-run median comparison, GCMajor detection across Firefox Profiler and Chromium DevTools exports."
+description: 'Performance analysis methodology + Python helper for web-extension / browser-feature latency benchmarking. Captures click-to-paint measurement, multi-run median comparison, GCMajor detection across Firefox Profiler and Chromium DevTools exports.'
 changelog: Initial release. Distilled from FF-WebHID benchmark cycle.
-metadata: {"clawdbot":{"emoji":"📊","requires":{"bins":["python3"]},"os":["linux","darwin","win32"]}}
+metadata:
+  {
+    'clawdbot':
+      { 'emoji': '📊', 'requires': { 'bins': ['python3'] }, 'os': ['linux', 'darwin', 'win32'] }
+  }
 ---
 
 # Agent Performance Analysis
@@ -73,9 +77,9 @@ tail that pulls the mean up by 10–20%.
 
 ### 4. Profile collection
 
-| Browser | Tool | Export format |
-|---------|------|---------------|
-| Firefox | `about:performance` → "Record" → "Capture" → Save | `.json` (Firefox Profiler schema) |
+| Browser  | Tool                                                        | Export format                      |
+| -------- | ----------------------------------------------------------- | ---------------------------------- |
+| Firefox  | `about:performance` → "Record" → "Capture" → Save           | `.json` (Firefox Profiler schema)  |
 | Chromium | DevTools → Performance → Record → Stop → Right-click → Save | `.json` (DevTools Timeline schema) |
 
 Save exports as `<mode>/run-1.json` … `run-5.json` under a single
@@ -96,7 +100,7 @@ Common causes (FF-WebHID case study):
   (zero-copy view, no allocation).
 - **Xray unwrap overhead**: each `Cu.waiveXrays` + structured-clone
   across compartment boundary doubles alloc count. Fix: MessageChannel
-  + `postMessage(.., [transfer])` to skip the clone.
+  - `postMessage(.., [transfer])` to skip the clone.
 
 ## Python Helper
 
@@ -197,10 +201,10 @@ worker-ws       5    1757.0ms  1704.2ms 1874.9ms 1866.7ms     0
 
 ## Files
 
-| File | Purpose |
-|------|---------|
-| `SKILL.md` | This file (methodology + workflow). |
-| `scripts/perf_analysis.py` | Parser + summary table generator. |
+| File                       | Purpose                             |
+| -------------------------- | ----------------------------------- |
+| `SKILL.md`                 | This file (methodology + workflow). |
+| `scripts/perf_analysis.py` | Parser + summary table generator.   |
 
 ## See Also
 

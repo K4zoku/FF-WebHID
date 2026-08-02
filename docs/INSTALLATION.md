@@ -1,6 +1,7 @@
 # Installation
 
 WebHID requires two components:
+
 1. **System daemon** (`webhid-daemon` + `webhid-native-messaging`): runs in the background, talks to HID hardware
 2. **Browser extension**: installed in Firefox, bridges web pages to the daemon
 
@@ -114,6 +115,8 @@ systemctl --user daemon-reload
 systemctl --user enable --now webhid-daemon
 ```
 
+The install targets substitute the `{{NM_BIN}}` / `{{DAEMON_BIN}}` placeholders in `manifests/webhid.forwarder_nm_host.json` and `manifests/webhid.daemon_nm_host.json` with the actual binary paths, then place the resolved manifests into the system or per-user native-messaging directory. If you install manually instead of via `make`, you must do that substitution yourself (see the JSON snippets in the browser setup section of `docs/DEVELOPMENT.md`).
+
 Install paths are configurable: `make install-system PREFIX=/usr` or `make install-user USER_PREFIX=$HOME/.local`.
 
 > **udev rule**: The `99-webhid.rules` file grants console users access to `hidraw*` devices via `uaccess`, with explicit exclusions for known FIDO/U2F security keys (matching Chromium's `hid_blocklist.cc`). This is only needed for non-root daemons. Root daemons already have full access.
@@ -172,6 +175,7 @@ The installed NM manifest (`webhid.daemon_nm_host.json`) uses the `"name": "webh
 Download the `.msi` from [GitHub Releases](https://github.com/K4zoku/FF-WebHID/releases) and double-click to install.
 
 The installer:
+
 - Installs binaries to `C:\Program Files\WebHID\`
 - Registers the native messaging host in the Windows registry (Firefox auto-detects)
 - Registers both `webhid.forwarder_nm_host` and `webhid.daemon_nm_host` manifests
@@ -320,35 +324,35 @@ Then install the [browser extension](https://addons.mozilla.org/en-US/firefox/ad
 
 ### Linux
 
-| Setting | Recommended | Reason |
-|---------|------------|--------|
-| Daemon as NM host | ON (if user has direct hidraw access) or OFF (if using root daemon + webhid group) | Eliminates forwarder process + Unix socket. Skips group membership requirement. |
-| Data Plane | WS (default) | Binary WS via worker with MessagePort for max performance. Switch to NM if WS is blocked. |
-| Device Picker Mode | modal (default) | Inline dialog, least friction. pageAction/window available for single-device sites. |
+| Setting            | Recommended                                                                        | Reason                                                                                    |
+| ------------------ | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Daemon as NM host  | ON (if user has direct hidraw access) or OFF (if using root daemon + webhid group) | Eliminates forwarder process + Unix socket. Skips group membership requirement.           |
+| Data Plane         | WS (default)                                                                       | Binary WS via worker with MessagePort for max performance. Switch to NM if WS is blocked. |
+| Device Picker Mode | modal (default)                                                                    | Inline dialog, least friction. pageAction/window available for single-device sites.       |
 
 **Setup**: Install daemon (system package or `make install-system`). If using root daemon with thin forwarder, add your user to the `webhid` group: `sudo usermod -aG webhid $USER` (log out + back in). If using daemon-as-NM-host (recommended for users with direct hidraw access via udev `uaccess` rule), install `webhid.daemon_nm_host` manifest via `make install-daemon-nm-host-user`: no group membership needed.
 
 ### Windows
 
-| Setting | Recommended | Reason |
-|---------|------------|--------|
+| Setting           | Recommended  | Reason                                                                                                                                                  |
+| ----------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Daemon as NM host | ON (default) | Windows has no permission setup needed, just point NM manifest path to `webhid-daemon.exe`. Daemon auto-detects NM mode via Firefox's 2 positional args |
-| Data Plane | WS (default) | Binary WS via worker with MessagePort for performance |
+| Data Plane        | WS (default) | Binary WS via worker with MessagePort for performance                                                                                                   |
 
 **Setup**: Install MSI or portable zip. `daemonAsNmHost` defaults to `true` on Windows (auto-detected). For forwarder mode, register `webhid.forwarder_nm_host.json` with `path` pointing to `webhid-native-messaging.exe`.
 
 ### macOS
 
-| Setting | Recommended | Reason |
-|---------|------------|--------|
-| Daemon as NM host | ON (if user daemon) | Eliminates forwarder + Unix socket |
-| Data Plane | WS (default) | WS worker + MessagePort works well on macOS |
+| Setting           | Recommended         | Reason                                      |
+| ----------------- | ------------------- | ------------------------------------------- |
+| Daemon as NM host | ON (if user daemon) | Eliminates forwarder + Unix socket          |
+| Data Plane        | WS (default)        | WS worker + MessagePort works well on macOS |
 
 **Setup**: Install via Homebrew (`brew install webhid`) or manual. Grant HID permissions in System Settings → Privacy & Security → Input Monitoring if prompted.
 
 ### Benchmarking / Debugging
 
-| Setting | Recommended | Reason |
-|---------|------------|--------|
-| Data Plane | NM | Isolates NM path performance (no worker/WS overhead) |
-| Log Level | Debug | See all message timings + settings change logs |
+| Setting    | Recommended | Reason                                               |
+| ---------- | ----------- | ---------------------------------------------------- |
+| Data Plane | NM          | Isolates NM path performance (no worker/WS overhead) |
+| Log Level  | Debug       | See all message timings + settings change logs       |
