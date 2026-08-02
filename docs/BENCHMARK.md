@@ -699,12 +699,12 @@ Reading the numbers:
 - **Total (sum of 10 runs)**: native 1.25s, ws 3.45s, wt 4.14s, nm 8.91s. The
   total gap vs native (2.8x ws, 3.3x wt, 7.1x nm) mirrors the p50 gap, so the
   overhead is uniform across runs rather than concentrated in outliers.
-- **Init time**: warm-up is a 128-report prime, 21-227ms in the recorded
-  ws/nm runs (the 10-run wt run measured 2.2s and a 1-run smoke showed ws
-  at 2.2s too, so warm-up time is dominated by the known first-burst-after-
-  cold-start lossiness absorbed by retries, see AGENTS.md, not by the data
-  plane; warm-up is unmeasured by design); total (load to run #1) is
-  62-316ms for ws/nm, ~2.3s for wt because run #1 starts after the warm-up.
+- **Init time**: warm-up is a 128-report prime, unmeasured by design and
+  normally ~200-300ms across modes (a CI run measured nm 306ms, ws 205ms,
+  wt 217ms). It can spike to seconds when the known first-burst-after-
+  cold-start lossiness absorbs retries (see AGENTS.md); the recorded 10-run
+  wt dataset happened to hit that, which is why its warm-up shows 2.1s and
+  its total (load to run #1) 2.2s. Total is 62-405ms otherwise.
 - These are not a polyfill-vs-native comparison: Firefox runs the polyfill
   over the daemon (daemon-nm deployment), Chromium runs native WebHID on the
   same mock; the engine, transport and grant path all differ. The
