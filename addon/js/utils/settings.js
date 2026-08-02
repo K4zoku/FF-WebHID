@@ -146,6 +146,12 @@
   const SETTING_NAMES = Object.keys(GLOBAL_DEFAULTS)
 
   /**
+   * Settings that can be overridden per site. `daemonAsNmHost` is intentionally
+   * excluded: it configures the native-messaging host and is global-only.
+   */
+  const SITE_SETTING_NAMES = SETTING_NAMES.filter((n) => n !== 'daemonAsNmHost')
+
+  /**
    * Builds the storage key for a global setting.
    * @param {string} name
    * @returns {string}
@@ -198,10 +204,10 @@
    * @returns {Promise<object>}
    */
   async function loadSiteSettings(origin) {
-    const keys = SETTING_NAMES.map((n) => siteSettingKey(origin, n))
+    const keys = SITE_SETTING_NAMES.map((n) => siteSettingKey(origin, n))
     const raw = await browser.storage.local.get(keys)
     const result = {}
-    for (const name of SETTING_NAMES) {
+    for (const name of SITE_SETTING_NAMES) {
       const k = siteSettingKey(origin, name)
       if (k in raw) result[name] = raw[k]
     }
@@ -230,6 +236,7 @@
   }
 
   webhid.export('SETTING_NAMES', SETTING_NAMES)
+  webhid.export('SITE_SETTING_NAMES', SITE_SETTING_NAMES)
   webhid.export('globalSettingKey', globalSettingKey)
   webhid.export('siteSettingKey', siteSettingKey)
   webhid.export('parseSettingsKey', parseSettingsKey)

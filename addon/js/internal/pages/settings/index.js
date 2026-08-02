@@ -3,6 +3,7 @@
   const localizeHTML = webhid.import('localizeHTML')
   const loadGlobalSettings = webhid.import('loadGlobalSettings')
   const saveGlobalSetting = webhid.import('saveGlobalSetting')
+  const GLOBAL_DEFAULTS = webhid.import('GLOBAL_DEFAULTS')
   const syncBrowserTheme = webhid.import('syncBrowserTheme')
   logger.initLogger('settings')
 
@@ -23,9 +24,9 @@
   const dataPlaneSelect = document.getElementById('dataPlane')
   dataPlaneSelect.value = current.dataPlane
   const devicePickerModeSelect = document.getElementById('devicePickerMode')
-  devicePickerModeSelect.value = current.devicePickerMode || 'modal'
+  devicePickerModeSelect.value = current.devicePickerMode || GLOBAL_DEFAULTS.devicePickerMode
   const workerSpawnModeSelect = document.getElementById('workerSpawnMode')
-  workerSpawnModeSelect.value = current.workerSpawnMode || 'shadow'
+  workerSpawnModeSelect.value = current.workerSpawnMode || GLOBAL_DEFAULTS.workerSpawnMode
 
   /**
    * Displays a temporary status message in the settings page.

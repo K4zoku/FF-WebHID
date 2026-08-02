@@ -32,11 +32,23 @@
   "popupDataPlaneNm": {
     "message": "Native Messaging"
   },
+  "popupDevicePickerMode": {
+    "message": "Device Picker Mode"
+  },
+  "popupDevicePickerModeDesc": {
+    "message": "How the device chooser is presented on this site"
+  },
   "popupWorkerPolyfill": {
     "message": "Worker Polyfill"
   },
   "popupWorkerPolyfillDesc": {
     "message": "Inject WebHID API into Worker scripts on this site"
+  },
+  "popupWorkerSpawnMode": {
+    "message": "Worker Spawn Mode"
+  },
+  "popupWorkerSpawnModeDesc": {
+    "message": "How the data worker is created on this site"
   },
   "popupLogLevel": {
     "message": "Log Level"

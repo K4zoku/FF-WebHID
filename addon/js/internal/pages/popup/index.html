@@ -19,12 +19,7 @@
           <span id="device-count" class="muted" aria-live="polite"></span>
         </h2>
         <div id="device-list" role="list"></div>
-        <div
-          id="no-devices"
-          class="muted"
-          data-i18n="popupNoDevices"
-          role="status"
-        >
+        <div id="no-devices" class="muted" data-i18n="popupNoDevices" role="status">
           No devices paired for this site.
         </div>
       </div>
@@ -33,19 +28,28 @@
         <div class="setting">
           <div class="setting-info">
             <h3 data-i18n="popupDataPlane">Data Plane</h3>
-            <p data-i18n="popupDataPlaneDesc">
-              WebSocket, WebTransport, or Native Messaging
-            </p>
+            <p data-i18n="popupDataPlaneDesc">WebSocket, WebTransport, or Native Messaging</p>
           </div>
           <select id="dataPlane" aria-labelledby="popupDataPlane">
-            <option value="ws" data-i18n="popupDataPlaneWs">
-              WebSocket (Worker)
+            <option value="ws" data-i18n="popupDataPlaneWs">WebSocket (Worker)</option>
+            <option value="wt" data-i18n="popupDataPlaneWt">WebTransport (Worker)</option>
+            <option value="nm" data-i18n="popupDataPlaneNm">Native Messaging</option>
+          </select>
+        </div>
+        <div class="setting">
+          <div class="setting-info">
+            <h3 data-i18n="popupDevicePickerMode">Device Picker Mode</h3>
+            <p data-i18n="popupDevicePickerModeDesc">
+              How the device chooser is presented on this site
+            </p>
+          </div>
+          <select id="devicePickerMode" aria-labelledby="popupDevicePickerMode">
+            <option value="modal" data-i18n="settingsDevicePickerModal">Modal (overlay)</option>
+            <option value="pageAction" data-i18n="settingsDevicePickerPageAction">
+              Page Action (URL bar popup)
             </option>
-            <option value="wt" data-i18n="popupDataPlaneWt">
-              WebTransport (Worker)
-            </option>
-            <option value="nm" data-i18n="popupDataPlaneNm">
-              Native Messaging
+            <option value="window" data-i18n="settingsDevicePickerWindow">
+              Window (separate popup window)
             </option>
           </select>
         </div>
@@ -67,10 +71,18 @@
         </div>
         <div class="setting">
           <div class="setting-info">
+            <h3 data-i18n="popupWorkerSpawnMode">Worker Spawn Mode</h3>
+            <p data-i18n="popupWorkerSpawnModeDesc">How the data worker is created on this site</p>
+          </div>
+          <select id="workerSpawnMode" aria-labelledby="popupWorkerSpawnMode">
+            <option value="shadow" data-i18n="settingsWorkerSpawnShadow">Shadow URL</option>
+            <option value="blob" data-i18n="settingsWorkerSpawnBlob">Blob + CSP rewrite</option>
+          </select>
+        </div>
+        <div class="setting">
+          <div class="setting-info">
             <h3 data-i18n="popupLogLevel">Log Level</h3>
-            <p data-i18n="popupLogLevelDesc">
-              Console output verbosity for this site
-            </p>
+            <p data-i18n="popupLogLevelDesc">Console output verbosity for this site</p>
           </div>
           <select id="logLevel" aria-labelledby="popupLogLevel">
             <option value="0" data-i18n="logLevelError">Error</option>
@@ -83,18 +95,16 @@
       <div id="default-note" class="muted" data-i18n="popupDefaultNote">
         Changes here override defaults for this site.
       </div>
-      <a id="open-settings" href="#" data-i18n="popupGlobalSettings"
-        >Global settings →</a
-      >
+      <a id="open-settings" href="#" data-i18n="popupGlobalSettings">Global settings →</a>
     </main>
-    <script src="../../../js/utils/bootstrap.js"></script>
-    <script src="../../../js/utils/i18n.js"></script>
-    <script src="../../../js/utils/resource.js"></script>
-    <script src="../../../js/utils/http.js"></script>
-    <script src="../../../js/utils/logger.js"></script>
-    <script src="../../../js/utils/device.js"></script>
-    <script src="../../../js/utils/settings.js"></script>
-    <script src="../../../js/utils/theme-sync.js"></script>
+    <script src="../../../../js/utils/bootstrap.js"></script>
+    <script src="../../../../js/utils/i18n.js"></script>
+    <script src="../../../../js/utils/resource.js"></script>
+    <script src="../../../../js/utils/http.js"></script>
+    <script src="../../../../js/utils/logger.js"></script>
+    <script src="../../../../js/utils/device.js"></script>
+    <script src="../../../../js/utils/settings.js"></script>
+    <script src="../../../../js/utils/theme-sync.js"></script>
     <script src="index.js"></script>
   </body>
 </html>

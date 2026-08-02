@@ -6,6 +6,7 @@
   const localizeHTML = webhid.import('localizeHTML')
   const loadGlobalSettings = webhid.import('loadGlobalSettings')
   const loadSiteSettings = webhid.import('loadSiteSettings')
+  const GLOBAL_DEFAULTS = webhid.import('GLOBAL_DEFAULTS')
   const saveSiteSetting = webhid.import('saveSiteSetting')
   const syncBrowserTheme = webhid.import('syncBrowserTheme')
   logger.initLogger('popup')
@@ -64,6 +65,13 @@
   document.getElementById('workerPolyfillEnabled').checked = settings.workerPolyfillEnabled || false
 
   /** @type {HTMLSelectElement} */
+  const devicePickerModeSelect = document.getElementById('devicePickerMode')
+  devicePickerModeSelect.value = settings.devicePickerMode || GLOBAL_DEFAULTS.devicePickerMode
+  /** @type {HTMLSelectElement} */
+  const workerSpawnModeSelect = document.getElementById('workerSpawnMode')
+  workerSpawnModeSelect.value = settings.workerSpawnMode || GLOBAL_DEFAULTS.workerSpawnMode
+
+  /** @type {HTMLSelectElement} */
   const logLevelSelect = document.getElementById('logLevel')
   logLevelSelect.value = String(settings.logLevel)
 
@@ -72,6 +80,12 @@
   })
   document.getElementById('workerPolyfillEnabled').addEventListener('change', (e) => {
     saveSetting('workerPolyfillEnabled', e.target.checked)
+  })
+  devicePickerModeSelect.addEventListener('change', (e) => {
+    saveSetting('devicePickerMode', e.target.value)
+  })
+  workerSpawnModeSelect.addEventListener('change', (e) => {
+    saveSetting('workerSpawnMode', e.target.value)
   })
   logLevelSelect.addEventListener('change', (e) => {
     saveSetting('logLevel', parseInt(e.target.value, 10))

@@ -225,6 +225,8 @@ Each consumer (background, bridge, polyfill, worker) creates its own `SettingsSt
 
 The bridge's `storage.onChanged` listener extracts `changes[k].newValue` from Firefox storage events and calls `settings.set(patch)`: the store handles the diffing internally. The daemon-as-NM-host setting defaults to `true` on Windows (auto-detected in `loadNmHostSetting`).
 
+`daemonAsNmHost` is the only global-only setting: `loadSiteSettings` (and the `SITE_SETTING_NAMES` list it iterates) excludes it, so a site override can never shadow the global NM-host choice. Every other setting (`dataPlane`, `workerSpawnMode`, `logLevel`, `devicePickerMode`, `workerPolyfillEnabled`) is per-site overridable from the popup. Changes propagate live through the `storage.onChanged` → `settings.set` path: the bridge re-routes open devices when `dataPlane` changes, resets the spawn-mode cache when `workerSpawnMode` changes, re-levels its logger when `logLevel` changes, and `devicePickerMode` is re-read at the next `requestDevice()` call. `workerPolyfillEnabled` is the exception: it applies at worker-creation time, so per-site toggles need a page reload (the background refreshes `workerPolyfillSites` immediately).
+
 ## Worker spawn (shadow URL / blob / NM)
 
 Firefox MV3 content scripts cannot spawn Web Workers from extension URLs in page context, and pages may have CSPs that block worker sources. The data worker is spawned in page context using one of two modes, chosen per site by the `workerSpawnMode` setting (shadow is the MV3 default, blob the MV2 default):

@@ -32,11 +32,23 @@
   "popupDataPlaneNm": {
     "message": "Native Messaging"
   },
+  "popupDevicePickerMode": {
+    "message": "Chế độ chọn thiết bị"
+  },
+  "popupDevicePickerModeDesc": {
+    "message": "Cách hiển thị bộ chọn thiết bị trên trang này"
+  },
   "popupWorkerPolyfill": {
     "message": "Worker Polyfill"
   },
   "popupWorkerPolyfillDesc": {
     "message": "Cho phép WebHID API dùng được trên Worker scripts của trang này"
+  },
+  "popupWorkerSpawnMode": {
+    "message": "Chế độ tạo Worker"
+  },
+  "popupWorkerSpawnModeDesc": {
+    "message": "Cách tạo data worker trên trang này"
   },
   "popupLogLevel": {
     "message": "Mức độ log"

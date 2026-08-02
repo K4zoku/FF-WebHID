@@ -22,7 +22,7 @@ WebHID brings Human Interface Device (HID) support to Firefox on Linux, macOS, a
 - **Hot-plug**: event-driven on all platforms
 - **Security**: FIDO/U2F + mouse/keyboard blocklist, localhost-only WebSocket, per-device token authentication (SHA-256 hash subprotocol), group-based IPC socket permissions (SO_PEERCRED on Linux)
 - **Per-device event routing**: daemon sends events only to the requested channel (NM or WS)
-- **SettingsStore observer**: Proxy-based settings propagation: changes take effect immediately, no reload needed. Per-site overrides for all settings including log level.
+- **SettingsStore observer**: Proxy-based settings propagation: changes take effect immediately, no reload needed. Per-site overrides for every setting except `daemonAsNmHost`, including log level.
 - **NM error propagation**: NM host writes `{"s":503,"E":"..."}` error frame to stdout on connect failure, addon logs the reason instead of silent paralysis
 - **Packed TLV wire format**: hot-path NM messages (sendReport, sendFeatureReport, inputReport) use binary TLVs inside `{"d":"<b64>"}` with reqId inside the TLV: saves 7-14 bytes vs JSON fields
 - **HTTP status codes**: responses use `s` field with HTTP semantics (200/201/204/4xx/5xx) instead of separate ok/err fields
@@ -49,10 +49,14 @@ Open `about:addons -> WebHID -> Options`:
 
 Click on the WebHID addon icon:
 
-- **Data Plane**: WS or NM
+- **Data Plane**: WebSocket, WebTransport, or Native Messaging
 - **Device Picker Mode**: modal, pageAction, or window
 - **Worker Polyfill**: enable per-site
+- **Worker Spawn Mode**: shadow URL or blob + CSP rewrite
 - **Log Level**: per-site verbosity override
+
+`daemonAsNmHost` is the only global-only setting: it configures the
+native-messaging host and cannot be overridden per site.
 
 ## Documentation
 
