@@ -25,7 +25,7 @@ interface WindowWithTests {
 export async function getPermResult(page: Page): Promise<PermResult | null> {
   return page.evaluate((): PermResult | null => {
     const r = (window as unknown as WindowWithTests).tests?.results?.perm;
-    if (r && typeof r === 'object') return r as PermResult;
+    if (r && typeof r === 'object') return r;
     return null;
   });
 }

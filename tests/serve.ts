@@ -155,11 +155,11 @@ const shadowRedirectCounts = new Map<string, number>();
 
 function recordGated(req: http.IncomingMessage, status: number): GatedRecord {
   return {
-    dest: ((req.headers['sec-fetch-dest'] || '') as string).toLowerCase() || null,
-    mode: ((req.headers['sec-fetch-mode'] || '') as string).toLowerCase() || null,
-    site: ((req.headers['sec-fetch-site'] || '') as string).toLowerCase() || null,
-    user: (req.headers['sec-fetch-user'] as string | undefined) || null,
-    accept: (req.headers['accept'] as string | undefined) || null,
+    dest: ((req.headers['sec-fetch-dest'] || '')).toLowerCase() || null,
+    mode: ((req.headers['sec-fetch-mode'] || '')).toLowerCase() || null,
+    site: ((req.headers['sec-fetch-site'] || '')).toLowerCase() || null,
+    user: (req.headers['sec-fetch-user']) || null,
+    accept: (req.headers['accept']) || null,
     status,
   };
 }

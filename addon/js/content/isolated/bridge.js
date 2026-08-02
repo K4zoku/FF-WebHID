@@ -225,6 +225,9 @@
   let cachedSpawnMode = null
   let cachedTtPolicy = null
 
+  /**
+   * @returns {Promise<string>}
+   */
   async function resolveSpawnMode() {
     if (cachedSpawnMode) return cachedSpawnMode
     const origin = window.location.origin
@@ -254,6 +257,9 @@
     return 'shadow'
   }
 
+  /**
+   * @returns {Promise<Worker>}
+   */
   async function spawnBlobWorker() {
     const resp = await browser.runtime.sendMessage({ action: 'getWorkerBundle' })
     if (!resp || !resp.text) throw new Error('worker bundle fetch failed')
@@ -607,7 +613,7 @@
   /**
    * @param {object} data
    * @param {MessagePort[]} ports
-   * @param {Window} source
+   * @param {Window|null} _source
    * @returns {Promise<void>}
    */
   async function handleRequest(data, ports, _source) {

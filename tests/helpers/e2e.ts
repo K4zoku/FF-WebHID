@@ -149,7 +149,7 @@ interface MockDeviceFixture {
 // test (stopWebhidMock tolerates an already-dead process).
 function deviceFixture(
   key: DeviceKey
-): Record<string, [WorkerFixture<MockDeviceFixture, any>, { scope: 'worker' }]> {
+): Record<string, [WorkerFixture<MockDeviceFixture, object>, { scope: 'worker' }]> {
   const def = DEVICES[key]
   const descriptorPath = resolve(__dirname, '..', 'fixtures', 'descriptors', def.descriptor)
   return {

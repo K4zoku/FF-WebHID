@@ -453,6 +453,10 @@
     ['blocking']
   )
 
+  /**
+   * @param {object} details
+   * @returns {void}
+   */
   function handleMetaCsp(details) {
     const filter = browser.webRequest.filterResponseData(details.requestId)
     const enc = new TextEncoder()
@@ -474,11 +478,16 @@
       return mode
     })()
 
+    /** @returns {void} */
     function passthrough() {
       for (const buf of rawChunks) filter.write(buf)
       filter.disconnect()
     }
 
+    /**
+     * @param {boolean} eof
+     * @returns {Promise<void>}
+     */
     async function process(eof) {
       if (processed) return
       const headEnd = scanText.toLowerCase().indexOf('</head>')
@@ -651,6 +660,10 @@
     })
   })
 
+  /**
+   * @param {string} url
+   * @returns {string}
+   */
   function urlOrigin(url) {
     try {
       return new URL(url).origin
@@ -659,6 +672,11 @@
     }
   }
 
+  /**
+   * @param {string} csp
+   * @param {object} cspInfo
+   * @returns {{value: string, modified: boolean}}
+   */
   function rewriteCspValue(csp, cspInfo) {
     const { directives, order } = parseDirectives(csp || '')
     let modified = false
@@ -706,6 +724,11 @@
     return { value: rebuilt, modified }
   }
 
+  /**
+   * @param {Array|null} headers
+   * @param {object} cspInfo
+   * @returns {Array|null}
+   */
   function rewriteCspForBlob(headers, cspInfo) {
     if (!headers) return null
     let modified = false
@@ -718,6 +741,10 @@
     return modified ? newHeaders : null
   }
 
+  /**
+   * @param {string} csp
+   * @returns {{directives: object, order: string[]}}
+   */
   function parseDirectives(csp) {
     const directives = {}
     const order = []
@@ -733,12 +760,21 @@
     return { directives, order }
   }
 
+  /**
+   * @param {string} list
+   * @param {string} origin
+   * @returns {boolean}
+   */
   function sourceListAllowsWorker(list, origin) {
     const tokens = list.split(/\s+/)
     return tokens.includes('*') || tokens.includes("'self'") || tokens.includes(origin)
       || tokens.includes('http:') || tokens.includes('https:')
   }
 
+  /**
+   * @param {string} list
+   * @returns {boolean}
+   */
   function sourceListAllowsDaemonConnects(list) {
     const tokens = list.split(/\s+/)
     return (
@@ -750,6 +786,12 @@
     )
   }
 
+  /**
+   * @param {Array|null} cspValues
+   * @param {string} spawnMode
+   * @param {string} pageOrigin
+   * @returns {object|null}
+   */
   function parseCspForWorkerSpawn(cspValues, spawnMode, pageOrigin) {
     const mode = spawnMode || settings.workerSpawnMode
     if (!cspValues || cspValues.length === 0) return null

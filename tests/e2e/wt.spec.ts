@@ -466,9 +466,9 @@ test.describe.serial('WebHID E2E (WebTransport data plane)', () => {
       `
       await sharedPage.evaluate((src) => {
         const blob = new Blob([src], { type: 'application/javascript' })
-        window.__wtLog = []
+        const log: string[] = (window.__wtLog = [])
         const worker = new Worker(URL.createObjectURL(blob))
-        worker.onmessage = (e) => window.__wtLog.push(String(e.data))
+        worker.onmessage = (e) => log.push(String(e.data))
       }, workerSource)
       try {
         await sharedPage.waitForFunction(
@@ -480,7 +480,7 @@ test.describe.serial('WebHID E2E (WebTransport data plane)', () => {
         throw e
       }
       const ack1 = await sharedPage.evaluate(() =>
-        (window.__wtLog.find((m) => m.startsWith('ack1:')) || 'ack1:[]').slice(5)
+        ((window.__wtLog || []).find((m) => m.startsWith('ack1:')) || 'ack1:[]').slice(5)
       )
       expect(ack1).toBe('[255,1,0,0,0,1]')
 
@@ -500,7 +500,7 @@ test.describe.serial('WebHID E2E (WebTransport data plane)', () => {
         { timeout: 20000 }
       )
       const ack2 = await sharedPage.evaluate(() =>
-        (window.__wtLog.find((m) => m.startsWith('ack2:')) || 'ack2:[]').slice(5)
+        ((window.__wtLog || []).find((m) => m.startsWith('ack2:')) || 'ack2:[]').slice(5)
       )
       expect(ack2).toBe('[255,2,0,0,0,1]')
 

@@ -26,10 +26,11 @@ interface GatedHeaders {
 
 async function readGatedHeaders(page: Page): Promise<GatedHeaders> {
   // Shape is the test server's own /last-dest contract (see tests/serve.ts).
-  const payload = (await page.evaluate(async () => {
+  const payload = await page.evaluate(async (): Promise<GatedHeaders> => {
     const res = await fetch('/last-dest');
-    return await res.json();
-  })) as GatedHeaders;
+    const data: unknown = await res.json();
+    return data as GatedHeaders;
+  });
   return payload;
 }
 

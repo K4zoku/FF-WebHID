@@ -101,7 +101,7 @@ function nextInputReport(
   return page.evaluate(
     ({ f, link }: { f: DeviceFilter; link: { index: number; value: number } | undefined }) => {
       const { promise, resolve, reject } = Promise.withResolvers<ReportEvent>()
-      navigator.hid.getDevices().then((ds) => {
+      void navigator.hid.getDevices().then((ds) => {
         const d = ds.find((x) => x.vendorId === f.vendorId && x.productId === f.productId)
         if (!d) {
           reject(new Error(`device not paired: ${JSON.stringify(f)}`))
@@ -282,7 +282,7 @@ test.describe.serial('WebHID E2E', () => {
         onInput: ReportEvent
         addEventListener: ReportEvent
       }>()
-      navigator.hid.getDevices().then((ds) => {
+      void navigator.hid.getDevices().then((ds) => {
         const d = ds.find((x) => x.vendorId === f.vendorId && x.productId === f.productId)
         if (!d) {
           reject(new Error(`device not paired: ${JSON.stringify(f)}`))
