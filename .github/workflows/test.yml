@@ -79,3 +79,5 @@ jobs:
           sudo udevadm trigger
       - name: Run E2E tests
         run: sg webhid -c "npm run test"
+      - name: Run benchmark
+        run: sg webhid -c "npm run test:benchmark"
