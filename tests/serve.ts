@@ -187,7 +187,7 @@ export async function startPolicyServer(port = 0): Promise<ServerHandle> {
         'Content-Type': isDocument ? 'text/html' : 'application/javascript',
         'Cache-Control': 'no-store',
       });
-      res.end(isDocument ? loadPage('self-script.html') : 'self.selfScriptRan = true;\n');
+      res.end(isDocument ? loadPage('self-script.html') : '(self.tests = self.tests || { results: {} }).results.selfScriptRan = true;\n');
       return;
     }
     const body = PAGES[pathname];

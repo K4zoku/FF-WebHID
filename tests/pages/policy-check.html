@@ -22,6 +22,7 @@
   } catch (e) {
     getDevicesResult = { ok: false, name: e.name, message: e.message };
   }
+  window.tests = window.tests || { helper: {}, results: {} };
   const result = {
     isTop: window === window.top,
     isCrossOrigin,
@@ -30,10 +31,7 @@
     getDevices: getDevicesResult,
     hidUndefined
   };
-  const el = document.createElement('div');
-  el.id = '__perm-result';
-  el.dataset.json = JSON.stringify(result);
-  document.body.appendChild(el);
+  window.tests.results.perm = result;
 })();
 </script>
 </body></html>

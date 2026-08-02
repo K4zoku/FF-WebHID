@@ -5,10 +5,8 @@
     <title>Iframe Child</title>
   </head>
   <body>
-    <div id="__start-marker"></div>
     <script>
       (async function () {
-        const _urlAtStart = location.href;
         let isCrossOrigin = false;
         if (window !== window.top) {
           try {
@@ -27,12 +25,8 @@
 
         const hidUndefined = typeof navigator.hid === "undefined";
 
-        const result = { isCrossOrigin, queryHid: qHid, hidUndefined, _urlAtStart };
-        const el = document.createElement("div");
-        el.id = "__perm-result";
-        el.dataset.json = JSON.stringify(result);
-        el.textContent = JSON.stringify(result);
-        document.body.appendChild(el);
+        window.tests = window.tests || { helper: {}, results: {} };
+        window.tests.results.perm = { isCrossOrigin, queryHid: qHid, hidUndefined };
       })();
     </script>
   </body>

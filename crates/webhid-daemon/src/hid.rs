@@ -39,7 +39,16 @@ fn resolve_linux_syspath(devnode: &str) -> Option<String> {
     let syslink = format!("/sys/class/hidraw/{name}/device");
     let realpath = std::fs::canonicalize(&syslink).ok()?;
     let parent = realpath.parent()?;
-    Some(parent.to_string_lossy().into_owned())
+    let mut base = parent.to_string_lossy().into_owned();
+
+    if base.ends_with("/misc/uhid") {
+        if let Some(dir) = realpath.file_name().and_then(|n| n.to_str()) {
+            if let Some(id_part) = dir.split('.').next() {
+                base = format!("{base}/{id_part}");
+            }
+        }
+    }
+    Some(base)
 }
 
 // ---------------------------------------------------------------------------

@@ -136,7 +136,7 @@ impl DeviceManager {
                     .unwrap_or_else(|e| e.into_inner())
                     .insert(ws_auth_hash.clone(), (device_id, session_token.clone()));
                 log::info!("[device_mgr] {device_id:#x} refcount → {rc} (existing session)");
-                return Ok((rc, None));
+                return Ok((device_id, Some(session_token)));
             }
         }
 

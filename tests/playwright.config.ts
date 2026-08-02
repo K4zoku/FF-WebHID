@@ -11,6 +11,7 @@ export default defineConfig({
   timeout: 120000,
   expect: { timeout: 10000 },
   fullyParallel: false,
+  workers: 1,
   retries: 0,
   globalSetup: 'firefox-webext-playwright-harness/globalSetup',
   use: {
@@ -32,7 +33,19 @@ export default defineConfig({
         firefoxHarnessConfig: {
           extensionPath: resolve(__dirname, '..', 'addon'),
         },
-      } as PlaywrightUseOptions & { firefoxHarnessConfig: { extensionPath: string } },
+        daemonMode: 'forwarder',
+      } as PlaywrightUseOptions & { firefoxHarnessConfig: { extensionPath: string }; daemonMode: string },
+    },
+    {
+      name: 'firefox-e2e-daemon-nm',
+      testDir: './e2e',
+      use: {
+        browserName: 'firefox',
+        firefoxHarnessConfig: {
+          extensionPath: resolve(__dirname, '..', 'addon'),
+        },
+        daemonMode: 'daemon-nm',
+      } as PlaywrightUseOptions & { firefoxHarnessConfig: { extensionPath: string }; daemonMode: string },
     },
   ],
 });

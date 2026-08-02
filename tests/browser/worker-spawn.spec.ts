@@ -38,13 +38,23 @@ async function isMv2(backgroundPage: BackgroundPage): Promise<boolean> {
   return backgroundPage.evaluate(() => browser.runtime.getManifest().manifest_version === 2);
 }
 
-async function waitForStatus(sharedPage: Page, id: string): Promise<string | null | undefined> {
+type WorkerSpawnWindow = {
+  tests?: { results?: { workerStatus?: Record<string, string> } };
+};
+
+async function waitForStatus(sharedPage: Page, id: string): Promise<string | undefined> {
   await sharedPage.waitForFunction(
-    (elId) => document.getElementById(elId)?.textContent !== 'loading',
+    (key) => {
+      const statuses = (window as unknown as WorkerSpawnWindow).tests?.results?.workerStatus;
+      return statuses !== undefined && statuses[key] !== undefined && statuses[key] !== 'loading';
+    },
     id,
     { timeout: 10000 },
   );
-  return sharedPage.evaluate((elId) => document.getElementById(elId)?.textContent, id);
+  return sharedPage.evaluate(
+    (key) => (window as unknown as WorkerSpawnWindow).tests?.results?.workerStatus?.[key],
+    id,
+  );
 }
 
 test.describe('Worker spawn mode detection', () => {

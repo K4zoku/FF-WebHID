@@ -6,7 +6,7 @@
     "strict": true,
     "esModuleInterop": true,
     "resolveJsonModule": true,
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": ["ES2022", "ES2024.Promise", "DOM", "DOM.Iterable"],
     "skipLibCheck": true,
     "declaration": false
   },

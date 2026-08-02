@@ -92,7 +92,7 @@ function keyboardDescriptor() {
 
 function vendorDescriptor() {
   return cat(
-    usagePage(0x01), usage(0x02), collection(),
+    usagePage(0x01), usage(0x04), collection(),
     usage(0x01), collection(0),
     reportSize(8), reportCount(3),
     usagePage(0x01),
@@ -104,7 +104,9 @@ function vendorDescriptor() {
     collection(),
     reportSize(8), reportCount(64),
     usage(0x01),
-    inputData(), outputData(),
+    inputData(),
+    usage(0x02),
+    outputData(),
     endCollection(),
   );
 }

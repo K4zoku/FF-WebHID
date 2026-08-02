@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Worker API Check</title></head>
 <body>
-<pre id="__worker-result">waiting...</pre>
 <script>
+window.tests = window.tests || { helper: {}, results: {} };
 (async function () {
   var ts = Date.now();
   try {
@@ -12,9 +12,9 @@
       w.onerror = function (e) { reject(e.message || e.error?.message || String(e)); };
       setTimeout(function () { reject('timeout'); }, 10000);
     });
-    document.getElementById('__worker-result').textContent = JSON.stringify(r);
+    window.tests.results.workerApi = r;
   } catch (e) {
-    document.getElementById('__worker-result').textContent = JSON.stringify({ error: e.message || String(e) });
+    window.tests.results.workerApi = { error: e.message || String(e) };
   }
 })();
 </script>

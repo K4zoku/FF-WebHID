@@ -7,7 +7,9 @@ test.describe('shadow-URL gating', () => {
   }) => {
     await sharedPage.goto(pageUrl('/self-script'), { waitUntil: 'domcontentloaded', timeout: 15000 });
     const ran = await sharedPage.evaluate(
-      () => (window as unknown as { selfScriptRan?: boolean }).selfScriptRan === true,
+      () =>
+        (window as unknown as { tests?: { results?: { selfScriptRan?: boolean } } }).tests?.results
+          ?.selfScriptRan === true,
     );
     expect(ran).toBe(true);
   });

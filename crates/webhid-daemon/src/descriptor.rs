@@ -949,24 +949,45 @@ mod tests {
     }
 
     #[test]
-    fn test_switchpro_descriptor() {
-        let path = fixture_path("switchpro-gamepad.bin");
+    fn test_vendor_descriptor() {
+        let path = fixture_path("vendor.bin");
         let bytes = std::fs::read(&path).unwrap();
         let collections = parse_report_descriptor(&bytes);
-        assert!(!collections.is_empty(), "should parse into at least one collection");
+        assert_eq!(collections.len(), 2, "expected two application collections");
+
+        let app = &collections[0];
+        assert_eq!(app.collection_type, 1); // Application
+
+        // Vendor report ID 1 (64 bytes) is present as an input report.
+        let report_id_1 = collections
+            .iter()
+            .flat_map(|c| c.input_reports.iter())
+            .find(|r| r.report_id == 1)
+            .expect("vendor should have an input report with report_id 1");
+        assert!(!report_id_1.items.is_empty(), "should have report items");
+
+        assert_eq!(max_input_report_size(&collections), 64);
+    }
+
+    #[test]
+    fn test_gamepad_descriptor() {
+        let path = fixture_path("gamepad.bin");
+        let bytes = std::fs::read(&path).unwrap();
+        let collections = parse_report_descriptor(&bytes);
+        assert_eq!(collections.len(), 1, "should parse into exactly one collection");
 
         let app = &collections[0];
         assert_eq!(app.collection_type, 1); // Application
         assert_eq!(app.usage_page, Some(0x01)); // Generic Desktop
         assert_eq!(app.usage, Some(0x04)); // Joystick
 
-        // Should have input reports (report ID 0x30)
+        // No report ID item, so every report is report_id 0
         assert!(!app.input_reports.is_empty(), "should have input reports");
-        let report = &app.input_reports[0];
-        assert_eq!(report.report_id, 0x30);
-        assert!(!report.items.is_empty(), "should have report items");
+        for r in &app.input_reports {
+            assert_eq!(r.report_id, 0, "gamepad has numbered reports?");
+        }
 
-        // max_input_report_size now includes constant padding (63 bytes total).
-        assert_eq!(max_input_report_size(&collections), 63);
+        // 8*4 bits sticks + 8*1 bit buttons = 40 bits = 5 bytes
+        assert_eq!(max_input_report_size(&collections), 5);
     }
 }

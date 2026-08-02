@@ -24,7 +24,7 @@ test.describe('Permissions Policy', () => {
     const r = await waitForPermResult(page);
     expect(r).not.toBeNull();
     expect(r!.queryHid).toBe('denied');
-    expect(r!.hidUndefined || !r!.getDevices.ok).toBe(true);
+    expect(r!.hidUndefined || r!.getDevices?.ok === false).toBe(true);
   });
 
   test('hid=self allows same-origin', async ({ page, pageUrl }) => {
@@ -76,11 +76,16 @@ interface PermResult {
 
   async function readIframeResult(p: Page, urlSubstring: string) {
     const childFrame = await waitForFrame(p, urlSubstring);
-    await childFrame.locator('#__perm-result').waitFor({ state: 'attached', timeout: 10000 });
+    await childFrame.waitForFunction(
+      () => {
+        const r = (window as unknown as { tests?: { results?: Record<string, unknown> } }).tests?.results?.perm;
+        return r !== null && typeof r === 'object';
+      },
+      { timeout: 10000 },
+    );
     const raw = await childFrame.evaluate<PermResult | null>(() => {
-      const el = document.getElementById('__perm-result');
-      if (!el || !el.dataset.json) return null;
-      try { return JSON.parse(el.dataset.json) as PermResult; } catch { return null; }
+      const r = (window as unknown as { tests?: { results?: Record<string, unknown> } }).tests?.results?.perm;
+      return r && typeof r === 'object' ? (r as PermResult) : null;
     });
     return raw;
   }

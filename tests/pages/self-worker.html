@@ -3,16 +3,17 @@
 <head><meta charset="utf-8"><title>self-worker</title></head>
 <body>
 <script>
-window.workerResult = 'pending';
+window.tests = window.tests || { helper: {}, results: {} };
+window.tests.results.selfWorker = 'pending';
 try {
   const w = new Worker(location.href);
-  w.onmessage = (e) => { window.workerResult = e.data; };
-  w.onerror = () => { window.workerResult = 'error'; };
+  w.onmessage = (e) => { window.tests.results.selfWorker = e.data; };
+  w.onerror = () => { window.tests.results.selfWorker = 'error'; };
 } catch (e) {
-  window.workerResult = 'thrown';
+  window.tests.results.selfWorker = 'thrown';
 }
 setTimeout(() => {
-  if (window.workerResult === 'pending') window.workerResult = 'timeout';
+  if (window.tests.results.selfWorker === 'pending') window.tests.results.selfWorker = 'timeout';
 }, 3000);
 </script>
 </body>

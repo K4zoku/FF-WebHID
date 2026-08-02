@@ -81,7 +81,7 @@ export const test = base.extend<
     servers: Servers;
     pageUrl: (path: string) => string;
     crossUrl: (path: string) => string;
-    _harnessCtx: HarnessContext;
+    harnessCtx: HarnessContext;
     rdpPort: number;
     backgroundPage: FirefoxBgPage;
     sharedPage: Page;
@@ -104,7 +104,7 @@ export const test = base.extend<
     }
   }, { scope: 'worker' }],
 
-  _harnessCtx: [async ({ rdpPort, headless }, use) => {
+  harnessCtx: [async ({ rdpPort, headless }, use) => {
     const { context } = await createFirefoxContext(rdpPort, EXTENSION_PATH, {
       routeHandler: defaultRouteHandler,
       playwrightOptions: { headless },
@@ -148,20 +148,20 @@ export const test = base.extend<
     await cleanupFirefoxContext(context);
   }, { scope: 'worker' }],
 
-  backgroundPage: [async ({ _harnessCtx }, use) => {
-    await use(_harnessCtx._firefoxBgPage);
+  backgroundPage: [async ({ harnessCtx }, use) => {
+    await use(harnessCtx._firefoxBgPage);
   }, { scope: 'worker' }],
 
-  sharedPage: [async ({ _harnessCtx }, use) => {
-    const page = await _harnessCtx.newPage();
+  sharedPage: [async ({ harnessCtx }, use) => {
+    const page = await harnessCtx.newPage();
     installAddScriptTagPatch(page);
-    await use(wrapWithNetworkBridge(page, _harnessCtx._firefoxBridge));
+    await use(wrapWithNetworkBridge(page, harnessCtx._firefoxBridge));
   }, { scope: 'worker' }],
 
-  page: [async ({ _harnessCtx }, use) => {
-    const page = await _harnessCtx.newPage();
+  page: [async ({ harnessCtx }, use) => {
+    const page = await harnessCtx.newPage();
     installAddScriptTagPatch(page);
-    await use(wrapWithNetworkBridge(page, _harnessCtx._firefoxBridge));
+    await use(wrapWithNetworkBridge(page, harnessCtx._firefoxBridge));
   }, { scope: 'test' }],
 
   pageUrl: [async ({ servers }, use) => {
