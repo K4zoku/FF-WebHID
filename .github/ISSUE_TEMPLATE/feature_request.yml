@@ -26,6 +26,7 @@ body:
       options:
         - Addon (background/popup/settings/device picker)
         - Daemon (Rust, data plane, hotplug, packaging)
+        - Performance / Benchmark
         - Documentation
         - Other / not sure
     validations:
