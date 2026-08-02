@@ -65,6 +65,8 @@ jobs:
         run: npm ci
       - name: Run unit tests
         run: npm run test:rs
+      - name: Build webhid-mock
+        run: npm run build:mock:debug
       - name: Setup uhid + udev rules + webhid group
         run: |
           sudo groupadd --system webhid
