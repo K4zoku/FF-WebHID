@@ -549,7 +549,7 @@ not a transport-only number.
 **Run**:
 
 ```
-npx playwright test --config tests/playwright.config.ts --project=firefox-benchmark
+npm run test:benchmark
 ```
 
 Standalone project, `daemonMode: 'daemon-nm'`, Firefox only. The ws and nm
@@ -564,7 +564,7 @@ A separate **Chromium project** (`chromium-benchmark`) benchmarks native
 WebHID (no addon, no daemon; the mock talks straight to `/dev/hidraw`). It is
 semi-auto: Chromium has no CDP way to grant HID permission, so the spec opens
 the native chooser and waits for a human click on the mock device. Run it
-headed: `npx playwright test --project=chromium-benchmark`. Chromium coarsens
+headed: `npm run test:benchmark:chromium`. Chromium coarsens
 `performance.now()` to 100us with no flag to disable that clamp, so the
 benchmark page is served cross-origin-isolated (COOP/COEP, `tests/serve.ts`)
 to get 5us timestamps instead.

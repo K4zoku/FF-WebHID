@@ -53,38 +53,5 @@ export default defineConfig({
         daemonMode: string
       }
     },
-    {
-      name: 'firefox-benchmark',
-      testDir: './benchmark',
-      // The Chromium semi-auto spec lives under ./benchmark/chromium and runs
-      // in its own project.
-      testIgnore: '**/chromium/**',
-      use: {
-        browserName: 'firefox',
-        firefoxHarnessConfig: {
-          extensionPath: resolve(__dirname, '..', 'addon')
-        },
-        daemonMode: 'daemon-nm',
-        benchmarkRuns: 5,
-        launchOptions: {
-          firefoxUserPrefs: { 'privacy.reduceTimerPrecision': false }
-        }
-      } as PlaywrightUseOptions & {
-        firefoxHarnessConfig: { extensionPath: string }
-        daemonMode: string
-        benchmarkRuns: number
-        launchOptions: { firefoxUserPrefs: { [key: string]: boolean } }
-      }
-    },
-    {
-      name: 'chromium-benchmark',
-      testDir: './benchmark/chromium',
-      timeout: 600000,
-      use: {
-        browserName: 'chromium',
-        headless: false,
-        benchmarkRuns: 5
-      } as PlaywrightUseOptions & { benchmarkRuns: number }
-    }
   ]
 })

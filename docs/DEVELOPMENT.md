@@ -135,7 +135,7 @@ npm ci
 npx playwright install firefox
 npm run test:browser          # builds dist/addon first, runs the browser project against it
 npm run test:browser:src      # runs the browser project against addon/ directly
-npm run test:headed           # all projects, headed
+npm run test:headed           # browser + e2e projects, headed
 ```
 
 All Playwright deps live in the root `package.json` (there is no `tests/package.json`). The browser project is named `firefox-browser` in `tests/playwright.config.ts`.

@@ -1,7 +1,8 @@
 {
   "config": {
     "cargoManifest": "crates/Cargo.toml",
-    "playwrightConfig": "tests/playwright.config.ts"
+    "playwrightConfig": "tests/playwright.config.ts",
+    "playwrightBenchmarkConfig": "tests/playwright.benchmark.config.ts"
   },
   "scripts": {
     "build": "npm run build:native && npm run build:addon",
@@ -41,7 +42,8 @@
     "test:browser:src": "npx playwright test --config $npm_package_config_playwrightConfig --project=firefox-browser",
     "test:debug": "npx playwright test --config $npm_package_config_playwrightConfig --debug",
     "test:e2e": "npx playwright test --config $npm_package_config_playwrightConfig --project=firefox-e2e",
-    "test:benchmark": "npx playwright test --config $npm_package_config_playwrightConfig --project=firefox-benchmark",
+    "test:benchmark": "npx playwright test --config $npm_package_config_playwrightBenchmarkConfig --project=firefox-benchmark",
+    "test:benchmark:chromium": "npx playwright test --config $npm_package_config_playwrightBenchmarkConfig --project=chromium-benchmark",
     "test:headed": "npx playwright test --config $npm_package_config_playwrightConfig --headed",
     "test:rs": "cargo test --manifest-path $npm_package_config_cargoManifest"
   },
