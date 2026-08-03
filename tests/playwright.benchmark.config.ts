@@ -10,13 +10,11 @@ type PlaywrightUseOptions = Exclude<Parameters<typeof defineConfig>[0], undefine
 
 export default defineConfig({
   ...base,
+  workers: 1,
   projects: [
     {
       name: 'firefox-benchmark',
       testDir: './benchmark',
-      // The Chromium semi-auto spec lives under ./benchmark/chromium and runs
-      // in its own project; the input-report loss benchmark lives under
-      // ./benchmark/loss and runs in its own project too.
       testIgnore: ['**/chromium/**', '**/loss/**'],
       use: {
         browserName: 'firefox',
