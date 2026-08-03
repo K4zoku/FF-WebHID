@@ -29,6 +29,8 @@
 
   /** @type {Map<string, object>} */
   const workers = new Map()
+  /** @type {Set<string>} */
+  const workerReadyDevices = new Set()
   /** @type {Map<string, object>} */
   const connectParams = new Map()
   /** @type {Map<string, MessagePort>} */
@@ -145,6 +147,7 @@
       }
       worker.terminate()
       workers.delete(deviceId)
+      workerReadyDevices.delete(deviceId)
     } else if (!keepPort) {
       const port = dataPorts.get(deviceId)
       if (port) {
@@ -640,6 +643,7 @@
           if (!data || !data.type) return
           if (data.type === 'ready') {
             logger.info('worker ready for', deviceId)
+            workerReadyDevices.add(deviceId)
             proxy.postMessage({
               type: 'settings',
               dataPlane: settings.dataPlane,
@@ -649,19 +653,25 @@
           }
           if (data.type === 'auth-failed') {
             logger.warn('worker auth-failed for', deviceId, 'code=' + data.code + '; re-opening')
-            workers.delete(deviceId)
-            dataPorts.delete(deviceId)
-            refreshDataPlaneToken(deviceId)
+            if (workers.get(deviceId) === proxy) {
+              workers.delete(deviceId)
+              workerReadyDevices.delete(deviceId)
+              dataPorts.delete(deviceId)
+              refreshDataPlaneToken(deviceId)
+            }
             return
           }
           if (data.type === 'closed') {
             logger.warn('worker closed for', deviceId)
-            workers.delete(deviceId)
-            dataPorts.delete(deviceId)
-            replyToPage({
-              type: 'event',
-              event: { eventType: 'disconnect', deviceId: deviceId }
-            })
+            if (workers.get(deviceId) === proxy) {
+              workers.delete(deviceId)
+              workerReadyDevices.delete(deviceId)
+              dataPorts.delete(deviceId)
+              replyToPage({
+                type: 'event',
+                event: { eventType: 'disconnect', deviceId: deviceId }
+              })
+            }
             return
           }
         }
@@ -917,6 +927,12 @@
     if (message.action === 'webhidDeviceEvent' && message.event) {
       const messageEvent = message.event
       if (messageEvent.eventType === 'input_report') {
+        // A ready worker data plane (WS/WT) already delivers this device's
+        // reports to the page. NM input events arriving here are duplicates
+        // from another session's NM mode (multi-tab, leftover session after a
+        // data-plane toggle); forwarding them double-delivers and reorders the
+        // stream (sawtooth analog graphs). Skip them while the worker is live.
+        if (workerReadyDevices.has(messageEvent.deviceId)) return
         const port = dataPorts.get(messageEvent.deviceId)
         if (port) {
           const view = messageEvent.data

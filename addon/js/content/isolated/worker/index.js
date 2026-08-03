@@ -137,10 +137,23 @@ function pushInputBatch(batch, offset = 0) {
           hex += view[i].toString(16).padStart(2, '0') + ' '
         logger.debug('inputReport reportId=' + reportId + ' len=' + payloadLen + ' first8=' + hex)
       }
-      if (dataPort)
-        dataPort.postMessage({ type: 'inputReport', reportId, data: buffer }, [buffer])
+      if (dataPort) {
+        try {
+          dataPort.postMessage({ type: 'inputReport', reportId, data: buffer }, [buffer])
+        } catch (e) {
+          // A closed/re-wired data port mid-batch must not drop the rest of
+          // the frame's reports.
+          logger.warn('inputReport postMessage failed', e)
+        }
+      }
     } else {
-      if (dataPort) dataPort.postMessage({ type: 'inputReport', reportId, data: null })
+      if (dataPort) {
+        try {
+          dataPort.postMessage({ type: 'inputReport', reportId, data: null })
+        } catch (e) {
+          logger.warn('inputReport postMessage failed', e)
+        }
+      }
     }
     offset += len
     count++
