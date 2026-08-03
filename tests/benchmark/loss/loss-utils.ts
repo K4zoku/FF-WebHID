@@ -100,8 +100,10 @@ async function runLossOnce(
   for (let i = 0; i < count; ) {
     for (let j = 0; j < perTick && i < count; j++, i++) {
       const payload = new Array<number>(PAYLOAD_LEN).fill(0)
-      payload[0] = (startSeq + i) & 0xff
-      payload[1] = ((startSeq + i) >> 8) & 0xff
+      const seq = startSeq + i
+      payload[0] = seq & 0xff
+      payload[1] = (seq >> 8) & 0xff
+      payload[2] = (seq >> 16) & 0xff
       sendInput(mock, 1, payload)
     }
     await sleep(tickMs)
@@ -202,7 +204,7 @@ export async function benchmarkLoss(
       }
       d.oninputreport = (ev) => {
         const data = new Uint8Array(ev.data.buffer)
-        const seq = data[0] | (data[1] << 8)
+        const seq = data[0] | (data[1] << 8) | (data[2] << 16)
         state.count++
         if (seq >= state.phaseStart) {
           state.phaseCount++
