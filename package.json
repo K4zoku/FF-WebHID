@@ -2,7 +2,8 @@
   "config": {
     "cargoManifest": "crates/Cargo.toml",
     "playwrightConfig": "tests/playwright.config.ts",
-    "playwrightBenchmarkConfig": "tests/playwright.benchmark.config.ts"
+    "playwrightBenchmarkConfig": "tests/playwright.benchmark.config.ts",
+    "playwrightForwarderConfig": "tests/playwright.forwarder.config.ts"
   },
   "scripts": {
     "build": "npm run build:native && npm run build:addon",
@@ -41,7 +42,9 @@
     "test:browser": "npm run build:addon && EXTENSION_PATH=dist/addon npx playwright test --config $npm_package_config_playwrightConfig --project=firefox-browser",
     "test:browser:src": "npx playwright test --config $npm_package_config_playwrightConfig --project=firefox-browser",
     "test:debug": "npx playwright test --config $npm_package_config_playwrightConfig --debug",
-    "test:e2e": "npx playwright test --config $npm_package_config_playwrightConfig --project=firefox-e2e",
+    "test:e2e": "npm run test:e2e:daemon && npm run test:e2e:forwarder",
+    "test:e2e:daemon": "npx playwright test --config $npm_package_config_playwrightConfig --project=firefox-e2e-daemon",
+    "test:e2e:forwarder": "npx playwright test --config $npm_package_config_playwrightForwarderConfig --project=firefox-e2e-forwarder",
     "test:benchmark": "npx playwright test --config $npm_package_config_playwrightBenchmarkConfig --project=firefox-benchmark",
     "test:benchmark:loss": "npx playwright test --config $npm_package_config_playwrightBenchmarkConfig --project=firefox-benchmark-loss",
     "test:benchmark:chromium": "npx playwright test --config $npm_package_config_playwrightBenchmarkConfig --project=chromium-benchmark",

@@ -1,6 +1,7 @@
 import { defineConfig } from '@playwright/test'
 import { fileURLToPath } from 'url'
 import { dirname, resolve } from 'path'
+import base from './playwright.config.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -8,36 +9,26 @@ const __dirname = dirname(__filename)
 type PlaywrightUseOptions = Exclude<Parameters<typeof defineConfig>[0], undefined>['use']
 
 export default defineConfig({
-  timeout: 120000,
-  expect: { timeout: 10000 },
-  fullyParallel: false,
-  retries: 0,
-  globalSetup: 'firefox-webext-playwright-harness/globalSetup',
-  use: {
-    headless: true,
-    screenshot: 'only-on-failure',
-    trace: 'retain-on-failure'
-  },
+  ...base,
+  // Forwarder-mode chain (root daemon + thin NM forwarder over the Unix
+  // socket, the no-udev deployment): run explicitly via `npm run test:e2e`,
+  // not part of the default suite. One worker: two heavy Firefox+daemon
+  // stacks in parallel drop WS input reports (see AGENTS.md).
+  workers: 1,
   projects: [
     {
-      name: 'firefox-browser',
-      testDir: './browser',
-      use: { browserName: 'firefox' }
-    },
-    {
-      name: 'firefox-e2e-daemon',
+      name: 'firefox-e2e-forwarder',
       testDir: './e2e',
-      workers: 1,
       use: {
         browserName: 'firefox',
         firefoxHarnessConfig: {
           extensionPath: resolve(__dirname, '..', 'addon')
         },
-        daemonMode: 'daemon-nm'
+        daemonMode: 'forwarder'
       } as PlaywrightUseOptions & {
         firefoxHarnessConfig: { extensionPath: string }
         daemonMode: string
       }
-    },
+    }
   ]
 })
