@@ -27,7 +27,11 @@ let dataPort = null
 /** @type {Array<object>} */
 let preOpen = []
 
-self.onmessage = ({ data: msg }) => {
+self.onmessage = ({ data: msg, ports }) => {
+  if (msg === null && ports && ports[0]) {
+    self.postMessage({ type: 'ready' })
+    return
+  }
   if (msg && msg.type === 'setPorts') {
     controlPort = msg.controlPort || null
     dataPort = msg.dataPort || null
