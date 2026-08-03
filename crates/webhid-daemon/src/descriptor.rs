@@ -430,12 +430,20 @@ impl CollectionTreeBuilder {
     }
 }
 
-/// Maximum input report payload size in bytes across all collections. Returns 0 if none.
-pub fn max_input_report_size(collections: &[Collection]) -> u32 {
-    fn visit(collections: &[Collection]) -> u32 {
+/// Maximum report payload size in bytes across all collections of one
+/// direction. Returns 0 if none. Mirrors Chromium's max input/output/feature
+/// report sizes, which are computed from the full (unpruned) descriptor.
+fn max_report_size<F>(collections: &[Collection], reports: &F) -> u32
+where
+    F: Fn(&Collection) -> &Vec<Report>,
+{
+    fn visit<F>(collections: &[Collection], reports: &F) -> u32
+    where
+        F: Fn(&Collection) -> &Vec<Report>,
+    {
         let mut max = 0u32;
         for c in collections {
-            for r in &c.input_reports {
+            for r in reports(c) {
                 let bits: u32 = r
                     .items
                     .iter()
@@ -446,14 +454,29 @@ pub fn max_input_report_size(collections: &[Collection]) -> u32 {
                     max = bytes;
                 }
             }
-            let child_max = visit(&c.children);
+            let child_max = visit(&c.children, reports);
             if child_max > max {
                 max = child_max;
             }
         }
         max
     }
-    visit(collections)
+    visit(collections, reports)
+}
+
+/// Maximum input report payload size in bytes across all collections. Returns 0 if none.
+pub fn max_input_report_size(collections: &[Collection]) -> u32 {
+    max_report_size(collections, &|c| &c.input_reports)
+}
+
+/// Maximum output report payload size in bytes across all collections. Returns 0 if none.
+pub fn max_output_report_size(collections: &[Collection]) -> u32 {
+    max_report_size(collections, &|c| &c.output_reports)
+}
+
+/// Maximum feature report payload size in bytes across all collections. Returns 0 if none.
+pub fn max_feature_report_size(collections: &[Collection]) -> u32 {
+    max_report_size(collections, &|c| &c.feature_reports)
 }
 
 #[cfg(test)]

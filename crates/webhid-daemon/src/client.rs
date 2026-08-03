@@ -135,6 +135,14 @@ async fn dispatch(
                 let mut r =
                     if device_mgr.is_report_blocked(device_id, report_id, ReportType::Output) {
                         NmResponse::err(403)
+                    } else if !device_mgr.validate_report_send(
+                        device_id,
+                        report_id,
+                        ReportType::Output,
+                        Some(data.len()),
+                    ) {
+                        // Chromium pre-check failure: fail like an OS write error.
+                        NmResponse::err(500)
                     } else {
                         match device_mgr.get_file(device_id) {
                             Err(_) => NmResponse::err(404),
@@ -166,6 +174,10 @@ async fn dispatch(
         } => {
             if device_mgr.is_report_blocked(device_id, report_id, ReportType::Feature) {
                 NmResponse::err(403)
+            } else if !device_mgr.validate_report_send(device_id, report_id, ReportType::Feature, None)
+            {
+                // Chromium pre-check failure: fail like an OS read error.
+                NmResponse::err(500)
             } else {
                 match device_mgr.get_file(device_id) {
                     Err(_) => NmResponse::err(404),
@@ -193,6 +205,14 @@ async fn dispatch(
         } => {
             if device_mgr.is_report_blocked(device_id, report_id, ReportType::Feature) {
                 NmResponse::err(403)
+            } else if !device_mgr.validate_report_send(
+                device_id,
+                report_id,
+                ReportType::Feature,
+                Some(data.len()),
+            ) {
+                // Chromium pre-check failure: fail like an OS write error.
+                NmResponse::err(500)
             } else {
                 match device_mgr.get_file(device_id) {
                     Err(_) => NmResponse::err(404),

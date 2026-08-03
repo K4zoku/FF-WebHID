@@ -246,6 +246,22 @@ pub async fn handle_client_message<F>(
                 emit(make_status_resp(resp_type, req_id, 2));
                 return;
             }
+            // Chromium pre-checks (invalid report ID mode, oversized payload)
+            // fail the write like an OS error, not like a blocked report.
+            if !device_mgr.validate_report_send(
+                device_id,
+                report_id,
+                report_type,
+                Some(frame.len() - 6),
+            ) {
+                let resp_type = if msg_type == MSG_SEND_REPORT {
+                    RESP_SEND_REPORT
+                } else {
+                    RESP_SEND_FEATURE_REPORT
+                };
+                emit(make_status_resp(resp_type, req_id, 1));
+                return;
+            }
             let payload: Arc<[u8]> = Arc::from(&frame[6..]);
 
             let dev_arc = match device_mgr.get_file(device_id) {
@@ -292,6 +308,10 @@ pub async fn handle_client_message<F>(
             let report_id = frame[5];
             if device_mgr.is_report_blocked(device_id, report_id, ReportType::Feature) {
                 emit(make_feature_read_resp(req_id, 2, &[]));
+                return;
+            }
+            if !device_mgr.validate_report_send(device_id, report_id, ReportType::Feature, None) {
+                emit(make_feature_read_resp(req_id, 1, &[]));
                 return;
             }
 

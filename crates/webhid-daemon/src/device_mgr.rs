@@ -53,6 +53,12 @@ struct Entry {
     /// is protected (unparseable descriptor, e.g. empty boot-keyboard
     /// interface). Blocks every report when true.
     interface_protected: [bool; 3],
+    /// Report ID mode (any report ID present in the descriptor), used to
+    /// validate send report IDs like Chromium's `has_report_id`.
+    numbered_reports: bool,
+    /// Declared max output/feature payload sizes in bytes (0 = not declared).
+    max_output_report_size: u32,
+    max_feature_report_size: u32,
 }
 
 fn random_hex_token(n: usize) -> Result<String, getrandom::Error> {
@@ -250,6 +256,26 @@ fn prune_collection(
     })
 }
 
+/// See `DeviceManager::validate_report_send`. Kept as a free function so the
+/// Chromium-parity rules are unit-testable without opening a device.
+fn report_write_valid(
+    numbered_reports: bool,
+    max_size: u32,
+    report_id: u8,
+    payload_len: Option<usize>,
+) -> bool {
+    if numbered_reports != (report_id != 0) {
+        return false;
+    }
+    if let Some(len) = payload_len
+        && max_size > 0
+        && len > max_size as usize
+    {
+        return false;
+    }
+    true
+}
+
 fn compute_blocked_input_ids(info: &DeviceInfo, report_map: &ReportCollectionMap) -> HashSet<u8> {
     let rules = blocklist::blocklist_rules();
     let mut ids = HashSet::new();
@@ -356,6 +382,8 @@ impl DeviceManager {
             interface_protected(&info, ReportType::Output),
             interface_protected(&info, ReportType::Feature),
         ];
+        let max_output_report_size = crate::descriptor::max_output_report_size(&info.collections);
+        let max_feature_report_size = crate::descriptor::max_feature_report_size(&info.collections);
 
         let stop_flag = Arc::new(AtomicBool::new(false));
 
@@ -402,6 +430,9 @@ impl DeviceManager {
             report_to_collection: Arc::clone(&report_map),
             always_protected,
             interface_protected,
+            numbered_reports: uses_numbered_reports,
+            max_output_report_size,
+            max_feature_report_size,
         };
 
         map.insert(id, entry);
@@ -672,6 +703,34 @@ impl DeviceManager {
             .unwrap_or_else(|e| e.into_inner());
         hashes.retain(|_, (dev_id, _)| *dev_id != device_id);
         log::info!("[device_mgr] {device_id:#x} force-closed (hotplug removal)");
+    }
+
+    /// Chromium's `HidConnection::Write` / `GetFeatureReport` /
+    /// `SendFeatureReport` pre-checks: the report ID must be consistent with
+    /// the device's numbered-report mode (`has_report_id != (report_id != 0)`
+    /// in Chromium) and the payload must fit the declared max size for the
+    /// report type. A payload length of `None` means a read (no payload). The
+    /// max-size-zero case (report type not declared in the descriptor) is
+    /// deliberately allowed: the daemon issues raw SET/GET_REPORT ioctls
+    /// regardless of declaration, which the e2e feature-report coverage
+    /// relies on.
+    pub fn validate_report_send(
+        &self,
+        device_id: u32,
+        report_id: u8,
+        report_type: ReportType,
+        payload_len: Option<usize>,
+    ) -> bool {
+        let map = self.devices.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(entry) = map.get(&device_id) else {
+            return false;
+        };
+        let max_size = match report_type {
+            ReportType::Output => entry.max_output_report_size,
+            ReportType::Feature => entry.max_feature_report_size,
+            ReportType::Input => return false,
+        };
+        report_write_valid(entry.numbered_reports, max_size, report_id, payload_len)
     }
 
     pub fn is_report_blocked(
@@ -1114,6 +1173,28 @@ mod tests {
         assert_eq!(pruned.collections.len(), 1);
         assert_eq!(pruned.collections[0].children.len(), 1);
         assert_eq!(pruned.collections[0].children[0].input_reports.len(), 1);
+    }
+
+    #[test]
+    fn test_report_write_valid() {
+        // Numbered device: report ID 0 is invalid, any non-zero ID is valid.
+        assert!(!report_write_valid(true, 64, 0, Some(64)));
+        assert!(report_write_valid(true, 64, 1, Some(64)));
+        // Unnumbered device: only report ID 0 is valid.
+        assert!(report_write_valid(false, 64, 0, Some(64)));
+        assert!(!report_write_valid(false, 64, 1, Some(64)));
+        // Oversized payload fails; exactly max passes.
+        assert!(!report_write_valid(true, 64, 1, Some(65)));
+        assert!(report_write_valid(true, 64, 1, Some(64)));
+        // Undeclared report type (max size 0): size not enforced (raw
+        // SET/GET_REPORT ioctl allowance the e2e feature coverage relies on),
+        // but the report ID mode check still applies.
+        assert!(report_write_valid(true, 0, 1, Some(1024)));
+        assert!(!report_write_valid(true, 0, 0, Some(1024)));
+        // Read (no payload): only the report ID mode check applies.
+        assert!(report_write_valid(false, 64, 0, None));
+        assert!(!report_write_valid(false, 64, 1, None));
+        assert!(report_write_valid(true, 0, 2, None));
     }
 
     #[cfg(feature = "report-blocking")]
