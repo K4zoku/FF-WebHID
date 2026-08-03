@@ -21,6 +21,7 @@ declare global {
   interface Window {
     __wtOldClose?: () => void
     __wtLog?: string[]
+    __nmSendActions?: number
   }
 }
 
@@ -393,6 +394,38 @@ test.describe.serial('WebHID E2E (WebTransport data plane)', () => {
       value: 0x2b
     })
     expect(event.data[1]).toBe(0x2b)
+
+    // The in-page plane must carry the whole hot path, not just input
+    // reports: sendReport/sendFeatureReport/receiveFeatureReport ride the
+    // same QUIC stream. Instrument the background to count NM send actions
+    // and prove the sends below never touch NM.
+    await backgroundPage.evaluate(() => {
+      window.__nmSendActions = 0
+      browser.runtime.onMessage.addListener((msg: { action?: string }) => {
+        if (
+          msg &&
+          (msg.action === 'sendReport' ||
+            msg.action === 'sendFeatureReport' ||
+            msg.action === 'receiveFeatureReport')
+        ) {
+          window.__nmSendActions = (window.__nmSendActions || 0) + 1
+        }
+      })
+    })
+
+    const outputPromise = waitForOutputReport(vendorDevice)
+    await sleep(200)
+    await sharedPage.evaluate(async (ctx: VendorCtx) => {
+      const ds = await navigator.hid.getDevices()
+      const d = ds.find((x) => x.vendorId === ctx.f.vendorId && x.productId === ctx.f.productId)!
+      await d.sendReport(ctx.outputId, new Uint8Array(ctx.size).fill(0x43))
+      const feature = await d.receiveFeatureReport(ctx.featureId)
+      if (!(feature instanceof DataView)) throw new Error('feature read did not return DataView')
+    }, VENDOR_CTX)
+    const output = await outputPromise
+    expect(output.data[0]).toBe(VENDOR_OUTPUT_ID)
+    expect(await backgroundPage.evaluate(() => window.__nmSendActions)).toBe(0)
+
     if (daemon) {
       const logPath = daemon.socketPath.replace(/\.sock$/, '.log')
       const start = Date.now()

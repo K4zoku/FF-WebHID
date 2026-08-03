@@ -27,6 +27,13 @@
   /** @type {Map<string, object>} */
   const inPagePlanes = new Map()
 
+  const MSG_SEND_REPORT = 0x01
+  const MSG_SEND_FEATURE_REPORT = 0x02
+  const MSG_RECEIVE_FEATURE_REPORT = 0x03
+  const RESP_RECEIVE_FEATURE_REPORT = 0x83
+  /** @type {Map<number, {deviceId: string, resolve: Function, reject: Function}>} */
+  const inPagePending = new Map()
+
   /**
    * @param {object} req
    * @returns {void}
@@ -40,10 +47,12 @@
       },
       onClosed: () => {
         inPagePlanes.delete(deviceId)
+        rejectInPagePending(deviceId, new Error('data plane closed'))
         bridgePort.postMessage({ type: 'dataPlaneEvent', deviceId, event: { type: 'closed' } })
       },
       onAuthFailed: (code) => {
         inPagePlanes.delete(deviceId)
+        rejectInPagePending(deviceId, new Error('auth failed'))
         bridgePort.postMessage({
           type: 'dataPlaneEvent',
           deviceId,
@@ -51,11 +60,12 @@
         })
       },
       onBinary: (batch) => {
+        if (batch.length > 0 && batch[0] >= 0x81) return handleInPageControlResponse(batch)
         const offset = batch.length > 0 && batch[0] === 0x00 ? 1 : 0
         pushInPageBatch(deviceId, batch, offset)
       },
     })
-    inPagePlanes.set(deviceId, { wt })
+    inPagePlanes.set(deviceId, { wt, deviceId })
     wt.connect(req.payload || {})
   }
 
@@ -93,6 +103,90 @@
       if (plane.wt) plane.wt.disconnect()
       inPagePlanes.delete(data.deviceId)
     }
+    rejectInPagePending(data.deviceId, new Error('data plane closed'))
+  }
+
+  /**
+   * Rejects every in-flight in-page plane request for a device.
+   * @param {string} deviceId
+   * @param {Error} error
+   * @returns {void}
+   */
+  function rejectInPagePending(deviceId, error) {
+    for (const [reqId, entry] of inPagePending) {
+      if (entry.deviceId === deviceId) {
+        inPagePending.delete(reqId)
+        entry.reject(error)
+      }
+    }
+  }
+
+  /**
+   * Routes a control response frame (0x81/0x82/0x83) from the in-page WT
+   * stream to its pending request. Mirrors the data worker's
+   * handleControlResponse; the daemon uses the same wire format on WS and WT.
+   * @param {Uint8Array} batch
+   * @returns {void}
+   */
+  function handleInPageControlResponse(batch) {
+    if (batch.length < 6) return
+    const respType = batch[0]
+    const dataView = new DataView(batch.buffer, batch.byteOffset, batch.byteLength)
+    const reqId = dataView.getUint32(1, true)
+    const status = batch[5]
+    const entry = inPagePending.get(reqId)
+    if (!entry) return
+    inPagePending.delete(reqId)
+    if (respType === RESP_RECEIVE_FEATURE_REPORT) {
+      if (status === 2) return entry.reject({ blocked: true })
+      if (status !== 0) return entry.reject(new Error('feature read failed'))
+      if (batch.length < 8) return entry.reject(new Error('short feature resp'))
+      const len = dataView.getUint16(6, true)
+      const out = new Uint8Array(len)
+      if (len > 0 && batch.length >= 8 + len) out.set(batch.subarray(8, 8 + len))
+      return entry.resolve(out)
+    }
+    if (status === 0) entry.resolve()
+    else if (status === 2) entry.reject({ blocked: true })
+    else entry.reject(new Error('write failed status=' + status))
+  }
+
+  /**
+   * Sends a request frame over an in-page plane and resolves on the daemon
+   * ack. Returns null when the plane is not usable, so the caller falls back
+   * to the data port (NM) path.
+   * @param {object} plane
+   * @param {number} msgType
+   * @param {number} reportId
+   * @param {Uint8Array|null} payload
+   * @param {(data?: Uint8Array) => unknown} mapResolve
+   * @returns {Promise<unknown>|null}
+   */
+  function inPageRequest(plane, msgType, reportId, payload, mapResolve) {
+    if (!plane || !plane.wt || !plane.wt.isOpen()) return null
+    const reqId = ++nextReqId
+    const frame = new Uint8Array(6 + (payload ? payload.length : 0))
+    frame[0] = msgType
+    new DataView(frame.buffer).setUint32(1, reqId, true)
+    frame[5] = reportId
+    if (payload) frame.set(payload, 6)
+    return new Promise((resolve, reject) => {
+      inPagePending.set(reqId, {
+        deviceId: plane.deviceId,
+        resolve: (data) => resolve(mapResolve(data)),
+        reject: (e) => {
+          if (e && e.blocked) {
+            reject(new DOMException('Report is blocked', 'NotAllowedError'))
+          } else {
+            reject(new DOMException((e && e.message) || e || 'request failed', 'NetworkError'))
+          }
+        },
+      })
+      if (!plane.wt.send(frame)) {
+        inPagePending.delete(reqId)
+        reject(new DOMException('wt not open', 'NetworkError'))
+      }
+    })
   }
 
   /** @type {Map<string, Worker>} */
@@ -741,6 +835,14 @@
         const buffer = view.slice()
         try {
           logger.debug('sendReport reportId=' + reportId + ' len=' + buffer.length)
+          const inPage = inPageRequest(
+            inPagePlanes.get(state.deviceId),
+            MSG_SEND_REPORT,
+            reportId,
+            buffer,
+            () => undefined
+          )
+          if (inPage) return inPage
           if (!state.dataPort) throw new Error('data port not connected')
           const reqId = ++nextReqId
           const msg = { type: 'send', reqId, reportId, data: buffer }
@@ -777,6 +879,18 @@
         if (!state.opened) throw new DOMException('Device is not open', 'InvalidStateError')
         validateReportId(reportId, state.collections)
         try {
+          const inPage = inPageRequest(
+            inPagePlanes.get(state.deviceId),
+            MSG_RECEIVE_FEATURE_REPORT,
+            reportId,
+            null,
+            (data) => {
+              if (!data) return new DataView(new ArrayBuffer(0))
+              const b = data instanceof Uint8Array ? data : new Uint8Array(data)
+              return new DataView(b.buffer, b.byteOffset, b.byteLength)
+            }
+          )
+          if (inPage) return inPage
           if (!state.dataPort) throw new Error('data port not connected')
           const reqId = ++nextReqId
           return new Promise((resolve, reject) => {
@@ -829,6 +943,14 @@
         const buffer = view.slice()
         logger.debug('sendFeatureReport reportId=' + reportId + ' len=' + buffer.length)
         try {
+          const inPage = inPageRequest(
+            inPagePlanes.get(state.deviceId),
+            MSG_SEND_FEATURE_REPORT,
+            reportId,
+            buffer,
+            () => undefined
+          )
+          if (inPage) return inPage
           if (!state.dataPort) throw new Error('data port not connected')
           const reqId = ++nextReqId
           const msg = { type: 'sendFeature', reqId, reportId, data: buffer }
