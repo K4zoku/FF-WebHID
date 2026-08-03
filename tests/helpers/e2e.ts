@@ -345,7 +345,7 @@ export const test = base.extend<
           })
           .catch(() => {})
       }
-      const page = await harnessCtx.newPage()
+      const page = harnessCtx.pages()[0] ?? (await harnessCtx.newPage())
       installAddScriptTagPatch(page)
       const url = `http://localhost:${httpPort}/tests/test-page.html`
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 })
@@ -362,7 +362,11 @@ export const test = base.extend<
     async ({ harnessCtx }, use) => {
       const page = await harnessCtx.newPage()
       installAddScriptTagPatch(page)
-      await use(wrapWithNetworkBridge(page, harnessCtx._firefoxBridge))
+      try {
+        await use(wrapWithNetworkBridge(page, harnessCtx._firefoxBridge))
+      } finally {
+        await page.close().catch(() => {})
+      }
     },
     { scope: 'test' }
   ]
