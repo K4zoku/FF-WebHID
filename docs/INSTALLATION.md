@@ -11,6 +11,31 @@ Choose your platform below for daemon installation.
 
 ---
 
+## Choosing a daemon mode
+
+The daemon has two deployment modes:
+
+- **Daemon-as-NM-host (recommended on all platforms)**: the daemon speaks the
+  native-messaging protocol directly on stdin/stdout. No separate forwarder
+  process, no Unix socket, no IPC hop. The daemon runs as **your user** (not
+  root), so it can only touch devices the OS grants your user (udev `uaccess`
+  on Linux, TCC Input Monitoring on macOS, no special setup on Windows).
+  Firefox spawns it on demand per session.
+- **Persistent daemon + thin forwarder**: the daemon runs as a system service
+  (root on Linux, `brew services` on macOS, Scheduled Task on Windows) and a
+  tiny `webhid-native-messaging` forwarder bridges stdio to the Unix socket.
+  This survives browser restarts and shares one daemon across the system.
+
+Why Daemon-as-NM-host is recommended: one fewer process and IPC hop per
+message (lower latency), and the daemon never runs as root. The forwarder
+mode's only real advantage is persistence (daemon stays up across browser
+restarts); its latency cost is a few microseconds per report, so pick it if
+you want the daemon always-on. Both modes are switchable at any time from the
+addon settings (`about:addons → WebHID → Options → Daemon as NM host`); all
+packages ship both NM manifests.
+
+---
+
 ## Linux
 
 ### Arch Linux (AUR)
@@ -23,20 +48,33 @@ paru -S webhid           # or: yay -S webhid
 paru -S webhid-addon
 ```
 
-The AUR packages install the daemon as a systemd system service (runs as root). Enable it:
+The AUR packages install the daemon as a systemd system service (root) with both
+NM manifests. Recommended setup (daemon-as-NM-host, runs as your user):
+
+```sh
+# 1. Grant your user direct hidraw access (one-time)
+sudo cp manifests/99-webhid.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules && sudo udevadm trigger
+
+# 2. Stop the root service (it would shadow the user daemon)
+sudo systemctl disable --now webhid-daemon
+
+# 3. Enable "Daemon as NM host" in the addon settings
+```
+
+**Prefer a persistent root daemon?** Keep the service enabled instead:
 
 ```sh
 sudo systemctl enable --now webhid-daemon
-```
-
-Root daemon has access to all hidraw devices; no udev rule needed. The root daemon uses an abstract socket `@webhid`; users must be in the `webhid` group to connect via the thin forwarder:
-
-```sh
 sudo usermod -aG webhid $USER
 # log out + log back in for group change to take effect
 ```
 
-**Non-root daemon (optional):** If you prefer the daemon to run as your user:
+Root daemon has access to all hidraw devices; no udev rule needed. Users must
+be in the `webhid` group to connect via the thin forwarder. The latency cost
+of the forwarder vs. daemon-as-NM-host is a few microseconds per report.
+
+**User daemon (systemd user service, optional):**
 
 ```sh
 sudo cp manifests/99-webhid.rules /etc/udev/rules.d/
@@ -56,7 +94,20 @@ sudo dpkg -i webhid-<version>-<arch>.deb
 sudo apt-get install -f    # fix any missing dependencies
 ```
 
-The package installs and auto-starts the daemon as a systemd system service (root). No manual setup needed.
+The package installs and auto-starts the daemon as a systemd system service (root).
+Both NM manifests are installed. For the recommended daemon-as-NM-host mode:
+
+```sh
+sudo cp manifests/99-webhid.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules && sudo udevadm trigger
+sudo systemctl disable --now webhid-daemon
+# Enable "Daemon as NM host" in the addon settings
+```
+
+**Prefer a persistent root daemon?** Leave the service enabled; add your user
+to the `webhid` group (`sudo usermod -aG webhid $USER`) and connect via the
+thin forwarder. The latency cost vs. daemon-as-NM-host is a few microseconds
+per report.
 
 **Non-root daemon (optional):**
 
@@ -76,7 +127,20 @@ Download the `.rpm` from [GitHub Releases](https://github.com/K4zoku/FF-WebHID/r
 sudo dnf install webhid-<version>.<arch>.rpm
 ```
 
-The package installs and auto-starts the daemon as a systemd system service (root). No manual setup needed.
+The package installs and auto-starts the daemon as a systemd system service (root).
+Both NM manifests are installed. For the recommended daemon-as-NM-host mode:
+
+```sh
+sudo cp manifests/99-webhid.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules && sudo udevadm trigger
+sudo systemctl disable --now webhid-daemon
+# Enable "Daemon as NM host" in the addon settings
+```
+
+**Prefer a persistent root daemon?** Leave the service enabled; add your user
+to the `webhid` group (`sudo usermod -aG webhid $USER`) and connect via the
+thin forwarder. The latency cost vs. daemon-as-NM-host is a few microseconds
+per report.
 
 **Non-root daemon (optional):**
 
@@ -98,7 +162,22 @@ cd FF-WebHID
 make build
 ```
 
-**System-wide install (root daemon):**
+**Daemon-as-NM-host (recommended, runs as your user):**
+
+```sh
+sudo make install-udev-rule    # one-time: grants hidraw access to your user
+sudo make install-daemon-nm-host-system
+# Enable "Daemon as NM host" in the addon settings
+```
+
+Or user-local, no root needed after the udev rule:
+
+```sh
+sudo make install-udev-rule    # one-time: grants hidraw access to your user
+make install-daemon-nm-host-user
+```
+
+**Persistent root daemon (optional, forwarder mode):**
 
 ```sh
 sudo make install-system
@@ -106,7 +185,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now webhid-daemon
 ```
 
-**User-local install (non-root daemon):**
+**User-local install (non-root daemon, optional):**
 
 ```sh
 make install-user
@@ -121,9 +200,9 @@ Install paths are configurable: `make install-system PREFIX=/usr` or `make insta
 
 > **udev rule**: The `99-webhid.rules` file grants console users access to `hidraw*` devices via `uaccess`, with explicit exclusions for known FIDO/U2F security keys (matching Chromium's `hid_blocklist.cc`). This is only needed for non-root daemons. Root daemons already have full access.
 
-### Daemon-as-NM-host mode (Linux/macOS, advanced)
+### Daemon-as-NM-host mode (details)
 
-Eliminates the separate NM host binary and IPC socket; the daemon speaks native-messaging protocol directly on stdin/stdout. This reduces latency by ~100μs per frame (1 fewer IPC hop, 2 fewer allocations).
+Eliminates the separate NM host binary and IPC socket; the daemon speaks native-messaging protocol directly on stdin/stdout, saving one IPC hop per message (a few microseconds of latency vs. the forwarder).
 
 **Requires:** udev rules installed (daemon runs as your user, not root).
 
@@ -180,9 +259,7 @@ The installer:
 - Registers the native messaging host in the Windows registry (Firefox auto-detects)
 - Registers both `webhid.forwarder_nm_host` and `webhid.daemon_nm_host` manifests
 
-Install and restart Firefox. Start the daemon manually: run webhid-daemon.exe from the install directory.
-
-On Windows, `daemonAsNmHost` defaults to `true` (the daemon speaks NM directly, no forwarder process needed). Windows has no special HID permission setup.
+Install and restart Firefox. On Windows, `daemonAsNmHost` defaults to `true` (the recommended mode: the daemon speaks NM directly, no forwarder process needed) and Windows has no special HID permission setup. The installer already registers both manifests, so you can switch to the persistent forwarder mode from the addon settings anytime (see "Choosing a daemon mode" above).
 
 ### Portable/Manual
 
@@ -233,7 +310,12 @@ brew install webhid
 brew services start webhid
 ```
 
-Homebrew installs the daemon as a background service (via `brew services`). The NM manifest is installed to `/usr/local/lib/mozilla/native-messaging-hosts/` (Homebrew prefix).
+Homebrew installs the daemon as a background service via `brew services` (persistent forwarder mode; the NM manifests are installed to `/usr/local/lib/mozilla/native-messaging-hosts/`). For the recommended daemon-as-NM-host mode, stop the service and enable the toggle in the addon settings instead:
+
+```sh
+brew services stop webhid
+# Enable "Daemon as NM host" in the addon settings
+```
 
 > **Note:** macOS requires Input Monitoring (TCC) permission for `IOHIDManager` access. There is no way to prompt for it programmatically; grant it manually in System Settings → Privacy & Security → Input Monitoring.
 
@@ -324,31 +406,31 @@ Then install the [browser extension](https://addons.mozilla.org/en-US/firefox/ad
 
 ### Linux
 
-| Setting            | Recommended                                                                        | Reason                                                                                    |
-| ------------------ | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| Daemon as NM host  | ON (if user has direct hidraw access) or OFF (if using root daemon + webhid group) | Eliminates forwarder process + Unix socket. Skips group membership requirement.           |
-| Data Plane         | WS (default)                                                                       | Binary WS via worker with MessagePort for max performance. Switch to NM if WS is blocked. |
-| Device Picker Mode | modal (default)                                                                    | Inline dialog, least friction. pageAction/window available for single-device sites.       |
+| Setting           | Recommended                                      | Reason                                                                                    |
+| ----------------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------- |
+| Daemon as NM host | ON (recommended)                                  | Runs daemon as your user, no forwarder process / Unix socket, one less IPC hop. Needs udev `uaccess` rule. OFF only if you prefer a persistent root daemon + forwarder. |
+| Data Plane        | WS (default)                                      | Binary WS via worker with MessagePort for max performance. Switch to NM if WS is blocked. |
+| Device Picker Mode | modal (default)                                   | Inline dialog, least friction. pageAction/window available for single-device sites.       |
 
-**Setup**: Install daemon (system package or `make install-system`). If using root daemon with thin forwarder, add your user to the `webhid` group: `sudo usermod -aG webhid $USER` (log out + back in). If using daemon-as-NM-host (recommended for users with direct hidraw access via udev `uaccess` rule), install `webhid.daemon_nm_host` manifest via `make install-daemon-nm-host-user`: no group membership needed.
+**Setup**: Install daemon (system package or `make install-system`). Recommended: install the udev rule (`sudo make install-udev-rule` or copy `99-webhid.rules`) and enable "Daemon as NM host" in the addon settings; no group membership needed. Alternative: keep the root daemon + thin forwarder and add your user to the `webhid` group (`sudo usermod -aG webhid $USER`, log out + back in).
 
 ### Windows
 
-| Setting           | Recommended  | Reason                                                                                                                                                  |
-| ----------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Daemon as NM host | ON (default) | Windows has no permission setup needed, just point NM manifest path to `webhid-daemon.exe`. Daemon auto-detects NM mode via Firefox's 2 positional args |
-| Data Plane        | WS (default) | Binary WS via worker with MessagePort for performance                                                                                                   |
+| Setting           | Recommended  | Reason                                                                                                                          |
+| ----------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| Daemon as NM host | ON (default) | Recommended mode: daemon speaks NM directly, no forwarder. Windows has no permission setup; daemon auto-detects via Firefox's 2 positional args. |
+| Data Plane        | WS (default) | Binary WS via worker with MessagePort for performance                                                                           |
 
 **Setup**: Install MSI or portable zip. `daemonAsNmHost` defaults to `true` on Windows (auto-detected). For forwarder mode, register `webhid.forwarder_nm_host.json` with `path` pointing to `webhid-native-messaging.exe`.
 
 ### macOS
 
-| Setting           | Recommended         | Reason                                      |
-| ----------------- | ------------------- | ------------------------------------------- |
-| Daemon as NM host | ON (if user daemon) | Eliminates forwarder + Unix socket          |
-| Data Plane        | WS (default)        | WS worker + MessagePort works well on macOS |
+| Setting           | Recommended | Reason                                             |
+| ----------------- | ----------- | -------------------------------------------------- |
+| Daemon as NM host | ON          | Recommended mode: no forwarder / Unix socket, one less hop |
+| Data Plane        | WS (default) | WS worker + MessagePort works well on macOS        |
 
-**Setup**: Install via Homebrew (`brew install webhid`) or manual. Grant HID permissions in System Settings → Privacy & Security → Input Monitoring if prompted.
+**Setup**: Install via Homebrew (`brew install webhid`) or manual. Recommended: stop the `brew services` daemon and enable "Daemon as NM host" in the addon settings. Grant HID permissions in System Settings → Privacy & Security → Input Monitoring if prompted.
 
 ### Benchmarking / Debugging
 
