@@ -164,6 +164,92 @@ fn interface_protected(info: &DeviceInfo, report_type: ReportType) -> bool {
     ) || always_protected_usage(info.usage_page, info.usage, report_type)
 }
 
+/// Chromium's `RemoveProtectedReports` (content/browser/hid/hid_service.cc):
+/// prune blocked reports from the page-visible collection tree. A device
+/// whose collections all become empty is hidden (`None`), matching
+/// `OnDeviceAdded`'s `collections.empty()` check. Only the `collections`
+/// field is touched: the report map, reader and send path keep working off
+/// the full parse, and `max_input_report_size` is preserved.
+pub fn prune_device_info(info: DeviceInfo) -> Option<DeviceInfo> {
+    let map = build_report_collection_map(&info);
+    let rules = blocklist::blocklist_rules();
+    let collections: Vec<webhid::Collection> = info
+        .collections
+        .into_iter()
+        .filter_map(|c| prune_collection(c, &map, rules, info.vendor_id, info.product_id))
+        .collect();
+    if collections.is_empty() {
+        return None;
+    }
+    Some(DeviceInfo { collections, ..info })
+}
+
+fn prune_collection(
+    col: webhid::Collection,
+    map: &ReportCollectionMap,
+    rules: &[blocklist::BlocklistRule],
+    vendor_id: u16,
+    product_id: u16,
+) -> Option<webhid::Collection> {
+    let children: Vec<webhid::Collection> = col
+        .children
+        .into_iter()
+        .filter_map(|c| prune_collection(c, map, rules, vendor_id, product_id))
+        .collect();
+    let report_kept = |r: &webhid::Report, rt_byte: u8| -> bool {
+        let report_type = match rt_byte {
+            0 => ReportType::Input,
+            1 => ReportType::Output,
+            _ => ReportType::Feature,
+        };
+        let protected = map
+            .get(&(r.report_id, rt_byte))
+            .map(|assoc| {
+                associations_any_protected(
+                    rules,
+                    vendor_id,
+                    product_id,
+                    assoc,
+                    r.report_id,
+                    report_type,
+                )
+            })
+            .unwrap_or(false);
+        !protected
+    };
+    let input_reports: Vec<webhid::Report> = col
+        .input_reports
+        .into_iter()
+        .filter(|r| report_kept(r, 0))
+        .collect();
+    let output_reports: Vec<webhid::Report> = col
+        .output_reports
+        .into_iter()
+        .filter(|r| report_kept(r, 1))
+        .collect();
+    let feature_reports: Vec<webhid::Report> = col
+        .feature_reports
+        .into_iter()
+        .filter(|r| report_kept(r, 2))
+        .collect();
+    if input_reports.is_empty()
+        && output_reports.is_empty()
+        && feature_reports.is_empty()
+        && children.is_empty()
+    {
+        return None;
+    }
+    Some(webhid::Collection {
+        collection_type: col.collection_type,
+        usage_page: col.usage_page,
+        usage: col.usage,
+        children,
+        input_reports,
+        output_reports,
+        feature_reports,
+    })
+}
+
 fn compute_blocked_input_ids(info: &DeviceInfo, report_map: &ReportCollectionMap) -> HashSet<u8> {
     let rules = blocklist::blocklist_rules();
     let mut ids = HashSet::new();
@@ -215,7 +301,13 @@ impl DeviceManager {
     }
 
     pub fn enumerate(&self) -> anyhow::Result<Vec<DeviceInfo>> {
-        hid::enumerate()
+        // Prune blocked reports from the page-visible collections and hide
+        // devices whose collections all became empty, mirroring Chromium's
+        // RemoveProtectedReports + OnDeviceAdded.
+        Ok(hid::enumerate()?
+            .into_iter()
+            .filter_map(prune_device_info)
+            .collect())
     }
 
     pub fn open(&self, device_id: u32) -> anyhow::Result<(u32, Option<String>)> {
@@ -914,7 +1006,7 @@ mod tests {
         // mouse.bin and keyboard.bin are consumer-input fixtures: their
         // reports must be blocked with the feature on, matching Chromium
         // (mouse reports sit in a Physical child but propagate to the Mouse
-        // Application ancestor).
+        // Application ancestor), and pruning must hide the whole device.
         for file in ["mouse.bin", "keyboard.bin"] {
             let info = read_fixture(file);
             let map = build_report_collection_map(&info);
@@ -923,7 +1015,105 @@ mod tests {
                 !blocked.is_empty(),
                 "{file}: consumer-input fixture unexpectedly unblocked"
             );
+            assert!(
+                prune_device_info(info).is_none(),
+                "{file}: should be hidden after pruning"
+            );
         }
+        // vendor.bin and gamepad.bin stay fully visible after pruning.
+        for file in ["vendor.bin", "gamepad.bin"] {
+            let info = read_fixture(file);
+            let pruned = prune_device_info(info).expect("{file} kept");
+            assert!(!pruned.collections.is_empty());
+        }
+    }
+
+    #[cfg(feature = "report-blocking")]
+    #[test]
+    fn test_prune_keyboard_only_hidden() {
+        // A device whose collections all become empty after pruning is hidden,
+        // mirroring Chromium's OnDeviceAdded collections.empty() check.
+        let kb = device_info(vec![col(Some(0x0001), Some(0x0006), &[0])]);
+        assert!(prune_device_info(kb).is_none());
+
+        // Usage page 0x07 (Keyboard/Keypad page) is always protected.
+        let kbd_page = device_info(vec![col(Some(0x0007), Some(0x0001), &[5])]);
+        assert!(prune_device_info(kbd_page).is_none());
+    }
+
+    #[cfg(feature = "report-blocking")]
+    #[test]
+    fn test_prune_mouse_physical_child_hidden() {
+        // Mouse report in a Physical child: the report propagates to the
+        // Mouse Application ancestor, is blocked, and the whole device is
+        // pruned to nothing.
+        let mut phys = col(Some(0x0009), Some(0x0001), &[3]); // Physical/Pointer
+        phys.collection_type = 0;
+        let mut mouse = col(Some(0x0001), Some(0x0002), &[]); // Mouse top-level
+        mouse.children = vec![phys];
+        assert!(prune_device_info(device_info(vec![mouse])).is_none());
+    }
+
+    #[cfg(feature = "report-blocking")]
+    #[test]
+    fn test_prune_mixed_vendor_keyboard() {
+        // Vendor collection (report 1 in/out, unblocked) + Keyboard collection
+        // (report 0, blocked): the keyboard collection is pruned, the vendor
+        // collection survives with its reports, and max_input_report_size is
+        // preserved.
+        let kb = col(Some(0x0001), Some(0x0006), &[0]); // Keyboard
+        let vendor = webhid::Collection {
+            collection_type: 1,
+            usage_page: Some(0xFF00),
+            usage: Some(0x0001),
+            children: vec![],
+            input_reports: vec![Report { report_id: 1, items: vec![] }],
+            output_reports: vec![Report { report_id: 1, items: vec![] }],
+            feature_reports: vec![],
+        };
+        let mut info = device_info(vec![kb, vendor]);
+        info.max_input_report_size = 64;
+        let pruned = prune_device_info(info).expect("vendor collection survives");
+        assert_eq!(pruned.max_input_report_size, 64);
+        assert_eq!(pruned.collections.len(), 1);
+        let c = &pruned.collections[0];
+        assert_eq!(c.usage_page, Some(0xFF00));
+        assert_eq!(c.input_reports.len(), 1);
+        assert_eq!(c.output_reports.len(), 1);
+    }
+
+    #[cfg(feature = "report-blocking")]
+    #[test]
+    fn test_prune_nested_keyboard() {
+        // Keyboard nested under a vendor top-level: the child is pruned, the
+        // vendor top-level survives with its own report.
+        let nested_kb = col(Some(0x0001), Some(0x0006), &[1]); // Keyboard child
+        let mut vendor = col(Some(0xFF00), Some(0x0001), &[2]); // vendor report 2
+        vendor.children = vec![nested_kb];
+        let pruned = prune_device_info(device_info(vec![vendor])).expect("vendor kept");
+        assert_eq!(pruned.collections.len(), 1);
+        assert!(pruned.collections[0].children.is_empty(), "keyboard child pruned");
+        assert_eq!(pruned.collections[0].input_reports.len(), 1);
+
+        // Vendor top-level with no own reports: everything pruned -> hidden.
+        let mut vendor2 = col(Some(0xFF00), Some(0x0001), &[]);
+        vendor2.children = vec![col(Some(0x0001), Some(0x0006), &[1])];
+        assert!(prune_device_info(device_info(vec![vendor2])).is_none());
+    }
+
+    #[cfg(feature = "report-blocking")]
+    #[test]
+    fn test_prune_pointer_physical_under_vendor_kept() {
+        // Pointer-usage Physical child under a vendor top-level is not
+        // protected (no rule, not an Application): everything survives.
+        let mut phys = col(Some(0x0001), Some(0x0001), &[3]); // Physical/Pointer
+        phys.collection_type = 0;
+        let mut vendor = col(Some(0xFF00), Some(0x0001), &[2]);
+        vendor.children = vec![phys];
+        let pruned = prune_device_info(device_info(vec![vendor])).expect("kept");
+        assert_eq!(pruned.collections.len(), 1);
+        assert_eq!(pruned.collections[0].children.len(), 1);
+        assert_eq!(pruned.collections[0].children[0].input_reports.len(), 1);
     }
 
     #[cfg(feature = "report-blocking")]

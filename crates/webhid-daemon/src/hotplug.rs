@@ -11,7 +11,11 @@ static DEVICE_CACHE: Mutex<Option<HashMap<u32, webhid::DeviceInfo>>> = Mutex::ne
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 fn refresh_and_diff(event_tx: &broadcast::Sender<IpcResponse>) {
     let current: HashMap<u32, webhid::DeviceInfo> = match crate::hid::enumerate() {
-        Ok(devs) => devs.into_iter().map(|d| (d.device_id, d)).collect(),
+        Ok(devs) => devs
+            .into_iter()
+            .filter_map(crate::device_mgr::prune_device_info)
+            .map(|d| (d.device_id, d))
+            .collect(),
         Err(_) => return,
     };
     let mut cache = DEVICE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
@@ -124,6 +128,9 @@ fn start_udev(event_tx: broadcast::Sender<IpcResponse>) -> anyhow::Result<()> {
                         if crate::hid::is_blocked_by_vendor_product(&d) {
                             continue;
                         }
+                        let Some(d) = crate::device_mgr::prune_device_info(d) else {
+                            continue;
+                        };
                         let devnode = info.path().to_string_lossy().into_owned();
                         cache.insert(d.device_id, d.clone());
                         dnmap.insert(devnode, d.device_id);
@@ -151,6 +158,11 @@ fn start_udev(event_tx: broadcast::Sender<IpcResponse>) -> anyhow::Result<()> {
                     let response = match event.event_type() {
                         udev::EventType::Add => {
                             let Some(info) = crate::hid::info_by_raw_path(&devnode) else {
+                                continue;
+                            };
+                            // Hidden after pruning (all collections protected):
+                            // do not report the device, like Chromium.
+                            let Some(info) = crate::device_mgr::prune_device_info(info) else {
                                 continue;
                             };
                             log::info!(
@@ -216,7 +228,7 @@ fn run_windows(event_tx: broadcast::Sender<IpcResponse>) {
     if let Ok(devices) = crate::hid::enumerate() {
         let mut cache = DEVICE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
         let cache = cache.get_or_insert_with(HashMap::new);
-        for d in devices {
+        for d in devices.into_iter().filter_map(crate::device_mgr::prune_device_info) {
             cache.insert(d.device_id, d);
         }
     }
@@ -437,7 +449,7 @@ fn run_macos(event_tx: broadcast::Sender<IpcResponse>) {
     if let Ok(devices) = crate::hid::enumerate() {
         let mut cache = DEVICE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
         let cache = cache.get_or_insert_with(HashMap::new);
-        for d in devices {
+        for d in devices.into_iter().filter_map(crate::device_mgr::prune_device_info) {
             cache.insert(d.device_id, d);
         }
     }
