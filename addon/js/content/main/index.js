@@ -104,6 +104,14 @@
    */
   async function handleSpawnWorkerRequest(req) {
     const payload = req.payload || {}
+    if (payload.mode === 'terminate') {
+      const existing = mainWorldWorkers.get(payload.deviceId)
+      if (existing) existing.terminate()
+      if (mainWorldWorkers.get(payload.deviceId) === existing) {
+        mainWorldWorkers.delete(payload.deviceId)
+      }
+      return { result: { ok: true }, transfer: null }
+    }
     const makeUrl = ttFactory || ((s) => s)
     let worker
     try {
@@ -118,16 +126,19 @@
     } catch (e) {
       return { result: { ok: false, error: String(e && e.message) }, transfer: null }
     }
-    if (payload.mode === 'terminate') {
-      worker.terminate()
-      mainWorldWorkers.delete(payload.deviceId)
-      return { result: { ok: true }, transfer: null }
-    }
+    const previous = mainWorldWorkers.get(payload.deviceId)
+    if (previous && previous !== worker) previous.terminate()
     mainWorldWorkers.set(payload.deviceId, worker)
-    worker.onclose = () => mainWorldWorkers.delete(payload.deviceId)
+    worker.onclose = () => {
+      if (mainWorldWorkers.get(payload.deviceId) === worker) {
+        mainWorldWorkers.delete(payload.deviceId)
+      }
+    }
     worker.onerror = (event) => {
       logger.debug('worker error:', event && event.message)
-      mainWorldWorkers.delete(payload.deviceId)
+      if (mainWorldWorkers.get(payload.deviceId) === worker) {
+        mainWorldWorkers.delete(payload.deviceId)
+      }
       if (bridgePort) {
         bridgePort.postMessage({
           type: 'workerError',
@@ -137,6 +148,57 @@
       }
     }
     return { result: { ok: true }, transfer: null }
+  }
+
+  /**
+   * Wires the data and control channels for an open device to its (possibly
+   * freshly spawned) worker. Called both from the polyfill's open() and from
+   * the bridge's wireWorkerPort message, which the bridge sends after spawning
+   * a replacement worker on a data-plane switch (the device is already open,
+   * so open() will not run again). Closes a stale data port before replacing it.
+   * @param {object} state
+   * @returns {void}
+   */
+  function wireDevicePort(state) {
+    if (state.dataPort) {
+      try {
+        state.dataPort.onmessage = null
+        state.dataPort.close()
+      } catch (e) {
+        logger.debug('close stale dataPort failed', e)
+      }
+    }
+    const dataChannel = new MessageChannel()
+    state.dataPort = dataChannel.port1
+    state.dataPort.onmessage = (event) => onDataPortMessage(state, event.data)
+    const worker = mainWorldWorkers.get(state.deviceId)
+    if (worker) {
+      const controlChannel = new MessageChannel()
+      worker.postMessage(
+        { type: 'setPorts', controlPort: controlChannel.port2, dataPort: dataChannel.port2 },
+        [controlChannel.port2, dataChannel.port2]
+      )
+      bridgePort.postMessage(
+        { id: 0, action: 'dataPort', payload: { deviceId: state.deviceId } },
+        [controlChannel.port1]
+      )
+    } else {
+      bridgePort.postMessage(
+        { id: 0, action: 'dataPort', payload: { deviceId: state.deviceId } },
+        [dataChannel.port2]
+      )
+    }
+  }
+
+  /**
+   * @param {{deviceId?: string}} data
+   * @returns {void}
+   */
+  function handleWireWorkerPort(data) {
+    const device = data.deviceId ? deviceRegistry.get(data.deviceId) : null
+    const state = device ? devState.get(device) : null
+    if (!state || !state.opened) return
+    wireDevicePort(state)
   }
 
 
@@ -329,6 +391,10 @@
             })
           }
         })
+        return
+      }
+      if (event.data.type === 'wireWorkerPort') {
+        handleWireWorkerPort(event.data)
         return
       }
       if (event.data.type === 'response') {
@@ -609,26 +675,7 @@
           })
           if (http.isOk(response.s)) {
             await bridgeReady
-            const dataChannel = new MessageChannel()
-            state.dataPort = dataChannel.port1
-            state.dataPort.onmessage = (event) => onDataPortMessage(state, event.data)
-            const worker = mainWorldWorkers.get(state.deviceId)
-            if (worker) {
-              const controlChannel = new MessageChannel()
-              worker.postMessage(
-                { type: 'setPorts', controlPort: controlChannel.port2, dataPort: dataChannel.port2 },
-                [controlChannel.port2, dataChannel.port2]
-              )
-              bridgePort.postMessage(
-                { id: 0, action: 'dataPort', payload: { deviceId: state.deviceId } },
-                [controlChannel.port1]
-              )
-            } else {
-              bridgePort.postMessage(
-                { id: 0, action: 'dataPort', payload: { deviceId: state.deviceId } },
-                [dataChannel.port2]
-              )
-            }
+            wireDevicePort(state)
             state.opened = true
             logger.info('open deviceId=' + state.deviceId)
             this.dispatchEvent(new Event('open'))

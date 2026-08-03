@@ -174,7 +174,7 @@
       })
       if (http.isOk(resp.s) && resp.t) {
         sessionTokens.set(deviceId, resp.t)
-        spawnDataPlane(deviceId, resp.t, resp.w || wsPort)
+        spawnDataPlane(deviceId, resp.t, resp.w || wsPort, { rewire: true })
       } else {
         logger.error(
           'data plane token refresh failed for',
@@ -408,6 +408,10 @@
       ok = await spawnInPageDataPlane(deviceId, sessionToken, opts)
     } else {
       ok = await spawnWorker(deviceId, sessionToken, wsPort, opts, gen)
+      if (ok && opts.rewire) {
+        const pagePort = pagePorts.get(window)
+        if (pagePort) pagePort.postMessage({ type: 'wireWorkerPort', deviceId })
+      }
     }
     if (!ok && spawnGen.get(deviceId) === gen) {
       logger.warn('data plane spawn failed for', deviceId, '; falling back to NM')
@@ -1031,16 +1035,16 @@
     if (dp === 'ws') {
       for (const id of openDevices) {
         const token = sessionTokens.get(id)
-        if (token) spawnDataPlane(id, token, wsPort)
+        if (token) spawnDataPlane(id, token, wsPort, { rewire: true })
       }
     } else if (dp === 'wt') {
       for (const id of openDevices) {
         const token = sessionTokens.get(id)
         if (token) {
           if (wtPort != null) {
-            spawnDataPlane(id, token, null, { wtPort, wtCertHash })
+            spawnDataPlane(id, token, null, { wtPort, wtCertHash, rewire: true })
           } else {
-            spawnDataPlane(id, token, wsPort)
+            spawnDataPlane(id, token, wsPort, { rewire: true })
           }
         }
       }
