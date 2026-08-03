@@ -1092,13 +1092,7 @@
       if (device && Array.isArray(data.reports)) {
         for (const r of data.reports) {
           if (r == null) continue
-          const dataView = r.data
-            ? new DataView(
-                r.data.buffer || r.data,
-                r.data.byteOffset || 0,
-                r.data.byteLength
-              )
-            : new DataView(new ArrayBuffer(0))
+          const dataView = r.data ? new DataView(r.data) : new DataView(new ArrayBuffer(0))
           device.dispatchEvent(
             new HIDInputReportEvent('inputreport', {
               device: device,
@@ -1111,13 +1105,7 @@
       return
     }
     if (data.type === 'inputReport') {
-      const dataView = data.data
-        ? new DataView(
-            data.data.buffer || data.data,
-            data.data.byteOffset || 0,
-            data.data.byteLength
-          )
-        : new DataView(new ArrayBuffer(0))
+      const dataView = data.data ? new DataView(data.data) : new DataView(new ArrayBuffer(0))
       const device = state.self
       if (device)
         device.dispatchEvent(

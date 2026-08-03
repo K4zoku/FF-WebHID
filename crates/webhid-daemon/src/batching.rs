@@ -15,6 +15,9 @@ pub const MSG_INPUT_BATCH: u8 = 0x00;
 
 const DEFAULT_BATCH_FLUSH_MS: u64 = 0;
 const ADAPTIVE_COALESCE_US: u64 = 25;
+const HIGH_RATE_COALESCE_MS: u64 = 8;
+const RATE_WINDOW_MS: u64 = 4;
+const HIGH_RATE_COUNT: u32 = 12;
 
 pub fn write_batch_frame(out: &mut Vec<u8>, reports: &[(u8, Bytes)]) {
     out.clear();
@@ -144,7 +147,23 @@ pub async fn run_sender<F>(
     }
 
     let coalesce = Duration::from_micros(ADAPTIVE_COALESCE_US);
-    loop {
+    let high_rate_coalesce = std::env::var("WEBHID_WS_HIGH_RATE_MS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .map(Duration::from_millis)
+        .unwrap_or(Duration::from_millis(HIGH_RATE_COALESCE_MS));
+    let rate_window = std::env::var("WEBHID_WS_RATE_WINDOW_MS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .map(Duration::from_millis)
+        .unwrap_or(Duration::from_millis(RATE_WINDOW_MS));
+    let high_rate_count = std::env::var("WEBHID_WS_HIGH_RATE_COUNT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(HIGH_RATE_COUNT);
+    let mut rate_count: u32 = 0;
+    let mut rate_start = tokio::time::Instant::now();
+    'outer: loop {
         let event_result = event_rx.recv().await;
         if !handle_event(event_result, device_id, &mut batch, &mut flush) {
             break;
@@ -153,23 +172,43 @@ pub async fn run_sender<F>(
         drain_available(&mut event_rx, device_id, &mut batch, &mut flush);
 
         if batch.len() > 1 {
-            tokio::select! {
-                _ = tokio::time::sleep(coalesce) => {}
-                event_result = event_rx.recv() => {
-                    if !handle_event(event_result, device_id, &mut batch, &mut flush) {
-                        break;
+            let window = if rate_count >= high_rate_count {
+                high_rate_coalesce
+            } else {
+                coalesce
+            };
+            let deadline = tokio::time::Instant::now() + window;
+            loop {
+                let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+                if remaining.is_zero() {
+                    break;
+                }
+                tokio::select! {
+                    _ = tokio::time::sleep(remaining) => break,
+                    event_result = event_rx.recv() => {
+                        if !handle_event(event_result, device_id, &mut batch, &mut flush) {
+                            break 'outer;
+                        }
+                        drain_available(&mut event_rx, device_id, &mut batch, &mut flush);
                     }
-                    drain_available(&mut event_rx, device_id, &mut batch, &mut flush);
                 }
             }
         }
 
         if !batch.is_empty() {
             write_batch_frame(&mut frame_buf, &batch);
+            let flushed = batch.len() as u32;
             if !flush(std::mem::take(&mut frame_buf)) {
                 break;
             }
             batch.clear();
+            let now = tokio::time::Instant::now();
+            if now.duration_since(rate_start) >= rate_window {
+                rate_count = flushed;
+                rate_start = now;
+            } else {
+                rate_count = rate_count.saturating_add(flushed);
+            }
         }
     }
 }
