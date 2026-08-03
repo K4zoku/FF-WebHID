@@ -18,7 +18,13 @@ const MODE_NM: &str = "nm";
 const MODE_WS: &str = "ws";
 const MODE_WT: &str = "wt";
 
-type ReportCollectionMap = HashMap<(u8, u8), (Option<u16>, Option<u16>)>;
+// (report_id, report_type) -> every (usage_page, usage) association from the
+// collections that declare that report. Multiple collections can share a
+// report_id (notably unnumbered report 0), so each key carries a list.
+// Nested child collections are walked recursively, mirroring Chromium's
+// kWebHidRecursiveFiltering (enabled by default) so reports living in child
+// collections (e.g. a Keyboard nested under a vendor top-level) are seen.
+type ReportCollectionMap = HashMap<(u8, u8), Vec<(Option<u16>, Option<u16>)>>;
 
 struct Entry {
     device: Arc<Mutex<HidDevice>>,
@@ -40,43 +46,67 @@ fn random_hex_token(n: usize) -> Result<String, getrandom::Error> {
 }
 
 fn build_report_collection_map(info: &DeviceInfo) -> ReportCollectionMap {
-    let mut map = HashMap::new();
-    for col in &info.collections {
+    fn walk(col: &webhid::Collection, map: &mut ReportCollectionMap) {
         let up = col.usage_page;
         let u = col.usage;
         for r in &col.input_reports {
-            map.insert((r.report_id, 0), (up, u));
+            map.entry((r.report_id, 0)).or_default().push((up, u));
         }
         for r in &col.output_reports {
-            map.insert((r.report_id, 1), (up, u));
+            map.entry((r.report_id, 1)).or_default().push((up, u));
         }
         for r in &col.feature_reports {
-            map.insert((r.report_id, 2), (up, u));
+            map.entry((r.report_id, 2)).or_default().push((up, u));
+        }
+        for c in &col.children {
+            walk(c, map);
         }
     }
+    let mut map: ReportCollectionMap = HashMap::new();
+    for col in &info.collections {
+        walk(col, &mut map);
+    }
     map
+}
+
+// A report is blocked when ANY collection association matches a blocklist
+// rule. This mirrors Chromium's HidBlocklist::GetProtectedReportIds, which
+// unions the report IDs of every collection matching a rule: if a keyboard
+// collection and a vendor collection share a report_id (common for unnumbered
+// report 0), the report is still dropped because the keyboard data in it must
+// never reach the page. An empty association list never blocks.
+fn associations_any_blocked(
+    rules: &[blocklist::BlocklistRule],
+    vendor_id: u16,
+    product_id: u16,
+    associations: &[(Option<u16>, Option<u16>)],
+    report_id: u8,
+    report_type: ReportType,
+) -> bool {
+    !associations.is_empty()
+        && associations.iter().any(|(up, u)| {
+            blocklist::is_report_blocked(
+                rules, vendor_id, product_id, *up, *u, report_id, report_type,
+            )
+        })
 }
 
 fn compute_blocked_input_ids(info: &DeviceInfo, report_map: &ReportCollectionMap) -> HashSet<u8> {
     let rules = blocklist::blocklist_rules();
     let mut ids = HashSet::new();
-    for col in &info.collections {
-        for r in &col.input_reports {
-            let (up, u) = report_map
-                .get(&(r.report_id, 0))
-                .copied()
-                .unwrap_or((col.usage_page, col.usage));
-            if blocklist::is_report_blocked(
-                rules,
-                info.vendor_id,
-                info.product_id,
-                up,
-                u,
-                r.report_id,
-                ReportType::Input,
-            ) {
-                ids.insert(r.report_id);
-            }
+    for (&(report_id, rt_byte), associations) in report_map {
+        if rt_byte != 0 {
+            continue;
+        }
+        if associations_any_blocked(
+            rules,
+            info.vendor_id,
+            info.product_id,
+            associations,
+            report_id,
+            ReportType::Input,
+        ) {
+            ids.insert(report_id);
         }
     }
     ids
@@ -464,17 +494,16 @@ impl DeviceManager {
             ReportType::Output => 1,
             ReportType::Feature => 2,
         };
-        let (up, u) = match entry.report_to_collection.get(&(report_id, rt_byte)) {
-            Some(v) => *v,
+        let associations = match entry.report_to_collection.get(&(report_id, rt_byte)) {
+            Some(v) => v,
             None => return false,
         };
         let rules = blocklist::blocklist_rules();
-        blocklist::is_report_blocked(
+        associations_any_blocked(
             rules,
             entry.vendor_id,
             entry.product_id,
-            up,
-            u,
+            associations,
             report_id,
             report_type,
         )
@@ -500,12 +529,199 @@ impl DeviceManager {
 mod tests {
     use super::*;
     use tokio::sync::broadcast;
+    use webhid::{Collection, Report};
+
+    fn col(usage_page: Option<u16>, usage: Option<u16>, input_ids: &[u8]) -> Collection {
+        Collection {
+            collection_type: 1, // Application
+            usage_page,
+            usage,
+            children: vec![],
+            input_reports: input_ids
+                .iter()
+                .map(|&report_id| Report {
+                    report_id,
+                    items: vec![],
+                })
+                .collect(),
+            output_reports: vec![],
+            feature_reports: vec![],
+        }
+    }
+
+    fn device_info(collections: Vec<Collection>) -> DeviceInfo {
+        DeviceInfo {
+            vendor_id: 0x1234,
+            product_id: 0x5678,
+            product_name: String::new(),
+            manufacturer: None,
+            serial_number: None,
+            usage_page: None,
+            usage: None,
+            device_id: 1,
+            collections,
+            max_input_report_size: 64,
+        }
+    }
 
     fn test_token(seed: u8) -> String {
         hex::encode([seed; 16])
     }
     fn test_nonce(seed: u8) -> String {
         hex::encode([seed; 16])
+    }
+
+    #[test]
+    fn test_associations_any_blocked_semantics() {
+        let rules = blocklist::blocklist_rules();
+        // FIDO usage page is always blocked at the report level.
+        let all_blocked = vec![(Some(0xF1D0), None), (Some(0xF1D0), None)];
+        assert!(associations_any_blocked(
+            rules,
+            0x1234,
+            0x5678,
+            &all_blocked,
+            0x01,
+            ReportType::Input
+        ));
+        // ANY blocked association blocks the report, even if another (Generic
+        // Desktop / Joystick) is unblocked: the shared report may carry the
+        // blocked collection's data.
+        let mixed = vec![(Some(0xF1D0), None), (Some(0x0001), Some(0x0004))];
+        assert!(associations_any_blocked(
+            rules,
+            0x1234,
+            0x5678,
+            &mixed,
+            0x01,
+            ReportType::Input
+        ));
+        // No association matches -> not blocked.
+        let none_match = vec![(Some(0x0001), Some(0x0004)), (Some(0x0001), Some(0x0005))];
+        assert!(!associations_any_blocked(
+            rules,
+            0x1234,
+            0x5678,
+            &none_match,
+            0x01,
+            ReportType::Input
+        ));
+        // No associations -> no blocking.
+        assert!(!associations_any_blocked(
+            rules,
+            0x1234,
+            0x5678,
+            &[],
+            0x01,
+            ReportType::Input
+        ));
+    }
+
+    #[cfg(feature = "report-blocking")]
+    #[test]
+    fn test_compute_blocked_input_ids_any_association_blocks() {
+        // Keyboard (blocked) + Joystick (not blocked) share unnumbered id 0:
+        // the keyboard association still blocks the shared report, matching
+        // Chromium's union of protected report IDs.
+        let info = device_info(vec![
+            col(Some(0x0001), Some(0x0006), &[0]), // Keyboard
+            col(Some(0x0001), Some(0x0004), &[0]), // Joystick
+        ]);
+        let map = build_report_collection_map(&info);
+        assert_eq!(compute_blocked_input_ids(&info, &map), HashSet::from([0]));
+
+        // Keyboard + Mouse share id 0, both blocked -> dropped.
+        let info = device_info(vec![
+            col(Some(0x0001), Some(0x0006), &[0]), // Keyboard
+            col(Some(0x0001), Some(0x0002), &[0]), // Mouse
+        ]);
+        let map = build_report_collection_map(&info);
+        assert_eq!(compute_blocked_input_ids(&info, &map), HashSet::from([0]));
+
+        // Single blocked association still blocks.
+        let info = device_info(vec![col(Some(0x0001), Some(0x0006), &[0])]);
+        let map = build_report_collection_map(&info);
+        assert_eq!(compute_blocked_input_ids(&info, &map), HashSet::from([0]));
+
+        // Id 0 is keyboard-only, id 1 is keyboard + joystick: both blocked,
+        // because the keyboard declares both.
+        let info = device_info(vec![
+            col(Some(0x0001), Some(0x0006), &[0, 1]), // Keyboard
+            col(Some(0x0001), Some(0x0004), &[1]),    // Joystick
+        ]);
+        let map = build_report_collection_map(&info);
+        assert_eq!(compute_blocked_input_ids(&info, &map), HashSet::from([0, 1]));
+
+        // Nothing matches the rules -> nothing blocked.
+        let info = device_info(vec![col(Some(0x0001), Some(0x0004), &[0])]); // Joystick
+        let map = build_report_collection_map(&info);
+        assert!(compute_blocked_input_ids(&info, &map).is_empty());
+    }
+
+    #[cfg(feature = "report-blocking")]
+    #[test]
+    fn test_e2e_fixtures_unblocked_with_report_blocking() {
+        // The e2e harness builds the daemon with default features (now
+        // including report-blocking); vendor.bin and gamepad.bin must stay
+        // fully usable. Regression guard for the default-features flip.
+        for (file, vid, pid) in [
+            ("vendor.bin", 0x16c0, 0x0001),
+            ("gamepad.bin", 0x16c0, 0x0002),
+        ] {
+            let path = concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../tests/fixtures/descriptors/"
+            );
+            let bytes = std::fs::read(format!("{path}{file}"))
+                .unwrap_or_else(|e| panic!("{file}: {e}"));
+            let info = DeviceInfo {
+                vendor_id: vid,
+                product_id: pid,
+                product_name: String::new(),
+                manufacturer: None,
+                serial_number: None,
+                usage_page: None,
+                usage: None,
+                device_id: 1,
+                collections: crate::descriptor::parse_report_descriptor(&bytes),
+                max_input_report_size: 0,
+            };
+            assert!(
+                !info.collections.is_empty(),
+                "{file}: descriptor failed to parse"
+            );
+            let map = build_report_collection_map(&info);
+            let blocked = compute_blocked_input_ids(&info, &map);
+            assert!(
+                blocked.is_empty(),
+                "{file}: e2e fixture unexpectedly blocked input reports {blocked:?}"
+            );
+        }
+    }
+
+    #[cfg(feature = "report-blocking")]
+    #[test]
+    fn test_compute_blocked_input_ids_nested_collections() {
+        // A Keyboard nested as a child of a vendor top-level is walked
+        // recursively (Chromium's kWebHidRecursiveFiltering, enabled by
+        // default): its report is blocked.
+        let nested_kb = col(Some(0x0001), Some(0x0006), &[1]); // Keyboard
+        let mut vendor = col(Some(0xFF00), Some(0x0001), &[]); // Vendor top-level
+        vendor.children = vec![nested_kb];
+        let info = device_info(vec![vendor]);
+        let map = build_report_collection_map(&info);
+        assert_eq!(compute_blocked_input_ids(&info, &map), HashSet::from([1]));
+
+        // A Mouse pointer report attached to a Physical child (usage page
+        // 0x09, not a blocked usage) stays unblocked: its association does not
+        // match any rule, exactly like Chromium's per-collection matching.
+        let mut phys = col(Some(0x0009), Some(0x0001), &[3]); // Physical/Pointer
+        phys.collection_type = 0;
+        let mut mouse = col(Some(0x0001), Some(0x0002), &[]); // Mouse top-level
+        mouse.children = vec![phys];
+        let info = device_info(vec![mouse]);
+        let map = build_report_collection_map(&info);
+        assert!(compute_blocked_input_ids(&info, &map).is_empty());
     }
 
     #[test]

@@ -5,12 +5,14 @@ edition = "2024"
 license = "MIT"
 
 [features]
+default = ["report-blocking"]
 hardening = ["webhid/hardening"]
 # Enforce report-level blocking for Generic Desktop consumer-input collections
 # (mouse 0x0002, keyboard 0x0006, keypad 0x0007, system control 0x0080):
 # input reports are dropped at the reader, output/feature writes are rejected.
-# Off by default so consumer-input devices (e.g. macropads) stay fully usable;
-# matches Chromium/WICG behavior when enabled.
+# On by default to match Chromium/WICG behavior; build with
+# `--no-default-features` to keep consumer-input devices (e.g. macropads)
+# fully usable.
 report-blocking = []
 
 [dependencies]
