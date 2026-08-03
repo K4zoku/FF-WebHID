@@ -239,8 +239,11 @@ export async function benchmarkMode(
   }
   if (opts?.inPage) {
     await setUseWorker(backgroundPage, origin, false)
-  }
-  if (process.env.BENCHMARK_DEBUG_LOG) {
+    // The in-page stream-attach detection watches the page console for the
+    // debug-level 'WT persistent stream attached' log; without debug logging
+    // a working in-page run is indistinguishable from a degraded one.
+    await setLogLevel(backgroundPage, origin, 3)
+  } else if (process.env.BENCHMARK_DEBUG_LOG) {
     await setLogLevel(backgroundPage, origin, 3)
   }
 
@@ -324,17 +327,19 @@ export async function runBenchmark(
   if (opts.inPage && !wtStreamAttached) {
     // Grace period for the stream-attach log to land after warmup, then fail
     // fast instead of running the whole benchmark on the NM fallback path.
+    // The in-page WT data plane attaches within ~10ms of open() on the
+    // harness (verified); a missed attach here means the spawn degraded to NM.
     const deadline = Date.now() + 2000
     while (!wtStreamAttached && Date.now() < deadline) {
       await page.waitForTimeout(200)
     }
-    test.skip(
-      true,
-      'in-page WT data plane did not attach its stream during warmup: the spawn ' +
-        'degraded to NM (page-context WebTransport to 127.0.0.1 is gated in the ' +
-        'harness Firefox). Skipping instead of measuring NM. Run on real Firefox ' +
-        'after allowing the local-network prompt once.'
-    )
+    if (!wtStreamAttached) {
+      throw new Error(
+        'in-page WT data plane did not attach its stream during warmup; the ' +
+          'spawn degraded to NM' +
+          (fallbacks.length ? ': ' + fallbacks.join(' | ') : '')
+      )
+    }
   }
 
   const envRuns = Number(process.env.BENCHMARK_RUNS)

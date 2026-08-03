@@ -18,9 +18,8 @@ test('image pipeline benchmark wt in-page (useWorker off)', async ({
   expect(
     result.wtStreamAttached,
     'the in-page WT never logged a stream attach: the spawn degraded to NM ' +
-      '(page-context WebTransport to 127.0.0.1 is gated in the harness Firefox). ' +
-      'These numbers measure NM, not in-page WT. Run on real Firefox after allowing ' +
-      'the local-network prompt once.'
+      '(page-context WebTransport must not be intercepted by Playwright routing; ' +
+      'Juggler interception breaks the WebTransport channel. See tests/helpers/e2e.ts).'
   ).toBe(true)
   expect(result.fallbacks, 'unexpected data-plane fallback messages').toEqual([])
 })

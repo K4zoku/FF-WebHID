@@ -377,14 +377,6 @@ test.describe.serial('WebHID E2E (WebTransport data plane)', () => {
     backgroundPage,
     daemon
   }) => {
-    test.skip(
-      true,
-      'page-context WebTransport to 127.0.0.1 is gated in the harness Firefox: ' +
-        'the in-page spawn silently stalls and falls back to NM (verified via the ' +
-        'daemon log: no WT connect). Real Firefox 153 shows a one-time "Allow" ' +
-        'local-network prompt that works; the harness never renders it. ' +
-        'Verified manually on real Firefox.'
-    )
     const origin = new URL(sharedPage.url()).origin
     const siteKey = `settings :: ${origin} :: useWorker`
     const genCountBefore = daemon

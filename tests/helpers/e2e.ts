@@ -279,7 +279,16 @@ export const test = base.extend<
       let onUnroute: ((pattern: string, handler: RouteHandler) => void) | undefined
       let onUnrouteAll: (() => void) | undefined
       try {
-        await context.route('**/*', defaultRouteHandler)
+        // No catch-all `context.route('**/*', ...)` here: Juggler implements
+        // route interception with the service-worker intercept API, which
+        // internally redirects the intercepted channel and cancels the
+        // original with NS_ERROR_NOT_AVAILABLE. That breaks page-context
+        // WebTransport (the in-page WT data plane): the replacement channel
+        // cannot carry the WebTransport session, so `wt.ready` never settles
+        // and the bridge falls back to NM after 10s. Worker-context
+        // WebTransport is unaffected (Juggler only routes page requests).
+        // No spec uses page.route()/context.route() for mocking, so nothing
+        // needs interception enabled globally.
 
         bridge = new NetworkEventBridge(context._firefoxWebServer)
         context._firefoxBridge = bridge
