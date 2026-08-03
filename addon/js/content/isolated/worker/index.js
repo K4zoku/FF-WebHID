@@ -121,6 +121,8 @@ function handleDataPortMessage(msg) {
  */
 function pushInputBatch(batch, offset = 0) {
   let count = 0
+  const reports = []
+  const transfers = []
   while (offset + 1 < batch.length) {
     const len = batch[offset] | (batch[offset + 1] << 8)
     offset += 2
@@ -137,28 +139,30 @@ function pushInputBatch(batch, offset = 0) {
           hex += view[i].toString(16).padStart(2, '0') + ' '
         logger.debug('inputReport reportId=' + reportId + ' len=' + payloadLen + ' first8=' + hex)
       }
-      if (dataPort) {
-        try {
-          dataPort.postMessage({ type: 'inputReport', reportId, data: buffer }, [buffer])
-        } catch (e) {
-          // A closed/re-wired data port mid-batch must not drop the rest of
-          // the frame's reports.
-          logger.warn('inputReport postMessage failed', e)
-        }
-      }
+      reports.push({ reportId, data: buffer })
+      transfers.push(buffer)
     } else {
-      if (dataPort) {
-        try {
-          dataPort.postMessage({ type: 'inputReport', reportId, data: null })
-        } catch (e) {
-          logger.warn('inputReport postMessage failed', e)
-        }
-      }
+      reports.push({ reportId, data: null })
     }
     offset += len
     count++
   }
-  if (count > 0) logger.debug('forwarded ' + count + ' reports via data port')
+  if (count > 0) {
+    // One port message per frame (the daemon batches reports into ~1ms
+    // frames at high polling rates), not one per report: per-message port
+    // overhead at 8000 msg/s drops reports under main-thread load (measured:
+    // worker parses all, page misses 0.2-0.4% mid-run).
+    if (dataPort) {
+      try {
+        dataPort.postMessage({ type: 'inputReportBatch', reports }, transfers)
+      } catch (e) {
+        // A closed/re-wired data port mid-batch must not drop the rest of
+        // the frame's reports.
+        logger.warn('inputReportBatch postMessage failed', e)
+      }
+    }
+    logger.debug('forwarded ' + count + ' reports via data port')
+  }
 }
 
 /**

@@ -1087,6 +1087,29 @@
       else entry.resolve()
       return
     }
+    if (data.type === 'inputReportBatch') {
+      const device = state.self
+      if (device && Array.isArray(data.reports)) {
+        for (const r of data.reports) {
+          if (r == null) continue
+          const dataView = r.data
+            ? new DataView(
+                r.data.buffer || r.data,
+                r.data.byteOffset || 0,
+                r.data.byteLength
+              )
+            : new DataView(new ArrayBuffer(0))
+          device.dispatchEvent(
+            new HIDInputReportEvent('inputreport', {
+              device: device,
+              reportId: r.reportId,
+              data: dataView
+            })
+          )
+        }
+      }
+      return
+    }
     if (data.type === 'inputReport') {
       const dataView = data.data
         ? new DataView(
