@@ -70,7 +70,7 @@ const FALLBACK_PATTERNS = [
  * world (polyfill logger) logs this only after the WebTransport stream attach
  * succeeded. The worker logs the same text, but worker console does not reach
  * the page, so a match here is the in-page transport. */
-const WT_STREAM_ATTACHED = 'WT persistent stream attached'
+export const WT_STREAM_ATTACHED = 'WT persistent stream attached'
 
 export interface BenchmarkResult {
   open: number | null

@@ -2,7 +2,14 @@ import { test } from '../../helpers/e2e.js'
 import type { Page } from '@playwright/test'
 import { sendInput, type WebhidMockProcess } from '../../helpers/e2e-process.js'
 import { grantDevicePermission, mockIdFor, type DeviceFilter } from '../../helpers/e2e-devices.js'
-import { setDataPlane, percentile, getBenchmarkPage } from '../benchmark-utils.js'
+import {
+  setDataPlane,
+  setUseWorker,
+  setLogLevel,
+  percentile,
+  getBenchmarkPage,
+  WT_STREAM_ATTACHED
+} from '../benchmark-utils.js'
 
 export const VENDOR = mockIdFor('vendor')
 
@@ -69,6 +76,8 @@ export interface LossResult {
   runs: LossRun[]
   failures: number
   fallbacks: string[]
+  /** True when the in-page WT transport logged a successful stream attach. */
+  wtStreamAttached: boolean
 }
 
 function sleep(ms: number): Promise<void> {
@@ -165,17 +174,35 @@ async function runLossOnceWithRetry(
  * delivery loss at LOSS_RATE for LOSS_COUNT reports per run. */
 export async function benchmarkLoss(
   fixtures: LossFixtures,
-  mode: 'ws' | 'wt' | 'nm'
+  mode: 'ws' | 'wt' | 'nm',
+  opts: { inPage?: boolean } = {}
 ): Promise<LossResult> {
   const { harnessCtx, backgroundPage, httpPort, daemonMode } = fixtures
   const page = await getBenchmarkPage(harnessCtx)
   const fallbacks: string[] = []
+  let wtStreamAttached = false
   const onConsole = (msg: { text(): string; type(): string }) => {
     const text = msg.text()
     if (FALLBACK_PATTERNS.some((p) => text.includes(p))) fallbacks.push(`[${msg.type()}] ${text}`)
+    if (text.includes(WT_STREAM_ATTACHED) && text.includes('polyfill')) {
+      wtStreamAttached = true
+    }
   }
   page.on('console', onConsole)
   const origin = `http://localhost:${httpPort}`
+  const resetSettings = () =>
+    backgroundPage
+      .evaluate(
+        ({ origin }: { origin: string }) =>
+          browser.storage.local.remove([
+            'settings :: useWorker',
+            'settings :: logLevel',
+            `settings :: ${origin} :: useWorker`,
+            `settings :: ${origin} :: logLevel`
+          ]),
+        { origin }
+      )
+      .catch(() => {})
   try {
     if (daemonMode === 'daemon-nm') {
       await backgroundPage
@@ -183,6 +210,14 @@ export async function benchmarkLoss(
         .catch(() => {})
     }
     await setDataPlane(backgroundPage, origin, mode)
+    if (opts.inPage) {
+      await setUseWorker(backgroundPage, origin, false)
+      // The in-page stream-attach detection watches the page console for the
+      // debug-level 'WT persistent stream attached' log; without debug
+      // logging a working in-page run is indistinguishable from a degraded
+      // one.
+      await setLogLevel(backgroundPage, origin, 3)
+    }
     await page.goto(`${origin}/tests/test-page.html`, {
       waitUntil: 'domcontentloaded',
       timeout: 15000
@@ -235,6 +270,25 @@ export async function benchmarkLoss(
       await runLossOnce(page, mock, LOSS_RATE, Math.floor(LOSS_COUNT / 2), 0)
     } catch {}
 
+    if (opts.inPage && !wtStreamAttached) {
+      // Grace period for the stream-attach log to land after warmup, then
+      // fail fast instead of running the whole benchmark on the NM fallback
+      // path. The in-page WT data plane attaches within ~10ms of open() on
+      // the harness (verified); a missed attach here means the spawn
+      // degraded to NM.
+      const deadline = Date.now() + 2000
+      while (!wtStreamAttached && Date.now() < deadline) {
+        await sleep(200)
+      }
+      if (!wtStreamAttached) {
+        throw new Error(
+          'in-page WT data plane did not attach its stream during warmup; the ' +
+            'spawn degraded to NM' +
+            (fallbacks.length ? ': ' + fallbacks.join(' | ') : '')
+        )
+      }
+    }
+
     const envRuns = Number(process.env.BENCHMARK_RUNS)
     const projectUse = test.info().project?.use as { benchmarkRuns?: number } | undefined
     const runs =
@@ -261,9 +315,15 @@ export async function benchmarkLoss(
         } catch {}
       }
     })
-    return { runs: runsOut, failures, fallbacks }
+    return { runs: runsOut, failures, fallbacks, wtStreamAttached }
   } finally {
     page.off('console', onConsole)
+    // Reset the settings this benchmark wrote so the next spec in the same
+    // profile starts from defaults. Without this, an in-page run (useWorker
+    // false + logLevel 3) leaks into the following wt spec and makes its
+    // spawn take the in-page path. Runs even when benchmarkLoss throws (the
+    // in-page attach check).
+    await resetSettings()
   }
 }
 
