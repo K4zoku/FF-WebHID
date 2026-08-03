@@ -466,7 +466,7 @@
           if (callbackMap && callbackMap.has(data.reqId)) {
             const callback = callbackMap.get(data.reqId)
             callbackMap.delete(data.reqId)
-            if (data.error) callback({ s: 500 })
+            if (data.error) callback({ s: 500, err: data.error })
             else if (data.data) callback({ s: 200, d: data.data })
             else callback({ s: 204 })
           }
@@ -1141,6 +1141,47 @@
   function onDataPortMessage(deviceId, msg) {
     if (!msg) return
     if (msg.type === 'send' || msg.type === 'sendFeature' || msg.type === 'receiveFeature') {
+      const worker = workers.get(deviceId)
+      if (worker && workerReady.has(deviceId)) {
+        const workerMsg = {
+          type: msg.type === 'send' ? 'send' : msg.type === 'sendFeature' ? 'sendFeature' : 'receiveFeature',
+          reqId: msg.reqId,
+          reportId: msg.reportId
+        }
+        if (msg.type === 'send' || msg.type === 'sendFeature') workerMsg.data = msg.data
+        let callbackMap = workerCallbacks.get(deviceId)
+        if (!callbackMap) {
+          callbackMap = new Map()
+          workerCallbacks.set(deviceId, callbackMap)
+        }
+        const port = dataPorts.get(deviceId)
+        callbackMap.set(msg.reqId, (data) => {
+          if (!port) return
+          if (data && data.err) logger.warn('worker send error:', data.err)
+          const status = data ? data.s : 500
+          if (msg.type === 'receiveFeature') {
+            const d = status === 200 && data.d ? data.d : null
+            try {
+              port.postMessage({ type: 'featureResult', reqId: msg.reqId, data: d || null })
+            } catch (e) {
+              logger.debug('postMessage featureResult failed', e)
+            }
+          } else {
+            try {
+              port.postMessage({
+                type: msg.type === 'send' ? 'sendResult' : 'featureResult',
+                reqId: msg.reqId,
+                error: status === 200 || status === 204 ? null : 'send failed'
+              })
+            } catch (e) {
+              logger.debug('postMessage sendResult failed', e)
+            }
+          }
+        })
+        const transfer = msg.data && msg.data.buffer ? [msg.data.buffer] : []
+        worker.postMessage(workerMsg, transfer)
+        return
+      }
       const action =
         msg.type === 'send'
           ? 'sendReport'

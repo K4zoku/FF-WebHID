@@ -141,6 +141,13 @@
               performance.mark('hid-first-report')
               firstReportMarked = true
             }
+            if (window.__webhidReportT) {
+              const wt = window.__webhidReportT
+              window.__webhidReportT = 0
+              if (!window.__reportDeltas) window.__reportDeltas = []
+              window.__reportDeltas.push(performance.now() - wt)
+            }
+
             armStall()
             received.add(seq)
             chunkBuf.set(seq, data.subarray(2))

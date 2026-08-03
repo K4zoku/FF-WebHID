@@ -119,7 +119,20 @@
       return { result: { ok: false, error: String(e && e.message) }, transfer: null }
     }
     const ch = new MessageChannel()
+    const dataCh = new MessageChannel()
     mainWorldWorkers.set(payload.deviceId, worker)
+    dataCh.port1.onmessage = (event) => {
+      const d = event.data
+      if (d && d.type === 'inputReport') {
+        dispatchDeviceEvent({
+          eventType: 'input_report',
+          deviceId: payload.deviceId,
+          reportId: d.reportId,
+          data: d.data,
+        })
+      }
+    }
+    worker.postMessage({ type: 'init', dataPort: dataCh.port2 }, [dataCh.port2])
     ch.port1.onmessage = (event) => {
       if (event.data && event.data.type === 'terminate') {
         worker.terminate()
@@ -134,15 +147,6 @@
     }
     worker.onmessage = (event) => {
       const data = event.data
-      if (data && data.type === 'inputReport') {
-        dispatchDeviceEvent({
-          eventType: 'input_report',
-          deviceId: payload.deviceId,
-          reportId: data.reportId,
-          data: data.data,
-        })
-        return
-      }
       const transfer = data && data.data && data.data.buffer ? [data.data.buffer] : []
       ch.port1.postMessage(data, transfer)
     }

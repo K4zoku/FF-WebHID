@@ -26,7 +26,13 @@ let transport = null
  * @param {MessageEvent} event
  * @returns {void}
  */
+let dataPort = null
+
 self.onmessage = ({ data: msg }) => {
+  if (msg.type === 'init') {
+    dataPort = msg.dataPort
+    return
+  }
   if (msg.type === 'connect') {
     const factory =
       msg.transport === 'wt'
@@ -93,9 +99,10 @@ function pushInputBatch(batch, offset = 0) {
           hex += view[i].toString(16).padStart(2, '0') + ' '
         logger.debug('inputReport reportId=' + reportId + ' len=' + payloadLen + ' first8=' + hex)
       }
-      self.postMessage({ type: 'inputReport', reportId, data: buffer }, [buffer])
+      if (dataPort)
+        dataPort.postMessage({ type: 'inputReport', reportId, data: buffer, t: performance.now() }, [buffer])
     } else {
-      self.postMessage({ type: 'inputReport', reportId, data: null })
+      if (dataPort) dataPort.postMessage({ type: 'inputReport', reportId, data: null })
     }
     offset += len
     count++

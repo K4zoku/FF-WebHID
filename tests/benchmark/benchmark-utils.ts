@@ -173,6 +173,19 @@ async function runOnce(
     const duration = await page.evaluate(() => window.webhidBenchmark!.getMeasure())
     if (duration == null) throw new Error('roundtrip measure missing after painted')
     const latencies = await page.evaluate(() => window.webhidBenchmark!.getLatencies())
+    const reportDeltas = await page.evaluate(() => {
+      const w = window as unknown as { __reportDeltas?: number[] }
+      const d = w.__reportDeltas || []
+      w.__reportDeltas = []
+      return d
+    })
+    if (reportDeltas.length > 0) {
+      const s = [...reportDeltas].sort((a, b) => a - b)
+      console.log(
+        'WORKER-POST-TO-HANDLER p50:',
+        s[Math.floor(s.length / 2)].toFixed(3) + 'ms (' + s.length + ' samples)'
+      )
+    }
     return { duration, latencies }
   } finally {
     relay.stop()
@@ -240,9 +253,9 @@ export async function benchmarkMode(
   if (opts?.inPage) {
     await setUseWorker(backgroundPage, origin, false)
   }
-  // Debug logging so data-plane spawn/fallback decisions are visible on the
-  // page console; the wt-inpage benchmark asserts none of them degrade to NM.
-  await setLogLevel(backgroundPage, origin, 3)
+  if (process.env.BENCHMARK_DEBUG_LOG) {
+    await setLogLevel(backgroundPage, origin, 3)
+  }
 
   await page.goto(`${origin}/tests/test-page.html`, {
     waitUntil: 'domcontentloaded',
@@ -267,7 +280,32 @@ export async function benchmarkMode(
     throw new Error('page chunk count does not match file-based chunking')
   }
 
-  return runBenchmark(page, vendorDevice, { inPage: !!opts?.inPage })
+  const resetSettings = () =>
+    backgroundPage
+      .evaluate(
+        ({ origin }: { origin: string }) =>
+          browser.storage.local.remove([
+            'settings :: dataPlane',
+            'settings :: useWorker',
+            'settings :: logLevel',
+            'settings :: workerSpawnMode',
+            `settings :: ${origin} :: dataPlane`,
+            `settings :: ${origin} :: useWorker`,
+            `settings :: ${origin} :: logLevel`,
+            `settings :: ${origin} :: workerSpawnMode`
+          ]),
+        { origin }
+      )
+      .catch(() => {})
+  // Reset the settings this benchmark wrote so the next spec in the same
+  // profile starts from defaults. Without this, an in-page run (useWorker
+  // false + logLevel 3) leaks into the following ws/wt benchmark and makes
+  // its spawn take the in-page path, which stalls in the harness and falls
+  // back to NM. Runs even when runBenchmark throws (the in-page skip).
+  const result = await runBenchmark(page, vendorDevice, { inPage: !!opts?.inPage }).finally(
+    resetSettings
+  )
+  return result
 }
 
 export async function runBenchmark(
@@ -346,6 +384,19 @@ export async function runBenchmark(
 export function percentile(vals: number[], p: number): number {
   const s = [...vals].sort((a, b) => a - b)
   return s[Math.max(0, Math.ceil((p / 100) * s.length) - 1)]
+}
+
+/** Skips the benchmark when the data plane degraded to NM: the numbers would
+ * measure Native Messaging, not the requested mode, so a silent pass is worse
+ * than a skip with the fallback messages attached. */
+export function skipOnFallback(result: BenchmarkResult, mode: string): void {
+  if (result.fallbacks.length > 0) {
+    test.skip(
+      true,
+      `${mode} benchmark degraded to NM fallback: ${result.fallbacks.join(' | ')}. ` +
+        'The numbers would measure NM, not ' + mode + '. Rerun to see if the spawn recovers.'
+    )
+  }
 }
 
 export function printResults(mode: string, result: BenchmarkResult): void {
