@@ -8,10 +8,7 @@ R.hasTrustedTypes = typeof trustedTypes !== 'undefined';
 if (!R.hasTrustedTypes) {
   R.skipped = true;
 } else {
-  R.extClaimed = typeof (navigator.hid && navigator.hid[Symbol.for('webhid.createTtUrl')]);
-  R.factoryUrl = typeof navigator.hid[Symbol.for('webhid.createTtUrl')] === 'function'
-    ? String(navigator.hid[Symbol.for('webhid.createTtUrl')]('https://x/worker.js'))
-    : '';
+  R.extHidden = typeof (navigator.hid && navigator.hid[Symbol.for('webhid.createTtUrl')]);
   try {
     var pagePolicy = trustedTypes.createPolicy('webhid-worker', { createScriptURL: function (s) { return s + '#page'; } });
     R.swallowedType = typeof pagePolicy.createScriptURL;

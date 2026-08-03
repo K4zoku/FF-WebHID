@@ -21,13 +21,12 @@ const pending = new Map()
 /** @type {import("./types.js").WsTransport | import("./types.js").WtTransport | null} */
 let transport = null
 /** @type {MessagePort|null} */
-let dataPort = null
 
 /**
  * @param {MessageEvent} event
  * @returns {void}
  */
-self.onmessage = ({ data: msg, ports }) => {
+self.onmessage = ({ data: msg }) => {
   if (msg.type === 'connect') {
     const factory =
       msg.transport === 'wt'
@@ -51,22 +50,8 @@ self.onmessage = ({ data: msg, ports }) => {
     transport.connect(msg)
     return
   }
-  if (msg.type === 'setPort') {
-    dataPort = ports[0]
-    dataPort.onmessage = (event) => handleDataPortMessage(event.data)
-    logger.debug('data port received from bridge')
-    return
-  }
-  if (msg.type === 'unsetPort') {
-    if (dataPort) {
-      const port = dataPort
-      dataPort.onmessage = null
-      dataPort = null
-      self.postMessage({ type: 'returnPort' }, [port])
-    } else {
-      self.postMessage({ type: 'returnPort' })
-    }
-    return
+  if (msg.type === 'send' || msg.type === 'sendFeature' || msg.type === 'receiveFeature') {
+    return handleDataPortMessage(msg)
   }
   if (msg.type === 'settings') {
     settings.set(msg)
@@ -108,18 +93,14 @@ function pushInputBatch(batch, offset = 0) {
           hex += view[i].toString(16).padStart(2, '0') + ' '
         logger.debug('inputReport reportId=' + reportId + ' len=' + payloadLen + ' first8=' + hex)
       }
-      if (dataPort) {
-        dataPort.postMessage({ type: 'inputReport', reportId, data: buffer }, [buffer])
-      }
+      self.postMessage({ type: 'inputReport', reportId, data: buffer }, [buffer])
     } else {
-      if (dataPort) {
-        dataPort.postMessage({ type: 'inputReport', reportId, data: null })
-      }
+      self.postMessage({ type: 'inputReport', reportId, data: null })
     }
     offset += len
     count++
   }
-  if (count > 0 && dataPort) logger.debug('forwarded ' + count + ' reports via data port')
+  if (count > 0) logger.debug('forwarded ' + count + ' reports via data port')
 }
 
 /**
@@ -219,7 +200,7 @@ function handleReceiveFeature(msg) {
  * @returns {void}
  */
 function replyData(msg, transfer) {
-  if (dataPort) dataPort.postMessage(msg, transfer || [])
+  self.postMessage(msg, transfer || [])
 }
 
 /**

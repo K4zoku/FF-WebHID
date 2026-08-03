@@ -3,8 +3,7 @@ import { test, expect } from '../helpers/browser.js';
 interface TtResults {
   hasTrustedTypes: boolean;
   skipped?: boolean;
-  extClaimed?: string;
-  factoryUrl?: string;
+  extHidden?: string;
   swallowedType?: string;
   swallowedChain?: string;
   wrappedInstanceof?: boolean;
@@ -40,10 +39,9 @@ test.describe('Trusted Types policy handling', () => {
     expect(raw?.hasTrustedTypes).toBe(true);
   });
 
-  test('addon claims the CSP-allowed policy name and exposes a factory', () => {
+  test('addon keeps the URL factory hidden from the page', () => {
     test.skip(!raw?.hasTrustedTypes, 'browser lacks Trusted Types');
-    expect(raw?.extClaimed).toBe('function');
-    expect(raw?.factoryUrl).toBe('https://x/worker.js');
+    expect(raw?.extHidden).toBe('undefined');
   });
 
   test('first page call is swallowed and returns a working policy', () => {

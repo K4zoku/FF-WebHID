@@ -133,42 +133,8 @@
     const worker = workers.get(deviceId)
     if (worker) {
       const port = dataPorts.get(deviceId)
-      if (port && keepPort) {
-        try {
-          worker.postMessage({ type: 'unsetPort' })
-        } catch (e) {
-          logger.debug('unsetPort failed (keepPort)', e)
-        }
-        const returned = await new Promise((resolve) => {
-          let done = false
-          const onMsg = (event) => {
-            if (done) return
-            if (event.data && event.data.type === 'returnPort') {
-              done = true
-              worker.onmessage = null
-              resolve((event.ports && event.ports[0]) || null)
-            }
-          }
-          worker.onmessage = onMsg
-          setTimeout(() => {
-            if (!done) {
-              done = true
-              worker.onmessage = null
-              resolve(null)
-            }
-          }, 500)
-        })
-        if (returned) {
-          dataPorts.set(deviceId, returned)
-          returned.onmessage = (e) => onDataPortMessage(deviceId, e.data)
-        }
-      } else if (port) {
+      if (port && !keepPort) {
         dataPorts.delete(deviceId)
-        try {
-          worker.postMessage({ type: 'unsetPort' })
-        } catch (e) {
-          logger.debug('unsetPort failed (port path)', e)
-        }
         try {
           port.onmessage = null
           port.close()
@@ -187,8 +153,8 @@
         } catch (e) {
           logger.debug('port cleanup failed (no worker)', e)
         }
-        dataPorts.delete(deviceId)
       }
+      dataPorts.delete(deviceId)
     }
     workerCallbacks.delete(deviceId)
     workerReady.delete(deviceId)
@@ -223,7 +189,6 @@
   }
 
   let cachedSpawnMode = null
-  let cachedTtPolicy = null
 
   /**
    * @returns {Promise<string>}
@@ -258,41 +223,64 @@
   }
 
   /**
-   * @param {string} url
-   * @returns {string|object}
+   * @returns {Promise<string>}
    */
-  function toTrustedUrl(url) {
-    const w = window.wrappedJSObject
-    const hid = w && w.navigator && w.navigator.hid
-    const make = hid && hid[Symbol.for('webhid.createTtUrl')]
-    if (typeof make === 'function') {
-      try {
-        return make(url)
-      } catch (e) {
-        logger.debug('tt factory failed, falling back', e)
-      }
-    }
-    if (typeof trustedTypes !== 'undefined' && trustedTypes !== null) {
-      try {
-        if (!cachedTtPolicy) {
-          cachedTtPolicy = trustedTypes.createPolicy('webhid-worker', { createScriptURL: (s) => s })
-        }
-        return cachedTtPolicy.createScriptURL(url)
-      } catch {
-        /* fall through to plain url */
-      }
-    }
-    return url
+  async function fetchWorkerBundle() {
+    const resp = await browser.runtime.sendMessage({ action: 'getWorkerBundle' })
+    if (!resp || !resp.text) throw new Error('worker bundle fetch failed')
+    return resp.text
+  }
+
+  /** @type {Map<string, object>} */
+  const pendingSpawns = new Map()
+  let spawnReqSeq = 0
+
+  /**
+   * @param {object} payload
+   * @returns {Promise<object>}
+   */
+  function requestMainWorldSpawn(payload) {
+    const port = pagePorts.get(window)
+    if (!port) return Promise.reject(new Error('no page port for worker spawn'))
+    return new Promise((resolve, reject) => {
+      const id = 'spawn:' + ++spawnReqSeq
+      const timer = setTimeout(() => {
+        pendingSpawns.delete(id)
+        reject(new Error('worker spawn request timeout'))
+      }, 10000)
+      pendingSpawns.set(id, { resolve, reject, timer })
+      port.postMessage({ type: 'spawnWorkerRequest', id, payload })
+    })
   }
 
   /**
-   * @returns {Promise<Worker>}
+   * @param {object} port
+   * @returns {object}
    */
-  async function spawnBlobWorker() {
-    const resp = await browser.runtime.sendMessage({ action: 'getWorkerBundle' })
-    if (!resp || !resp.text) throw new Error('worker bundle fetch failed')
-    const blobUrl = URL.createObjectURL(new Blob([resp.text], { type: 'application/javascript' }))
-    return new Worker(toTrustedUrl(blobUrl))
+  function makeWorkerProxy(port) {
+    const proxy = {}
+    let onerrorHandler = null
+    proxy.postMessage = (msg, transfer) => port.postMessage(msg, transfer)
+    proxy.terminate = () => port.postMessage({ type: 'terminate' })
+    Object.defineProperty(proxy, 'onmessage', {
+      set(fn) {
+        port.onmessage = (event) => {
+          if (event.data && event.data.type === 'worker-error') {
+            if (onerrorHandler) onerrorHandler({ message: event.data.message })
+          } else if (fn) {
+            fn(event)
+          }
+        }
+      },
+      configurable: true,
+    })
+    Object.defineProperty(proxy, 'onerror', {
+      set(fn) {
+        onerrorHandler = fn
+      },
+      configurable: true,
+    })
+    return proxy
   }
 
   /**
@@ -323,16 +311,16 @@
     }
     try {
       if (spawnMode === 'blob') {
-        worker = await spawnBlobWorker()
+        worker = await requestMainWorldSpawn({ mode: 'blob', bundleText: await fetchWorkerBundle(), deviceId })
       } else {
-        worker = new Worker(toTrustedUrl(location.href))
+        worker = await requestMainWorldSpawn({ mode: 'shadow', deviceId })
       }
     } catch (e) {
       logger.warn('worker spawn failed for', deviceId, '(', spawnMode, '):', e.message)
       if (spawnMode === 'shadow') {
         spawnMode = 'blob'
         try {
-          worker = await spawnBlobWorker()
+          worker = await requestMainWorldSpawn({ mode: 'blob', bundleText: await fetchWorkerBundle(), deviceId })
         } catch (e2) {
           logger.warn('worker spawn retry failed for', deviceId, '(', spawnMode, '):', e2.message)
         }
@@ -394,16 +382,6 @@
               worker.postMessage(workerMsg, workerMsg.data ? [workerMsg.data.buffer] : [])
             }
             workerQueues.delete(deviceId)
-          }
-          const port = dataPorts.get(deviceId)
-          if (port) {
-            port.onmessage = null
-            try {
-              worker.postMessage({ type: 'setPort' }, [port])
-            } catch (e) {
-              logger.warn('set-port transfer failed for', deviceId, ':', e.message)
-              port.onmessage = (e2) => onDataPortMessage(deviceId, e2.data)
-            }
           }
           worker.postMessage({
             type: 'settings',
@@ -614,6 +592,17 @@
       }
     }
     port.onmessage = (event) => {
+      if (event.data && event.data.type === 'spawnWorkerResponse') {
+        const pending = pendingSpawns.get(event.data.id)
+        if (pending) {
+          clearTimeout(pending.timer)
+          pendingSpawns.delete(event.data.id)
+          const workerPort = event.ports && event.ports[0]
+          if (workerPort) pending.resolve(makeWorkerProxy(workerPort))
+          else pending.reject(new Error('worker spawn response missing port'))
+        }
+        return
+      }
       if (event.data != null && event.data.id != null) requestPortMap.set(event.data.id, port)
       handleRequest(event.data, event.ports, source)
     }
@@ -675,17 +664,7 @@
       }
       dataPorts.set(deviceId, port)
       logger.debug('data port received for device', deviceId)
-      const worker = workers.get(deviceId)
-      if (worker && workerReady.has(deviceId)) {
-        try {
-          worker.postMessage({ type: 'setPort' }, [port])
-        } catch (e) {
-          logger.warn('set-port transfer failed for', deviceId, ':', e.message)
-          port.onmessage = (event) => onDataPortMessage(deviceId, event.data)
-        }
-      } else {
-        port.onmessage = (event) => onDataPortMessage(deviceId, event.data)
-      }
+      port.onmessage = (event) => onDataPortMessage(deviceId, event.data)
       return
     }
 

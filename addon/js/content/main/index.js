@@ -23,14 +23,66 @@
   /** @type {object|null} */
   let hidInstance = null
 
-  /** @returns {void} */
-  function attachTtFactory() {
-    if (!ttFactory || !hidInstance) return
-    Object.defineProperty(hidInstance, Symbol.for('webhid.createTtUrl'), {
-      value: ttFactory,
-      configurable: true,
-    })
+  /** @type {Map<string, Worker>} */
+  const mainWorldWorkers = new Map()
+
+  /**
+   * @param {object} req
+   * @returns {Promise<{result: object, transfer: object|null}>}
+   */
+  async function handleSpawnWorkerRequest(req) {
+    const payload = req.payload || {}
+    const makeUrl = ttFactory || ((s) => s)
+    let worker
+    try {
+      if (payload.mode === 'blob') {
+        const blobUrl = URL.createObjectURL(
+          new Blob([payload.bundleText || ''], { type: 'application/javascript' })
+        )
+        worker = new NativeWorker(makeUrl(blobUrl))
+      } else {
+        worker = new NativeWorker(makeUrl(location.href))
+      }
+    } catch (e) {
+      return { result: { ok: false, error: String(e && e.message) }, transfer: null }
+    }
+    const ch = new MessageChannel()
+    mainWorldWorkers.set(payload.deviceId, worker)
+    ch.port1.onmessage = (event) => {
+      if (event.data && event.data.type === 'terminate') {
+        worker.terminate()
+        mainWorldWorkers.delete(payload.deviceId)
+        return
+      }
+      const transfer =
+        event.data && event.data.data && event.data.data.buffer
+          ? [event.data.data.buffer]
+          : event.ports || []
+      worker.postMessage(event.data, transfer)
+    }
+    worker.onmessage = (event) => {
+      const data = event.data
+      if (data && data.type === 'inputReport') {
+        dispatchDeviceEvent({
+          eventType: 'input_report',
+          deviceId: payload.deviceId,
+          reportId: data.reportId,
+          data: data.data,
+        })
+        return
+      }
+      const transfer = data && data.data && data.data.buffer ? [data.data.buffer] : []
+      ch.port1.postMessage(data, transfer)
+    }
+    worker.onerror = (event) => {
+      ch.port1.postMessage({
+        type: 'worker-error',
+        message: (event && event.message) || 'unknown',
+      })
+    }
+    return { result: { ok: true }, transfer: ch.port2 }
   }
+
 
   if (!isWorker) {
     setupTrustedTypesSharing()
@@ -119,7 +171,6 @@
       return nativeCreatePolicy(claimedName, pageRules)
     }
     ttFactory = (url) => policy.createScriptURL(url)
-    attachTtFactory()
   }
 
   let OriginalError
@@ -199,6 +250,23 @@
     if (!bridgePort) return
     bridgePort.onmessage = (event) => {
       if (!event.data) return
+      if (event.data.type === 'spawnWorkerRequest') {
+        handleSpawnWorkerRequest(event.data).then((r) => {
+          if (r.transfer) {
+            bridgePort.postMessage(
+              { type: 'spawnWorkerResponse', id: event.data.id, result: r.result },
+              [r.transfer]
+            )
+          } else {
+            bridgePort.postMessage({
+              type: 'spawnWorkerResponse',
+              id: event.data.id,
+              result: r.result,
+            })
+          }
+        })
+        return
+      }
       if (event.data.type === 'response') {
         const handler = pending[event.data.id]
         if (handler) {
@@ -1322,7 +1390,6 @@
   }
 
   hidInstance = createHID()
-  attachTtFactory()
   if (!isWorker) {
     Object.defineProperty(Navigator.prototype, 'hid', {
       get() {
