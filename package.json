@@ -36,6 +36,7 @@
     "lint:rs": "cargo clippy --manifest-path $npm_package_config_cargoManifest",
     "lint:test": "npx eslint tests/ eslint.config.ts",
     "release": "npx commit-and-tag-version",
+    "release:major": "npx commit-and-tag-version --release-as major",
     "release:minor": "npx commit-and-tag-version --release-as minor",
     "release:patch": "npx commit-and-tag-version --release-as patch",
     "test": "npx playwright test --config $npm_package_config_playwrightConfig",
