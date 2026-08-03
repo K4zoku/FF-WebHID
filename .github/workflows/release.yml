@@ -418,12 +418,13 @@ jobs:
             rpms-x86_64/*.rpm
             rpms-aarch64/*.rpm
 
-      # - name: Upload to AMO
-      #   uses: kewisch/action-web-ext@84a13bb9e1b6108c43788ba091c41ca1dba6ad45 # v2
-      #   with:
-      #     cmd: sign
-      #     source: dist/webhid-addon-v${{ steps.variables.outputs.VERSION }}.xpi
-      #     channel: listed
-      #     apiKey: ${{ secrets.AMO_JWT_ISSUER }}
-      #     apiSecret: ${{ secrets.AMO_JWT_SECRET }}
-      #     timeout: 900000
+      - name: Upload to AMO
+        uses: kewisch/action-web-ext@84a13bb9e1b6108c43788ba091c41ca1dba6ad45 # v2
+        continue-on-error: true
+        with:
+          cmd: sign
+          source: dist/webhid-addon-v${{ steps.variables.outputs.VERSION }}.xpi
+          channel: listed
+          apiKey: ${{ secrets.AMO_JWT_ISSUER }}
+          apiSecret: ${{ secrets.AMO_JWT_SECRET }}
+          timeout: 900000
