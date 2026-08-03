@@ -42,7 +42,7 @@ After the SAB ring-buffer alloc-size bug was fixed (see below), SAB was benchmar
 
 **Tradeoff**: streams >= ~3kHz pay up to 8ms of delivery latency (reports arrive in 8ms chunks, all present and in order). For a high-rate analog graph this is invisible (125Hz chunk cadence, no holes); the env knobs `WEBHID_WS_HIGH_RATE_MS` (8), `WEBHID_WS_RATE_WINDOW_MS` (4), `WEBHID_WS_HIGH_RATE_COUNT` (12) tune the window and the gate. A fixed `WEBHID_WS_BATCH_MS` interval path also exists for users who want constant time-based batching. Do not "optimize away" the rate gate because the fast path looks fine at low rates: the drop only manifests under sustained high-rate streams plus a busy main thread, which the idle benchmarks never exercise.
 
-**Test coverage**: the render-load loss workload lives in `tests/pages/loss-render.html` (fixed per-frame matrix+canvas load, budget via URL fragment) and is exercised by the autoresearch spec (`tests/benchmark/autoresearch.spec.ts`) through the `pagePath` option in `tests/benchmark/loss/loss-utils.ts`. The plain loss benchmark cannot see this bug (idle pages never drop); any regression to the batching shows up as nonzero `loss_pct_render` in the autoresearch run.
+**Test coverage**: the plain loss benchmark cannot see this bug (idle pages never drop); reproducing it requires the 8000Hz loss workload on a render-saturated page (a fixed per-frame compute + canvas load).
 
 ## 9. When a tradeoff has no universally correct answer, expose it as a setting (implementation detail)
 
