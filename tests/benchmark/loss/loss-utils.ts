@@ -2,7 +2,7 @@ import { test } from '../../helpers/e2e.js'
 import type { Page } from '@playwright/test'
 import { sendInput, type WebhidMockProcess } from '../../helpers/e2e-process.js'
 import { grantDevicePermission, mockIdFor, type DeviceFilter } from '../../helpers/e2e-devices.js'
-import { setDataPlane, percentile } from '../benchmark-utils.js'
+import { setDataPlane, percentile, getBenchmarkPage } from '../benchmark-utils.js'
 
 export const VENDOR = mockIdFor('vendor')
 
@@ -48,7 +48,7 @@ const FALLBACK_PATTERNS = [
 ]
 
 export interface LossFixtures {
-  harnessCtx: { newPage(): Promise<Page> }
+  harnessCtx: { newPage(): Promise<Page>; pages(): Page[] }
   backgroundPage: { evaluate: Page['evaluate'] }
   vendorDevice: { process: WebhidMockProcess['process']; ready: Promise<void> }
   httpPort: number
@@ -168,98 +168,103 @@ export async function benchmarkLoss(
   mode: 'ws' | 'wt' | 'nm'
 ): Promise<LossResult> {
   const { harnessCtx, backgroundPage, httpPort, daemonMode } = fixtures
-  const page = await harnessCtx.newPage()
+  const page = await getBenchmarkPage(harnessCtx)
   const fallbacks: string[] = []
-  page.on('console', (msg) => {
+  const onConsole = (msg: { text(): string; type(): string }) => {
     const text = msg.text()
     if (FALLBACK_PATTERNS.some((p) => text.includes(p))) fallbacks.push(`[${msg.type()}] ${text}`)
-  })
-  const origin = `http://localhost:${httpPort}`
-
-  if (daemonMode === 'daemon-nm') {
-    await backgroundPage
-      .evaluate(() => browser.storage.local.set({ 'settings :: daemonAsNmHost': true }))
-      .catch(() => {})
   }
-  await setDataPlane(backgroundPage, origin, mode)
-  await page.goto(`${origin}/tests/test-page.html`, { waitUntil: 'domcontentloaded', timeout: 15000 })
-  await page.waitForFunction(() => typeof navigator.hid !== 'undefined', { timeout: 15000 })
-  const granted = await grantDevicePermission(page, [VENDOR])
-  if (granted !== 1) throw new Error(`grantDevicePermission resolved ${granted} devices, expected 1`)
+  page.on('console', onConsole)
+  const origin = `http://localhost:${httpPort}`
+  try {
+    if (daemonMode === 'daemon-nm') {
+      await backgroundPage
+        .evaluate(() => browser.storage.local.set({ 'settings :: daemonAsNmHost': true }))
+        .catch(() => {})
+    }
+    await setDataPlane(backgroundPage, origin, mode)
+    await page.goto(`${origin}/tests/test-page.html`, {
+      waitUntil: 'domcontentloaded',
+      timeout: 15000
+    })
+    await page.waitForFunction(() => typeof navigator.hid !== 'undefined', { timeout: 15000 })
+    const granted = await grantDevicePermission(page, [VENDOR])
+    if (granted !== 1)
+      throw new Error(`grantDevicePermission resolved ${granted} devices, expected 1`)
 
-  await page.evaluate(
-    async (f: DeviceFilter) => {
-      const ds = await navigator.hid.getDevices()
-      const d = ds.find((x) => x.vendorId === f.vendorId && x.productId === f.productId)
-      if (!d) throw new Error('vendor device not paired')
-      await d.open()
-      const state = {
-        count: 0,
-        last: -1,
-        phaseStart: 0,
-        phaseCount: 0,
-        phaseGaps: 0,
-        phaseMaxGap: 0,
-        phaseFirstGap: -1
-      }
-      d.oninputreport = (ev) => {
-        const data = new Uint8Array(ev.data.buffer)
-        const seq = data[0] | (data[1] << 8) | (data[2] << 16)
-        state.count++
-        if (seq >= state.phaseStart) {
-          state.phaseCount++
-          if (state.last >= state.phaseStart - 1) {
-            const gap = seq - state.last
-            if (gap > 1) {
-              state.phaseGaps++
-              if (gap > state.phaseMaxGap) state.phaseMaxGap = gap
-              if (state.phaseFirstGap < 0) state.phaseFirstGap = seq
+    await page.evaluate(
+      async (f: DeviceFilter) => {
+        const ds = await navigator.hid.getDevices()
+        const d = ds.find((x) => x.vendorId === f.vendorId && x.productId === f.productId)
+        if (!d) throw new Error('vendor device not paired')
+        await d.open()
+        const state = {
+          count: 0,
+          last: -1,
+          phaseStart: 0,
+          phaseCount: 0,
+          phaseGaps: 0,
+          phaseMaxGap: 0,
+          phaseFirstGap: -1
+        }
+        d.oninputreport = (ev) => {
+          const data = new Uint8Array(ev.data.buffer)
+          const seq = data[0] | (data[1] << 8) | (data[2] << 16)
+          state.count++
+          if (seq >= state.phaseStart) {
+            state.phaseCount++
+            if (state.last >= state.phaseStart - 1) {
+              const gap = seq - state.last
+              if (gap > 1) {
+                state.phaseGaps++
+                if (gap > state.phaseMaxGap) state.phaseMaxGap = gap
+                if (state.phaseFirstGap < 0) state.phaseFirstGap = seq
+              }
             }
           }
+          state.last = seq
         }
-        state.last = seq
-      }
-      window.__lossState = state
-    },
-    VENDOR
-  )
+        window.__lossState = state
+      },
+      VENDOR
+    )
 
-  const mock = { process: fixtures.vendorDevice.process, ready: fixtures.vendorDevice.ready }
+    const mock = { process: fixtures.vendorDevice.process, ready: fixtures.vendorDevice.ready }
 
-  // Warmup burst (unmeasured) primes the worker/transport so run 1 starts with
-  // a clear path, mirroring the send-pipeline benchmark.
-  try {
-    await runLossOnce(page, mock, LOSS_RATE, Math.floor(LOSS_COUNT / 2), 0)
-  } catch {}
-
-  const envRuns = Number(process.env.BENCHMARK_RUNS)
-  const projectUse = test.info().project?.use as { benchmarkRuns?: number } | undefined
-  const runs =
-    Number.isInteger(envRuns) && envRuns > 0 ? envRuns : (projectUse?.benchmarkRuns ?? DEFAULT_RUNS)
-
-  const runsOut: LossRun[] = []
-  let failures = 0
-  for (let run = 0; run < runs; run++) {
-    const startSeq = (run + 1) * LOSS_COUNT
     try {
-      runsOut.push(await runLossOnceWithRetry(page, mock, LOSS_RATE, LOSS_COUNT, startSeq))
-    } catch {
-      failures++
-    }
-  }
+      await runLossOnce(page, mock, LOSS_RATE, Math.floor(LOSS_COUNT / 2), 0)
+    } catch {}
 
-  await page.evaluate(async () => {
-    const ds = await navigator.hid.getDevices()
-    for (const d of ds) {
+    const envRuns = Number(process.env.BENCHMARK_RUNS)
+    const projectUse = test.info().project?.use as { benchmarkRuns?: number } | undefined
+    const runs =
+      Number.isInteger(envRuns) && envRuns > 0
+        ? envRuns
+        : (projectUse?.benchmarkRuns ?? DEFAULT_RUNS)
+
+    const runsOut: LossRun[] = []
+    let failures = 0
+    for (let run = 0; run < runs; run++) {
+      const startSeq = (run + 1) * LOSS_COUNT
       try {
-        await d.close()
-      } catch {}
+        runsOut.push(await runLossOnceWithRetry(page, mock, LOSS_RATE, LOSS_COUNT, startSeq))
+      } catch {
+        failures++
+      }
     }
-  })
-  try {
-    await page.close()
-  } catch {}
-  return { runs: runsOut, failures, fallbacks }
+
+    await page.evaluate(async () => {
+      const ds = await navigator.hid.getDevices()
+      for (const d of ds) {
+        try {
+          await d.close()
+        } catch {}
+      }
+    })
+    return { runs: runsOut, failures, fallbacks }
+  } finally {
+    page.off('console', onConsole)
+  }
 }
 
 export function printLossResults(mode: string, result: LossResult): void {

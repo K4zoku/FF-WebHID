@@ -42,11 +42,20 @@ declare global {
 }
 
 interface BenchmarkFixtures {
-  harnessCtx: { newPage(): Promise<Page> }
+  harnessCtx: { newPage(): Promise<Page>; pages(): Page[] }
   backgroundPage: { evaluate: Page['evaluate'] }
   vendorDevice: WebhidMockProcess
   httpPort: number
   daemonMode: string
+}
+
+/** Returns the harness context's persistent tab */
+export async function getBenchmarkPage(ctx: {
+  pages(): Page[]
+  newPage(): Promise<Page>
+}): Promise<Page> {
+  const existing = ctx.pages().find((p) => !p.isClosed())
+  return existing ?? ctx.newPage()
 }
 
 /** Console messages that mean the data plane silently degraded to NM. */
@@ -223,7 +232,7 @@ export async function benchmarkMode(
   opts?: { inPage?: boolean }
 ): Promise<BenchmarkResult> {
   const { harnessCtx, backgroundPage, vendorDevice, httpPort, daemonMode } = fixtures
-  const page = await harnessCtx.newPage()
+  const page = await getBenchmarkPage(harnessCtx)
   const origin = `http://localhost:${httpPort}`
 
   if (daemonMode === 'daemon-nm') {
@@ -239,9 +248,6 @@ export async function benchmarkMode(
   }
   if (opts?.inPage) {
     await setUseWorker(backgroundPage, origin, false)
-    // The in-page stream-attach detection watches the page console for the
-    // debug-level 'WT persistent stream attached' log; without debug logging
-    // a working in-page run is indistinguishable from a degraded one.
     await setLogLevel(backgroundPage, origin, 3)
   } else if (process.env.BENCHMARK_DEBUG_LOG) {
     await setLogLevel(backgroundPage, origin, 3)
@@ -287,15 +293,9 @@ export async function benchmarkMode(
         { origin }
       )
       .catch(() => {})
-  // Reset the settings this benchmark wrote so the next spec in the same
-  // profile starts from defaults. Without this, an in-page run (useWorker
-  // false + logLevel 3) leaks into the following ws/wt benchmark and makes
-  // its spawn take the in-page path, which stalls in the harness and falls
-  // back to NM. Runs even when runBenchmark throws (the in-page skip).
-  const result = await runBenchmark(page, vendorDevice, { inPage: !!opts?.inPage }).finally(
+  return await runBenchmark(page, vendorDevice, { inPage: !!opts?.inPage }).finally(
     resetSettings
   )
-  return result
 }
 
 export async function runBenchmark(
@@ -305,7 +305,7 @@ export async function runBenchmark(
 ): Promise<BenchmarkResult> {
   const fallbacks: string[] = []
   let wtStreamAttached = false
-  page.on('console', (msg) => {
+  const onConsole = (msg: { text(): string; type(): string }) => {
     const text = msg.text()
     if (FALLBACK_PATTERNS.some((p) => text.includes(p))) {
       fallbacks.push(`[${msg.type()}] ${text}`)
@@ -313,64 +313,68 @@ export async function runBenchmark(
     if (text.includes(WT_STREAM_ATTACHED) && text.includes('polyfill')) {
       wtStreamAttached = true
     }
-  })
-
-  await page.evaluate(() => window.webhidBenchmark!.open())
-
-  let warmup: number | null = null
+  }
+  page.on('console', onConsole)
   try {
-    const warmupStart = Date.now()
-    await runWarmupWithRetry(page, mock)
-    warmup = Date.now() - warmupStart
-  } catch {}
+    await page.evaluate(() => window.webhidBenchmark!.open())
 
-  if (opts.inPage && !wtStreamAttached) {
-    // Grace period for the stream-attach log to land after warmup, then fail
-    // fast instead of running the whole benchmark on the NM fallback path.
-    // The in-page WT data plane attaches within ~10ms of open() on the
-    // harness (verified); a missed attach here means the spawn degraded to NM.
-    const deadline = Date.now() + 2000
-    while (!wtStreamAttached && Date.now() < deadline) {
-      await page.waitForTimeout(200)
-    }
-    if (!wtStreamAttached) {
-      throw new Error(
-        'in-page WT data plane did not attach its stream during warmup; the ' +
-          'spawn degraded to NM' +
-          (fallbacks.length ? ': ' + fallbacks.join(' | ') : '')
-      )
-    }
-  }
-
-  const envRuns = Number(process.env.BENCHMARK_RUNS)
-  const projectUse = test.info().project?.use as { benchmarkRuns?: number } | undefined
-  const runs =
-    Number.isInteger(envRuns) && envRuns > 0 ? envRuns : (projectUse?.benchmarkRuns ?? DEFAULT_RUNS)
-
-  const runsOut: Array<{
-    duration: number
-    latencies: number[]
-    marks: Record<string, number | null>
-  }> = []
-  let failures = 0
-  for (let run = 0; run < runs; run++) {
+    let warmup: number | null = null
     try {
-      const { duration, latencies } = await runOnceWithRetry(page, mock, false, run + 1)
-      const marks = await page.evaluate(() => window.webhidBenchmark!.getMarks())
-      runsOut.push({ duration, latencies, marks })
-    } catch {
-      failures++
+      const warmupStart = Date.now()
+      await runWarmupWithRetry(page, mock)
+      warmup = Date.now() - warmupStart
+    } catch {}
+
+    if (opts.inPage && !wtStreamAttached) {
+      const deadline = Date.now() + 2000
+      while (!wtStreamAttached && Date.now() < deadline) {
+        await page.waitForTimeout(200)
+      }
+      if (!wtStreamAttached) {
+        throw new Error(
+          'in-page WT data plane did not attach its stream during warmup; the ' +
+            'spawn degraded to NM' +
+            (fallbacks.length ? ': ' + fallbacks.join(' | ') : '')
+        )
+      }
     }
+
+    const envRuns = Number(process.env.BENCHMARK_RUNS)
+    const projectUse = test.info().project?.use as { benchmarkRuns?: number } | undefined
+    const runs =
+      Number.isInteger(envRuns) && envRuns > 0
+        ? envRuns
+        : (projectUse?.benchmarkRuns ?? DEFAULT_RUNS)
+
+    const runsOut: Array<{
+      duration: number
+      latencies: number[]
+      marks: Record<string, number | null>
+    }> = []
+    let failures = 0
+    for (let run = 0; run < runs; run++) {
+      try {
+        const { duration, latencies } = await runOnceWithRetry(page, mock, false, run + 1)
+        const marks = await page.evaluate(() => window.webhidBenchmark!.getMarks())
+        runsOut.push({ duration, latencies, marks })
+      } catch {
+        failures++
+      }
+    }
+
+    const setup = await page.evaluate(() => window.webhidBenchmark!.getMarks())
+    const openMs =
+      setup.dataReady != null && setup.openStart != null
+        ? setup.dataReady - setup.openStart
+        : null
+    await page.evaluate(() => {
+      document.getElementById('bench-status')!.textContent = ''
+    })
+
+    return { open: openMs, warmup, runs: runsOut, failures, fallbacks, wtStreamAttached }
+  } finally {
+    page.off('console', onConsole)
   }
-
-  const setup = await page.evaluate(() => window.webhidBenchmark!.getMarks())
-  const openMs =
-    setup.dataReady != null && setup.openStart != null ? setup.dataReady - setup.openStart : null
-  await page.evaluate(() => {
-    document.getElementById('bench-status')!.textContent = ''
-  })
-
-  return { open: openMs, warmup, runs: runsOut, failures, fallbacks, wtStreamAttached }
 }
 
 export function percentile(vals: number[], p: number): number {
