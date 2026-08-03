@@ -13,7 +13,7 @@ const RESP_RECEIVE_FEATURE_REPORT = 0x83
 const MSG_INPUT_BATCH = 0x00
 /** @type {import("./types.js").SettingsStore} */
 const settings = createSettingsStore(GLOBAL_DEFAULTS)
-settings.on('logLevel', (v) => logger.applyLevel(v))
+logger.bindSettings(settings)
 /** @type {number} */
 let nextReqId = 1
 /** @type {Map<number, {resolve: Function, reject: Function}>} */

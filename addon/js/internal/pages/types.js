@@ -6,6 +6,7 @@
  * @property {(msg: string, ...args: any[]) => void} debug
  * @property {(level: number) => void} applyLevel
  * @property {(m: string) => void} initLogger
+ * @property {(store: object|null) => void} bindSettings
  * @property {number} level
  * @property {boolean} loaded
  */

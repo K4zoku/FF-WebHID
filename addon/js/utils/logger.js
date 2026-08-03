@@ -44,7 +44,8 @@
     level: LEVEL_WARN,
     loaded: false,
     applyLevel: applyLevel,
-    initLogger: initLogger
+    initLogger: initLogger,
+    bindSettings: bindSettings
   }
 
   /**
@@ -74,19 +75,45 @@
     return LEVEL_WARN
   }
 
+  /** @type {Function|null} */
+  let unsubLogLevel = null
+
+  /**
+   * Re-points live logLevel updates at the given settings store.
+   * Used in environments without the WebExtension `browser` API (page main
+   * world, plain workers), where settings changes arrive over postMessage
+   * instead of `browser.storage.onChanged`.
+   * @param {object|null} store
+   * @returns {void}
+   */
+  function bindSettings(store) {
+    if (unsubLogLevel) {
+      unsubLogLevel()
+      unsubLogLevel = null
+    }
+    if (store && typeof store.on === 'function') {
+      applyLevel(parseLevel(store.logLevel))
+      unsubLogLevel = store.on('logLevel', (v) => applyLevel(parseLevel(v)))
+    }
+  }
+
   /** @returns {Promise<void>} */
   async function load() {
     if (logger.loaded) return
     logger.loaded = true
     try {
-      if (!browser || !browser.storage || !browser.storage.local) return
-      const result = await browser.storage.local.get({ logLevel: LEVEL_WARN })
-      applyLevel(parseLevel(result.logLevel))
-      browser.storage.onChanged.addListener((changes, area) => {
-        if (area === 'local' && changes.logLevel) {
-          applyLevel(parseLevel(changes.logLevel.newValue))
-        }
-      })
+      if (typeof browser !== 'undefined' && browser.storage && browser.storage.local) {
+        const result = await browser.storage.local.get({ logLevel: LEVEL_WARN })
+        applyLevel(parseLevel(result.logLevel))
+        browser.storage.onChanged.addListener((changes, area) => {
+          if (area === 'local' && changes.logLevel) {
+            applyLevel(parseLevel(changes.logLevel.newValue))
+          }
+        })
+      }
+      // No browser.storage (page main world, plain worker): the host hands its
+      // settings store to the logger via bindSettings; live updates arrive there
+      // over postMessage instead of storage.onChanged.
     } catch (e) {
       console.debug('logger load failed', e)
     }

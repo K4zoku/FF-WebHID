@@ -43,7 +43,7 @@
   let wtCertHash = null
   /** @type {import("./types.js").SettingsStore} */
   const settings = createSettingsStore(webhid.import('GLOBAL_DEFAULTS'))
-  settings.on('logLevel', (v) => logger.applyLevel(v))
+  logger.bindSettings(settings)
   /** @type {Map<Window, MessagePort>} */
   const pagePorts = new Map()
   /** @type {Map<MessagePort, Window>} */

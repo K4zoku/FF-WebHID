@@ -518,9 +518,7 @@
   const settings = createSettingsStore(defs)
 
   settings.on('dataPlane', (v) => logger.info('data plane changed: ' + v))
-  settings.on('logLevel', (v) => {
-    if (logger.applyLevel) logger.applyLevel(v)
-  })
+  logger.bindSettings(settings)
 
   bridgeReady.then(() => {
     sendRequest('getSettings', {}).then((result) => {
