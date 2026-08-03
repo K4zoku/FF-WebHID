@@ -29,6 +29,10 @@
 - **Profiler-confirmed main-thread contention** (the reason WS must stay off the main thread). Running WS receive/parse on the content-script main thread ("bridge-direct") loses late-phase throughput to NM under a render-heavy scenario: 510 vs 681 msg/s. This is CPU contention with page rendering (CanvasKit/WASM), not the old (mistaken) "Atomics blocking" concern. The dedicated per-device worker keeps WS off the main thread, which the architecture already does.
 - **WebTransport/QUIC data plane** explored on a curiosity-driven branch (a spec-sanctioned way to avoid the faketls/wildcard-cert trick): self-signed cert with `serverCertificateHashes`, rotated at most every 14 days. Expected latency gain on a localhost daemon connection is near-zero (QUIC's 0-RTT/resilience advantages don't apply to lossless loopback); pursued for architectural cleanliness, not speed.
 - **Cold-start benchmark methodology matured**: a local clone of the test site (sayodevice.com) with URLs patched to load locally removed network-load timing variance, which had been causing GCMajor to intrude into benchmark windows unpredictably. The last variance source (human click timing in the Chromium benchmark) is gone too: the chromium-benchmark project now grants via the WebHidAllowDevicesForUrls policy and runs fully headless, see the chromium section below.
+- **Rate-gated WS batching** (2026-08): the daemon's adaptive 25µs coalesce gained a high-rate path (8ms coalescing once ~12+ reports flush within a 4ms window) plus a fixed-timer override (`WEBHID_WS_BATCH_MS`). This eliminated render-load report loss at 8kHz; see AGENTS.md Section 3 for the design record.
+- **One port message per batch frame** (2026-08): the data worker now forwards each batch frame as a single `{type:'inputReportBatch', reports}` postMessage with every buffer transferred, instead of one postMessage per report. The page dispatches one `HIDInputReportEvent` per report. Per-message port overhead at 8000 msg/s was the loss mechanism above (worker parsed all, page missed 0.2-0.4% mid-run).
+- **In-page WT data plane** (2026-08): `useWorker: false` (WT only) runs the QUIC data plane on the page's main thread without a worker. Benchmarking it separately (`loss-wt-inpage.spec.ts`) is deliberate: without the worker's CPU isolation it is expected to show the same render-contention behavior WS showed before the worker, which is exactly why the option exists.
+- **8kHz input-report loss benchmark** (2026-08): a dedicated suite (`tests/benchmark/loss/`, project `firefox-benchmark-loss`, `npm run test:benchmark:loss`) measures delivery loss at 8000Hz, 6000 reports per run (`BENCHMARK_LOSS_RATE` / `BENCHMARK_LOSS_COUNT` overridable), across all four data-plane variants: nm, ws, wt, and wt-inpage. Prints received/lost/loss%/gaps/maxGap/firstGap per run.
 
 ---
 
@@ -646,8 +650,8 @@ latency (send to the report arriving back), per run, with whole-run walltime:
 
 **wt** (Firefox, daemon-nm deployment, WebTransport over QUIC)
 
-| run | min  | p50  | p90  | p95  | max    | walltime |
-| --- | ---- | ---- | ---- | ---- | ------ | -------- |
+| run | min  | p50  | p90  | p95  | max   | walltime |
+| --- | ---- | ---- | ---- | ---- | ----- | -------- |
 | #1  | 0.56 | 0.88 | 1.16 | 1.28 | 3.50  | 419.4    |
 | #2  | 0.46 | 0.88 | 1.10 | 1.20 | 2.48  | 396.6    |
 | #3  | 0.52 | 0.84 | 1.10 | 1.24 | 4.12  | 384.1    |
@@ -741,5 +745,4 @@ Measured against that, WT is effectively a free security option on loopback:
 per-report latency, walltime and total are within ~10-20% of ws, and well
 under nm. The ws data plane remains the fastest Firefox path, but
 WT no longer trades a measurable performance penalty for its impersonation
-defense.WT no longer trades a measurable performance penalty for its impersonation
 defense.

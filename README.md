@@ -7,13 +7,13 @@ WebHID brings Human Interface Device (HID) support to Firefox on Linux, macOS, a
 ## Features
 
 - **Full WebHID polyfill**: implements `navigator.hid` API in Firefox
-- **Dual data plane**: WebSocket worker with MessageChannel for max performance, or Native Messaging for simplicity. Switchable per-site. Control ops (enumerate/open/close) are always NM.
+- **Three data planes**: WebSocket worker with MessageChannel for max performance, WebTransport over QUIC (worker or in-page), or Native Messaging for simplicity. Switchable per-site. Control ops (enumerate/open/close) are always NM.
 - **Off-main-thread WS**: the data WS connection lives in a dedicated per-device Web Worker. Main thread has zero WS activity.
 - **CSP-aware worker spawn**: data worker is spawned via the shadow-URL trick (`new Worker(location.href)` served by webRequest interception, MV3 default) or from a blob URL with CSP rewrite (MV2 default). Background pre-flights the page CSP and fails fast to NM when neither mode can work (e.g. MV3 header CSP).
-- **MessageChannel direct delivery**: input reports flow directly from data worker to page via MessageChannel, bypassing the bridge entirely. Zero-copy, no Xray unwrap.
+- **MessageChannel direct delivery**: input reports flow directly from data worker to page via MessageChannel, bypassing the bridge entirely. One batched port message per frame, zero-copy, no Xray unwrap.
 - **Zero-copy polyfill**: DataView created directly on transferred ArrayBuffer, no intermediate copy. Eliminates GCMajor during benchmarks.
 - **Ack-wait sendReport**: `sendReport` resolves on daemon ack (WS or NM)
-- **Adaptive batching**: 0us added latency for sparse reports, <=25us coalescing for 8kHz bursts
+- **Rate-gated batching**: 0us added latency for sparse reports, <=25us coalescing for bursts, 8ms coalescing once polling exceeds ~12 reports/4ms (kills render-load report loss at 8kHz)
 - **Cross-platform HID**: Linux (hidraw + udev), macOS (IOHIDManager), Windows (native HID API)
 - **Daemon-as-NM-host**: daemon speaks NM protocol directly (skip forwarder + Unix socket)
 - **Report descriptor parser**: daemon-side (hidreport crate), produces Chromium-shaped collections
@@ -39,7 +39,8 @@ For detailed installation instructions and platform-specific recommendations, se
 Open `about:addons -> WebHID -> Options`:
 
 - **Daemon as NM host**: daemon speaks NM directly (skip forwarder + Unix socket). Requires `webhid.daemon_nm_host` NM manifest (default OFF; default ON on Windows)
-- **Data Plane**: WebSocket worker (default) or Native Messaging. WS mode spawns a per-device worker with binary WS + MessageChannel direct-to-page input reports. NM mode routes all data through the NM host.
+- **Data Plane**: WebSocket worker (default), WebTransport over QUIC, or Native Messaging. WS mode spawns a per-device worker with binary WS + MessageChannel direct-to-page input reports. WT runs in a worker too, or in-page on the main thread when Use Worker is off. NM mode routes all data through the NM host.
+- **Use Worker**: WT only. Run the data plane in a dedicated worker (default) or in-page on the main thread. Hidden unless Data Plane is WebTransport.
 - **Device Picker Mode**: modal (default), pageAction, or window. How the device chooser is presented.
 - **Worker Spawn Mode**: shadow URL (default on MV3) or blob + CSP rewrite (default on MV2). How the data worker is created in the page context.
 - **Worker Polyfill**: inject `navigator.hid` into page-created Web Workers (default OFF)
@@ -53,6 +54,7 @@ Click on the WebHID addon icon:
 - **Device Picker Mode**: modal, pageAction, or window
 - **Worker Polyfill**: enable per-site
 - **Worker Spawn Mode**: shadow URL or blob + CSP rewrite
+- **Use Worker**: WT only; off runs WT in-page instead of in a worker
 - **Log Level**: per-site verbosity override
 
 `daemonAsNmHost` is the only global-only setting: it configures the
