@@ -1,10 +1,12 @@
 # Maintainer: K4zoku <k4zoku@pm.me>
 #
-# This PKGBUILD builds the WebHID daemon + native-messaging host from a
-# git tag. It supports both x86_64 and aarch64.
+# This PKGBUILD builds the WebHID daemon + native-messaging host from the
+# latest git commit (git package; version derived via git describe, so no
+# manual bump per release). Supports both x86_64 and aarch64.
 
-pkgname=webhid
-pkgver=1.6.5
+_pkgbase=webhid
+pkgname=${_pkgbase}-git
+pkgver=3.0.0
 pkgrel=1
 pkgdesc='WebHID implementation for Firefox via a native-messaging bridge and hidraw daemon'
 arch=('x86_64' 'aarch64')
@@ -13,23 +15,30 @@ license=('MIT')
 depends=('libudev.so')
 makedepends=('cargo' 'pkgconf' 'git')
 optdepends=('webhid-addon: Firefox browser extension (system-wide install)')
-install=webhid.install
-source=("${pkgname}::git+${url}.git#tag=v${pkgver}")
+provides=("${_pkgbase}")
+conflicts=("${_pkgbase}")
+install=webhid-git.install
+source=("${_pkgbase}::git+${url}.git")
 sha256sums=('SKIP')
 options=('!lto' '!debug')
+
+pkgver() {
+    cd "${_pkgbase}"
+    git describe --tags | sed 's/^v//;s/_/./;s/\([^-]*-g\)/r\1/;s/-/./g'
+}
 
 prepare() {
     cargo fetch \
         --target "$CARCH-unknown-linux-gnu" \
-        --manifest-path "$srcdir/$pkgname/crates/Cargo.toml"
+        --manifest-path "$srcdir/${_pkgbase}/crates/Cargo.toml"
 }
 
 build() {
-    make -C "$srcdir/$pkgname" build CARGO_ARGS=--frozen
+    make -C "$srcdir/${_pkgbase}" build CARGO_ARGS=--frozen
 }
 
 package() {
-    local _root="$srcdir/$pkgname"
+    local _root="$srcdir/${_pkgbase}"
 
     make -C "$_root" install-system DESTDIR="$pkgdir" \
         PREFIX=/usr \
@@ -44,5 +53,5 @@ package() {
         "$pkgdir/usr/lib/waterfox/native-messaging-hosts/webhid.forwarder_nm_host.json"
 
     install -Dm644 "$_root/LICENSE" \
-        "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+        "$pkgdir/usr/share/licenses/${pkgname}/LICENSE"
 }
