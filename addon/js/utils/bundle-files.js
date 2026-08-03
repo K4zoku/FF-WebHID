@@ -21,6 +21,7 @@
       'js/utils/http.js',
       'js/utils/settings.js',
       'js/utils/device.js',
+      'js/utils/webtransport.js',
       'js/content/main/index.js'
     ],
     mv2MainWorld: [
@@ -32,6 +33,7 @@
       'js/utils/device.js',
       'js/utils/descriptor-tlv.js',
       'js/utils/settings.js',
+      'js/utils/webtransport.js',
       'js/content/main/index.js'
     ]
   }

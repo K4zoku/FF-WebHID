@@ -70,6 +70,33 @@
   /** @type {HTMLSelectElement} */
   const workerSpawnModeSelect = document.getElementById('workerSpawnMode')
   workerSpawnModeSelect.value = settings.workerSpawnMode || GLOBAL_DEFAULTS.workerSpawnMode
+  /** @type {HTMLInputElement} */
+  const useWorkerCheckbox = document.getElementById('useWorker')
+  useWorkerCheckbox.checked = settings.useWorker !== false
+
+  /**
+   * Shows only the options that apply to the current data plane:
+   * useWorker only matters for WT (WS always needs the worker, NM needs
+   * neither); workerSpawnMode matters only when a worker will actually spawn.
+   * @returns {void}
+   */
+  function updatePlaneVisibility() {
+    const dp = dataPlaneSelect.value
+    const useWorker = useWorkerCheckbox.checked
+    document.getElementById('useWorker-setting').style.display = dp === 'wt' ? '' : 'none'
+    document.getElementById('workerSpawnMode-setting').style.display =
+      dp !== 'nm' && useWorker ? '' : 'none'
+  }
+  updatePlaneVisibility()
+
+  dataPlaneSelect.addEventListener('change', (e) => {
+    saveSetting('dataPlane', e.target.value)
+    updatePlaneVisibility()
+  })
+  useWorkerCheckbox.addEventListener('change', (e) => {
+    saveSetting('useWorker', e.target.checked)
+    updatePlaneVisibility()
+  })
 
   /** @type {HTMLSelectElement} */
   const logLevelSelect = document.getElementById('logLevel')

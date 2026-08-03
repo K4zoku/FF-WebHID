@@ -130,6 +130,11 @@
   async function despawnDataPlane(deviceId, { keepPort = false } = {}) {
     const gen = (spawnGen.get(deviceId) || 0) + 1
     spawnGen.set(deviceId, gen)
+    if (inPageDevices.has(deviceId)) {
+      inPageDevices.delete(deviceId)
+      const pagePort = pagePorts.get(window)
+      if (pagePort) pagePort.postMessage({ type: 'dataPlaneDisconnect', deviceId })
+    }
     const worker = workers.get(deviceId)
     if (worker) {
       const port = dataPorts.get(deviceId)
@@ -234,6 +239,11 @@
   /** @type {Map<string, object>} */
   const pendingSpawns = new Map()
   let spawnReqSeq = 0
+  /** @type {Set<string>} */
+  const inPageDevices = new Set()
+  /** @type {Map<string, {resolve: Function, timer: ReturnType<typeof setTimeout>}>} */
+  const pendingPlaneSpawns = new Map()
+  let planeReqSeq = 0
 
   /**
    * @param {object} payload
@@ -483,12 +493,60 @@
    * @param {object} [opts]
    * @returns {Promise<void>}
    */
+  /**
+   * @param {string} deviceId
+   * @param {string} sessionToken
+   * @param {object} opts
+   * @returns {Promise<boolean>}
+   */
+  async function spawnInPageDataPlane(deviceId, sessionToken, opts) {
+    const wsAuthHash = await computeWsAuthHash(sessionToken)
+    if (!wsAuthHash) return false
+    const port = pagePorts.get(window)
+    if (!port) return false
+    return new Promise((resolve) => {
+      const id = 'plane:' + ++planeReqSeq
+      const timer = setTimeout(() => {
+        pendingPlaneSpawns.delete(id)
+        inPageDevices.delete(deviceId)
+        resolve(false)
+      }, 10000)
+      pendingPlaneSpawns.set(id, { resolve, timer, deviceId })
+      inPageDevices.add(deviceId)
+      port.postMessage({
+        type: 'dataPlaneConnect',
+        id,
+        deviceId,
+        payload: {
+          transport: 'wt',
+          wtPort: opts.wtPort,
+          wtCertHash: opts.wtCertHash,
+          token: wsAuthHash,
+          reportSize: opts.reportSize || 64,
+          logLevel: logger.level
+        }
+      })
+    })
+  }
+
+  /**
+   * @param {string} deviceId
+   * @param {string} sessionToken
+   * @param {number} wsPort
+   * @param {object} [opts]
+   * @returns {Promise<void>}
+   */
   async function spawnDataPlane(deviceId, sessionToken, wsPort, opts = {}) {
     const gen = (spawnGen.get(deviceId) || 0) + 1
     spawnGen.set(deviceId, gen)
-    const ok = await spawnWorker(deviceId, sessionToken, wsPort, opts, gen)
+    let ok
+    if (!settings.useWorker && opts.wtPort != null) {
+      ok = await spawnInPageDataPlane(deviceId, sessionToken, opts)
+    } else {
+      ok = await spawnWorker(deviceId, sessionToken, wsPort, opts, gen)
+    }
     if (!ok && spawnGen.get(deviceId) === gen) {
-      logger.warn('worker spawn failed for', deviceId, '; falling back to NM')
+      logger.warn('data plane spawn failed for', deviceId, '; falling back to NM')
       browser.runtime
         .sendMessage({
           action: 'setDataPlane',
@@ -600,6 +658,44 @@
           const workerPort = event.ports && event.ports[0]
           if (workerPort) pending.resolve(makeWorkerProxy(workerPort))
           else pending.reject(new Error('worker spawn response missing port'))
+        }
+        return
+      }
+      if (event.data && event.data.type === 'dataPlaneResponse') {
+        const pending = pendingPlaneSpawns.get(event.data.id)
+        if (pending) {
+          clearTimeout(pending.timer)
+          pendingPlaneSpawns.delete(event.data.id)
+          pending.resolve(!!(event.data.result && event.data.result.ok))
+        }
+        return
+      }
+      if (event.data && event.data.type === 'dataPlaneEvent') {
+        const deviceId = event.data.deviceId
+        const ev = event.data.event || {}
+        const orphanCallbackMap = workerCallbacks.get(deviceId)
+        if (orphanCallbackMap) {
+          for (const [, callback] of orphanCallbackMap) callback({ error: 'worker closed' })
+          orphanCallbackMap.clear()
+        }
+        if (ev.type === 'closed') {
+          inPageDevices.delete(deviceId)
+          let spawnPending = false
+          for (const [, entry] of pendingPlaneSpawns) {
+            if (entry.deviceId === deviceId) {
+              spawnPending = true
+              break
+            }
+          }
+          if (!spawnPending) {
+            replyToPage({
+              type: 'event',
+              event: { eventType: 'disconnect', deviceId: deviceId }
+            })
+          }
+        } else if (ev.type === 'auth-failed') {
+          inPageDevices.delete(deviceId)
+          refreshDataPlaneToken(deviceId)
         }
         return
       }
@@ -1154,6 +1250,8 @@
     cachedSpawnMode = null
     applyDataPlane(settings.dataPlane)
   })
+
+  settings.on('useWorker', () => applyDataPlane(settings.dataPlane))
 
   settings.on(['dataPlane', 'logLevel'], () => {
     const all = settings.getAll()

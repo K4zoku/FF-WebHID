@@ -13,7 +13,8 @@
     daemonAsNmHost: false,
     devicePickerMode: 'modal',
     workerPolyfillEnabled: false,
-    workerSpawnMode: isMv2 ? 'blob' : 'shadow'
+    workerSpawnMode: isMv2 ? 'blob' : 'shadow',
+    useWorker: true
   }
 
   /**

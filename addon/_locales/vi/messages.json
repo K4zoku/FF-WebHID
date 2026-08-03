@@ -102,7 +102,7 @@
     "message": "Kênh dữ liệu"
   },
   "settingsDataPlaneDesc": {
-    "message": "**WebSocket**: tạo một Web Worker sở hữu kết nối WS tới daemon. Report đầu vào được chuyển tới trang qua `postMessage` với ArrayBuffer transfer (ngoài main thread, zero-copy). Không SAB, không COOP/COEP.\n**WebTransport**: cùng kiến trúc worker, nhưng qua QUIC với cert tự ký được pin qua `serverCertificateHashes` (tốn CPU TLS/QUIC trên loopback).\n**Native Messaging**: đưa toàn bộ dữ liệu (sendReport, input reports, feature reports) qua NM host thông qua content-script bridge. Không dùng WS. Fallback khi WS bị chặn."
+    "message": "**WebSocket**: spawn Web Worker giữ kết nối WS tới daemon. Input report được chuyển tới page qua `postMessage` với ArrayBuffer transfer (ngoài main thread, zero-copy). Không SAB, không COOP/COEP.\n**WebTransport**: cùng kiến trúc worker, hoặc ngay trong page khi tắt Use Worker (xem toggle đó), qua QUIC với chứng chỉ tự ký pinned bằng `serverCertificateHashes` (tốn CPU TLS/QUIC trên loopback).\n**Native Messaging**: chuyển toàn bộ dữ liệu (sendReport, input reports, feature reports) qua NM host bằng content-script bridge. Không WS. Fallback khi WS bị chặn."
   },
   "settingsDataPlaneWs": {
     "message": "WebSocket"
@@ -175,5 +175,17 @@
   },
   "settingsWorkerSpawnBlob": {
     "message": "Blob + ghi đè CSP"
+  },
+  "settingsUseWorker": {
+    "message": "Dùng Worker"
+  },
+  "settingsUseWorkerDesc": {
+    "message": "Bật: data plane WS/WT chạy trong Web Worker riêng (ngoài main thread, khuyến nghị).\nTắt: WebTransport kết nối trực tiếp trong page, không dùng worker, report được dispatch trên main thread (dùng chung CPU với rendering; ổn ở tốc độ report thường, chưa benchmark). WebSocket vẫn cần worker vì HSTS đổi `ws://` thành `wss://` trên page, nên tùy chọn WS vẫn dùng worker. Native Messaging không bị ảnh hưởng. Reload pages sau khi đổi."
+  },
+  "popupUseWorker": {
+    "message": "Dùng Worker"
+  },
+  "popupUseWorkerDesc": {
+    "message": "Tắt: WebTransport kết nối trực tiếp trong page (dùng CPU main thread; ổn ở tốc độ report thường). WebSocket vẫn cần worker."
   }
 }

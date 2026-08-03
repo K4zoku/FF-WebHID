@@ -14,6 +14,7 @@
   const GLOBAL_DEFAULTS = webhid.import('GLOBAL_DEFAULTS')
   const createSettingsStore = webhid.import('createSettingsStore')
   const isValidFilter = webhid.import('isValidFilter')
+  const createWtTransport = webhid.import('createWtTransport')
   delete globalThis.webhid
 
   logger.initLogger('polyfill')
@@ -22,6 +23,77 @@
   let ttFactory = null
   /** @type {object|null} */
   let hidInstance = null
+
+  /** @type {Map<string, object>} */
+  const inPagePlanes = new Map()
+
+  /**
+   * @param {object} req
+   * @returns {void}
+   */
+  function handleDataPlaneConnect(req) {
+    const deviceId = req.deviceId
+    const wt = createWtTransport({
+      tag: 'page',
+      onReady: () => {
+        bridgePort.postMessage({ type: 'dataPlaneResponse', id: req.id, result: { ok: true } })
+      },
+      onClosed: () => {
+        inPagePlanes.delete(deviceId)
+        bridgePort.postMessage({ type: 'dataPlaneEvent', deviceId, event: { type: 'closed' } })
+      },
+      onAuthFailed: (code) => {
+        inPagePlanes.delete(deviceId)
+        bridgePort.postMessage({
+          type: 'dataPlaneEvent',
+          deviceId,
+          event: { type: 'auth-failed', code },
+        })
+      },
+      onBinary: (batch) => {
+        const offset = batch.length > 0 && batch[0] === 0x00 ? 1 : 0
+        pushInPageBatch(deviceId, batch, offset)
+      },
+    })
+    inPagePlanes.set(deviceId, { wt })
+    wt.connect(req.payload || {})
+  }
+
+  /**
+   * @param {string} deviceId
+   * @param {Uint8Array} batch
+   * @param {number} offset
+   * @returns {void}
+   */
+  function pushInPageBatch(deviceId, batch, offset) {
+    while (offset + 1 < batch.length) {
+      const len = batch[offset] | (batch[offset + 1] << 8)
+      offset += 2
+      if (len === 0 || offset + len > batch.length) break
+      const reportId = batch[offset]
+      const payloadLen = len - 1
+      if (payloadLen > 0) {
+        const buffer = new ArrayBuffer(payloadLen)
+        new Uint8Array(buffer).set(batch.subarray(offset + 1, offset + len))
+        dispatchDeviceEvent({ eventType: 'input_report', deviceId, reportId, data: buffer })
+      } else {
+        dispatchDeviceEvent({ eventType: 'input_report', deviceId, reportId, data: null })
+      }
+      offset += len
+    }
+  }
+
+  /**
+   * @param {object} data
+   * @returns {void}
+   */
+  function handleDataPlaneDisconnect(data) {
+    const plane = inPagePlanes.get(data.deviceId)
+    if (plane) {
+      if (plane.wt) plane.wt.disconnect()
+      inPagePlanes.delete(data.deviceId)
+    }
+  }
 
   /** @type {Map<string, Worker>} */
   const mainWorldWorkers = new Map()
@@ -250,6 +322,14 @@
     if (!bridgePort) return
     bridgePort.onmessage = (event) => {
       if (!event.data) return
+      if (event.data.type === 'dataPlaneConnect') {
+        handleDataPlaneConnect(event.data)
+        return
+      }
+      if (event.data.type === 'dataPlaneDisconnect') {
+        handleDataPlaneDisconnect(event.data)
+        return
+      }
       if (event.data.type === 'spawnWorkerRequest') {
         handleSpawnWorkerRequest(event.data).then((r) => {
           if (r.transfer) {

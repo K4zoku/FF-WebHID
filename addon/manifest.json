@@ -68,6 +68,7 @@
         "js/utils/device.js",
         "js/utils/descriptor-tlv.js",
         "js/utils/settings.js",
+        "js/utils/webtransport.js",
         "js/content/main/index.js"
       ],
       "world": "MAIN",

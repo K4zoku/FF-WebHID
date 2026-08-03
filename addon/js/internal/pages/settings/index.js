@@ -14,7 +14,7 @@
 
   const current = await loadGlobalSettings()
 
-  for (const key of ['daemonAsNmHost', 'workerPolyfillEnabled']) {
+  for (const key of ['daemonAsNmHost', 'workerPolyfillEnabled', 'useWorker']) {
     document.getElementById(key).checked = current[key]
   }
 
@@ -27,6 +27,23 @@
   devicePickerModeSelect.value = current.devicePickerMode || GLOBAL_DEFAULTS.devicePickerMode
   const workerSpawnModeSelect = document.getElementById('workerSpawnMode')
   workerSpawnModeSelect.value = current.workerSpawnMode || GLOBAL_DEFAULTS.workerSpawnMode
+  const useWorkerCheckbox = document.getElementById('useWorker')
+  useWorkerCheckbox.checked = current.useWorker !== false
+
+  /**
+   * Shows only the options that apply to the current data plane:
+   * useWorker only matters for WT (WS always needs the worker, NM needs
+   * neither); workerSpawnMode matters only when a worker will actually spawn.
+   * @returns {void}
+   */
+  function updatePlaneVisibility() {
+    const dp = dataPlaneSelect.value
+    const useWorker = useWorkerCheckbox.checked
+    document.getElementById('useWorker-setting').style.display = dp === 'wt' ? '' : 'none'
+    document.getElementById('workerSpawnMode-setting').style.display =
+      dp !== 'nm' && useWorker ? '' : 'none'
+  }
+  updatePlaneVisibility()
 
   /**
    * Displays a temporary status message in the settings page.
@@ -42,9 +59,10 @@
     }, 1500)
   }
 
-  for (const key of ['daemonAsNmHost', 'workerPolyfillEnabled']) {
+  for (const key of ['daemonAsNmHost', 'workerPolyfillEnabled', 'useWorker']) {
     document.getElementById(key).addEventListener('change', async (e) => {
       await saveGlobalSetting(key, e.target.checked)
+      if (key === 'useWorker') updatePlaneVisibility()
       showStatus(`${key} = ${e.target.checked}`)
     })
   }
@@ -55,6 +73,7 @@
   })
   dataPlaneSelect.addEventListener('change', async (e) => {
     await saveGlobalSetting('dataPlane', e.target.value)
+    updatePlaneVisibility()
     showStatus(`dataPlane = ${e.target.value}`)
   })
   devicePickerModeSelect.addEventListener('change', async (e) => {

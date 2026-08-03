@@ -60,6 +60,26 @@
           </option>
         </select>
       </div>
+      <div class="setting" id="useWorker-setting">
+        <div class="setting-info">
+          <h3 data-i18n="settingsUseWorker">Use Worker</h3>
+          <p data-i18n-md="settingsUseWorkerDesc">
+            On: the WS/WT data plane runs in a dedicated Web Worker
+            (off-main-thread, recommended). Off: WebTransport connects directly
+            in the page (main-thread CPU). WebSocket still needs the worker
+            (HSTS rewrites <code>ws://</code> to <code>wss://</code> on the
+            page). Reload pages after changing.
+          </p>
+        </div>
+        <label class="toggle">
+          <input
+            type="checkbox"
+            id="useWorker"
+            aria-labelledby="settingsUseWorker"
+          />
+          <span class="slider" role="presentation"></span>
+        </label>
+      </div>
       <div class="setting">
         <div class="setting-info">
           <h3 data-i18n="settingsDevicePickerMode">Device Picker Mode</h3>
@@ -109,7 +129,7 @@
           <span class="slider" role="presentation"></span>
         </label>
       </div>
-      <div class="setting">
+      <div class="setting" id="workerSpawnMode-setting">
         <div class="setting-info">
           <h3 data-i18n="settingsWorkerSpawnMode">Worker Spawn Mode</h3>
           <p data-i18n-md="settingsWorkerSpawnModeDesc"><strong>Shadow URL</strong> (default on MV3): spawns the data worker via <code>new Worker(location.href)</code> with a StreamFilter intercepting the synthetic self-request. Touches nothing about the page except one synthetic request. Fails if the server rejects that request or if <code>require-trusted-types-for</code> is active with a restrictive allow-list.<br /><strong>Blob + CSP rewrite</strong> (default on MV2): spawns the worker from a <code>blob:</code> URL created from the extension's worker bundle. No network dependency, but relaxes the page's <code>worker-src</code> and <code>connect-src</code> CSP directives to allow <code>blob:</code> and <code>ws://127.0.0.1:*</code>.</p>

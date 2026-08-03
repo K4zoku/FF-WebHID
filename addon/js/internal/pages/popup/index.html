@@ -36,6 +36,22 @@
             <option value="nm" data-i18n="popupDataPlaneNm">Native Messaging</option>
           </select>
         </div>
+        <div class="setting" id="useWorker-setting">
+          <div class="setting-info">
+            <h3 data-i18n="popupUseWorker">Use Worker</h3>
+            <p data-i18n="popupUseWorkerDesc">
+              Off: WebTransport connects directly in the page (main-thread CPU)
+            </p>
+          </div>
+          <label class="toggle">
+            <input
+              type="checkbox"
+              id="useWorker"
+              aria-labelledby="popupUseWorker"
+            />
+            <span class="slider" role="presentation"></span>
+          </label>
+        </div>
         <div class="setting">
           <div class="setting-info">
             <h3 data-i18n="popupDevicePickerMode">Device Picker Mode</h3>
@@ -69,7 +85,7 @@
             <span class="slider" role="presentation"></span>
           </label>
         </div>
-        <div class="setting">
+        <div class="setting" id="workerSpawnMode-setting">
           <div class="setting-info">
             <h3 data-i18n="popupWorkerSpawnMode">Worker Spawn Mode</h3>
             <p data-i18n="popupWorkerSpawnModeDesc">How the data worker is created on this site</p>
