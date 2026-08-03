@@ -95,11 +95,16 @@ pub fn device_is_blocked(rules: &[BlocklistRule], vendor_id: u16, product_id: u1
     // Chromium: consumer-input devices stay enumerable, only their reports
     // are blocked. FIDO devices are additionally hidden by usage page in
     // hid.rs.
+    // A vendor ID is required, mirroring Chromium's
+    // HidBlocklist::IsVendorProductBlockedByEntry.
     rules.iter().any(|r| {
         if r.report_id.is_some() || r.report_type.is_some() {
             return false;
         }
         if r.usage_page.is_some() || r.usage.is_some() {
+            return false;
+        }
+        if r.vendor.is_none() {
             return false;
         }
         if r.vendor.is_some_and(|v| v != vendor_id) {
@@ -110,6 +115,47 @@ pub fn device_is_blocked(rules: &[BlocklistRule], vendor_id: u16, product_id: u1
         }
         true
     })
+}
+
+/// Mirrors Chromium's `HidConnection::IsAlwaysProtected`
+/// (`services/device/public/cpp/hid/hid_report_utils.cc`): a hardcoded layer
+/// applied on top of the blocklist rules, independent of the WICG
+/// `blocklist.txt`. Usage page 0x07 (Keyboard/Keypad page) is always
+/// protected for every report type; Generic Desktop Pointer/Mouse/Keyboard/
+/// Keypad usages are always protected for input and output (not feature, the
+/// feature reports of mouse/keyboard collections are still blocked by the
+/// blocklist rules); Generic Desktop System Control 0x80-0x8f and System
+/// Dock 0xa0-0xb6 are always protected for every type. Gated behind
+/// `report-blocking` like the consumer-input rules.
+#[cfg(feature = "report-blocking")]
+pub fn is_always_protected(
+    usage_page: Option<u16>,
+    usage: Option<u16>,
+    report_type: ReportType,
+) -> bool {
+    let Some(up) = usage_page else {
+        return false;
+    };
+    if up == 0x0007 {
+        // kPageKeyboard: Keyboard/Keypad usage page.
+        return true;
+    }
+    if up != 0x0001 {
+        // kPageGenericDesktop only below.
+        return false;
+    }
+    let Some(u) = usage else {
+        return false;
+    };
+    match u {
+        // kGenericDesktopPointer/Mouse/Keyboard/Keypad.
+        0x0001 | 0x0002 | 0x0006 | 0x0007 => report_type != ReportType::Feature,
+        // kGenericDesktopSystemControl..SystemWarmRestart.
+        0x0080..=0x008f => true,
+        // kGenericDesktopSystemDock..SystemDisplaySwap.
+        0x00a0..=0x00b6 => true,
+        _ => false,
+    }
 }
 
 pub fn is_report_blocked(

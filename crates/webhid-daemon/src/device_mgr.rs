@@ -18,13 +18,21 @@ const MODE_NM: &str = "nm";
 const MODE_WS: &str = "ws";
 const MODE_WT: &str = "wt";
 
-// (report_id, report_type) -> every (usage_page, usage) association from the
-// collections that declare that report. Multiple collections can share a
-// report_id (notably unnumbered report 0), so each key carries a list.
-// Nested child collections are walked recursively, mirroring Chromium's
-// kWebHidRecursiveFiltering (enabled by default) so reports living in child
-// collections (e.g. a Keyboard nested under a vendor top-level) are seen.
-type ReportCollectionMap = HashMap<(u8, u8), Vec<(Option<u16>, Option<u16>)>>;
+// One collection on a report's chain: usage_page, usage, and whether the
+// collection is an Application collection (type 0x01). Chromium propagates
+// every report to all of its ancestor collections (hid_collection.cc), so a
+// report is associated with every collection from its innermost container up
+// to the top level; the Application flag mirrors the Application-only gate
+// in Chromium's HasReportInAlwaysProtectedCollection.
+type ReportAssociation = (Option<u16>, Option<u16>, bool);
+
+// (report_id, report_type) -> every collection association for that report.
+// Multiple collections can share a report_id (notably unnumbered report 0),
+// so each key carries a list. Nested child collections are walked
+// recursively, mirroring Chromium's kWebHidRecursiveFiltering (enabled by
+// default) so reports living in child collections (e.g. a Keyboard nested
+// under a vendor top-level) are seen.
+type ReportCollectionMap = HashMap<(u8, u8), Vec<ReportAssociation>>;
 
 struct Entry {
     device: Arc<Mutex<HidDevice>>,
@@ -37,6 +45,14 @@ struct Entry {
     vendor_id: u16,
     product_id: u16,
     report_to_collection: Arc<ReportCollectionMap>,
+    /// Chromium's IsAlwaysProtected fallback per report type (input/output/
+    /// feature): whether any top-level collection is always protected for
+    /// that type. Blocks report IDs not declared anywhere in the descriptor.
+    always_protected: [bool; 3],
+    /// Parse-failure fallback per report type: hidapi interface usage itself
+    /// is protected (unparseable descriptor, e.g. empty boot-keyboard
+    /// interface). Blocks every report when true.
+    interface_protected: [bool; 3],
 }
 
 fn random_hex_token(n: usize) -> Result<String, getrandom::Error> {
@@ -46,49 +62,106 @@ fn random_hex_token(n: usize) -> Result<String, getrandom::Error> {
 }
 
 fn build_report_collection_map(info: &DeviceInfo) -> ReportCollectionMap {
-    fn walk(col: &webhid::Collection, map: &mut ReportCollectionMap) {
-        let up = col.usage_page;
-        let u = col.usage;
+    fn walk(
+        col: &webhid::Collection,
+        ancestors: &[ReportAssociation],
+        map: &mut ReportCollectionMap,
+    ) {
+        let is_app = col.collection_type == 1; // Application
+        let mut chain = Vec::with_capacity(ancestors.len() + 1);
+        chain.extend_from_slice(ancestors);
+        chain.push((col.usage_page, col.usage, is_app));
         for r in &col.input_reports {
-            map.entry((r.report_id, 0)).or_default().push((up, u));
+            map.entry((r.report_id, 0))
+                .or_default()
+                .extend_from_slice(&chain);
         }
         for r in &col.output_reports {
-            map.entry((r.report_id, 1)).or_default().push((up, u));
+            map.entry((r.report_id, 1))
+                .or_default()
+                .extend_from_slice(&chain);
         }
         for r in &col.feature_reports {
-            map.entry((r.report_id, 2)).or_default().push((up, u));
+            map.entry((r.report_id, 2))
+                .or_default()
+                .extend_from_slice(&chain);
         }
         for c in &col.children {
-            walk(c, map);
+            walk(c, &chain, map);
         }
     }
     let mut map: ReportCollectionMap = HashMap::new();
     for col in &info.collections {
-        walk(col, &mut map);
+        walk(col, &[], &mut map);
     }
     map
 }
 
-// A report is blocked when ANY collection association matches a blocklist
-// rule. This mirrors Chromium's HidBlocklist::GetProtectedReportIds, which
-// unions the report IDs of every collection matching a rule: if a keyboard
+#[cfg(feature = "report-blocking")]
+fn always_protected_usage(up: Option<u16>, u: Option<u16>, rt: ReportType) -> bool {
+    blocklist::is_always_protected(up, u, rt)
+}
+#[cfg(not(feature = "report-blocking"))]
+fn always_protected_usage(_up: Option<u16>, _u: Option<u16>, _rt: ReportType) -> bool {
+    false
+}
+
+// A report is protected when ANY collection association matches a blocklist
+// rule, or when an Application collection on its chain is always protected.
+// This mirrors Chromium's HidBlocklist::GetProtectedReportIds (union of the
+// report IDs of every collection matching a rule) plus the hardcoded
+// IsAlwaysProtected layer (HidConnection::IsReportProtected): if a keyboard
 // collection and a vendor collection share a report_id (common for unnumbered
 // report 0), the report is still dropped because the keyboard data in it must
 // never reach the page. An empty association list never blocks.
-fn associations_any_blocked(
+fn associations_any_protected(
     rules: &[blocklist::BlocklistRule],
     vendor_id: u16,
     product_id: u16,
-    associations: &[(Option<u16>, Option<u16>)],
+    associations: &[ReportAssociation],
     report_id: u8,
     report_type: ReportType,
 ) -> bool {
     !associations.is_empty()
-        && associations.iter().any(|(up, u)| {
+        && associations.iter().any(|(up, u, is_app)| {
             blocklist::is_report_blocked(
                 rules, vendor_id, product_id, *up, *u, report_id, report_type,
-            )
+            ) || (*is_app && always_protected_usage(*up, *u, report_type))
         })
+}
+
+// Mirrors Chromium's HidConnection::HasAlwaysProtectedCollection: whether any
+// TOP-LEVEL collection's usage is always protected for the report type. Used
+// as the fallback for reports not declared anywhere in the descriptor (see
+// HidConnection::IsReportProtected), where Chromium drops unknown report IDs
+// on devices that carry an always-protected collection of that type.
+fn has_always_protected_collection(info: &DeviceInfo, report_type: ReportType) -> bool {
+    info.collections
+        .iter()
+        .any(|c| always_protected_usage(c.usage_page, c.usage, report_type))
+}
+
+// Fallback for devices whose report descriptor failed to parse (or is
+// empty), so `collections` carries no blocking information: if the hidapi
+// interface usage itself matches a blocklist rule or is always protected,
+// every report is treated as protected. Chromium's parser is lenient enough
+// to interpret such descriptors, so this closes the gap where an unparseable
+// consumer-input device would otherwise flow unblocked (e.g. a boot-keyboard
+// interface with an empty descriptor).
+fn interface_protected(info: &DeviceInfo, report_type: ReportType) -> bool {
+    if !info.collections.is_empty() {
+        return false; // parsed: the report map handles blocking
+    }
+    let rules = blocklist::blocklist_rules();
+    blocklist::is_report_blocked(
+        rules,
+        info.vendor_id,
+        info.product_id,
+        info.usage_page,
+        info.usage,
+        0,
+        report_type,
+    ) || always_protected_usage(info.usage_page, info.usage, report_type)
 }
 
 fn compute_blocked_input_ids(info: &DeviceInfo, report_map: &ReportCollectionMap) -> HashSet<u8> {
@@ -98,7 +171,7 @@ fn compute_blocked_input_ids(info: &DeviceInfo, report_map: &ReportCollectionMap
         if rt_byte != 0 {
             continue;
         }
-        if associations_any_blocked(
+        if associations_any_protected(
             rules,
             info.vendor_id,
             info.product_id,
@@ -174,6 +247,23 @@ impl DeviceManager {
 
         let report_map = Arc::new(build_report_collection_map(&info));
         let blocked_input_ids = Arc::new(compute_blocked_input_ids(&info, &report_map));
+        let declared_input_ids: Arc<HashSet<u8>> = Arc::new(
+            report_map
+                .keys()
+                .filter(|(_, rt)| *rt == 0)
+                .map(|(rid, _)| *rid)
+                .collect(),
+        );
+        let always_protected = [
+            has_always_protected_collection(&info, ReportType::Input),
+            has_always_protected_collection(&info, ReportType::Output),
+            has_always_protected_collection(&info, ReportType::Feature),
+        ];
+        let interface_protected = [
+            interface_protected(&info, ReportType::Input),
+            interface_protected(&info, ReportType::Output),
+            interface_protected(&info, ReportType::Feature),
+        ];
 
         let stop_flag = Arc::new(AtomicBool::new(false));
 
@@ -218,6 +308,8 @@ impl DeviceManager {
             vendor_id: info.vendor_id,
             product_id: info.product_id,
             report_to_collection: Arc::clone(&report_map),
+            always_protected,
+            interface_protected,
         };
 
         map.insert(id, entry);
@@ -230,6 +322,9 @@ impl DeviceManager {
         let dev_for_task = Arc::clone(&reader_arc);
         let stop_for_task = Arc::clone(&stop_flag);
         let blocked_for_task = Arc::clone(&blocked_input_ids);
+        let declared_for_task = Arc::clone(&declared_input_ids);
+        let always_protected_input = always_protected[0];
+        let interface_protected_input = interface_protected[0];
         let tx = self.event_tx.clone();
         let read_buf_size = info.max_input_report_size as usize + 1;
 
@@ -265,7 +360,16 @@ impl DeviceManager {
                         } else {
                             (0u8, Bytes::from(buf))
                         };
-                        if blocked_for_task.contains(&report_id) {
+                        // Chromium's HidConnection::ProcessInputReport: drop
+                        // protected report IDs, and drop IDs not declared in
+                        // the descriptor when the device carries an
+                        // always-protected input collection (fallback for
+                        // undocumented reports).
+                        if blocked_for_task.contains(&report_id)
+                            || interface_protected_input
+                            || (!declared_for_task.contains(&report_id)
+                                && always_protected_input)
+                        {
                             log::debug!(
                                 "[reader {dev_id:#x}] dropping blocked input report_id={report_id}"
                             );
@@ -496,10 +600,16 @@ impl DeviceManager {
         };
         let associations = match entry.report_to_collection.get(&(report_id, rt_byte)) {
             Some(v) => v,
-            None => return false,
+            // Undocumented report ID: Chromium falls back to blocking when
+            // the device has an always-protected collection of this type, or
+            // when the unparsed interface usage itself is protected.
+            None => {
+                return entry.always_protected[rt_byte as usize]
+                    || entry.interface_protected[rt_byte as usize]
+            }
         };
         let rules = blocklist::blocklist_rules();
-        associations_any_blocked(
+        associations_any_protected(
             rules,
             entry.vendor_id,
             entry.product_id,
@@ -529,8 +639,10 @@ impl DeviceManager {
 mod tests {
     use super::*;
     use tokio::sync::broadcast;
+    #[cfg(feature = "report-blocking")]
     use webhid::{Collection, Report};
 
+    #[cfg(feature = "report-blocking")]
     fn col(usage_page: Option<u16>, usage: Option<u16>, input_ids: &[u8]) -> Collection {
         Collection {
             collection_type: 1, // Application
@@ -549,6 +661,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "report-blocking")]
     fn device_info(collections: Vec<Collection>) -> DeviceInfo {
         DeviceInfo {
             vendor_id: 0x1234,
@@ -572,11 +685,11 @@ mod tests {
     }
 
     #[test]
-    fn test_associations_any_blocked_semantics() {
+    fn test_associations_any_protected_rule_only() {
         let rules = blocklist::blocklist_rules();
         // FIDO usage page is always blocked at the report level.
-        let all_blocked = vec![(Some(0xF1D0), None), (Some(0xF1D0), None)];
-        assert!(associations_any_blocked(
+        let all_blocked = vec![(Some(0xF1D0), None, true), (Some(0xF1D0), None, true)];
+        assert!(associations_any_protected(
             rules,
             0x1234,
             0x5678,
@@ -587,8 +700,8 @@ mod tests {
         // ANY blocked association blocks the report, even if another (Generic
         // Desktop / Joystick) is unblocked: the shared report may carry the
         // blocked collection's data.
-        let mixed = vec![(Some(0xF1D0), None), (Some(0x0001), Some(0x0004))];
-        assert!(associations_any_blocked(
+        let mixed = vec![(Some(0xF1D0), None, true), (Some(0x0001), Some(0x0004), true)];
+        assert!(associations_any_protected(
             rules,
             0x1234,
             0x5678,
@@ -597,8 +710,11 @@ mod tests {
             ReportType::Input
         ));
         // No association matches -> not blocked.
-        let none_match = vec![(Some(0x0001), Some(0x0004)), (Some(0x0001), Some(0x0005))];
-        assert!(!associations_any_blocked(
+        let none_match = vec![
+            (Some(0x0001), Some(0x0004), true),
+            (Some(0x0001), Some(0x0005), true),
+        ];
+        assert!(!associations_any_protected(
             rules,
             0x1234,
             0x5678,
@@ -607,11 +723,106 @@ mod tests {
             ReportType::Input
         ));
         // No associations -> no blocking.
-        assert!(!associations_any_blocked(
+        assert!(!associations_any_protected(
             rules,
             0x1234,
             0x5678,
             &[],
+            0x01,
+            ReportType::Input
+        ));
+    }
+
+    #[cfg(feature = "report-blocking")]
+    #[test]
+    fn test_associations_any_protected_always_protected() {
+        let rules = blocklist::blocklist_rules();
+        // Usage page 0x07 (Keyboard/Keypad page) is always protected for
+        // every report type.
+        assert!(associations_any_protected(
+            rules,
+            0x1234,
+            0x5678,
+            &[(Some(0x0007), None, true)],
+            0x01,
+            ReportType::Input
+        ));
+        assert!(associations_any_protected(
+            rules,
+            0x1234,
+            0x5678,
+            &[(Some(0x0007), None, true)],
+            0x01,
+            ReportType::Feature
+        ));
+        // Generic Desktop Pointer is always protected for input/output but
+        // not feature.
+        assert!(associations_any_protected(
+            rules,
+            0x1234,
+            0x5678,
+            &[(Some(0x0001), Some(0x0001), true)],
+            0x01,
+            ReportType::Input
+        ));
+        assert!(associations_any_protected(
+            rules,
+            0x1234,
+            0x5678,
+            &[(Some(0x0001), Some(0x0001), true)],
+            0x01,
+            ReportType::Output
+        ));
+        assert!(!associations_any_protected(
+            rules,
+            0x1234,
+            0x5678,
+            &[(Some(0x0001), Some(0x0001), true)],
+            0x01,
+            ReportType::Feature
+        ));
+        // Always-protected requires an Application collection: a Pointer
+        // usage on a Physical child is not enough on its own.
+        assert!(!associations_any_protected(
+            rules,
+            0x1234,
+            0x5678,
+            &[(Some(0x0001), Some(0x0001), false)],
+            0x01,
+            ReportType::Input
+        ));
+        // System Control range 0x80-0x8f and 0xa0-0xb6 are always protected;
+        // the gap 0x90-0x9f is not.
+        assert!(associations_any_protected(
+            rules,
+            0x1234,
+            0x5678,
+            &[(Some(0x0001), Some(0x0085), true)],
+            0x01,
+            ReportType::Feature
+        ));
+        assert!(associations_any_protected(
+            rules,
+            0x1234,
+            0x5678,
+            &[(Some(0x0001), Some(0x00b6), true)],
+            0x01,
+            ReportType::Input
+        ));
+        assert!(!associations_any_protected(
+            rules,
+            0x1234,
+            0x5678,
+            &[(Some(0x0001), Some(0x0095), true)],
+            0x01,
+            ReportType::Input
+        ));
+        // Non-Generic-Desktop pages are not always protected.
+        assert!(!associations_any_protected(
+            rules,
+            0x1234,
+            0x5678,
+            &[(Some(0x0002), Some(0x0006), true)],
             0x01,
             ReportType::Input
         ));
@@ -664,10 +875,7 @@ mod tests {
         // The e2e harness builds the daemon with default features (now
         // including report-blocking); vendor.bin and gamepad.bin must stay
         // fully usable. Regression guard for the default-features flip.
-        for (file, vid, pid) in [
-            ("vendor.bin", 0x16c0, 0x0001),
-            ("gamepad.bin", 0x16c0, 0x0002),
-        ] {
+        let read_fixture = |file: &str| -> DeviceInfo {
             let path = concat!(
                 env!("CARGO_MANIFEST_DIR"),
                 "/../../tests/fixtures/descriptors/"
@@ -675,8 +883,8 @@ mod tests {
             let bytes = std::fs::read(format!("{path}{file}"))
                 .unwrap_or_else(|e| panic!("{file}: {e}"));
             let info = DeviceInfo {
-                vendor_id: vid,
-                product_id: pid,
+                vendor_id: 0x16c0,
+                product_id: 0x0001,
                 product_name: String::new(),
                 manufacturer: None,
                 serial_number: None,
@@ -690,6 +898,12 @@ mod tests {
                 !info.collections.is_empty(),
                 "{file}: descriptor failed to parse"
             );
+            info
+        };
+        // vendor.bin and gamepad.bin carry no protected usages and must stay
+        // fully usable. Regression guard for the default-features flip.
+        for file in ["vendor.bin", "gamepad.bin"] {
+            let info = read_fixture(file);
             let map = build_report_collection_map(&info);
             let blocked = compute_blocked_input_ids(&info, &map);
             assert!(
@@ -697,6 +911,80 @@ mod tests {
                 "{file}: e2e fixture unexpectedly blocked input reports {blocked:?}"
             );
         }
+        // mouse.bin and keyboard.bin are consumer-input fixtures: their
+        // reports must be blocked with the feature on, matching Chromium
+        // (mouse reports sit in a Physical child but propagate to the Mouse
+        // Application ancestor).
+        for file in ["mouse.bin", "keyboard.bin"] {
+            let info = read_fixture(file);
+            let map = build_report_collection_map(&info);
+            let blocked = compute_blocked_input_ids(&info, &map);
+            assert!(
+                !blocked.is_empty(),
+                "{file}: consumer-input fixture unexpectedly unblocked"
+            );
+        }
+    }
+
+    #[cfg(feature = "report-blocking")]
+    #[test]
+    fn test_interface_protected_fallback() {
+        // Unparseable/empty descriptor with a protected hidapi interface
+        // usage (e.g. a boot-keyboard interface): every report is blocked.
+        let boot_kb = DeviceInfo {
+            usage_page: Some(0x0001),
+            usage: Some(0x0006),
+            ..device_info(vec![])
+        };
+        assert!(interface_protected(&boot_kb, ReportType::Input));
+        assert!(interface_protected(&boot_kb, ReportType::Output));
+
+        let boot_mouse = DeviceInfo {
+            usage_page: Some(0x0001),
+            usage: Some(0x0002),
+            ..device_info(vec![])
+        };
+        assert!(interface_protected(&boot_mouse, ReportType::Input));
+        // Mouse feature reports are also blocked: the WICG Mouse rule carries
+        // no reportType, so it matches feature reports too, exactly like
+        // Chromium's GetProtectedReportIds for kReportTypeFeature.
+        assert!(interface_protected(&boot_mouse, ReportType::Feature));
+
+        // Vendor interface usage: never protected.
+        let vendor = DeviceInfo {
+            usage_page: Some(0xFF00),
+            usage: Some(0x0001),
+            ..device_info(vec![])
+        };
+        assert!(!interface_protected(&vendor, ReportType::Input));
+        assert!(!interface_protected(&vendor, ReportType::Output));
+        assert!(!interface_protected(&vendor, ReportType::Feature));
+
+        // Parsed devices never take the interface path, even when their
+        // top-level usage matches a rule (the report map handles them).
+        let parsed = device_info(vec![col(Some(0x0001), Some(0x0006), &[0])]);
+        assert!(!interface_protected(&parsed, ReportType::Input));
+    }
+
+    #[cfg(feature = "report-blocking")]
+    #[test]
+    fn test_always_protected_fallback() {
+        // Chromium's HasAlwaysProtectedCollection fallback: a keyboard
+        // top-level protects input/output (not feature); vendor-only devices
+        // have no always-protected collection.
+        let kb = device_info(vec![col(Some(0x0001), Some(0x0006), &[0])]);
+        assert!(has_always_protected_collection(&kb, ReportType::Input));
+        assert!(has_always_protected_collection(&kb, ReportType::Output));
+        assert!(!has_always_protected_collection(&kb, ReportType::Feature));
+
+        let mouse = device_info(vec![col(Some(0x0001), Some(0x0002), &[0])]);
+        assert!(has_always_protected_collection(&mouse, ReportType::Input));
+        assert!(!has_always_protected_collection(&mouse, ReportType::Feature));
+
+        let vendor = device_info(vec![col(Some(0xFF00), Some(0x0001), &[1])]);
+        assert!(!has_always_protected_collection(&vendor, ReportType::Input));
+        assert!(!has_always_protected_collection(&vendor, ReportType::Output));
+        assert!(!has_always_protected_collection(&vendor, ReportType::Feature));
     }
 
     #[cfg(feature = "report-blocking")]
@@ -712,14 +1000,27 @@ mod tests {
         let map = build_report_collection_map(&info);
         assert_eq!(compute_blocked_input_ids(&info, &map), HashSet::from([1]));
 
-        // A Mouse pointer report attached to a Physical child (usage page
-        // 0x09, not a blocked usage) stays unblocked: its association does not
-        // match any rule, exactly like Chromium's per-collection matching.
+        // A Mouse pointer report attached to a Physical child is still
+        // blocked: Chromium propagates the report to all ancestor collections
+        // (hid_collection.cc), so the Mouse Application top-level (0x01/0x02)
+        // carries it and matches the Mouse rule.
         let mut phys = col(Some(0x0009), Some(0x0001), &[3]); // Physical/Pointer
         phys.collection_type = 0;
         let mut mouse = col(Some(0x0001), Some(0x0002), &[]); // Mouse top-level
         mouse.children = vec![phys];
         let info = device_info(vec![mouse]);
+        let map = build_report_collection_map(&info);
+        assert_eq!(compute_blocked_input_ids(&info, &map), HashSet::from([3]));
+
+        // A Pointer-usage Physical child under a VENDOR top-level stays
+        // unblocked: neither the vendor Application nor the non-Application
+        // Pointer child is protected (no rule matches, always-protected
+        // requires an Application collection).
+        let mut phys = col(Some(0x0001), Some(0x0001), &[3]); // Physical/Pointer
+        phys.collection_type = 0;
+        let mut vendor = col(Some(0xFF00), Some(0x0001), &[]); // Vendor top-level
+        vendor.children = vec![phys];
+        let info = device_info(vec![vendor]);
         let map = build_report_collection_map(&info);
         assert!(compute_blocked_input_ids(&info, &map).is_empty());
     }
