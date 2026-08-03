@@ -43,6 +43,7 @@
     "test:debug": "npx playwright test --config $npm_package_config_playwrightConfig --debug",
     "test:e2e": "npx playwright test --config $npm_package_config_playwrightConfig --project=firefox-e2e",
     "test:benchmark": "npx playwright test --config $npm_package_config_playwrightBenchmarkConfig --project=firefox-benchmark",
+    "test:benchmark:loss": "npx playwright test --config $npm_package_config_playwrightBenchmarkConfig --project=firefox-benchmark-loss",
     "test:benchmark:chromium": "npx playwright test --config $npm_package_config_playwrightBenchmarkConfig --project=chromium-benchmark",
     "test:headed": "npx playwright test --config $npm_package_config_playwrightConfig --headed",
     "test:rs": "cargo test --manifest-path $npm_package_config_cargoManifest"

@@ -28,7 +28,7 @@
 - **MessagePort direct delivery** replaced the 2-hop relay as the primary data path. On `open()` the polyfill creates a `MessageChannel`, keeps port1, transfers port2 to the bridge, which hands it to the data worker. Input reports now flow worker → page directly (1 hop, zero-copy, no Xray unwrap, bridge bypassed). The 2-hop relay (worker → bridge → page) remains as the fallback if the port transfer fails. The DataView zero-copy principle (the GCMajor-elimination finding below) is unchanged.
 - **Profiler-confirmed main-thread contention** (the reason WS must stay off the main thread). Running WS receive/parse on the content-script main thread ("bridge-direct") loses late-phase throughput to NM under a render-heavy scenario: 510 vs 681 msg/s. This is CPU contention with page rendering (CanvasKit/WASM), not the old (mistaken) "Atomics blocking" concern. The dedicated per-device worker keeps WS off the main thread, which the architecture already does.
 - **WebTransport/QUIC data plane** explored on a curiosity-driven branch (a spec-sanctioned way to avoid the faketls/wildcard-cert trick): self-signed cert with `serverCertificateHashes`, rotated at most every 14 days. Expected latency gain on a localhost daemon connection is near-zero (QUIC's 0-RTT/resilience advantages don't apply to lossless loopback); pursued for architectural cleanliness, not speed.
-- **Cold-start benchmark methodology matured**: a local clone of the test site (sayodevice.com) with URLs patched to load locally removed network-load timing variance, which had been causing GCMajor to intrude into benchmark windows unpredictably. Planned next step: Playwright automation to remove the last variance source (human click timing).
+- **Cold-start benchmark methodology matured**: a local clone of the test site (sayodevice.com) with URLs patched to load locally removed network-load timing variance, which had been causing GCMajor to intrude into benchmark windows unpredictably. The last variance source (human click timing in the Chromium benchmark) is gone too: the chromium-benchmark project now grants via the WebHidAllowDevicesForUrls policy and runs fully headless, see the chromium section below.
 
 ---
 
@@ -565,10 +565,16 @@ bridge handshakes with the target mode from the start instead of racing a
 mid-session `storage.onChanged` update.
 
 A separate **Chromium project** (`chromium-benchmark`) benchmarks native
-WebHID (no addon, no daemon; the mock talks straight to `/dev/hidraw`). It is
-semi-auto: Chromium has no CDP way to grant HID permission, so the spec opens
-the native chooser and waits for a human click on the mock device. Run it
-headed: `npm run test:benchmark:chromium`. Chromium coarsens
+WebHID (no addon, no daemon; the mock talks straight to `/dev/hidraw`). It
+runs fully automated and headless: `npm run test:benchmark:chromium`. WebHID
+cannot be granted via CDP (`Browser.grantPermissions` rejects `hid`;
+`DeviceAccess` does not cover the WebHID chooser), so the mock is pre-granted
+with the `WebHidAllowDevicesForUrls` policy and the benchmark page's own
+`open()` (`getDevices()`-based) finds it without ever touching
+`requestDevice`/the chooser. The policy matches origins including the port, so
+the benchmark serves on the fixed port 8123 and the policy file must contain
+exactly `http://localhost:8123` (see the spec header for the JSON and the
+install path). Chromium coarsens
 `performance.now()` to 100us with no flag to disable that clamp, so the
 benchmark page is served cross-origin-isolated (COOP/COEP, `tests/serve.ts`)
 to get 5us timestamps instead.
@@ -653,7 +659,7 @@ latency (send to the report arriving back), per run, with whole-run walltime:
 | #9  | 0.52 | 0.82 | 1.10 | 1.26 | 4.16  | 391.9    |
 | #10 | 0.52 | 0.90 | 1.22 | 1.40 | 2.14  | 415.2    |
 
-**native** (Chromium, no addon, semi-auto grant)
+**native** (Chromium, no addon, policy grant)
 
 | run | min  | p50  | p90  | p95  | max  | walltime |
 | --- | ---- | ---- | ---- | ---- | ---- | -------- |

@@ -15,8 +15,29 @@ export default defineConfig({
       name: 'firefox-benchmark',
       testDir: './benchmark',
       // The Chromium semi-auto spec lives under ./benchmark/chromium and runs
-      // in its own project.
-      testIgnore: '**/chromium/**',
+      // in its own project; the input-report loss benchmark lives under
+      // ./benchmark/loss and runs in its own project too.
+      testIgnore: ['**/chromium/**', '**/loss/**'],
+      use: {
+        browserName: 'firefox',
+        firefoxHarnessConfig: {
+          extensionPath: resolve(__dirname, '..', 'addon')
+        },
+        daemonMode: 'daemon-nm',
+        benchmarkRuns: 5,
+        launchOptions: {
+          firefoxUserPrefs: { 'privacy.reduceTimerPrecision': false }
+        }
+      } as PlaywrightUseOptions & {
+        firefoxHarnessConfig: { extensionPath: string }
+        daemonMode: string
+        benchmarkRuns: number
+        launchOptions: { firefoxUserPrefs: { [key: string]: boolean } }
+      }
+    },
+    {
+      name: 'firefox-benchmark-loss',
+      testDir: './benchmark/loss',
       use: {
         browserName: 'firefox',
         firefoxHarnessConfig: {
@@ -40,7 +61,7 @@ export default defineConfig({
       timeout: 600000,
       use: {
         browserName: 'chromium',
-        headless: false,
+        headless: true,
         benchmarkRuns: 5
       } as PlaywrightUseOptions & { benchmarkRuns: number }
     }
