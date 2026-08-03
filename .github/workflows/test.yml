@@ -60,7 +60,7 @@ jobs:
               libxrender1
           version: v1
       - name: Install kernel modules
-        run: sudo apt-get install -y linux-modules-extra-$(uname -r)
+        run: sudo apt-get update && sudo apt-get install -y linux-modules-extra-$(uname -r)
       - name: Install dependencies
         run: |
           npm ci
