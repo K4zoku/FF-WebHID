@@ -1,6 +1,7 @@
 mod batching;
 mod blocklist;
 mod client;
+mod report_blocking;
 mod descriptor;
 mod device_mgr;
 mod hid;

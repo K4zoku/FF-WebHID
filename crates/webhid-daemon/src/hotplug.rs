@@ -13,7 +13,7 @@ fn refresh_and_diff(event_tx: &broadcast::Sender<IpcResponse>) {
     let current: HashMap<u32, webhid::DeviceInfo> = match crate::hid::enumerate() {
         Ok(devs) => devs
             .into_iter()
-            .filter_map(crate::device_mgr::prune_device_info)
+            .filter_map(crate::report_blocking::prune_device_info)
             .map(|d| (d.device_id, d))
             .collect(),
         Err(_) => return,
@@ -128,7 +128,7 @@ fn start_udev(event_tx: broadcast::Sender<IpcResponse>) -> anyhow::Result<()> {
                         if crate::hid::is_blocked_by_vendor_product(&d) {
                             continue;
                         }
-                        let Some(d) = crate::device_mgr::prune_device_info(d) else {
+                        let Some(d) = crate::report_blocking::prune_device_info(d) else {
                             continue;
                         };
                         let devnode = info.path().to_string_lossy().into_owned();
@@ -162,7 +162,7 @@ fn start_udev(event_tx: broadcast::Sender<IpcResponse>) -> anyhow::Result<()> {
                             };
                             // Hidden after pruning (all collections protected):
                             // do not report the device, like Chromium.
-                            let Some(info) = crate::device_mgr::prune_device_info(info) else {
+                            let Some(info) = crate::report_blocking::prune_device_info(info) else {
                                 continue;
                             };
                             log::info!(
@@ -228,7 +228,7 @@ fn run_windows(event_tx: broadcast::Sender<IpcResponse>) {
     if let Ok(devices) = crate::hid::enumerate() {
         let mut cache = DEVICE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
         let cache = cache.get_or_insert_with(HashMap::new);
-        for d in devices.into_iter().filter_map(crate::device_mgr::prune_device_info) {
+        for d in devices.into_iter().filter_map(crate::report_blocking::prune_device_info) {
             cache.insert(d.device_id, d);
         }
     }
@@ -449,7 +449,7 @@ fn run_macos(event_tx: broadcast::Sender<IpcResponse>) {
     if let Ok(devices) = crate::hid::enumerate() {
         let mut cache = DEVICE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
         let cache = cache.get_or_insert_with(HashMap::new);
-        for d in devices.into_iter().filter_map(crate::device_mgr::prune_device_info) {
+        for d in devices.into_iter().filter_map(crate::report_blocking::prune_device_info) {
             cache.insert(d.device_id, d);
         }
     }

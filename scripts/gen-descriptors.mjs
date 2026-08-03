@@ -85,9 +85,11 @@ function mouseDescriptor() {
     usage(2),
     usage(3),
     inputData(),
+    // Padding bits must be Constant: hidreport rejects a Data/Variable item
+    // whose reportCount exceeds its declared usages.
     reportSize(1),
     reportCount(5),
-    inputData(),
+    inputData(0x01),
     reportSize(8),
     reportCount(2),
     usagePage(0x01),
@@ -116,13 +118,17 @@ function keyboardDescriptor() {
     usage(0xe6),
     usage(0xe7),
     inputData(),
+    // Reserved byte is Constant, and the 6-key list is an Array: both dodge
+    // hidreport's "Missing Usages for main item" check (Data/Variable items
+    // need a usage per report count). Matches the standard boot keyboard
+    // descriptor shape.
     reportSize(8),
     reportCount(1),
-    inputData(),
+    inputData(0x01),
     reportSize(8),
     reportCount(6),
     usage(0x00),
-    inputData(),
+    inputData(0x00),
     endCollection()
   )
 }
