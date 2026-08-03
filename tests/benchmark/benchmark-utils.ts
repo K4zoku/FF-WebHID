@@ -49,11 +49,29 @@ interface BenchmarkFixtures {
   daemonMode: string
 }
 
+/** Console messages that mean the data plane silently degraded to NM. */
+const FALLBACK_PATTERNS = [
+  'falling back to NM',
+  'spawn failed',
+  'using NM data plane',
+  'cannot derive WS auth hash'
+]
+
+/** Positive signal that the in-page WT data plane actually engaged: the main
+ * world (polyfill logger) logs this only after the WebTransport stream attach
+ * succeeded. The worker logs the same text, but worker console does not reach
+ * the page, so a match here is the in-page transport. */
+const WT_STREAM_ATTACHED = 'WT persistent stream attached'
+
 export interface BenchmarkResult {
   open: number | null
   warmup: number | null
   runs: Array<{ duration: number; latencies: number[]; marks: Record<string, number | null> }>
   failures: number
+  /** Console messages matching FALLBACK_PATTERNS (data-plane degraded to NM). */
+  fallbacks: string[]
+  /** True when the in-page WT transport logged a successful stream attach. */
+  wtStreamAttached: boolean
 }
 
 export async function setDataPlane(
@@ -83,6 +101,36 @@ export async function setWorkerSpawnMode(
         [`settings :: ${origin} :: workerSpawnMode`]: mode
       }),
     { origin, mode }
+  )
+}
+
+export async function setUseWorker(
+  bg: { evaluate: Page['evaluate'] },
+  origin: string,
+  enabled: boolean
+): Promise<void> {
+  await bg.evaluate(
+    ({ origin, enabled }: { origin: string; enabled: boolean }) =>
+      browser.storage.local.set({
+        'settings :: useWorker': enabled,
+        [`settings :: ${origin} :: useWorker`]: enabled
+      }),
+    { origin, enabled }
+  )
+}
+
+export async function setLogLevel(
+  bg: { evaluate: Page['evaluate'] },
+  origin: string,
+  level: number
+): Promise<void> {
+  await bg.evaluate(
+    ({ origin, level }: { origin: string; level: number }) =>
+      browser.storage.local.set({
+        'settings :: logLevel': level,
+        [`settings :: ${origin} :: logLevel`]: level
+      }),
+    { origin, level }
   )
 }
 
@@ -171,7 +219,8 @@ export function median(vals: number[]): number {
 
 export async function benchmarkMode(
   fixtures: BenchmarkFixtures,
-  mode: 'ws' | 'wt' | 'nm'
+  mode: 'ws' | 'wt' | 'nm',
+  opts?: { inPage?: boolean }
 ): Promise<BenchmarkResult> {
   const { harnessCtx, backgroundPage, vendorDevice, httpPort, daemonMode } = fixtures
   const page = await harnessCtx.newPage()
@@ -188,6 +237,24 @@ export async function benchmarkMode(
   if (spawnMode === 'blob' || spawnMode === 'shadow') {
     await setWorkerSpawnMode(backgroundPage, origin, spawnMode)
   }
+  if (opts?.inPage) {
+    await setUseWorker(backgroundPage, origin, false)
+  }
+  // Debug logging so data-plane spawn/fallback decisions are visible on the
+  // page console; the wt-inpage benchmark asserts none of them degrade to NM.
+  await setLogLevel(backgroundPage, origin, 3)
+
+  const fallbacks: string[] = []
+  let wtStreamAttached = false
+  page.on('console', (msg) => {
+    const text = msg.text()
+    if (FALLBACK_PATTERNS.some((p) => text.includes(p))) {
+      fallbacks.push(`[${msg.type()}] ${text}`)
+    }
+    if (text.includes(WT_STREAM_ATTACHED) && text.includes('polyfill')) {
+      wtStreamAttached = true
+    }
+  })
 
   await page.goto(`${origin}/tests/test-page.html`, {
     waitUntil: 'domcontentloaded',
@@ -212,10 +279,24 @@ export async function benchmarkMode(
     throw new Error('page chunk count does not match file-based chunking')
   }
 
-  return runBenchmark(page, vendorDevice)
+  const result = await runBenchmark(page, vendorDevice, fallbacks)
+  if (opts?.inPage) {
+    // Wait until the in-page WT either attaches its stream (real run, fast) or
+    // the 10s spawn timeout fires the NM-fallback warning (harness). Asserting
+    // before this would race the benchmark end and miss both signals.
+    const deadline = Date.now() + 11500
+    while (!wtStreamAttached && Date.now() < deadline) {
+      await page.waitForTimeout(200)
+    }
+  }
+  return { ...result, wtStreamAttached }
 }
 
-export async function runBenchmark(page: Page, mock: WebhidMockProcess): Promise<BenchmarkResult> {
+export async function runBenchmark(
+  page: Page,
+  mock: WebhidMockProcess,
+  fallbacks: string[] = []
+): Promise<BenchmarkResult> {
   await page.evaluate(() => window.webhidBenchmark!.open())
 
   let warmup: number | null = null
@@ -253,7 +334,7 @@ export async function runBenchmark(page: Page, mock: WebhidMockProcess): Promise
     document.getElementById('bench-status')!.textContent = ''
   })
 
-  return { open: openMs, warmup, runs: runsOut, failures }
+  return { open: openMs, warmup, runs: runsOut, failures, fallbacks, wtStreamAttached: false }
 }
 
 export function percentile(vals: number[], p: number): number {
@@ -308,4 +389,12 @@ export function printResults(mode: string, result: BenchmarkResult): void {
     ).padStart(7)}`
   )
   if (failures > 0) console.log(`  ${failures} failed run(s) after retries`)
+  if (result.fallbacks.length > 0) {
+    console.log('')
+    console.log(
+      'WARNING: the data plane degraded to NM fallback; these numbers measure ' +
+        'Native Messaging, not the requested mode:'
+    )
+    for (const fb of result.fallbacks) console.log('  - ' + fb)
+  }
 }

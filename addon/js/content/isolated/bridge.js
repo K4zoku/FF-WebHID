@@ -540,7 +540,7 @@
     const gen = (spawnGen.get(deviceId) || 0) + 1
     spawnGen.set(deviceId, gen)
     let ok
-    if (!settings.useWorker && opts.wtPort != null) {
+    if (settings.useWorker === false && opts.wtPort != null) {
       ok = await spawnInPageDataPlane(deviceId, sessionToken, opts)
     } else {
       ok = await spawnWorker(deviceId, sessionToken, wsPort, opts, gen)

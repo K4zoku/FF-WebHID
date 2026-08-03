@@ -180,7 +180,7 @@
     "message": "Dùng Worker"
   },
   "settingsUseWorkerDesc": {
-    "message": "Bật: data plane WS/WT chạy trong Web Worker riêng (ngoài main thread, khuyến nghị).\nTắt: WebTransport kết nối trực tiếp trong page, không dùng worker, report được dispatch trên main thread (dùng chung CPU với rendering; ổn ở tốc độ report thường, chưa benchmark). WebSocket vẫn cần worker vì HSTS đổi `ws://` thành `wss://` trên page, nên tùy chọn WS vẫn dùng worker. Native Messaging không bị ảnh hưởng. Reload pages sau khi đổi."
+    "message": "Bật: data plane WS/WT chạy trong Web Worker riêng (ngoài main thread, khuyến nghị).\nTắt: WebTransport kết nối trực tiếp trong page, không dùng worker, report được dispatch trên main thread (dùng chung CPU với rendering; ổn ở tốc độ report thường, chưa benchmark). Firefox hỏi quyền local-network \\\"Allow\\\" một lần cho page trước khi kết nối WebTransport đầu tiên tới daemon; worker được miễn prompt này. WebSocket vẫn cần worker vì HSTS đổi `ws://` thành `wss://` trên page, nên tùy chọn WS vẫn dùng worker. Native Messaging không bị ảnh hưởng. Reload pages sau khi đổi."
   },
   "popupUseWorker": {
     "message": "Dùng Worker"

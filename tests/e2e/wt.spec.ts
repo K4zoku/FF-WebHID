@@ -224,7 +224,11 @@ function waitForDaemonListening(proc: ChildProcess): Promise<void> {
 
 test.describe.serial('WebHID E2E (WebTransport data plane)', () => {
   test('set dataPlane to wt before any device opens', async ({ sharedPage, backgroundPage }) => {
-    await backgroundPage.evaluate(() => browser.storage.local.set({ 'settings :: dataPlane': 'wt' }))
+    const origin = new URL(sharedPage.url()).origin
+    await backgroundPage.evaluate(
+      (key) => browser.storage.local.set({ [key]: 'wt' }),
+      `settings :: ${origin} :: dataPlane`
+    )
     await sharedPage.reload({ waitUntil: 'domcontentloaded' })
     await sharedPage.waitForFunction(() => typeof navigator.hid !== 'undefined', {
       timeout: 15000
@@ -333,7 +337,11 @@ test.describe.serial('WebHID E2E (WebTransport data plane)', () => {
     backgroundPage,
     daemon
   }) => {
-    await backgroundPage.evaluate(() => browser.storage.local.set({ 'settings :: dataPlane': 'ws' }))
+    const origin = new URL(sharedPage.url()).origin
+    await backgroundPage.evaluate(
+      (key) => browser.storage.local.set({ [key]: 'ws' }),
+      `settings :: ${origin} :: dataPlane`
+    )
     await sleep(2500)
     const wsPacket = new Array<number>(VENDOR_INPUT_SIZE).fill(0)
     wsPacket[1] = 0xb1
@@ -346,7 +354,10 @@ test.describe.serial('WebHID E2E (WebTransport data plane)', () => {
       expect(await waitForLog(daemon, 'WS connect gen=')).toBe(true)
     }
 
-    await backgroundPage.evaluate(() => browser.storage.local.set({ 'settings :: dataPlane': 'wt' }))
+    await backgroundPage.evaluate(
+      (key) => browser.storage.local.set({ [key]: 'wt' }),
+      `settings :: ${origin} :: dataPlane`
+    )
     await sleep(2500)
     const wtPacket = new Array<number>(VENDOR_INPUT_SIZE).fill(0)
     wtPacket[1] = 0xb2
@@ -358,6 +369,53 @@ test.describe.serial('WebHID E2E (WebTransport data plane)', () => {
     if (daemon) {
       expect(await waitForLog(daemon, 'WT connect gen=2')).toBe(true)
     }
+  })
+
+  test('WT data plane runs in-page when useWorker is off (per-site)', async ({
+    sharedPage,
+    vendorDevice,
+    backgroundPage,
+    daemon
+  }) => {
+    test.skip(
+      true,
+      'page-context WebTransport to 127.0.0.1 is gated in the harness Firefox: ' +
+        'the in-page spawn silently stalls and falls back to NM (verified via the ' +
+        'daemon log: no WT connect). Real Firefox 153 shows a one-time "Allow" ' +
+        'local-network prompt that works; the harness never renders it. ' +
+        'Verified manually on real Firefox.'
+    )
+    const origin = new URL(sharedPage.url()).origin
+    const siteKey = `settings :: ${origin} :: useWorker`
+    const genCountBefore = daemon
+      ? readFileSync(daemon.socketPath.replace(/\.sock$/, '.log'), 'utf8').split(
+          'WT connect gen='
+        ).length - 1
+      : 0
+    await backgroundPage.evaluate((key) => browser.storage.local.set({ [key]: false }), siteKey)
+    await sleep(2500)
+    const packet = new Array<number>(VENDOR_INPUT_SIZE).fill(0)
+    packet[1] = 0x2b
+    const event = await sendUntilReported(vendorDevice, sharedPage, VENDOR, 1, packet, {
+      index: 1,
+      value: 0x2b
+    })
+    expect(event.data[1]).toBe(0x2b)
+    if (daemon) {
+      const logPath = daemon.socketPath.replace(/\.sock$/, '.log')
+      const start = Date.now()
+      let grew = false
+      while (Date.now() - start < 10000) {
+        const count = readFileSync(logPath, 'utf8').split('WT connect gen=').length - 1
+        if (count > genCountBefore) {
+          grew = true
+          break
+        }
+        await sleep(200)
+      }
+      expect(grew).toBe(true)
+    }
+    await backgroundPage.evaluate((key) => browser.storage.local.remove(key), siteKey)
   })
 
   test('WT generation rotates after cert expiry and drains the old port', async ({
