@@ -5,15 +5,12 @@ edition = "2024"
 license = "MIT"
 
 [features]
-default = ["report-blocking"]
 hardening = ["webhid/hardening"]
-# Enforce report-level blocking for Generic Desktop consumer-input collections
-# (mouse 0x0002, keyboard 0x0006, keypad 0x0007, system control 0x0080):
-# input reports are dropped at the reader, output/feature writes are rejected.
-# On by default to match Chromium/WICG behavior; build with
-# `--no-default-features` to keep consumer-input devices (e.g. macropads)
-# fully usable.
-report-blocking = []
+# Report-level blocking for Generic Desktop consumer-input collections (mouse
+# 0x0002, keyboard 0x0006, keypad 0x0007, system control 0x0080) is enforced
+# unconditionally, matching Chromium/WICG: input reports are dropped at the
+# reader, output/feature writes are rejected. Chromium has no gate for this
+# layer, so neither does the daemon.
 
 [dependencies]
 webhid = { path = "../webhid" }

@@ -26,7 +26,6 @@ pub fn blocklist_rules() -> &'static [BlocklistRule] {
             report_id: None,
             report_type: None,
         },
-        #[cfg(feature = "report-blocking")]
         // Generic Desktop / Mouse
         BlocklistRule {
             vendor: None,
@@ -36,7 +35,6 @@ pub fn blocklist_rules() -> &'static [BlocklistRule] {
             report_id: None,
             report_type: None,
         },
-        #[cfg(feature = "report-blocking")]
         // Generic Desktop / Keyboard
         BlocklistRule {
             vendor: None,
@@ -46,7 +44,6 @@ pub fn blocklist_rules() -> &'static [BlocklistRule] {
             report_id: None,
             report_type: None,
         },
-        #[cfg(feature = "report-blocking")]
         // Generic Desktop / Keypad
         BlocklistRule {
             vendor: None,
@@ -56,7 +53,6 @@ pub fn blocklist_rules() -> &'static [BlocklistRule] {
             report_id: None,
             report_type: None,
         },
-        #[cfg(feature = "report-blocking")]
         // Generic Desktop / System Control
         BlocklistRule {
             vendor: None,
@@ -125,9 +121,7 @@ pub fn device_is_blocked(rules: &[BlocklistRule], vendor_id: u16, product_id: u1
 /// Keypad usages are always protected for input and output (not feature, the
 /// feature reports of mouse/keyboard collections are still blocked by the
 /// blocklist rules); Generic Desktop System Control 0x80-0x8f and System
-/// Dock 0xa0-0xb6 are always protected for every type. Gated behind
-/// `report-blocking` like the consumer-input rules.
-#[cfg(feature = "report-blocking")]
+/// Dock 0xa0-0xb6 are always protected for every type.
 pub fn is_always_protected(
     usage_page: Option<u16>,
     usage: Option<u16>,
@@ -211,7 +205,6 @@ mod tests {
         let rules = blocklist_rules();
         // Usage rules block reports, not devices (WICG spec + Chromium model).
         assert!(!device_is_blocked(rules, 0x1234, 0x5678));
-        #[cfg(feature = "report-blocking")]
         {
             assert!(is_report_blocked(
                 rules,
@@ -259,28 +252,6 @@ mod tests {
                 Some(0x0006),
                 1,
                 ReportType::Output,
-            ));
-        }
-        #[cfg(not(feature = "report-blocking"))]
-        {
-            // Feature off: consumer-input reports flow normally.
-            assert!(!is_report_blocked(
-                rules,
-                0x1234,
-                0x5678,
-                Some(0x0001),
-                Some(0x0006),
-                1,
-                ReportType::Input,
-            ));
-            assert!(!is_report_blocked(
-                rules,
-                0x1234,
-                0x5678,
-                Some(0x0001),
-                Some(0x0007),
-                1,
-                ReportType::Input,
             ));
         }
         // Vendor-defined collections are untouched either way.

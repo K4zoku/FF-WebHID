@@ -65,13 +65,8 @@ fn build_report_collection_map(info: &DeviceInfo) -> ReportCollectionMap {
     map
 }
 
-#[cfg(feature = "report-blocking")]
 fn always_protected_usage(up: Option<u16>, u: Option<u16>, rt: ReportType) -> bool {
     blocklist::is_always_protected(up, u, rt)
-}
-#[cfg(not(feature = "report-blocking"))]
-fn always_protected_usage(_up: Option<u16>, _u: Option<u16>, _rt: ReportType) -> bool {
-    false
 }
 
 // A report is protected when ANY collection association matches a blocklist
@@ -382,10 +377,8 @@ impl DeviceReportBlocking {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(feature = "report-blocking")]
     use webhid::{Collection, Report};
 
-    #[cfg(feature = "report-blocking")]
     fn col(usage_page: Option<u16>, usage: Option<u16>, input_ids: &[u8]) -> Collection {
         Collection {
             collection_type: 1, // Application
@@ -404,7 +397,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "report-blocking")]
     fn device_info(collections: Vec<Collection>) -> DeviceInfo {
         DeviceInfo {
             vendor_id: 0x1234,
@@ -469,7 +461,6 @@ mod tests {
         ));
     }
 
-    #[cfg(feature = "report-blocking")]
     #[test]
     fn test_associations_any_protected_always_protected() {
         let rules = blocklist::blocklist_rules();
@@ -564,7 +555,6 @@ mod tests {
         ));
     }
 
-    #[cfg(feature = "report-blocking")]
     #[test]
     fn test_compute_blocked_input_ids_any_association_blocks() {
         // Keyboard (blocked) + Joystick (not blocked) share unnumbered id 0:
@@ -617,12 +607,10 @@ mod tests {
         assert!(compute_blocked_input_ids(info.vendor_id, info.product_id, &map).is_empty());
     }
 
-    #[cfg(feature = "report-blocking")]
     #[test]
     fn test_e2e_fixtures_unblocked_with_report_blocking() {
-        // The e2e harness builds the daemon with default features (now
-        // including report-blocking); vendor.bin and gamepad.bin must stay
-        // fully usable. Regression guard for the default-features flip.
+        // vendor.bin and gamepad.bin must stay fully usable under
+        // unconditional report-level blocking (Chromium parity).
         let read_fixture = |file: &str| -> DeviceInfo {
             let path = concat!(
                 env!("CARGO_MANIFEST_DIR"),
@@ -660,9 +648,9 @@ mod tests {
             );
         }
         // mouse.bin and keyboard.bin are consumer-input fixtures: their
-        // reports must be blocked with the feature on, matching Chromium
-        // (mouse reports sit in a Physical child but propagate to the Mouse
-        // Application ancestor), and pruning must hide the whole device.
+        // reports must be blocked, matching Chromium (mouse reports sit in a
+        // Physical child but propagate to the Mouse Application ancestor),
+        // and pruning must hide the whole device.
         for file in ["mouse.bin", "keyboard.bin"] {
             let info = read_fixture(file);
             let map = build_report_collection_map(&info);
@@ -684,7 +672,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "report-blocking")]
     #[test]
     fn test_prune_keyboard_only_hidden() {
         // A device whose collections all become empty after pruning is hidden,
@@ -697,7 +684,6 @@ mod tests {
         assert!(prune_device_info(kbd_page).is_none());
     }
 
-    #[cfg(feature = "report-blocking")]
     #[test]
     fn test_prune_mouse_physical_child_hidden() {
         // Mouse report in a Physical child: the report propagates to the
@@ -710,7 +696,6 @@ mod tests {
         assert!(prune_device_info(device_info(vec![mouse])).is_none());
     }
 
-    #[cfg(feature = "report-blocking")]
     #[test]
     fn test_prune_mixed_vendor_keyboard() {
         // Vendor collection (report 1 in/out, unblocked) + Keyboard collection
@@ -738,7 +723,6 @@ mod tests {
         assert_eq!(c.output_reports.len(), 1);
     }
 
-    #[cfg(feature = "report-blocking")]
     #[test]
     fn test_prune_nested_keyboard() {
         // Keyboard nested under a vendor top-level: the child is pruned, the
@@ -757,7 +741,6 @@ mod tests {
         assert!(prune_device_info(device_info(vec![vendor2])).is_none());
     }
 
-    #[cfg(feature = "report-blocking")]
     #[test]
     fn test_prune_pointer_physical_under_vendor_kept() {
         // Pointer-usage Physical child under a vendor top-level is not
@@ -794,7 +777,6 @@ mod tests {
         assert!(report_write_valid(true, 0, 2, None));
     }
 
-    #[cfg(feature = "report-blocking")]
     #[test]
     fn test_interface_protected_fallback() {
         // Unparseable/empty descriptor with a protected hidapi interface
@@ -834,7 +816,6 @@ mod tests {
         assert!(!interface_protected(&parsed, ReportType::Input));
     }
 
-    #[cfg(feature = "report-blocking")]
     #[test]
     fn test_always_protected_fallback() {
         // Chromium's HasAlwaysProtectedCollection fallback: a keyboard
@@ -855,7 +836,6 @@ mod tests {
         assert!(!has_always_protected_collection(&vendor, ReportType::Feature));
     }
 
-    #[cfg(feature = "report-blocking")]
     #[test]
     fn test_compute_blocked_input_ids_nested_collections() {
         // A Keyboard nested as a child of a vendor top-level is walked
