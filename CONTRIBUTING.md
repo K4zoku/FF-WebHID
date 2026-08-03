@@ -42,7 +42,7 @@ But don't accept "this is the ceiling" without verifying. This project has repea
 Device permission and isolation are layered independently:
 
 - udev rules (or platform equivalent) gate which devices a non-root process can even open.
-- The HID blocklist (FIDO/U2F security keys) is enforced in the daemon regardless of OS-level permissions, matching Chromium's blocklist. Keyboard and mouse access is gated by the OS layer (udev rules on Linux, HID API on Windows, Input Monitoring/TCC on macOS), not by the daemon.
+- The HID blocklist (FIDO/U2F security keys) is enforced in the daemon regardless of OS-level permissions, matching Chromium's blocklist. Keyboard and mouse device access (enumerability) is gated by the OS layer (udev rules on Linux, HID API on Windows, Input Monitoring/TCC on macOS); the daemon additionally blocks their input/output/feature reports by default (the `report-blocking` cargo feature, on by default), so consumer-input devices stay enumerable but never deliver data to pages.
 - The device picker UI runs in closed-mode Shadow DOM, isolated from page script.
 - WebSocket auth uses a per-session token, checked independently of the above.
 
