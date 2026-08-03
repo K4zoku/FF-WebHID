@@ -10,7 +10,7 @@
     { "filename": "crates/webhid/Cargo.toml", "updater": ".versionrc.cargo-updater.cjs" },
     { "filename": "crates/webhid-daemon/Cargo.toml", "updater": ".versionrc.cargo-updater.cjs" },
     { "filename": "crates/webhid-native-messaging/Cargo.toml", "updater": ".versionrc.cargo-updater.cjs" },
-    { "filename": "crates/Cargo.lock", "updater": ".versionrc.cargo-updater.cjs" }
+    { "filename": "crates/Cargo.lock", "updater": ".versionrc.cargo-lock-updater.cjs" }
   ],
   "types": [
     { "type": "feat", "section": "Features" },
