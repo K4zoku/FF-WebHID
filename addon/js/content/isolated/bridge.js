@@ -27,14 +27,10 @@
     }
   })
 
-  /** @type {Map<string, Worker>} */
+  /** @type {Map<string, object>} */
   const workers = new Map()
-  /** @type {Map<string, Map<number, Function>>} */
-  const workerCallbacks = new Map()
-  /** @type {Set<string>} */
-  const workerReady = new Set()
-  /** @type {Map<string, object[]>} */
-  const workerQueues = new Map()
+  /** @type {Map<string, object>} */
+  const connectParams = new Map()
   /** @type {Map<string, MessagePort>} */
   const dataPorts = new Map()
   /** @type {number|null} */
@@ -161,9 +157,7 @@
       }
       dataPorts.delete(deviceId)
     }
-    workerCallbacks.delete(deviceId)
-    workerReady.delete(deviceId)
-    workerQueues.delete(deviceId)
+    connectParams.delete(deviceId)
     spawnGen.delete(deviceId)
   }
 
@@ -313,7 +307,7 @@
       )
       return false
     }
-    let worker
+    let spawnResult = null
     let spawnMode = await resolveSpawnMode()
     if (spawnMode === 'nm') {
       logger.info('page CSP blocks all worker spawn modes for', deviceId, '; using NM data plane')
@@ -321,169 +315,39 @@
     }
     try {
       if (spawnMode === 'blob') {
-        worker = await requestMainWorldSpawn({ mode: 'blob', bundleText: await fetchWorkerBundle(), deviceId })
+        spawnResult = await requestMainWorldSpawn({ mode: 'blob', bundleText: await fetchWorkerBundle(), deviceId })
       } else {
-        worker = await requestMainWorldSpawn({ mode: 'shadow', deviceId })
+        spawnResult = await requestMainWorldSpawn({ mode: 'shadow', deviceId })
       }
     } catch (e) {
       logger.warn('worker spawn failed for', deviceId, '(', spawnMode, '):', e.message)
       if (spawnMode === 'shadow') {
         spawnMode = 'blob'
         try {
-          worker = await requestMainWorldSpawn({ mode: 'blob', bundleText: await fetchWorkerBundle(), deviceId })
+          spawnResult = await requestMainWorldSpawn({ mode: 'blob', bundleText: await fetchWorkerBundle(), deviceId })
         } catch (e2) {
           logger.warn('worker spawn retry failed for', deviceId, '(', spawnMode, '):', e2.message)
         }
       }
     }
-    if (!worker) return false
+    if (!spawnResult || !spawnResult.ok) return false
 
     if (spawnGen.get(deviceId) !== gen) {
       logger.info('worker spawn stale, discarding for', deviceId)
-      worker.terminate()
+      requestMainWorldSpawn({ mode: 'terminate', deviceId }).catch(() => {})
       return false
     }
-    workers.set(deviceId, worker)
-
-    return new Promise((resolveSpawn) => {
-      let resolved = false
-      let readyTimer = null
-
-      const fail = (reason) => {
-        if (resolved) return
-        resolved = true
-        if (readyTimer) clearTimeout(readyTimer)
-        worker.onerror = null
-        worker.onmessage = null
-        worker.terminate()
-        workers.delete(deviceId)
-        workerReady.delete(deviceId)
-        dataPorts.delete(deviceId)
-        const queue = workerQueues.get(deviceId)
-        if (queue) {
-          const callbackMap = workerCallbacks.get(deviceId)
-          for (const workerMsg of queue) {
-            if (callbackMap && callbackMap.has(workerMsg.reqId)) {
-              callbackMap.get(workerMsg.reqId)({
-                error: 'worker spawn failed'
-              })
-              callbackMap.delete(workerMsg.reqId)
-            }
-          }
-          workerQueues.delete(deviceId)
-        }
-        logger.warn('worker spawn failed for', deviceId, ':', reason)
-        resolveSpawn(false)
-      }
-
-      worker.onerror = (e) => fail('onerror: ' + (e.message || 'unknown'))
-      readyTimer = setTimeout(() => fail('ready timeout'), 3000)
-
-      worker.onmessage = ({ data }) => {
-        if (data.type === 'ready') {
-          if (resolved) return
-          resolved = true
-          if (readyTimer) clearTimeout(readyTimer)
-          logger.info('worker ready for', deviceId)
-          workerReady.add(deviceId)
-          const queue = workerQueues.get(deviceId)
-          if (queue) {
-            for (const workerMsg of queue) {
-              worker.postMessage(workerMsg, workerMsg.data ? [workerMsg.data.buffer] : [])
-            }
-            workerQueues.delete(deviceId)
-          }
-          worker.postMessage({
-            type: 'settings',
-            dataPlane: settings.dataPlane,
-            logLevel: settings.logLevel
-          })
-          resolveSpawn(true)
-          return
-        }
-        if (data.type === 'auth-failed') {
-          logger.warn('worker auth-failed for', deviceId, 'code=' + data.code + '; re-opening')
-          const orphanCallbackMap = workerCallbacks.get(deviceId)
-          if (orphanCallbackMap) {
-            for (const [, callback] of orphanCallbackMap) callback({ error: 'worker auth-failed' })
-            orphanCallbackMap.clear()
-          }
-          workers.delete(deviceId)
-          workerReady.delete(deviceId)
-          dataPorts.delete(deviceId)
-          refreshDataPlaneToken(deviceId)
-          return
-        }
-        if (data.type === 'closed') {
-          logger.warn('worker closed for', deviceId)
-          const orphanCallbackMap = workerCallbacks.get(deviceId)
-          if (orphanCallbackMap) {
-            for (const [, callback] of orphanCallbackMap) callback({ error: 'worker closed' })
-            orphanCallbackMap.clear()
-          }
-          workers.delete(deviceId)
-          workerReady.delete(deviceId)
-          dataPorts.delete(deviceId)
-          replyToPage({
-            type: 'event',
-            event: { eventType: 'disconnect', deviceId: deviceId }
-          })
-          return
-        }
-        if (data.type === 'inputReport') {
-          const view = data.data ? new Uint8Array(data.data) : null
-          if (view && logger.level >= 3 && data.reportId !== 33) {
-            let hex = ''
-            for (let i = 0; i < Math.min(8, view.length); i++)
-              hex += view[i].toString(16).padStart(2, '0') + ' '
-            logger.debug(
-              'worker→page inputReport device=' +
-                deviceId +
-                ' reportId=' +
-                data.reportId +
-                ' len=' +
-                view.length +
-                ' first8=' +
-                hex
-            )
-          }
-          replyToPage(
-            {
-              type: 'event',
-              event: {
-                eventType: 'input_report',
-                deviceId: deviceId,
-                reportId: data.reportId,
-                data: view
-              }
-            },
-            view ? [view.buffer] : []
-          )
-          return
-        }
-        if (data.type === 'sendResult' || data.type === 'featureResult') {
-          const callbackMap = workerCallbacks.get(deviceId)
-          if (callbackMap && callbackMap.has(data.reqId)) {
-            const callback = callbackMap.get(data.reqId)
-            callbackMap.delete(data.reqId)
-            if (data.error) callback({ s: 500, err: data.error })
-            else if (data.data) callback({ s: 200, d: data.data })
-            else callback({ s: 204 })
-          }
-        }
-      }
-
-      worker.postMessage({
-        type: 'connect',
-        transport: opts.wtPort != null ? 'wt' : 'ws',
-        wsPort: opts.wtPort != null ? undefined : wsPort,
-        wtPort: opts.wtPort != null ? opts.wtPort : undefined,
-        wtCertHash: opts.wtPort != null ? opts.wtCertHash : undefined,
-        token: wsAuthHash,
-        reportSize: opts.reportSize || 64,
-        logLevel: logger.level
-      })
+    workers.set(deviceId, null)
+    connectParams.set(deviceId, {
+      transport: opts.wtPort != null ? 'wt' : 'ws',
+      wsPort: opts.wtPort != null ? undefined : wsPort,
+      wtPort: opts.wtPort != null ? opts.wtPort : undefined,
+      wtCertHash: opts.wtPort != null ? opts.wtCertHash : undefined,
+      token: wsAuthHash,
+      reportSize: opts.reportSize || 64,
+      logLevel: logger.level
     })
+    return true
   }
 
   /**
@@ -655,9 +519,7 @@
         if (pending) {
           clearTimeout(pending.timer)
           pendingSpawns.delete(event.data.id)
-          const workerPort = event.ports && event.ports[0]
-          if (workerPort) pending.resolve(makeWorkerProxy(workerPort))
-          else pending.reject(new Error('worker spawn response missing port'))
+          pending.resolve(event.data.result || {})
         }
         return
       }
@@ -673,11 +535,6 @@
       if (event.data && event.data.type === 'dataPlaneEvent') {
         const deviceId = event.data.deviceId
         const ev = event.data.event || {}
-        const orphanCallbackMap = workerCallbacks.get(deviceId)
-        if (orphanCallbackMap) {
-          for (const [, callback] of orphanCallbackMap) callback({ error: 'worker closed' })
-          orphanCallbackMap.clear()
-        }
         if (ev.type === 'closed') {
           inPageDevices.delete(deviceId)
           let spawnPending = false
@@ -696,6 +553,19 @@
         } else if (ev.type === 'auth-failed') {
           inPageDevices.delete(deviceId)
           refreshDataPlaneToken(deviceId)
+        }
+        return
+      }
+      if (event.data && event.data.type === 'workerError') {
+        const deviceId = event.data.deviceId
+        logger.warn('worker errored for', deviceId, ':', event.data.message)
+        if (workers.has(deviceId)) {
+          workers.delete(deviceId)
+          connectParams.delete(deviceId)
+          replyToPage({
+            type: 'event',
+            event: { eventType: 'disconnect', deviceId: deviceId }
+          })
         }
         return
       }
@@ -756,6 +626,47 @@
         } catch (e) {
           logger.debug('unauthorized port close failed', e)
         }
+        return
+      }
+      if (workers.has(deviceId)) {
+        const proxy = makeWorkerProxy(port)
+        workers.set(deviceId, proxy)
+        proxy.onmessage = (event) => {
+          const data = event.data
+          if (!data || !data.type) return
+          if (data.type === 'ready') {
+            logger.info('worker ready for', deviceId)
+            proxy.postMessage({
+              type: 'settings',
+              dataPlane: settings.dataPlane,
+              logLevel: settings.logLevel
+            })
+            return
+          }
+          if (data.type === 'auth-failed') {
+            logger.warn('worker auth-failed for', deviceId, 'code=' + data.code + '; re-opening')
+            workers.delete(deviceId)
+            dataPorts.delete(deviceId)
+            refreshDataPlaneToken(deviceId)
+            return
+          }
+          if (data.type === 'closed') {
+            logger.warn('worker closed for', deviceId)
+            workers.delete(deviceId)
+            dataPorts.delete(deviceId)
+            replyToPage({
+              type: 'event',
+              event: { eventType: 'disconnect', deviceId: deviceId }
+            })
+            return
+          }
+        }
+        const params = connectParams.get(deviceId)
+        if (params) {
+          connectParams.delete(deviceId)
+          proxy.postMessage(Object.assign({ type: 'connect' }, params))
+        }
+        logger.debug('worker control port received for device', deviceId)
         return
       }
       dataPorts.set(deviceId, port)
@@ -832,108 +743,13 @@
     }
 
     if (
-      (action === 'sendReport' ||
-        action === 'sendFeatureReport' ||
-        action === 'receiveFeatureReport') &&
-      payload &&
-      payload.deviceId &&
-      workers.has(payload.deviceId)
+      action === 'sendReport' ||
+      action === 'sendFeatureReport' ||
+      action === 'receiveFeatureReport'
     ) {
-      action =
-        action === 'sendReport'
-          ? 'workerSend'
-          : action === 'sendFeatureReport'
-            ? 'workerSendFeature'
-            : 'workerReceiveFeature'
-    }
-
-    if (
-      action === 'workerSend' ||
-      action === 'workerSendFeature' ||
-      action === 'workerReceiveFeature'
-    ) {
-      const deviceId = payload.deviceId
-
-      const worker = workers.get(deviceId)
-      if (worker && workerReady.has(deviceId)) {
-        const workerType =
-          action === 'workerSend'
-            ? 'send'
-            : action === 'workerSendFeature'
-              ? 'sendFeature'
-              : 'receiveFeature'
-        const workerMsg = {
-          type: workerType,
-          reqId: id,
-          reportId: payload.reportId
-        }
-        if (action === 'workerSend' || action === 'workerSendFeature') workerMsg.data = payload.data
-
-        {
-          let callbackMap = workerCallbacks.get(deviceId)
-          if (!callbackMap) {
-            callbackMap = new Map()
-            workerCallbacks.set(deviceId, callbackMap)
-          }
-          callbackMap.set(id, (data) => {
-            const result = data.error
-              ? { s: 500 }
-              : data.data
-                ? { s: 200, d: data.data }
-                : { s: 204 }
-            const transfers = result.d instanceof Uint8Array ? [result.d.buffer] : []
-            replyToPage({ type: 'response', id, result }, transfers.length ? transfers : undefined)
-          })
-        }
-        worker.postMessage(workerMsg)
-        return
-      }
-
-      if (worker) {
-        const workerType =
-          action === 'workerSend'
-            ? 'send'
-            : action === 'workerSendFeature'
-              ? 'sendFeature'
-              : 'receiveFeature'
-        const workerMsg = {
-          type: workerType,
-          reqId: id,
-          reportId: payload.reportId
-        }
-        if (action === 'workerSend' || action === 'workerSendFeature') workerMsg.data = payload.data
-
-        {
-          let callbackMap = workerCallbacks.get(deviceId)
-          if (!callbackMap) {
-            callbackMap = new Map()
-            workerCallbacks.set(deviceId, callbackMap)
-          }
-          callbackMap.set(id, (data) => {
-            const result = data.error
-              ? { s: 500 }
-              : data.data
-                ? { s: 200, d: data.data }
-                : { s: 204 }
-            const transfers = result.d instanceof Uint8Array ? [result.d.buffer] : []
-            replyToPage({ type: 'response', id, result }, transfers.length ? transfers : undefined)
-          })
-        }
-
-        if (!workerQueues.has(deviceId)) workerQueues.set(deviceId, [])
-        workerQueues.get(deviceId).push(workerMsg)
-        return
-      }
-
-      logger.warn('no worker for', deviceId, '; falling back to NM')
-      const fallbackAction =
-        action === 'workerSend'
-          ? 'sendReport'
-          : action === 'workerSendFeature'
-            ? 'sendFeatureReport'
-            : 'receiveFeatureReport'
+      if (!payload || !payload.deviceId) return
       try {
-        const msg = Object.assign({ action: fallbackAction }, payload || {})
+        const msg = Object.assign({ action }, payload || {})
         const response = await browser.runtime.sendMessage(msg)
         const transfers = response && response.d instanceof Uint8Array ? [response.d.buffer] : []
         replyToPage(
@@ -1025,12 +841,16 @@
 
         const dataPlane = settings.dataPlane
         if (dataPlane === 'ws') {
-          spawnDataPlane(deviceId, response.t, response.w || wsPort)
+          await spawnDataPlane(deviceId, response.t, response.w || wsPort)
         } else if (dataPlane === 'wt') {
           if (wtPort != null) {
-            spawnDataPlane(deviceId, response.t, null, { wtPort, wtCertHash })
+            if (settings.useWorker === false) {
+              spawnDataPlane(deviceId, response.t, null, { wtPort, wtCertHash })
+            } else {
+              await spawnDataPlane(deviceId, response.t, null, { wtPort, wtCertHash })
+            }
           } else {
-            spawnDataPlane(deviceId, response.t, response.w || wsPort)
+            await spawnDataPlane(deviceId, response.t, response.w || wsPort)
           }
         }
       }
@@ -1141,47 +961,6 @@
   function onDataPortMessage(deviceId, msg) {
     if (!msg) return
     if (msg.type === 'send' || msg.type === 'sendFeature' || msg.type === 'receiveFeature') {
-      const worker = workers.get(deviceId)
-      if (worker && workerReady.has(deviceId)) {
-        const workerMsg = {
-          type: msg.type === 'send' ? 'send' : msg.type === 'sendFeature' ? 'sendFeature' : 'receiveFeature',
-          reqId: msg.reqId,
-          reportId: msg.reportId
-        }
-        if (msg.type === 'send' || msg.type === 'sendFeature') workerMsg.data = msg.data
-        let callbackMap = workerCallbacks.get(deviceId)
-        if (!callbackMap) {
-          callbackMap = new Map()
-          workerCallbacks.set(deviceId, callbackMap)
-        }
-        const port = dataPorts.get(deviceId)
-        callbackMap.set(msg.reqId, (data) => {
-          if (!port) return
-          if (data && data.err) logger.warn('worker send error:', data.err)
-          const status = data ? data.s : 500
-          if (msg.type === 'receiveFeature') {
-            const d = status === 200 && data.d ? data.d : null
-            try {
-              port.postMessage({ type: 'featureResult', reqId: msg.reqId, data: d || null })
-            } catch (e) {
-              logger.debug('postMessage featureResult failed', e)
-            }
-          } else {
-            try {
-              port.postMessage({
-                type: msg.type === 'send' ? 'sendResult' : 'featureResult',
-                reqId: msg.reqId,
-                error: status === 200 || status === 204 ? null : 'send failed'
-              })
-            } catch (e) {
-              logger.debug('postMessage sendResult failed', e)
-            }
-          }
-        })
-        const transfer = msg.data && msg.data.buffer ? [msg.data.buffer] : []
-        worker.postMessage(workerMsg, transfer)
-        return
-      }
       const action =
         msg.type === 'send'
           ? 'sendReport'

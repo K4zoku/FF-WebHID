@@ -118,45 +118,25 @@
     } catch (e) {
       return { result: { ok: false, error: String(e && e.message) }, transfer: null }
     }
-    const ch = new MessageChannel()
-    const dataCh = new MessageChannel()
+    if (payload.mode === 'terminate') {
+      worker.terminate()
+      mainWorldWorkers.delete(payload.deviceId)
+      return { result: { ok: true }, transfer: null }
+    }
     mainWorldWorkers.set(payload.deviceId, worker)
-    dataCh.port1.onmessage = (event) => {
-      const d = event.data
-      if (d && d.type === 'inputReport') {
-        dispatchDeviceEvent({
-          eventType: 'input_report',
+    worker.onclose = () => mainWorldWorkers.delete(payload.deviceId)
+    worker.onerror = (event) => {
+      logger.debug('worker error:', event && event.message)
+      mainWorldWorkers.delete(payload.deviceId)
+      if (bridgePort) {
+        bridgePort.postMessage({
+          type: 'workerError',
           deviceId: payload.deviceId,
-          reportId: d.reportId,
-          data: d.data,
+          message: (event && event.message) || 'unknown',
         })
       }
     }
-    worker.postMessage({ type: 'init', dataPort: dataCh.port2 }, [dataCh.port2])
-    ch.port1.onmessage = (event) => {
-      if (event.data && event.data.type === 'terminate') {
-        worker.terminate()
-        mainWorldWorkers.delete(payload.deviceId)
-        return
-      }
-      const transfer =
-        event.data && event.data.data && event.data.data.buffer
-          ? [event.data.data.buffer]
-          : event.ports || []
-      worker.postMessage(event.data, transfer)
-    }
-    worker.onmessage = (event) => {
-      const data = event.data
-      const transfer = data && data.data && data.data.buffer ? [data.data.buffer] : []
-      ch.port1.postMessage(data, transfer)
-    }
-    worker.onerror = (event) => {
-      ch.port1.postMessage({
-        type: 'worker-error',
-        message: (event && event.message) || 'unknown',
-      })
-    }
-    return { result: { ok: true }, transfer: ch.port2 }
+    return { result: { ok: true }, transfer: null }
   }
 
 
@@ -632,14 +612,23 @@
             const dataChannel = new MessageChannel()
             state.dataPort = dataChannel.port1
             state.dataPort.onmessage = (event) => onDataPortMessage(state, event.data)
-            bridgePort.postMessage(
-              {
-                id: 0,
-                action: 'dataPort',
-                payload: { deviceId: state.deviceId }
-              },
-              [dataChannel.port2]
-            )
+            const worker = mainWorldWorkers.get(state.deviceId)
+            if (worker) {
+              const controlChannel = new MessageChannel()
+              worker.postMessage(
+                { type: 'setPorts', controlPort: controlChannel.port2, dataPort: dataChannel.port2 },
+                [controlChannel.port2, dataChannel.port2]
+              )
+              bridgePort.postMessage(
+                { id: 0, action: 'dataPort', payload: { deviceId: state.deviceId } },
+                [controlChannel.port1]
+              )
+            } else {
+              bridgePort.postMessage(
+                { id: 0, action: 'dataPort', payload: { deviceId: state.deviceId } },
+                [dataChannel.port2]
+              )
+            }
             state.opened = true
             logger.info('open deviceId=' + state.deviceId)
             this.dispatchEvent(new Event('open'))

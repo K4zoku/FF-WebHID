@@ -21,18 +21,27 @@ const pending = new Map()
 /** @type {import("./types.js").WsTransport | import("./types.js").WtTransport | null} */
 let transport = null
 /** @type {MessagePort|null} */
-
-/**
- * @param {MessageEvent} event
- * @returns {void}
- */
+let controlPort = null
+/** @type {MessagePort|null} */
 let dataPort = null
+/** @type {Array<object>} */
+let preOpen = []
 
 self.onmessage = ({ data: msg }) => {
-  if (msg.type === 'init') {
-    dataPort = msg.dataPort
-    return
+  if (msg && msg.type === 'setPorts') {
+    controlPort = msg.controlPort || null
+    dataPort = msg.dataPort || null
+    if (dataPort) dataPort.onmessage = (event) => handleDataPortMessage(event.data)
+    if (controlPort) controlPort.onmessage = (event) => handleControlMessage(event.data)
   }
+}
+
+/**
+ * @param {object} msg
+ * @returns {void}
+ */
+function handleControlMessage(msg) {
+  if (!msg) return
   if (msg.type === 'connect') {
     const factory =
       msg.transport === 'wt'
@@ -40,13 +49,29 @@ self.onmessage = ({ data: msg }) => {
         : createWsTransport
     transport = factory({
       tag: 'worker',
-      onReady: () => self.postMessage({ type: 'ready' }),
+      onReady: () => {
+        if (controlPort) controlPort.postMessage({ type: 'ready' })
+        const queued = preOpen
+        preOpen = []
+        for (const item of queued) handleDataPortMessage(item)
+      },
       onClosed: () => {
-        self.postMessage({ type: 'closed' })
+        if (controlPort) controlPort.postMessage({ type: 'closed' })
         for (const [, entry] of pending) entry.reject(new Error('ws closed'))
         pending.clear()
+        const queued = preOpen
+        preOpen = []
+        for (const item of queued) {
+          replyData({
+            type: item.type === 'receiveFeature' ? 'featureResult' : 'sendResult',
+            reqId: item.reqId,
+            error: 'ws closed'
+          })
+        }
       },
-      onAuthFailed: (code) => self.postMessage({ type: 'auth-failed', code }),
+      onAuthFailed: (code) => {
+        if (controlPort) controlPort.postMessage({ type: 'auth-failed', code })
+      },
       onBinary: (batch) => {
         if (batch.length > 0 && batch[0] === MSG_INPUT_BATCH) return pushInputBatch(batch, 1)
         if (batch.length > 0 && batch[0] >= 0x81) return handleControlResponse(batch)
@@ -56,12 +81,17 @@ self.onmessage = ({ data: msg }) => {
     transport.connect(msg)
     return
   }
-  if (msg.type === 'send' || msg.type === 'sendFeature' || msg.type === 'receiveFeature') {
-    return handleDataPortMessage(msg)
-  }
   if (msg.type === 'settings') {
     settings.set(msg)
     return
+  }
+  if (msg.type === 'terminate') {
+    if (transport && transport.close) transport.close()
+    self.close()
+    return
+  }
+  if (msg.type === 'send' || msg.type === 'sendFeature' || msg.type === 'receiveFeature') {
+    return handleDataPortMessage(msg)
   }
 }
 
@@ -71,6 +101,10 @@ self.onmessage = ({ data: msg }) => {
  */
 function handleDataPortMessage(msg) {
   if (!msg) return
+  if (!transport || !transport.isOpen()) {
+    preOpen.push(msg)
+    return
+  }
   if (msg.type === 'send') return handleSend(msg, MSG_SEND_REPORT)
   if (msg.type === 'sendFeature') return handleSend(msg, MSG_SEND_FEATURE_REPORT)
   if (msg.type === 'receiveFeature') return handleReceiveFeature(msg)
@@ -100,7 +134,7 @@ function pushInputBatch(batch, offset = 0) {
         logger.debug('inputReport reportId=' + reportId + ' len=' + payloadLen + ' first8=' + hex)
       }
       if (dataPort)
-        dataPort.postMessage({ type: 'inputReport', reportId, data: buffer, t: performance.now() }, [buffer])
+        dataPort.postMessage({ type: 'inputReport', reportId, data: buffer }, [buffer])
     } else {
       if (dataPort) dataPort.postMessage({ type: 'inputReport', reportId, data: null })
     }
@@ -207,7 +241,7 @@ function handleReceiveFeature(msg) {
  * @returns {void}
  */
 function replyData(msg, transfer) {
-  self.postMessage(msg, transfer || [])
+  if (dataPort) dataPort.postMessage(msg, transfer || [])
 }
 
 /**

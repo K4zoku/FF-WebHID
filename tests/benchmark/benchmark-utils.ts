@@ -173,19 +173,6 @@ async function runOnce(
     const duration = await page.evaluate(() => window.webhidBenchmark!.getMeasure())
     if (duration == null) throw new Error('roundtrip measure missing after painted')
     const latencies = await page.evaluate(() => window.webhidBenchmark!.getLatencies())
-    const reportDeltas = await page.evaluate(() => {
-      const w = window as unknown as { __reportDeltas?: number[] }
-      const d = w.__reportDeltas || []
-      w.__reportDeltas = []
-      return d
-    })
-    if (reportDeltas.length > 0) {
-      const s = [...reportDeltas].sort((a, b) => a - b)
-      console.log(
-        'WORKER-POST-TO-HANDLER p50:',
-        s[Math.floor(s.length / 2)].toFixed(3) + 'ms (' + s.length + ' samples)'
-      )
-    }
     return { duration, latencies }
   } finally {
     relay.stop()
