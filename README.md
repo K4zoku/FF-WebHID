@@ -26,7 +26,7 @@ WebHID brings Human Interface Device (HID) support to Firefox on Linux, macOS, a
 - **NM error propagation**: NM host writes `{"s":503,"E":"..."}` error frame to stdout on connect failure, addon logs the reason instead of silent paralysis
 - **Packed TLV wire format**: hot-path NM messages (sendReport, sendFeatureReport, inputReport) use binary TLVs inside `{"d":"<b64>"}` with reqId inside the TLV: saves 7-14 bytes vs JSON fields
 - **HTTP status codes**: responses use `s` field with HTTP semantics (200/201/204/4xx/5xx) instead of separate ok/err fields
-- **Worker polyfill (opt-in)**: injects a stub `navigator.hid` into page-created Web Workers for spec-compliance coverage
+- **Worker polyfill (opt-in)**: injects the full `navigator.hid` implementation into page-created Web Workers for spec-compliance coverage
 
 ## Install
 
@@ -43,7 +43,7 @@ Open `about:addons -> WebHID -> Options`:
 - **Use Worker**: WT only. Run the data plane in a dedicated worker (default) or in-page on the main thread. Hidden unless Data Plane is WebTransport.
 - **Device Picker Mode**: modal (default), pageAction, or window. How the device chooser is presented.
 - **Worker Spawn Mode**: shadow URL (default on MV3) or blob + CSP rewrite (default on MV2). How the data worker is created in the page context.
-- **Worker Polyfill**: inject `navigator.hid` into page-created Web Workers (default OFF)
+- **Worker Polyfill**: inject the full `navigator.hid` implementation into page-created Web Workers (default OFF)
 - **Log Level**: console output verbosity (Error/Warn/Info/Debug)
 
 ### Per-site settings (override globals for the current site)
