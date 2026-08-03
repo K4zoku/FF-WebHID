@@ -90,7 +90,7 @@ pub fn enumerate() -> anyhow::Result<Vec<DeviceInfo>> {
                 continue;
             }
             if let Some(d) = info_from_hidapi_pub_with_desc(info, desc) {
-                if is_blocked_by_collections(&d) {
+                if is_blocked_by_vendor_product(&d) {
                     continue;
                 }
                 devices.push(d);
@@ -244,15 +244,13 @@ pub fn is_blocked_pub(info: &HidDeviceInfo) -> bool {
     false
 }
 
-/// Collection-level blocking check: parsed report descriptor is available.
-pub fn is_blocked_by_collections(info: &webhid::DeviceInfo) -> bool {
+/// Vendor/product rules from the blocklist (e.g. OnlyKey). Collection usage
+/// rules are enforced per report instead, matching the WICG spec and
+/// Chromium: consumer-input devices stay enumerable, only their reports are
+/// blocked.
+pub fn is_blocked_by_vendor_product(info: &webhid::DeviceInfo) -> bool {
     let rules = crate::blocklist::blocklist_rules();
-    let top_level: Vec<(Option<u16>, Option<u16>)> = info
-        .collections
-        .iter()
-        .map(|c| (c.usage_page, c.usage))
-        .collect();
-    crate::blocklist::device_is_blocked(rules, info.vendor_id, info.product_id, &top_level)
+    crate::blocklist::device_is_blocked(rules, info.vendor_id, info.product_id)
 }
 
 // ---------------------------------------------------------------------------
@@ -271,7 +269,7 @@ pub fn open_by_device_id(device_id: u32) -> anyhow::Result<(DeviceInfo, bool, Hi
             let desc = read_raw_report_descriptor_with_api(&api, info);
             let device_info = info_from_hidapi_pub_with_desc(info, desc.clone())
                 .ok_or_else(|| anyhow::anyhow!("failed to build DeviceInfo"))?;
-            if is_blocked_by_collections(&device_info) {
+            if is_blocked_by_vendor_product(&device_info) {
                 continue;
             }
             let numbered = uses_numbered_reports(&desc);
@@ -396,7 +394,7 @@ pub fn info_by_raw_path(raw_path: &str) -> Option<DeviceInfo> {
                 return None;
             }
             if let Some(d) = info_from_hidapi_pub(info) {
-                if is_blocked_by_collections(&d) {
+                if is_blocked_by_vendor_product(&d) {
                     return None;
                 }
                 return Some(d);

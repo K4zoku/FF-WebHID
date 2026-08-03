@@ -26,6 +26,7 @@ pub fn blocklist_rules() -> &'static [BlocklistRule] {
             report_id: None,
             report_type: None,
         },
+        #[cfg(feature = "report-blocking")]
         // Generic Desktop / Mouse
         BlocklistRule {
             vendor: None,
@@ -35,6 +36,7 @@ pub fn blocklist_rules() -> &'static [BlocklistRule] {
             report_id: None,
             report_type: None,
         },
+        #[cfg(feature = "report-blocking")]
         // Generic Desktop / Keyboard
         BlocklistRule {
             vendor: None,
@@ -44,6 +46,7 @@ pub fn blocklist_rules() -> &'static [BlocklistRule] {
             report_id: None,
             report_type: None,
         },
+        #[cfg(feature = "report-blocking")]
         // Generic Desktop / Keypad
         BlocklistRule {
             vendor: None,
@@ -53,6 +56,7 @@ pub fn blocklist_rules() -> &'static [BlocklistRule] {
             report_id: None,
             report_type: None,
         },
+        #[cfg(feature = "report-blocking")]
         // Generic Desktop / System Control
         BlocklistRule {
             vendor: None,
@@ -84,14 +88,18 @@ pub fn blocklist_rules() -> &'static [BlocklistRule] {
     RULES
 }
 
-pub fn device_is_blocked(
-    rules: &[BlocklistRule],
-    vendor_id: u16,
-    product_id: u16,
-    top_level_collections: &[(Option<u16>, Option<u16>)],
-) -> bool {
+pub fn device_is_blocked(rules: &[BlocklistRule], vendor_id: u16, product_id: u16) -> bool {
+    // Device-level blocking matches vendor/product rules only. Rules that
+    // carry a usage page or usage describe collections or reports and are
+    // enforced per report by `is_report_blocked`, matching the WICG spec and
+    // Chromium: consumer-input devices stay enumerable, only their reports
+    // are blocked. FIDO devices are additionally hidden by usage page in
+    // hid.rs.
     rules.iter().any(|r| {
         if r.report_id.is_some() || r.report_type.is_some() {
+            return false;
+        }
+        if r.usage_page.is_some() || r.usage.is_some() {
             return false;
         }
         if r.vendor.is_some_and(|v| v != vendor_id) {
@@ -100,14 +108,7 @@ pub fn device_is_blocked(
         if r.product.is_some_and(|p| p != product_id) {
             return false;
         }
-        if r.usage_page.is_some() || r.usage.is_some() {
-            top_level_collections.iter().any(|(up, u)| {
-                r.usage_page.is_none_or(|rp| Some(rp) == *up)
-                    && r.usage.is_none_or(|ru| Some(ru) == *u)
-            })
-        } else {
-            true
-        }
+        true
     })
 }
 
@@ -160,39 +161,116 @@ mod tests {
     }
 
     #[test]
-    fn test_fido_blocked() {
+    fn test_consumer_input_devices_stay_enumerable() {
         let rules = blocklist_rules();
-        let collections = [(Some(0xF1D0), Some(0x01u16))];
-        assert!(device_is_blocked(rules, 0x1234, 0x5678, &collections));
+        // Usage rules block reports, not devices (WICG spec + Chromium model).
+        assert!(!device_is_blocked(rules, 0x1234, 0x5678));
+        #[cfg(feature = "report-blocking")]
+        {
+            assert!(is_report_blocked(
+                rules,
+                0x1234,
+                0x5678,
+                Some(0x0001),
+                Some(0x0002),
+                1,
+                ReportType::Input,
+            ));
+            assert!(is_report_blocked(
+                rules,
+                0x1234,
+                0x5678,
+                Some(0x0001),
+                Some(0x0006),
+                1,
+                ReportType::Input,
+            ));
+            assert!(is_report_blocked(
+                rules,
+                0x1234,
+                0x5678,
+                Some(0x0001),
+                Some(0x0007),
+                1,
+                ReportType::Input,
+            ));
+            assert!(is_report_blocked(
+                rules,
+                0x1234,
+                0x5678,
+                Some(0x0001),
+                Some(0x0080),
+                1,
+                ReportType::Input,
+            ));
+            // Output/feature reports in those collections are blocked too
+            // (rule report_type is None, matching any type).
+            assert!(is_report_blocked(
+                rules,
+                0x1234,
+                0x5678,
+                Some(0x0001),
+                Some(0x0006),
+                1,
+                ReportType::Output,
+            ));
+        }
+        #[cfg(not(feature = "report-blocking"))]
+        {
+            // Feature off: consumer-input reports flow normally.
+            assert!(!is_report_blocked(
+                rules,
+                0x1234,
+                0x5678,
+                Some(0x0001),
+                Some(0x0006),
+                1,
+                ReportType::Input,
+            ));
+            assert!(!is_report_blocked(
+                rules,
+                0x1234,
+                0x5678,
+                Some(0x0001),
+                Some(0x0007),
+                1,
+                ReportType::Input,
+            ));
+        }
+        // Vendor-defined collections are untouched either way.
+        assert!(!is_report_blocked(
+            rules,
+            0x1234,
+            0x5678,
+            Some(0xFF00),
+            Some(0x0001),
+            1,
+            ReportType::Input,
+        ));
     }
 
     #[test]
-    fn test_mouse_blocked() {
+    fn test_fido_report_blocked() {
         let rules = blocklist_rules();
-        let collections = [(Some(0x0001), Some(0x0002u16))];
-        assert!(device_is_blocked(rules, 0x1234, 0x5678, &collections));
-    }
-
-    #[test]
-    fn test_keyboard_blocked() {
-        let rules = blocklist_rules();
-        let collections = [(Some(0x0001), Some(0x0006u16))];
-        assert!(device_is_blocked(rules, 0x1234, 0x5678, &collections));
-    }
-
-    #[test]
-    fn test_non_blocked_collection() {
-        let rules = blocklist_rules();
-        let collections = [(Some(0xFF00), Some(0x0001u16))];
-        assert!(!device_is_blocked(rules, 0x1234, 0x5678, &collections));
+        // FIDO devices are device-blocked by usage page in hid.rs; the rule
+        // here also blocks their reports at the report level.
+        assert!(!device_is_blocked(rules, 0x1234, 0x5678));
+        assert!(is_report_blocked(
+            rules,
+            0x1234,
+            0x5678,
+            Some(0xF1D0),
+            Some(0x01),
+            0,
+            ReportType::Input,
+        ));
     }
 
     #[test]
     fn test_onlykey_device_blocked() {
         let rules = blocklist_rules();
-        let collections = [(Some(0xFF00), Some(0x0001u16))];
-        assert!(device_is_blocked(rules, 0x1d50, 0x60fc, &collections));
-        assert!(!device_is_blocked(rules, 0x1d50, 0x9999, &collections));
+        assert!(device_is_blocked(rules, 0x1d50, 0x60fc));
+        assert!(!device_is_blocked(rules, 0x1d50, 0x9999));
     }
 
     #[test]
@@ -239,7 +317,6 @@ mod tests {
     #[test]
     fn test_report_level_rule_does_not_block_device() {
         let rules = blocklist_rules();
-        let collections = [(Some(0xFF00), Some(0x0001u16))];
-        assert!(!device_is_blocked(rules, 0x0b0e, 0x0000, &collections));
+        assert!(!device_is_blocked(rules, 0x0b0e, 0x0000));
     }
 }

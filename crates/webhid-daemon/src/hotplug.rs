@@ -121,7 +121,7 @@ fn start_udev(event_tx: broadcast::Sender<IpcResponse>) -> anyhow::Result<()> {
                         continue;
                     }
                     if let Some(d) = crate::hid::info_from_hidapi_pub(info) {
-                        if crate::hid::is_blocked_by_collections(&d) {
+                        if crate::hid::is_blocked_by_vendor_product(&d) {
                             continue;
                         }
                         let devnode = info.path().to_string_lossy().into_owned();
