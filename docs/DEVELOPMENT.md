@@ -241,9 +241,7 @@ FF-WebHID/
 │   └── 99-webhid-e2e.rules             E2E rule (webhid group gets /dev/uhid + VID 0x16C0 hidraw)
 ├── packaging/               Platform packaging
 │   ├── linux/archlinux/     Arch PKGBUILDs (webhid daemon + webhid-addon)
-│   ├── linux/debian/        Debian .deb build script
-│   ├── linux/rpm/           RPM .spec + build script
-│   ├── windows/             WiX v6 MSI (.wxs + build-msi.ps1)
+│   ├── windows/             WiX v6 MSI (.wxs)
 │   └── macos/               Homebrew formula
 ├── tests/                   Playwright test suite
 │   ├── playwright.config.ts (firefox-browser, firefox-e2e, firefox-e2e-daemon-nm projects)
