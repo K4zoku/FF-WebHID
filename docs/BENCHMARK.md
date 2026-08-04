@@ -595,75 +595,92 @@ default 5 runs p90 and p95 collapse onto max).
 
 ---
 
-## Automated benchmark results (2026-08-02, 10 runs per mode)
+## Automated benchmark results (2026-08-05, 10 runs per mode)
 
-Fresh run per mode: separate cold Firefox worker for ws, wt and nm, headed
-Chromium with a human grant click for native. `BENCHMARK_RUNS=10`. Each
-mode opens the mock device cold, runs one warm-up burst (an awaited
-128-report prime, so run #1 starts with a clear path), then 10 measured
-runs; a dropped or late report invalidates a run and it is retried.
+Fresh page per spec (a new tab is created and closed around each spec, so no
+mode measures on a page carrying JIT/GC/canvas state from earlier ones; the
+harness's default tab stays untouched). `BENCHMARK_RUNS=10`, all four Firefox
+modes in one worker. Each mode opens the mock device cold, runs one warm-up
+burst, then 10 measured runs; a dropped or late report invalidates a run and
+it is retried. Chromium native numbers are from the 2026-08-02 dataset: the
+addon code does not affect the native benchmark, so that baseline is
+unchanged.
 
 Init time per mode (open = device open through data-plane ready; warmup =
 wall time of the warm-up; total = page load through run #1's send-start):
 
-| mode   | open (ms) | warmup (ms) | total (ms) |
-| ------ | --------- | ----------- | ---------- |
-| nm     | 18.9      | 227.0       | 315.5      |
-| ws     | 22.9      | 116.0       | 203.6      |
-| wt     | 20.6      | 2130.0      | 2217.2     |
-| native | 5.2       | 21.0        | 62.4       |
+| mode      | open (ms) | warmup (ms) | total (ms) |
+| --------- | --------- | ----------- | ---------- |
+| nm        | 15.9      | 248.0       | 330.7      |
+| ws        | 25.6      | 132.0       | 208.1      |
+| wt-inpage | 13.2      | 106.0       | 184.6      |
+| wt        | 34.5      | 134.0       | 211.5      |
+| native    | 5.2       | 21.0        | 62.4       |
 
-Warm-up primes by awaiting a 128-report burst (per-send time-box, so a
-slow-but-working prime under machine load completes instead of failing and
-run #1 never waits behind in-flight prime reports). Per-report round-trip
-latency (send to the report arriving back), per run, with whole-run walltime:
+Per-report round-trip latency (send to the report arriving back), per run,
+with whole-run walltime:
 
 **nm** (Firefox, daemon-nm deployment)
 
 | run | min  | p50  | p90  | p95  | max   | walltime |
 | --- | ---- | ---- | ---- | ---- | ----- | -------- |
-| #1  | 1.58 | 2.24 | 2.60 | 2.78 | 4.64  | 1024.5   |
-| #2  | 1.40 | 2.10 | 2.44 | 2.54 | 11.40 | 985.7    |
-| #3  | 1.24 | 1.90 | 2.30 | 2.46 | 16.88 | 886.4    |
-| #4  | 1.08 | 1.74 | 2.32 | 3.12 | 7.40  | 870.0    |
-| #5  | 1.08 | 1.78 | 2.18 | 2.36 | 16.10 | 838.7    |
-| #6  | 1.06 | 1.76 | 3.64 | 4.00 | 16.28 | 994.9    |
-| #7  | 1.14 | 1.74 | 2.16 | 2.34 | 9.68  | 826.9    |
-| #8  | 1.22 | 1.82 | 2.18 | 2.26 | 18.58 | 861.9    |
-| #9  | 0.98 | 1.64 | 2.08 | 2.26 | 6.38  | 775.9    |
-| #10 | 0.84 | 1.64 | 2.30 | 3.60 | 9.66  | 847.8    |
+| #1  | 1.50 | 2.30 | 2.78 | 2.96 | 15.72 | 1059.5   |
+| #2  | 1.42 | 2.12 | 2.72 | 3.08 | 11.32 | 1005.4   |
+| #3  | 1.06 | 1.98 | 2.48 | 2.74 | 9.38  | 932.5    |
+| #4  | 1.22 | 1.86 | 2.28 | 2.58 | 6.86  | 868.0    |
+| #5  | 1.26 | 1.88 | 2.40 | 2.60 | 9.20  | 900.1    |
+| #6  | 1.16 | 2.02 | 3.76 | 4.38 | 15.56 | 1134.0   |
+| #7  | 1.20 | 1.88 | 2.46 | 2.72 | 8.06  | 897.9    |
+| #8  | 1.18 | 1.86 | 2.80 | 3.46 | 11.16 | 951.9    |
+| #9  | 1.10 | 1.84 | 2.36 | 2.64 | 8.76  | 882.2    |
+| #10 | 1.02 | 1.66 | 2.12 | 2.36 | 9.08  | 800.0    |
 
 **ws** (Firefox, daemon-nm deployment)
 
-| run | min  | p50  | p90  | p95  | max   | walltime |
-| --- | ---- | ---- | ---- | ---- | ----- | -------- |
-| #1  | 0.56 | 0.88 | 1.12 | 1.26 | 6.26  | 378.9    |
-| #2  | 0.46 | 0.82 | 0.98 | 1.04 | 4.54  | 339.1    |
-| #3  | 0.54 | 0.82 | 1.00 | 1.06 | 5.36  | 338.0    |
-| #4  | 0.50 | 0.78 | 0.98 | 1.06 | 15.16 | 341.0    |
-| #5  | 0.48 | 0.82 | 1.56 | 1.92 | 5.86  | 410.8    |
-| #6  | 0.44 | 0.78 | 0.96 | 1.02 | 4.20  | 330.6    |
-| #7  | 0.50 | 0.78 | 0.96 | 1.04 | 6.14  | 332.8    |
-| #8  | 0.50 | 0.78 | 0.92 | 0.96 | 7.24  | 324.3    |
-| #9  | 0.50 | 0.78 | 0.94 | 1.02 | 6.22  | 331.1    |
-| #10 | 0.44 | 0.76 | 0.96 | 1.04 | 4.90  | 325.7    |
+| run | min  | p50  | p90  | p95  | max  | walltime |
+| --- | ---- | ---- | ---- | ---- | ---- | -------- |
+| #1  | 0.68 | 1.16 | 1.54 | 1.78 | 6.46 | 536.9    |
+| #2  | 0.64 | 1.12 | 1.54 | 1.76 | 4.76 | 516.5    |
+| #3  | 0.74 | 1.14 | 1.62 | 1.94 | 6.32 | 535.8    |
+| #4  | 0.68 | 1.08 | 1.52 | 1.80 | 4.56 | 499.8    |
+| #5  | 0.68 | 1.08 | 1.52 | 1.86 | 4.40 | 493.2    |
+| #6  | 0.64 | 1.08 | 1.58 | 1.84 | 14.08 | 535.9   |
+| #7  | 0.62 | 1.08 | 1.40 | 1.64 | 7.38 | 495.3    |
+| #8  | 0.70 | 1.06 | 1.46 | 1.60 | 4.28 | 498.2    |
+| #9  | 0.64 | 1.04 | 1.36 | 1.62 | 5.50 | 484.1    |
+| #10 | 0.68 | 1.02 | 1.34 | 1.60 | 5.98 | 481.1    |
+
+**wt-inpage** (Firefox, daemon-nm deployment, WebTransport in-page)
+
+| run | min  | p50  | p90  | p95  | max  | walltime |
+| --- | ---- | ---- | ---- | ---- | ---- | -------- |
+| #1  | 0.64 | 1.18 | 1.48 | 1.64 | 6.52 | 486.2    |
+| #2  | 0.70 | 1.10 | 1.40 | 1.52 | 4.52 | 461.8    |
+| #3  | 0.74 | 1.12 | 1.48 | 1.80 | 4.46 | 467.9    |
+| #4  | 0.68 | 1.08 | 2.18 | 2.82 | 6.50 | 518.3    |
+| #5  | 0.68 | 1.04 | 1.40 | 1.60 | 5.04 | 436.6    |
+| #6  | 0.66 | 1.04 | 1.36 | 1.50 | 4.82 | 416.7    |
+| #7  | 0.70 | 1.06 | 1.38 | 1.64 | 5.46 | 446.3    |
+| #8  | 0.54 | 1.04 | 1.26 | 1.40 | 5.56 | 417.8    |
+| #9  | 0.60 | 0.98 | 1.24 | 1.38 | 5.30 | 402.0    |
+| #10 | 0.60 | 1.02 | 1.26 | 1.36 | 6.44 | 440.0    |
 
 **wt** (Firefox, daemon-nm deployment, WebTransport over QUIC)
 
-| run | min  | p50  | p90  | p95  | max   | walltime |
-| --- | ---- | ---- | ---- | ---- | ----- | -------- |
-| #1  | 0.56 | 0.88 | 1.16 | 1.28 | 3.50  | 419.4    |
-| #2  | 0.46 | 0.88 | 1.10 | 1.20 | 2.48  | 396.6    |
-| #3  | 0.52 | 0.84 | 1.10 | 1.24 | 4.12  | 384.1    |
-| #4  | 0.44 | 0.78 | 1.02 | 1.12 | 5.22  | 364.1    |
-| #5  | 0.50 | 0.86 | 1.20 | 1.34 | 4.92  | 400.7    |
-| #6  | 0.44 | 0.78 | 1.10 | 1.32 | 6.16  | 380.9    |
-| #7  | 0.44 | 0.84 | 1.20 | 1.42 | 6.08  | 401.7    |
-| #8  | 0.48 | 1.00 | 1.70 | 3.36 | 22.06 | 586.8    |
-| #9  | 0.52 | 0.82 | 1.10 | 1.26 | 4.16  | 391.9    |
-| #10 | 0.52 | 0.90 | 1.22 | 1.40 | 2.14  | 415.2    |
+| run | min  | p50  | p90  | p95  | max  | walltime |
+| --- | ---- | ---- | ---- | ---- | ---- | -------- |
+| #1  | 0.72 | 1.06 | 1.40 | 1.68 | 4.30 | 490.0    |
+| #2  | 0.70 | 1.00 | 1.22 | 1.44 | 4.08 | 452.9    |
+| #3  | 0.66 | 0.96 | 1.18 | 1.28 | 4.28 | 432.4    |
+| #4  | 0.64 | 0.96 | 1.24 | 1.40 | 5.26 | 453.0    |
+| #5  | 0.66 | 0.96 | 1.24 | 1.40 | 6.22 | 434.7    |
+| #6  | 0.60 | 0.94 | 1.18 | 1.30 | 4.24 | 421.3    |
+| #7  | 0.58 | 0.92 | 1.16 | 1.28 | 4.68 | 417.9    |
+| #8  | 0.64 | 0.94 | 1.18 | 1.32 | 5.54 | 433.3    |
+| #9  | 0.60 | 0.96 | 1.18 | 1.32 | 6.32 | 434.0    |
+| #10 | 0.58 | 0.96 | 1.24 | 1.40 | 6.28 | 448.5    |
 
-**native** (Chromium, no addon, policy grant)
+**native** (Chromium, no addon, policy grant; 2026-08-02 dataset, unchanged)
 
 | run | min  | p50  | p90  | p95  | max  | walltime |
 | --- | ---- | ---- | ---- | ---- | ---- | -------- |
@@ -678,14 +695,16 @@ latency (send to the report arriving back), per run, with whole-run walltime:
 | #9  | 0.08 | 0.25 | 0.86 | 1.28 | 3.14 | 106.6    |
 | #10 | 0.10 | 0.50 | 1.97 | 2.22 | 4.59 | 168.0    |
 
-Whole-run walltime summary across modes (10 runs each):
+Whole-run walltime summary across modes (10 runs each; native from
+2026-08-02):
 
-| mode   | runs | min   | p50   | p90   | p95    | max    | total  |
-| ------ | ---- | ----- | ----- | ----- | ------ | ------ | ------ |
-| nm     | 10   | 775.8 | 861.9 | 994.8 | 1024.4 | 1024.4 | 8912.7 |
-| ws     | 10   | 324.3 | 332.7 | 378.8 | 410.7  | 410.7  | 3452.3 |
-| wt     | 10   | 363.9 | 396.5 | 419.3 | 586.7  | 586.7  | 4141.4 |
-| native | 10   | 106.6 | 113.8 | 167.9 | 184.8  | 184.8  | 1251.2 |
+| mode      | runs | min   | p50   | p90    | p95    | max    | total  |
+| --------- | ---- | ----- | ----- | ------ | ------ | ------ | ------ |
+| nm        | 10   | 800.0 | 932.5 | 1134.0 | 1134.0 | 1134.0 | 9431.5 |
+| ws        | 10   | 481.1 | 499.8 | 536.9  | 536.9  | 536.9  | 5076.8 |
+| wt-inpage | 10   | 402.0 | 446.3 | 518.3  | 518.3  | 518.3  | 4493.6 |
+| wt        | 10   | 417.9 | 434.7 | 490.0  | 490.0  | 490.0  | 4418.0 |
+| native    | 10   | 106.6 | 113.8 | 167.9  | 184.8  | 184.8  | 1251.2 |
 
 Delta vs the native baseline (per-report p50 is the median of the 10
 per-run p50 values; walltime p50 and total as in the table above; total is
@@ -694,27 +713,25 @@ the sum of the 10 whole-run walltimes):
 | mode         | per-report p50 | vs native    | walltime p50 | vs native     | total  | vs native      |
 | ------------ | -------------- | ------------ | ------------ | ------------- | ------ | -------------- |
 | native       | 0.26           | —            | 113.8        | —             | 1251.2 | —              |
-| ws (Firefox) | 0.78           | +0.52 (3.0x) | 332.7        | +218.9 (2.9x) | 3452.3 | +2201.1 (2.8x) |
-| wt (Firefox) | 0.85           | +0.59 (3.3x) | 396.5        | +282.7 (3.5x) | 4141.4 | +2890.2 (3.3x) |
-| nm (Firefox) | 1.77           | +1.51 (6.8x) | 861.9        | +748.1 (7.6x) | 8912.7 | +7661.5 (7.1x) |
+| wt (Firefox) | 0.96           | +0.70 (3.7x) | 434.7        | +320.9 (3.8x) | 4418.0 | +3166.8 (3.5x) |
+| wt-inpage    | 1.06           | +0.80 (4.1x) | 446.3        | +332.5 (3.9x) | 4493.6 | +3242.4 (3.6x) |
+| ws (Firefox) | 1.08           | +0.82 (4.2x) | 499.8        | +386.0 (4.4x) | 5076.8 | +3825.6 (4.1x) |
+| nm (Firefox) | 1.88           | +1.62 (7.2x) | 932.5        | +818.7 (8.2x) | 9431.5 | +8180.3 (7.5x) |
 
 Reading the numbers:
 
 - **Per-report round-trip latency p50** (send to the report arriving back):
-  native Chromium ~0.23-0.50ms, Firefox ws ~0.76-0.88ms, Firefox wt
-  ~0.78-1.00ms, Firefox nm ~1.64-2.24ms.
-- **Whole-run walltime p50**: native 114ms, ws 333ms, wt 397ms, nm 862ms. The
-  ws-vs-nm gap (~2.6x) is consistent with the per-report gap; wt sits just
-  above ws (397 vs 333ms), ~1.2x ws and far below nm.
-- **Total (sum of 10 runs)**: native 1.25s, ws 3.45s, wt 4.14s, nm 8.91s. The
-  total gap vs native (2.8x ws, 3.3x wt, 7.1x nm) mirrors the p50 gap, so the
-  overhead is uniform across runs rather than concentrated in outliers.
-- **Init time**: warm-up is a 128-report prime, unmeasured by design and
-  normally ~200-300ms across modes (a CI run measured nm 306ms, ws 205ms,
-  wt 217ms). It can spike to seconds when the known first-burst-after-
-  cold-start lossiness absorbs retries (see AGENTS.md); the recorded 10-run
-  wt dataset happened to hit that, which is why its warm-up shows 2.1s and
-  its total (load to run #1) 2.2s. Total is 62-405ms otherwise.
+  native Chromium ~0.23-0.50ms, wt ~0.92-1.06ms, wt-inpage ~0.98-1.18ms, ws
+  ~1.02-1.16ms, nm ~1.66-2.30ms.
+- **Whole-run walltime p50**: native 114ms, wt 435ms, wt-inpage 446ms, ws
+  500ms, nm 933ms. wt is now the fastest Firefox mode, ~13% under ws.
+- **Total (sum of 10 runs)**: native 1.25s, wt 4.42s, wt-inpage 4.49s, ws
+  5.08s, nm 9.43s. The total gap vs native (3.5x wt, 3.6x wt-inpage, 4.1x
+  ws, 7.5x nm) mirrors the p50 gap, so the overhead is uniform across runs
+  rather than concentrated in outliers.
+- **Init time**: warm-up is unmeasured by design and ~100-250ms across
+  modes; total (load to run #1 send-start) is 185-331ms. No first-burst
+  retry anomaly this dataset (the 2026-08-02 wt run hit one: warmup 2.1s).
 - These are not a polyfill-vs-native comparison: Firefox runs the polyfill
   over the daemon (daemon-nm deployment), Chromium runs native WebHID on the
   same mock; the engine, transport and grant path all differ. The
@@ -722,30 +739,42 @@ Reading the numbers:
 
 ### What the wt numbers buy (and cost)
 
-WT runs over one persistent bidirectional QUIC stream per session, with an
+wt runs over one persistent bidirectional QUIC stream per session, with an
 explicit `[len_u32 LE]` prefix on every frame (the batch format itself is not
 self-delimiting, so a continuous stream needs the length header). WS is
 untouched; the batch and control-response frame formats are the same in both
 transports.
 
-- Per-report round-trip p50 is **0.85ms vs ws 0.78ms and nm 1.77ms**: the
-  TLS/QUIC encryption cost on loopback is about +0.07ms per report, i.e. WT is
-  within ~10% of the plaintext WS data plane.
-- Whole-run walltime p50 is 397ms vs ws 333ms and nm 862ms; total (10 runs)
-  4.14s vs ws 3.45s and nm 8.91s.
-- Open cost is unchanged (20.6ms vs ws 22.9ms; the QUIC+TLS handshake is
+- Per-report round-trip p50 is **0.96ms vs ws 1.08ms and nm 1.88ms**: wt is
+  ~11% faster than ws, not slower. The old +0.07ms TLS/QUIC cost measured on
+  2026-08-02 is gone; the delivery-path difference now dominates.
+- Whole-run walltime p50 is 435ms vs ws 500ms and nm 933ms; total (10 runs)
+  4.42s vs ws 5.08s and nm 9.43s.
+- Why wt beats ws: WS input reports cross the content main thread on their
+  way to the worker (PWebSocket IPC into `RecvOnBinaryMessageAvailable`,
+  then ChannelEventQueue into the worker), which contends with page
+  rendering; wt reads reports from a DataPipe shared-memory buffer on the
+  worker with zero WebSocket IPC. Profiler-verified 2026-08: the ws
+  content-process main thread carries ~10.8k `OnBinaryMessageAvailable` and
+  ~10.8k `FrameReceived` IPC markers per 3.5s spec plus 8k
+  `ChannelEventQueue` enqueues, and 3.8x the main-thread IPC of wt; measured
+  main-thread CPU ws 75% vs wt 57% in a full-suite run. wt-inpage sits
+  between wt and ws: no delivery hops, but the DataPipe read happens on the
+  main thread. The earlier "wt ≈ ws within noise" conclusion (2026-08-02)
+  was measured on a suite that reused one page across specs; with a fresh
+  page per spec the wt advantage is consistent.
+- Open cost is unchanged (34.5ms vs ws 25.6ms; the QUIC+TLS handshake is
   inside the open window but does not add visible time at this scale).
 
-What that near-zero CPU buys, per the threat model in AGENTS.md: loopback TLS
-does not stop a network MITM (there is no real network between daemon and
-browser); it stops another local process from impersonating the daemon at
-`127.0.0.1:<port>` without the private key (the `serverCertificateHashes` pin
-is unforgeable without it), and does not stop an attacker with admin/root.
-Measured against that, WT is effectively a free security option on loopback:
-per-report latency, walltime and total are within ~10-20% of ws, and well
-under nm. The ws data plane remains the fastest Firefox path, but
-WT no longer trades a measurable performance penalty for its impersonation
-defense.
+What that buys, per the threat model in AGENTS.md: loopback TLS does not
+stop a network MITM (there is no real network between daemon and browser);
+it stops another local process from impersonating the daemon at
+`127.0.0.1:<port>` without the private key (the `serverCertificateHashes`
+pin is unforgeable without it), and does not stop an attacker with
+admin/root. Measured against that, WT is a free security option on loopback
+that is also the fastest Firefox data plane. The default `dataPlane`
+flipped from ws to wt on 2026-08-05 (ws on Firefox < 114, where
+WebTransport does not exist).
 
 ---
 
