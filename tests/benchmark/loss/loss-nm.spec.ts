@@ -6,10 +6,11 @@ test('input-report loss benchmark nm @ 8000Hz', async ({
   backgroundPage,
   vendorDevice,
   httpPort,
-  daemonMode
+  daemonMode,
+  rdpPort
 }) => {
   const result = await benchmarkLoss(
-    { harnessCtx, backgroundPage, vendorDevice, httpPort, daemonMode },
+    { harnessCtx, backgroundPage, vendorDevice, httpPort, daemonMode, rdpPort },
     'nm'
   )
   expect(result.runs.length).toBeGreaterThan(0)

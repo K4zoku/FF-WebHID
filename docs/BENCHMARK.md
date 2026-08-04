@@ -746,3 +746,54 @@ per-report latency, walltime and total are within ~10-20% of ws, and well
 under nm. The ws data plane remains the fastest Firefox path, but
 WT no longer trades a measurable performance penalty for its impersonation
 defense.
+
+---
+
+## Profiling benchmark runs (Gecko profiler via RDP)
+
+Each benchmark spec can capture a Gecko profile of the run around the
+measured window, driven over the harness's existing Remote Debugging Protocol
+connection (the same `-start-debugger-server` port the harness uses to drive
+the extension background). No browser flags are needed; the capture connects
+a second RDP client to the perf actor and starts/stops the profiler around
+`runBenchmark`.
+
+```
+BENCHMARK_PROFILE_DIR=/tmp/profiles npm run test:benchmark
+```
+
+With `BENCHMARK_PROFILE_DIR` set, each spec writes
+`<dir>/profile-<mode>[-inpage].json` (plain JSON, Firefox Profiler schema;
+also `loss-<mode>.json` for the loss project) and prints a `[profiler] saved
+...` line with the sampled thread list. The capture adds ~1-4s per spec
+(server-side gzip of the profile).
+
+Tunables (all optional):
+
+| Env | Default | Meaning |
+| --- | --- | --- |
+| `BENCHMARK_PROFILE_FEATURES` | `js,stackwalk,ipcmessages,cpu,cpuallthreads` | Comma-separated profiler features |
+| `BENCHMARK_PROFILE_THREADS` | `GeckoMain,Worker` | Comma-separated thread filters |
+| `BENCHMARK_PROFILE_ENTRIES` | `268435456` | Per-process buffer size in bytes |
+| `BENCHMARK_PROFILE_INTERVAL` | `1` | Sampling interval in ms |
+
+Notes:
+
+- The profile nests child processes under the top-level `processes` array
+  (Firefox Profiler schema); the top-level `threads` are the parent only.
+  The benchmark page's content process is the one whose `GeckoMain` shows
+  `benchmark-image.html` frames, and it carries the data worker as a
+  `DOM Worker`.
+- Native frames are unsymbolicated in the Playwright Firefox build (raw
+  addresses); JS and WASM frames carry names, and `threadCPUDelta`
+  (feature `cpu`/`cpuallthreads`) plus the `eventDelay` sample column give
+  per-thread busy ratios and event-loop queueing without symbols.
+- The profiler adds sampling overhead, so profiled runs are for mechanism
+  analysis, not for mode comparison numbers.
+- 2026-08 finding (ws vs wt): the ws content-process main thread carries
+  `Msg_OnBinaryMessageAvailable` / `Msg_FrameReceived` IPC markers
+  (~10.8k each in a 3.5s spec) plus `ChannelEventQueue::Enqueue` markers,
+  and 3.8x the main-thread IPC of wt; wt mode shows zero WebSocket IPC (the
+  data arrives through a DataPipe shared-memory read on the worker). Measured
+  main-thread CPU: ws 75% vs wt 57% in a full-suite run, matching the
+  AGENTS.md delivery-gate mechanism.

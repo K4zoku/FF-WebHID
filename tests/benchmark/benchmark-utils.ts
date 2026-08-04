@@ -1,7 +1,9 @@
 import { test } from '../helpers/e2e.js'
 import { type Page } from '@playwright/test'
 import { readFile } from 'node:fs/promises'
-import { dirname, resolve } from 'node:path'
+
+import { dirname, join, resolve } from 'node:path'
+import { ProfilerCapture } from './capture-profile.js'
 import { fileURLToPath } from 'node:url'
 import { startStreamingRelay } from '../helpers/e2e-relay.js'
 import { type WebhidMockProcess } from '../helpers/e2e-process.js'
@@ -47,6 +49,8 @@ interface BenchmarkFixtures {
   vendorDevice: WebhidMockProcess
   httpPort: number
   daemonMode: string
+  /** Harness RDP port; required when BENCHMARK_PROFILE_DIR is set. */
+  rdpPort?: number
 }
 
 /** Console messages that mean the data plane silently degraded to NM. */
@@ -148,6 +152,23 @@ export function chunkImage(img: Buffer): number[][] {
   return chunks
 }
 
+function splitEnv(name: string): string[] | null {
+  const raw = process.env[name]
+  if (!raw) return null
+  const parts = raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+  return parts.length ? parts : null
+}
+
+function numEnv(name: string): number | null {
+  const raw = process.env[name]
+  if (!raw) return null
+  const n = Number(raw)
+  return Number.isFinite(n) ? n : null
+}
+
 export function withTimeout<T>(p: Promise<T>, ms: number, msg: string): Promise<T> {
   const { promise, reject } = Promise.withResolvers<never>()
   const timer = setTimeout(() => reject(new Error(msg)), ms)
@@ -222,7 +243,7 @@ export async function benchmarkMode(
   mode: 'ws' | 'wt' | 'nm',
   opts?: { inPage?: boolean }
 ): Promise<BenchmarkResult> {
-  const { harnessCtx, backgroundPage, vendorDevice, httpPort, daemonMode } = fixtures
+  const { harnessCtx, backgroundPage, vendorDevice, httpPort, daemonMode, rdpPort } = fixtures
   // Fresh page per spec. Reusing one tab across specs (c2ed4b8) let later
   // modes measure on a page with accumulated JIT/GC/canvas state from earlier
   // ones, inflating the apparent ws-vs-wt gap (ws runs 2nd, wt runs last).
@@ -288,9 +309,31 @@ export async function benchmarkMode(
         { origin }
       )
       .catch(() => {})
+  const profileDir = process.env.BENCHMARK_PROFILE_DIR
+  let profiler: ProfilerCapture | null = null
+  if (profileDir && rdpPort) {
+    profiler = await ProfilerCapture.connect(rdpPort)
+    await profiler.startProfiler({
+      features: splitEnv('BENCHMARK_PROFILE_FEATURES') ?? ['js', 'stackwalk', 'ipcmessages', 'cpu', 'cpuallthreads'],
+      threads: splitEnv('BENCHMARK_PROFILE_THREADS') ?? ['GeckoMain', 'Worker'],
+      entries: numEnv('BENCHMARK_PROFILE_ENTRIES') ?? 1 << 28,
+      interval: numEnv('BENCHMARK_PROFILE_INTERVAL') ?? 1
+    })
+  }
   return await runBenchmark(page, vendorDevice, { inPage: !!opts?.inPage })
     .finally(resetSettings)
-    .finally(() => {
+    .finally(async () => {
+      if (profiler) {
+        const t0 = Date.now()
+        try {
+          const file = join(profileDir!, `profile-${mode}${opts?.inPage ? '-inpage' : ''}.json`)
+          const threads = await profiler.stopAndSave(file)
+          console.log(`[profiler] saved ${file} (${((Date.now() - t0) / 1000).toFixed(1)}s): ${threads.join(' | ')}`)
+        } catch (e) {
+          console.warn(`[profiler] capture failed after ${((Date.now() - t0) / 1000).toFixed(1)}s: ${e instanceof Error ? e.message : String(e)}`)
+        }
+        profiler.disconnect()
+      }
       if (!page.isClosed()) page.close().catch(() => {})
     })
 }

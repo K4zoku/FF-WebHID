@@ -2,6 +2,8 @@ import { test } from '../../helpers/e2e.js'
 import type { Page } from '@playwright/test'
 import { sendInput, type WebhidMockProcess } from '../../helpers/e2e-process.js'
 import { grantDevicePermission, mockIdFor, type DeviceFilter } from '../../helpers/e2e-devices.js'
+import { ProfilerCapture } from '../capture-profile.js'
+import { join } from 'node:path'
 import {
   setDataPlane,
   setUseWorker,
@@ -59,6 +61,8 @@ export interface LossFixtures {
   vendorDevice: { process: WebhidMockProcess['process']; ready: Promise<void> }
   httpPort: number
   daemonMode: string
+  /** Harness RDP port; required when BENCHMARK_PROFILE_DIR is set. */
+  rdpPort?: number
 }
 
 export interface LossRun {
@@ -176,7 +180,7 @@ export async function benchmarkLoss(
   mode: 'ws' | 'wt' | 'nm',
   opts: { inPage?: boolean } = {}
 ): Promise<LossResult> {
-  const { harnessCtx, backgroundPage, httpPort, daemonMode } = fixtures
+  const { harnessCtx, backgroundPage, httpPort, daemonMode, rdpPort } = fixtures
   const page = await harnessCtx.newPage()
   const fallbacks: string[] = []
   let wtStreamAttached = false
@@ -188,6 +192,12 @@ export async function benchmarkLoss(
     }
   }
   page.on('console', onConsole)
+  const profileDir = process.env.BENCHMARK_PROFILE_DIR
+  let profiler: ProfilerCapture | null = null
+  if (profileDir && rdpPort) {
+    profiler = await ProfilerCapture.connect(rdpPort)
+    await profiler.startProfiler()
+  }
   const origin = `http://localhost:${httpPort}`
   const resetSettings = () =>
     backgroundPage
@@ -323,6 +333,16 @@ export async function benchmarkLoss(
     // spawn take the in-page path. Runs even when benchmarkLoss throws (the
     // in-page attach check).
     await resetSettings()
+    if (profiler) {
+      try {
+        const file = join(profileDir!, `loss-${mode}.json`)
+        const threads = await profiler.stopAndSave(file)
+        console.log(`[profiler] saved ${file}: ${threads.join(' | ')}`)
+      } catch (e) {
+        console.warn(`[profiler] capture failed: ${e instanceof Error ? e.message : String(e)}`)
+      }
+      profiler.disconnect()
+    }
     if (!page.isClosed()) page.close().catch(() => {})
   }
 }
