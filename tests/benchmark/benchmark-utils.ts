@@ -42,20 +42,11 @@ declare global {
 }
 
 interface BenchmarkFixtures {
-  harnessCtx: { newPage(): Promise<Page>; pages(): Page[] }
+  harnessCtx: { newPage(): Promise<Page> }
   backgroundPage: { evaluate: Page['evaluate'] }
   vendorDevice: WebhidMockProcess
   httpPort: number
   daemonMode: string
-}
-
-/** Returns the harness context's persistent tab */
-export async function getBenchmarkPage(ctx: {
-  pages(): Page[]
-  newPage(): Promise<Page>
-}): Promise<Page> {
-  const existing = ctx.pages().find((p) => !p.isClosed())
-  return existing ?? ctx.newPage()
 }
 
 /** Console messages that mean the data plane silently degraded to NM. */
@@ -232,7 +223,11 @@ export async function benchmarkMode(
   opts?: { inPage?: boolean }
 ): Promise<BenchmarkResult> {
   const { harnessCtx, backgroundPage, vendorDevice, httpPort, daemonMode } = fixtures
-  const page = await getBenchmarkPage(harnessCtx)
+  // Fresh page per spec. Reusing one tab across specs (c2ed4b8) let later
+  // modes measure on a page with accumulated JIT/GC/canvas state from earlier
+  // ones, inflating the apparent ws-vs-wt gap (ws runs 2nd, wt runs last).
+  // Close it when done so the harness's default about:blank tab stays open.
+  const page = await harnessCtx.newPage()
   const origin = `http://localhost:${httpPort}`
 
   if (daemonMode === 'daemon-nm') {
@@ -293,9 +288,11 @@ export async function benchmarkMode(
         { origin }
       )
       .catch(() => {})
-  return await runBenchmark(page, vendorDevice, { inPage: !!opts?.inPage }).finally(
-    resetSettings
-  )
+  return await runBenchmark(page, vendorDevice, { inPage: !!opts?.inPage })
+    .finally(resetSettings)
+    .finally(() => {
+      if (!page.isClosed()) page.close().catch(() => {})
+    })
 }
 
 export async function runBenchmark(

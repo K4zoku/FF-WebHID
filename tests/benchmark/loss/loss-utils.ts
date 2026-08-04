@@ -7,7 +7,6 @@ import {
   setUseWorker,
   setLogLevel,
   percentile,
-  getBenchmarkPage,
   WT_STREAM_ATTACHED
 } from '../benchmark-utils.js'
 
@@ -55,7 +54,7 @@ const FALLBACK_PATTERNS = [
 ]
 
 export interface LossFixtures {
-  harnessCtx: { newPage(): Promise<Page>; pages(): Page[] }
+  harnessCtx: { newPage(): Promise<Page> }
   backgroundPage: { evaluate: Page['evaluate'] }
   vendorDevice: { process: WebhidMockProcess['process']; ready: Promise<void> }
   httpPort: number
@@ -178,7 +177,7 @@ export async function benchmarkLoss(
   opts: { inPage?: boolean } = {}
 ): Promise<LossResult> {
   const { harnessCtx, backgroundPage, httpPort, daemonMode } = fixtures
-  const page = await getBenchmarkPage(harnessCtx)
+  const page = await harnessCtx.newPage()
   const fallbacks: string[] = []
   let wtStreamAttached = false
   const onConsole = (msg: { text(): string; type(): string }) => {
@@ -324,6 +323,7 @@ export async function benchmarkLoss(
     // spawn take the in-page path. Runs even when benchmarkLoss throws (the
     // in-page attach check).
     await resetSettings()
+    if (!page.isClosed()) page.close().catch(() => {})
   }
 }
 
