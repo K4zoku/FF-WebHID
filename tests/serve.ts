@@ -44,6 +44,8 @@ const PAGES: Record<string, string> = {
   '/worker-check': loadPage('worker-check.html'),
   '/tt-policy': loadPage('tt-policy.html'),
   '/worker.js': loadPage('worker.js'),
+  '/sri-check': loadPage('sri-check.html'),
+  '/sri-test.js': loadPage('sri-test.js'),
   '/worker-spawn-csp': loadPage('worker-spawn-csp.html'),
   '/worker-spawn-csp-restrictive': loadPage('worker-spawn-csp.html'),
   '/worker-spawn-csp-trusted-types': loadPage('worker-spawn-csp.html'),
