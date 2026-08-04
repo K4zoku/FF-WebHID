@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## Unreleased
+
+### Changed
+
+* default data plane is now WebTransport (worker) instead of WebSocket, with ws as the fallback on Firefox < 114. Profiler-verified (2026-08): WS delivery crosses the content main thread (PWebSocket IPC + ChannelEventQueue into the worker), costing ~18pp main-thread CPU and 3.8x the main-thread IPC of WT under render-heavy load; WT reads reports from a DataPipe shared-memory buffer on the worker with zero WebSocket IPC. `dataPlane` still selects ws/wt/nm explicitly.
+
 ## [3.0.0](https://github.com/K4zoku/FF-WebHID/compare/v2.2.0...v3.0.0) (2026-08-03)
 
 ### Features

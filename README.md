@@ -39,7 +39,7 @@ For detailed installation instructions and platform-specific recommendations, se
 Open `about:addons -> WebHID -> Options`:
 
 - **Daemon as NM host**: daemon speaks NM directly (skip forwarder + Unix socket). Requires `webhid.daemon_nm_host` NM manifest (default OFF; default ON on Windows)
-- **Data Plane**: WebSocket worker (default), WebTransport over QUIC, or Native Messaging. WS mode spawns a per-device worker with binary WS + MessageChannel direct-to-page input reports. WT runs in a worker too, or in-page on the main thread when Use Worker is off. NM mode routes all data through the NM host.
+- **Data Plane**: WebTransport worker (default), WebSocket worker, or Native Messaging. WT delivers input reports over QUIC through a DataPipe read on a per-device worker (no main-thread delivery gate; falls back to WS on Firefox < 114). WS mode spawns a per-device worker with binary WS + MessageChannel direct-to-page input reports. WT also runs in-page on the main thread when Use Worker is off. NM mode routes all data through the NM host.
 - **Use Worker**: WT only. Run the data plane in a dedicated worker (default) or in-page on the main thread. Hidden unless Data Plane is WebTransport.
 - **Device Picker Mode**: modal (default), pageAction, or window. How the device chooser is presented.
 - **Worker Spawn Mode**: shadow URL (default on MV3) or blob + CSP rewrite (default on MV2). How the data worker is created in the page context.

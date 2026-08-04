@@ -35,7 +35,7 @@ graph TB
 
 The project has a single switchable plane:
 
-- **Data Plane** (`sendReport`, input reports, feature reports): WS binary via per-device data worker (default), WT over QUIC (worker, or in-page on the main thread when `useWorker` is off; self-signed cert pinned via `serverCertificateHashes`), or NM. Controlled by the `dataPlane` setting (`ws`, `wt`, or `nm`).
+- **Data Plane** (`sendReport`, input reports, feature reports): WT over QUIC via per-device data worker (default; DataPipe shared-memory reads, no main-thread delivery gate; self-signed cert pinned via `serverCertificateHashes`; falls back to WS on Firefox < 114), WS binary via per-device data worker, or NM. Controlled by the `dataPlane` setting (`wt`, `ws`, or `nm`).
 
 Control operations (`enumerate`, `open`, `close`, `handshake`, `getPolicy`, `requestDevice`, `forget`) always go via NM.
 
@@ -79,7 +79,7 @@ All control operations use length-prefixed JSON over NM stdio (Firefox ↔ NM ho
 
 ## Data plane
 
-### WS mode (default, worker + MessagePort)
+### WT mode (default, worker + MessagePort)
 
 High-frequency operations via binary WebSocket frames in a per-device Web Worker:
 
@@ -215,7 +215,7 @@ Device info cache and origin device allowlists are stored in IndexedDB (`webhid-
 
 | Setting                 | Values                            | Default                       | Description                                                                                                                                                                                                                                                            |
 | ----------------------- | --------------------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `dataPlane`             | `ws` / `wt` / `nm`                | `ws`                          | Data plane: WS worker, WT worker (QUIC, pinned self-signed cert), or NM via bridge                                                                                                                                                                                     |
+| `dataPlane`             | `ws` / `wt` / `nm`                | `wt` (`ws` on Firefox < 114)  | Data plane: WT worker (QUIC, pinned self-signed cert, default), WS worker, or NM via bridge                                                                                                                                                                                     |
 | `workerSpawnMode`       | `shadow` / `blob`                 | `shadow` (MV3) / `blob` (MV2) | Data worker spawn strategy (see Worker spawn below). `shadow` = `new Worker(location.href)` served by webRequest interception; `blob` = blob URL from the worker bundle, requires page CSP rewrite. Falls back to the other mode, then to NM, based on CSP pre-flight. |
 | `useWorker`             | bool                              | `true`                        | WT only: run the data plane in a dedicated worker (default) or in-page on the main thread. WS always uses the worker; NM never does. The UI only shows this option when `dataPlane` is `wt`.                                                                           |
 | `daemonAsNmHost`        | bool                              | `false` (`true` on Windows)   | Use daemon-as-NM-host (skip forwarder + socket)                                                                                                                                                                                                                        |
