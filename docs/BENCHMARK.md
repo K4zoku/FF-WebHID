@@ -6,7 +6,7 @@
 
 **Test scenario**: Open sayodevice.com → open device → switch to Image tab → wait for full gallery load (8 images).
 
-**Profile analysis**: Firefox Profiler and Chromium DevTools recordings, analyzed via Python scripts (methodology: `skills/agent-perf-analysis`).
+**Profile analysis**: Firefox Profiler and Chromium DevTools recordings, analyzed via Python scripts.
 
 **Benchmark window** (all modes): `pointerdown` (user clicks Image tab) → last `Paint` event (last image render complete). AnimationFrame::Presentation events after last Paint are skipped. they are the compositor presenting an already-rendered frame, not part of the image-loading pipeline.
 
