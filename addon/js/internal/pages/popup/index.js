@@ -63,6 +63,9 @@
   dataPlaneSelect.value = settings.dataPlane
   /** @type {HTMLInputElement} */
   document.getElementById('workerPolyfillEnabled').checked = settings.workerPolyfillEnabled || false
+  /** @type {HTMLInputElement} */
+  document.getElementById('allowActivationlessRequestDevice').checked =
+    settings.allowActivationlessRequestDevice || false
 
   /** @type {HTMLSelectElement} */
   const devicePickerModeSelect = document.getElementById('devicePickerMode')
@@ -107,6 +110,9 @@
   })
   document.getElementById('workerPolyfillEnabled').addEventListener('change', (e) => {
     saveSetting('workerPolyfillEnabled', e.target.checked)
+  })
+  document.getElementById('allowActivationlessRequestDevice').addEventListener('change', (e) => {
+    saveSetting('allowActivationlessRequestDevice', e.target.checked)
   })
   devicePickerModeSelect.addEventListener('change', (e) => {
     saveSetting('devicePickerMode', e.target.value)

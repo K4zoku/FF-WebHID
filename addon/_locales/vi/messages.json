@@ -44,6 +44,12 @@
   "popupWorkerPolyfillDesc": {
     "message": "Cho phép WebHID API dùng được trên Worker scripts của trang này"
   },
+  "popupAllowActivationless": {
+    "message": "Cho phép requestDevice() không cần thao tác người dùng"
+  },
+  "popupAllowActivationlessDesc": {
+    "message": "Bỏ qua kiểm tra user activation khi trang này gọi requestDevice(). Workaround cho trang gọi bất đồng bộ; bộ chọn thiết bị vẫn yêu cầu người dùng chọn rõ ràng."
+  },
   "popupWorkerSpawnMode": {
     "message": "Chế độ tạo Worker"
   },
@@ -133,6 +139,12 @@
   },
   "settingsWorkerPolyfillDesc": {
     "message": "Chèn stub WebHID API vào Web Worker scripts (`new Worker()`, `new SharedWorker()`). Worker có `navigator.hid`, `HIDDevice` và các constructor liên quan. Các method ném `NotSupportedError` cho tới khi giao tiếp worker đầy đủ được triển khai. Có thể ghi đè per-site từ popup. Reload trang sau khi thay đổi."
+  },
+  "settingsAllowActivationless": {
+    "message": "Cho phép requestDevice() không cần user activation"
+  },
+  "settingsAllowActivationlessDesc": {
+    "message": "Bỏ qua yêu cầu user activation cho `navigator.hid.requestDevice()` trên trang này. Khác với spec WebHID, nơi `requestDevice()` phải được gọi trong cử chỉ người dùng. Dùng làm workaround cho trang gọi `requestDevice()` từ handler bất đồng bộ (ví dụ sau khi fetch dữ liệu), khi cử chỉ có thể đã hết hạn lúc lời gọi chạy. Bộ chọn thiết bị vẫn yêu cầu người dùng chọn rõ ràng, và kiểm tra Permissions Policy không bị ảnh hưởng. Có thể ghi đè per-site từ popup. Reload trang sau khi thay đổi."
   },
   "settingsLogLevel": {
     "message": "Mức độ log"

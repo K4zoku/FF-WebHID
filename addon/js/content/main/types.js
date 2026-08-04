@@ -74,4 +74,5 @@
  * @property {boolean} daemonAsNmHost
  * @property {string} devicePickerMode
  * @property {boolean} workerPolyfillEnabled
+ * @property {boolean} allowActivationlessRequestDevice
  */

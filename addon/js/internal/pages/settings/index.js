@@ -14,7 +14,12 @@
 
   const current = await loadGlobalSettings()
 
-  for (const key of ['daemonAsNmHost', 'workerPolyfillEnabled', 'useWorker']) {
+  for (const key of [
+    'daemonAsNmHost',
+    'workerPolyfillEnabled',
+    'useWorker',
+    'allowActivationlessRequestDevice'
+  ]) {
     document.getElementById(key).checked = current[key]
   }
 
@@ -59,7 +64,12 @@
     }, 1500)
   }
 
-  for (const key of ['daemonAsNmHost', 'workerPolyfillEnabled', 'useWorker']) {
+  for (const key of [
+    'daemonAsNmHost',
+    'workerPolyfillEnabled',
+    'useWorker',
+    'allowActivationlessRequestDevice'
+  ]) {
     document.getElementById(key).addEventListener('change', async (e) => {
       await saveGlobalSetting(key, e.target.checked)
       if (key === 'useWorker') updatePlaneVisibility()

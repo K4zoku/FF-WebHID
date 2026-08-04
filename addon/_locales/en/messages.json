@@ -44,6 +44,12 @@
   "popupWorkerPolyfillDesc": {
     "message": "Inject WebHID API into Worker scripts on this site"
   },
+  "popupAllowActivationless": {
+    "message": "Allow requestDevice() without user gesture"
+  },
+  "popupAllowActivationlessDesc": {
+    "message": "Skip the user-activation check when this site calls requestDevice(). Spec workaround for sites that call it asynchronously; the device chooser still requires explicit user selection."
+  },
   "popupWorkerSpawnMode": {
     "message": "Worker Spawn Mode"
   },
@@ -133,6 +139,12 @@
   },
   "settingsWorkerPolyfillDesc": {
     "message": "Inject WebHID API stubs into Web Worker scripts (`new Worker()`, `new SharedWorker()`). Workers get `navigator.hid`, `HIDDevice`, and related constructors. Methods throw `NotSupportedError` until full worker communication is implemented. Can be overridden per-site from the popup. Reload pages after changing."
+  },
+  "settingsAllowActivationless": {
+    "message": "Allow activation-less requestDevice()"
+  },
+  "settingsAllowActivationlessDesc": {
+    "message": "Skip the user-activation requirement for `navigator.hid.requestDevice()` calls on this site. This deviates from the WebHID spec, where `requestDevice()` must be called within a user gesture. Intended as a workaround for sites that call `requestDevice()` from an async handler (for example after a network fetch), where the gesture may have expired by the time the call runs. The device chooser still requires explicit user selection, and the Permissions Policy check is unaffected. Can be overridden per-site from the popup. Reload pages after changing."
   },
   "settingsLogLevel": {
     "message": "Log Level"

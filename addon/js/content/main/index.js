@@ -1438,6 +1438,7 @@
         }
         if (
           !isCalledFromConsole() &&
+          !settings.allowActivationlessRequestDevice &&
           navigator.userActivation &&
           !navigator.userActivation.isActive
         ) {

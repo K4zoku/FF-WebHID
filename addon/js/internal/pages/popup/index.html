@@ -85,6 +85,25 @@
             <span class="slider" role="presentation"></span>
           </label>
         </div>
+        <div class="setting">
+          <div class="setting-info">
+            <h3 data-i18n="popupAllowActivationless">
+              Allow requestDevice() without user gesture
+            </h3>
+            <p data-i18n="popupAllowActivationlessDesc">
+              Skip the user-activation check when this site calls
+              requestDevice()
+            </p>
+          </div>
+          <label class="toggle">
+            <input
+              type="checkbox"
+              id="allowActivationlessRequestDevice"
+              aria-labelledby="popupAllowActivationless"
+            />
+            <span class="slider" role="presentation"></span>
+          </label>
+        </div>
         <div class="setting" id="workerSpawnMode-setting">
           <div class="setting-info">
             <h3 data-i18n="popupWorkerSpawnMode">Worker Spawn Mode</h3>

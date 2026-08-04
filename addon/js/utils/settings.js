@@ -14,7 +14,8 @@
     devicePickerMode: 'modal',
     workerPolyfillEnabled: false,
     workerSpawnMode: isMv2 ? 'blob' : 'shadow',
-    useWorker: true
+    useWorker: true,
+    allowActivationlessRequestDevice: false
   }
 
   /**
