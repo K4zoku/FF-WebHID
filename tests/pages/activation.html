@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>activation</title></head>
+<body>
+<script>
+  // Helper defined in real page source, NOT in page.evaluate: the polyfill's
+  // isCalledFromConsole() sniffs the stack for "debugger eval code", so any
+  // requestDevice call whose caller was created inside page.evaluate is
+  // exempted from the user-activation check and the test can never observe the
+  // SecurityError. Code from a served file carries the page URL instead.
+  window.tests = window.tests || { helper: {}, results: {} };
+  window.tests.helper.requestDeviceWithoutGesture = (delayMs) =>
+    new Promise((resolve) => {
+      setTimeout(() => {
+        navigator.hid.requestDevice({ filters: [] }).then(
+          (devices) => resolve({ ok: true, count: devices.length }),
+          (e) => resolve({ ok: false, name: e.name, message: e.message })
+        );
+      }, delayMs);
+    });
+</script>
+</body>
+</html>
