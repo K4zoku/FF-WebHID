@@ -34,3 +34,8 @@ addon/wasm-parser.wasm
 
 # Playwright test results
 **/test-results
+
+# cargo-fixup patched crate working copies
+/target/
+# workspace cargo target dir
+crates/target/

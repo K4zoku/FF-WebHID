@@ -839,6 +839,12 @@
         }
       }
       const msg = Object.assign({ action, origin: getRequestOrigin(data) }, payload || {})
+      if (action === 'close') {
+        // The session token must ride on the close request itself; set it
+        // before sending (the cleanup branch below runs after the response).
+        const sessionToken = sessionTokens.get(payload.deviceId)
+        if (sessionToken) msg.T = sessionToken
+      }
       response = await browser.runtime.sendMessage(msg)
 
       if (action === 'open' && http.isOk(response.s) && response.t) {
@@ -875,9 +881,6 @@
         logger.debug('close deviceId=' + deviceId)
         openDevices.delete(deviceId)
         sessionTokens.delete(deviceId)
-        if (sessionToken) {
-          msg.T = sessionToken
-        }
         browser.runtime
           .sendMessage({
             action: 'deviceCountChanged',

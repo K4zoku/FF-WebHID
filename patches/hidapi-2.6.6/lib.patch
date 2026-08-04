@@ -1,0 +1,18 @@
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -513,6 +513,15 @@
+     inner: Box<dyn HidDeviceBackend>,
+ }
+ 
++// Local patch (FF-WebHID): on Linux with the pure-Rust hidraw backend, the
++// underlying linux_native::HidDevice is Sync (shared state is AtomicBool +
++// Mutex, and OwnedFd supports concurrent syscalls on the same fd), so the
++// daemon can share one fd between reader and writer without a Mutex. Only
++// claimed when the linux-native backend is selected; the C backends remain
++// !Sync and callers wrap them in a Mutex.
++#[cfg(all(feature = "linux-native", target_os = "linux"))]
++unsafe impl Sync for HidDevice {}
++
+ impl Debug for HidDevice {
+     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+         f.debug_struct("HidDevice").finish_non_exhaustive()

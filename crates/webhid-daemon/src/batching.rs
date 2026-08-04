@@ -241,6 +241,7 @@ pub async fn handle_client_message<F>(
     F: FnMut(Vec<u8>),
 {
     use crate::blocklist::ReportType;
+    use crate::device_mgr::with_device;
     use crate::hid;
     use std::sync::Arc;
 
@@ -318,12 +319,13 @@ pub async fn handle_client_message<F>(
             };
 
             let result = tokio::task::spawn_blocking(move || {
-                let dev = dev_arc.lock().unwrap_or_else(|e| e.into_inner());
-                if msg_type == MSG_SEND_REPORT {
-                    hid::write_report(&dev, report_id, &payload)
-                } else {
-                    hid::write_feature_report(&dev, report_id, &payload)
-                }
+                with_device(&dev_arc, |dev| {
+                    if msg_type == MSG_SEND_REPORT {
+                        hid::write_report(dev, report_id, &payload)
+                    } else {
+                        hid::write_feature_report(dev, report_id, &payload)
+                    }
+                })
             })
             .await;
 
@@ -364,8 +366,7 @@ pub async fn handle_client_message<F>(
             };
 
             let result = tokio::task::spawn_blocking(move || {
-                let dev = dev_arc.lock().unwrap_or_else(|e| e.into_inner());
-                hid::read_feature_report(&dev, report_id)
+                with_device(&dev_arc, |d| hid::read_feature_report(d, report_id))
             })
             .await;
 

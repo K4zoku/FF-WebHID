@@ -5,7 +5,8 @@ use tokio::io::{AsyncRead, BufReader};
 use tokio::sync::{broadcast, mpsc};
 use webhid::{IpcResponse, NmMessage, NmRequest, NmResponse, parse_packed_send, protocol};
 
-use crate::{device_mgr::DeviceManager, hid, webtransport::WtState};
+use crate::device_mgr::{with_device, DeviceManager};
+use crate::{hid, webtransport::WtState};
 
 pub async fn handle(
     reader: impl AsyncRead + Unpin + Send + 'static,
@@ -149,8 +150,7 @@ async fn dispatch(
                             Ok(dev_arc) => {
                                 let data_owned = data.to_vec();
                                 let result = tokio::task::spawn_blocking(move || {
-                                    let dev = dev_arc.lock().unwrap_or_else(|e| e.into_inner());
-                                    hid::write_report(&dev, report_id, &data_owned)
+                                    with_device(&dev_arc, |d| hid::write_report(d, report_id, &data_owned))
                                 })
                                 .await;
                                 match result {
@@ -183,8 +183,7 @@ async fn dispatch(
                     Err(_) => NmResponse::err(404),
                     Ok(dev_arc) => {
                         let result = tokio::task::spawn_blocking(move || {
-                            let dev = dev_arc.lock().unwrap_or_else(|e| e.into_inner());
-                            hid::read_feature_report(&dev, report_id)
+                            with_device(&dev_arc, |d| hid::read_feature_report(d, report_id))
                         })
                         .await;
                         match result {
@@ -218,8 +217,7 @@ async fn dispatch(
                     Err(_) => NmResponse::err(404),
                     Ok(dev_arc) => {
                         let result = tokio::task::spawn_blocking(move || {
-                            let dev = dev_arc.lock().unwrap_or_else(|e| e.into_inner());
-                            hid::write_feature_report(&dev, report_id, &data)
+                            with_device(&dev_arc, |d| hid::write_feature_report(d, report_id, &data))
                         })
                         .await;
                         match result {

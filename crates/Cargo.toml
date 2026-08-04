@@ -7,6 +7,13 @@ members = [
 ]
 resolver = "2"
 
+# hidapi linux-native backend is patched at build time via cargo-fixup
+# (see .cargo/rustc-wrapper.sh + patches/hidapi-2.6.6/): it gets `unsafe impl
+# Sync` (Linux only) so the daemon can share one fd between reader and writer
+# without a Mutex, plus an empty-HID_UNIQ fix so uhid/emulated devices
+# enumerate. Remove the patches + wrapper once upstream merges them.
+
+
 [profile.release]
 opt-level = "s"
 lto = true

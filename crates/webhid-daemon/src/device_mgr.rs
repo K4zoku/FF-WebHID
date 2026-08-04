@@ -19,8 +19,29 @@ const MODE_NM: &str = "nm";
 const MODE_WS: &str = "ws";
 const MODE_WT: &str = "wt";
 
+// On Linux with the local hidapi patch (see vendor/hidapi), `HidDevice` is `Sync`
+// and safe to share between threads without a Mutex. On other platforms the
+// upstream `HidDevice` is `!Sync` so we still wrap it in a Mutex.
+#[cfg(target_os = "linux")]
+pub(crate) type DeviceHandle = Arc<HidDevice>;
+#[cfg(not(target_os = "linux"))]
+pub(crate) type DeviceHandle = Arc<Mutex<HidDevice>>;
+
+/// Run a closure against the inner `HidDevice`. On Linux this is a direct
+/// borrow (no Mutex). On other platforms it acquires the Mutex.
+#[cfg(target_os = "linux")]
+#[inline]
+pub(crate) fn with_device<R>(handle: &DeviceHandle, f: impl FnOnce(&HidDevice) -> R) -> R {
+    f(handle.as_ref())
+}
+#[cfg(not(target_os = "linux"))]
+#[inline]
+pub(crate) fn with_device<R>(handle: &DeviceHandle, f: impl FnOnce(&HidDevice) -> R) -> R {
+    f(&*handle.lock().unwrap_or_else(|e| e.into_inner()))
+}
+
 struct Entry {
-    device: Arc<Mutex<HidDevice>>,
+    device: DeviceHandle,
     stop_flag: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
     refcount: u32,
@@ -112,14 +133,12 @@ impl DeviceManager {
 
         let stop_flag = Arc::new(AtomicBool::new(false));
 
-        let reader_device = match hid::open_by_device_id(id) {
-            Ok((_, _, d)) => d,
-            Err(e) => {
-                return Err(e);
-            }
-        };
-        let reader_arc = Arc::new(Mutex::new(reader_device));
-        let writer_arc = Arc::new(Mutex::new(device));
+        // Open 1 hidapi fd; on Linux (with the local patch) `HidDevice` is
+        // `Sync` so reader and writer share the same fd via `Arc<HidDevice>` —
+        // the kernel multiplexes read+write concurrently. On other platforms
+        // the Mutex serialises them.
+        let device_arc: DeviceHandle = Arc::new(device);
+        let dev_for_task = Arc::clone(&device_arc);
 
         let mut map = self.devices.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(entry) = map.get_mut(&id) {
@@ -140,7 +159,7 @@ impl DeviceManager {
         }
 
         let entry = Entry {
-            device: Arc::clone(&writer_arc),
+            device: Arc::clone(&device_arc),
             stop_flag: Arc::clone(&stop_flag),
             handle: None,
             refcount: 1,
@@ -162,7 +181,6 @@ impl DeviceManager {
             .insert(ws_auth_hash.clone(), (id, session_token.clone()));
 
         let dev_id = id;
-        let dev_for_task = Arc::clone(&reader_arc);
         let stop_for_task = Arc::clone(&stop_flag);
         let blocked_for_task = Arc::clone(&blocked_input_ids);
         let declared_for_task = Arc::clone(&declared_input_ids);
@@ -182,10 +200,7 @@ impl DeviceManager {
 
                 let read_result = tokio::task::spawn_blocking({
                     let dev = Arc::clone(&dev_for_task);
-                    move || {
-                        let d = dev.lock().unwrap_or_else(|e| e.into_inner());
-                        hid::read_with_timeout(&d, 500, read_buf_size)
-                    }
+                    move || with_device(&dev, |d| hid::read_with_timeout(d, 500, read_buf_size))
                 })
                 .await;
 
@@ -249,16 +264,21 @@ impl DeviceManager {
     }
 
     pub fn close(&self, device_id: u32, session_token: Option<&str>) -> anyhow::Result<()> {
+        let token = session_token
+            .ok_or_else(|| anyhow!("close requires session_token"))?;
         let mut map = self.devices.lock().unwrap_or_else(|e| e.into_inner());
         let entry = map
             .get_mut(&device_id)
             .ok_or_else(|| anyhow!("'{device_id:#x}' not open"))?;
-        if let Some(token) = session_token {
-            entry
+        {
+            let mut modes = entry
                 .dataplane_modes
                 .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .remove(token);
+                .unwrap_or_else(|e| e.into_inner());
+            if !modes.contains_key(token) {
+                return Err(anyhow!("invalid session_token for device {device_id:#x}"));
+            }
+            modes.remove(token);
         }
         if entry.refcount > 1 {
             entry.refcount -= 1;
@@ -286,7 +306,7 @@ impl DeviceManager {
         Ok(())
     }
 
-    pub fn get_file(&self, device_id: u32) -> anyhow::Result<Arc<Mutex<HidDevice>>> {
+    pub fn get_file(&self, device_id: u32) -> anyhow::Result<DeviceHandle> {
         let map = self.devices.lock().unwrap_or_else(|e| e.into_inner());
         let entry = map
             .get(&device_id)
@@ -470,19 +490,11 @@ impl DeviceManager {
     }
 
     pub fn get_device_by_ws_auth(&self, hash: &str) -> Option<(u32, String)> {
-        use subtle::ConstantTimeEq;
-        let hashes = self
-            .ws_auth_hashes
+        self.ws_auth_hashes
             .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let hash_bytes = hash.as_bytes();
-        for (stored_hash, (dev_id, token)) in hashes.iter() {
-            let stored_bytes = stored_hash.as_bytes();
-            if stored_bytes.len() == hash_bytes.len() && stored_bytes.ct_eq(hash_bytes).into() {
-                return Some((*dev_id, token.clone()));
-            }
-        }
-        None
+            .unwrap_or_else(|e| e.into_inner())
+            .get(hash)
+            .map(|(dev_id, token)| (*dev_id, token.clone()))
     }
 }
 #[cfg(test)]
@@ -510,6 +522,30 @@ mod tests {
         let (tx, _) = broadcast::channel(16);
         let mgr = DeviceManager::new(tx);
         mgr.close_all_devices();
+    }
+
+    #[test]
+    fn test_close_rejects_missing_session_token() {
+        let (tx, _) = broadcast::channel(16);
+        let mgr = DeviceManager::new(tx);
+        let err = mgr.close(0xdeadbeef, None).unwrap_err();
+        assert!(err.to_string().contains("session_token"));
+    }
+
+    #[test]
+    fn test_get_device_by_ws_auth_roundtrip() {
+        let (tx, _) = broadcast::channel(16);
+        let mgr = DeviceManager::new(tx);
+        let hash = "a".repeat(64);
+        mgr.ws_auth_hashes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(hash.clone(), (0x1234, "tok".to_string()));
+        assert_eq!(
+            mgr.get_device_by_ws_auth(&hash),
+            Some((0x1234, "tok".to_string()))
+        );
+        assert!(mgr.get_device_by_ws_auth("b".repeat(64).as_str()).is_none());
     }
 
     #[test]

@@ -1,0 +1,121 @@
+--- a/src/linux_native.rs
++++ b/src/linux_native.rs
+@@ -6,7 +6,6 @@
+ use basic_udev as udev;
+ 
+ use std::{
+-    cell::{Cell, Ref, RefCell},
+     ffi::{CStr, CString, OsStr, OsString},
+     fs::{File, OpenOptions},
+     io::{Cursor, Read, Seek, SeekFrom},
+@@ -15,6 +14,8 @@
+         unix::{ffi::OsStringExt, fs::OpenOptionsExt},
+     },
+     path::{Path, PathBuf},
++    sync::atomic::{AtomicBool, Ordering},
++    sync::{Mutex, MutexGuard},
+ };
+ 
+ use libc::wchar_t;
+@@ -97,8 +98,11 @@
+         BUS_SPI => BusType::Spi,
+         _ => return None,
+     };
+-    let name = device.property_value("HID_NAME")?;
+-    let serial = device.property_value("HID_UNIQ")?;
++    // libudev returns NULL for empty property values, so `?` would drop
++    // devices with an empty HID_UNIQ (e.g. uhid/emulated devices) or an empty
++    // HID_NAME. Treat both as absent, matching the C hidapi backend.
++    let name = device.property_value("HID_NAME").unwrap_or_default();
++    let serial = device.property_value("HID_UNIQ").unwrap_or_default();
+     let path = match raw_device
+         .devnode()
+         .map(|p| p.as_os_str().to_os_string().into_vec())
+@@ -409,15 +413,14 @@
+     Some((devtype, vendor, product))
+ }
+ 
+-/// Object for accessing the HID device
+ pub struct HidDevice {
+-    blocking: Cell<bool>,
++    blocking: AtomicBool,
+     fd: OwnedFd,
+-    info: RefCell<Option<DeviceInfo>>,
++    info: Mutex<Option<DeviceInfo>>,
+ }
+ 
+ unsafe impl Send for HidDevice {}
+-
++unsafe impl Sync for HidDevice {}
+ // API for the library to call us, or for internal uses
+ impl HidDevice {
+     pub(crate) fn open(vid: u16, pid: u16, sn: Option<&str>) -> HidResult<Self> {
+@@ -462,22 +465,20 @@
+                 message: format!("ioctl(GRDESCSIZE) error for {path}, not a HIDRAW device?: {e}"),
+             });
+         }
+-
+         Ok(Self {
+-            blocking: Cell::new(true),
++            blocking: AtomicBool::new(true),
+             fd,
+-            info: RefCell::new(None),
++            info: Mutex::new(None),
+         })
+     }
+ 
+-    fn info(&self) -> HidResult<Ref<'_, DeviceInfo>> {
+-        if self.info.borrow().is_none() {
++    fn info(&self) -> HidResult<MutexGuard<'_, Option<DeviceInfo>>> {
++        let mut guard = self.info.lock().unwrap();
++        if guard.is_none() {
+             let info = self.get_device_info()?;
+-            self.info.replace(Some(info));
++            *guard = Some(info);
+         }
+-
+-        let info = self.info.borrow();
+-        Ok(Ref::map(info, |i: &Option<DeviceInfo>| i.as_ref().unwrap()))
++        Ok(guard)
+     }
+ }
+ 
+@@ -498,7 +499,7 @@
+ 
+     fn read(&self, buf: &mut [u8]) -> HidResult<usize> {
+         // If the caller asked for blocking, -1 makes us wait forever
+-        let timeout = if self.blocking.get() { -1 } else { 0 };
++        let timeout = if self.blocking.load(Ordering::Relaxed) { -1 } else { 0 };
+         self.read_timeout(buf, timeout)
+     }
+ 
+@@ -612,22 +613,25 @@
+     }
+ 
+     fn set_blocking_mode(&self, blocking: bool) -> HidResult<()> {
+-        self.blocking.set(blocking);
++        self.blocking.store(blocking, Ordering::Relaxed);
+         Ok(())
+     }
+ 
+     fn get_manufacturer_string(&self) -> HidResult<Option<String>> {
+-        let info = self.info()?;
++        let guard = self.info()?;
++        let info = guard.as_ref().expect("info populated");
+         Ok(info.manufacturer_string().map(str::to_string))
+     }
+ 
+     fn get_product_string(&self) -> HidResult<Option<String>> {
+-        let info = self.info()?;
++        let guard = self.info()?;
++        let info = guard.as_ref().expect("info populated");
+         Ok(info.product_string().map(str::to_string))
+     }
+ 
+     fn get_serial_number_string(&self) -> HidResult<Option<String>> {
+-        let info = self.info()?;
++        let guard = self.info()?;
++        let info = guard.as_ref().expect("info populated");
+         Ok(info.serial_number().map(str::to_string))
+     }
+ 

@@ -938,7 +938,7 @@
           sendResponse({ s: 403 })
           return true
         }
-        NativeMessaging.closeDevice(request.deviceId, request.sessionToken)
+        NativeMessaging.closeDevice(request.deviceId, request.T)
           .then((response) => {
             if (http.isOk(response.s)) unregisterDeviceTab(request.deviceId, tabId)
             sendResponse(response)
