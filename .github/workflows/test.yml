@@ -110,6 +110,8 @@ jobs:
         with:
           name: webhid-debug-binaries
           path: crates/target/debug
+      - name: Make binaries executable
+        run: chmod +x crates/target/debug/webhid-daemon crates/target/debug/webhid-mock crates/target/debug/webhid-native-messaging
       - name: Setup uhid + udev rules + webhid group
         run: |
           sudo groupadd --system webhid
@@ -179,6 +181,8 @@ jobs:
         with:
           name: webhid-debug-binaries
           path: crates/target/debug
+      - name: Make binaries executable
+        run: chmod +x crates/target/debug/webhid-daemon crates/target/debug/webhid-mock crates/target/debug/webhid-native-messaging
       - name: Setup uhid + udev rules + webhid group
         run: |
           sudo groupadd --system webhid
