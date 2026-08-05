@@ -36,7 +36,7 @@
   --shadow: color-mix(in srgb, var(--text), transparent 80%);
   --shadow-drop: drop-shadow(0 6px 20px color-mix(in srgb, var(--text), transparent 65%));
   --toggle-off: color-mix(in srgb, var(--text), transparent 70%);
-  --toggle-knob: var(--text);
+  --toggle-knob: #fff;
 
   
   --radius-sm: 4px;
