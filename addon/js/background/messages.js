@@ -132,6 +132,23 @@
     return true
   }
 
+  function handleEnumeratePaired(request, sender, sendResponse) {
+    const origin = request.origin || ''
+    NativeMessaging.enumerateDevices()
+      .then(async (response) => {
+        if (http.isOk(response.s) && response.D) {
+          const ids = await getAllowedDevices(origin)
+          const paired = response.D.filter((d) => ids.includes(d.deviceId))
+          decodeDeviceCollections(paired)
+          sendResponse({ s: response.s, D: paired })
+        } else {
+          sendResponse(response)
+        }
+      })
+      .catch(() => sendResponse({ s: 500 }))
+    return true
+  }
+
   /**
    * @param {object} request
    * @param {object} sender
@@ -560,6 +577,18 @@
    * @returns {boolean}
    */
   function handleGetDeviceInfo(request, sender, sendResponse) {
+    const fromPage = sender.url != null && !sender.url.startsWith(browser.runtime.getURL(''))
+    if (fromPage) {
+      getAllowedDevices(request.origin || '').then((ids) => {
+        const tabId = sender.tab != null ? sender.tab.id : undefined
+        if (ids.includes(request.deviceId) || isTabAuthorizedForDevice(tabId, request.deviceId)) {
+          getDeviceInfo(request.deviceId).then((device) => sendResponse({ device }))
+        } else {
+          sendResponse({ device: null })
+        }
+      })
+      return true
+    }
     getDeviceInfo(request.deviceId).then((device) => sendResponse({ device }))
     return true
   }
@@ -771,6 +800,12 @@
    * @returns {boolean}
    */
   function handlePickerResult(request, sender, sendResponse) {
+    const pickerPage = browser.runtime.getURL('js/internal/pages/picker/index.html')
+    if (sender.url == null || !sender.url.startsWith(pickerPage)) {
+      logger.warn('pickerResult rejected: sender is not the picker page')
+      sendResponse({ ok: false })
+      return false
+    }
     const { requestId, selected, devices } = request
     let tabId = request.tabId
     if (tabId == null && pendingPicker.size > 0) tabId = [...pendingPicker.keys()][0]
@@ -802,6 +837,7 @@
   /** @type {Object<string, function>} */
   const HANDLERS = {
     enumerate: handleEnumerate,
+    enumeratePaired: handleEnumeratePaired,
     handshake: handleHandshake,
     getBackendStatus: handleGetBackendStatus,
     recordGrantGroup: handleRecordGrantGroup,

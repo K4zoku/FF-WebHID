@@ -15,6 +15,18 @@
   const devicePicker = new WebHidDevicePicker()
   document.documentElement.appendChild(devicePicker.host)
 
+  const PAGE_BLOCKED_ACTIONS = new Set([
+    'pairDevice',
+    'recordGrantGroup',
+    'getGrantGroups',
+    'getAllPairedDevices',
+    'revokeDevice',
+    'getDeviceCache',
+    'getDeviceInfo',
+    'showPicker',
+    'pickerResult'
+  ])
+
   /** @type {Set<string>} */
   const openDevices = new Set()
   /** @type {Map<string, string>} */
@@ -878,11 +890,12 @@
           result: { cancelled: true }
         })
       }, 30000)
-      const onPickerResult = (msg) => {
+      const onPickerResult = async (msg) => {
         if (msg.action !== 'pickerResult' || msg.requestId !== data.id) return
         clearTimeout(pickerTimeout)
         browser.runtime.onMessage.removeListener(onPickerResult)
         if (msg.selected && msg.devices) {
+          await grantSelectedDevices(getRequestOrigin(data), msg.devices)
           replyToPage({
             type: 'response',
             id: data.id,
@@ -901,6 +914,9 @@
     }
 
     const result = await devicePicker.show(filters, exclusionFilters)
+    if (result.devices && result.devices.length) {
+      await grantSelectedDevices(getRequestOrigin(data), result.devices)
+    }
     replyToPage({
       type: 'response',
       id: data.id,
@@ -960,6 +976,29 @@
     despawnDataPlane(deviceId)
   }
 
+  async function grantSelectedDevices(origin, devices) {
+    await Promise.all(
+      devices.map((device) =>
+        browser.runtime
+          .sendMessage({
+            action: 'pairDevice',
+            origin,
+            device: { deviceId: device.deviceId }
+          })
+          .catch(() => {})
+      )
+    )
+    if (devices.length > 1) {
+      browser.runtime
+        .sendMessage({
+          action: 'recordGrantGroup',
+          origin,
+          deviceIds: devices.map((device) => device.deviceId)
+        })
+        .catch(() => {})
+    }
+  }
+
   /**
    * Routes open/close and other pass-through device actions to the background.
    * @param {object} data
@@ -968,6 +1007,10 @@
   async function handleGenericRequest(data) {
     const { id, action, payload } = data
     try {
+      if (PAGE_BLOCKED_ACTIONS.has(action)) {
+        replyToPage({ type: 'response', id, result: { s: 403 } })
+        return
+      }
       let response
       if (action === 'open') {
         const allowed = await isDeviceAllowed(payload.deviceId)
@@ -976,7 +1019,11 @@
           return
         }
       }
-      const msg = Object.assign({ action, origin: getRequestOrigin(data) }, payload || {})
+      const effectiveAction = action === 'enumerate' ? 'enumeratePaired' : action
+      const msg = Object.assign(
+        { action: effectiveAction, origin: getRequestOrigin(data) },
+        payload || {}
+      )
       if (action === 'close') {
         const sessionToken = sessionTokens.get(payload.deviceId)
         if (sessionToken) msg.T = sessionToken

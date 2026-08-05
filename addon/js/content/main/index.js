@@ -17,6 +17,15 @@
   const createWtTransport = webhid.import('createWtTransport')
   delete globalThis.webhid
 
+  const nativeMessagePortPostMessage = MessagePort.prototype.postMessage
+  const nativeMessagePortAddEventListener = MessagePort.prototype.addEventListener
+  const nativeMessagePortRemoveEventListener = MessagePort.prototype.removeEventListener
+  const nativeMessagePortClose = MessagePort.prototype.close
+  const nativeMessagePortStart = MessagePort.prototype.start
+  const NativeMessageChannel = MessageChannel
+  const nativeWorkerPostMessage = typeof Worker !== 'undefined' ? Worker.prototype.postMessage : null
+  const nativeWindowPostMessage = typeof window !== 'undefined' ? window.postMessage : null
+
   logger.initLogger('polyfill')
 
   /** @type {Function|null} */
@@ -45,17 +54,25 @@
     const wt = createWtTransport({
       tag: 'page',
       onReady: () => {
-        bridgePort.postMessage({ type: 'dataPlaneResponse', id: req.id, result: { ok: true } })
+        nativeMessagePortPostMessage.call(bridgePort, {
+          type: 'dataPlaneResponse',
+          id: req.id,
+          result: { ok: true }
+        })
       },
       onClosed: () => {
         inPagePlanes.delete(deviceId)
         rejectInPagePending(deviceId, new Error('data plane closed'))
-        bridgePort.postMessage({ type: 'dataPlaneEvent', deviceId, event: { type: 'closed' } })
+        nativeMessagePortPostMessage.call(bridgePort, {
+          type: 'dataPlaneEvent',
+          deviceId,
+          event: { type: 'closed' }
+        })
       },
       onAuthFailed: (code) => {
         inPagePlanes.delete(deviceId)
         rejectInPagePending(deviceId, new Error('auth failed'))
-        bridgePort.postMessage({
+        nativeMessagePortPostMessage.call(bridgePort, {
           type: 'dataPlaneEvent',
           deviceId,
           event: { type: 'auth-failed', code }
@@ -239,7 +256,7 @@
         mainWorldWorkers.delete(payload.deviceId)
       }
       if (bridgePort) {
-        bridgePort.postMessage({
+        nativeMessagePortPostMessage.call(bridgePort, {
           type: 'workerError',
           deviceId: payload.deviceId,
           message: (event && event.message) || 'unknown'
@@ -261,29 +278,43 @@
   function wireDevicePort(state) {
     if (state.dataPort) {
       try {
-        state.dataPort.onmessage = null
-        state.dataPort.close()
+        if (state.dataPortHandler) {
+          nativeMessagePortRemoveEventListener.call(
+            state.dataPort,
+            'message',
+            state.dataPortHandler
+          )
+          state.dataPortHandler = null
+        }
+        nativeMessagePortClose.call(state.dataPort)
       } catch (e) {
         logger.debug('close stale dataPort failed', e)
       }
     }
-    const dataChannel = new MessageChannel()
+    const dataChannel = new NativeMessageChannel()
     state.dataPort = dataChannel.port1
-    state.dataPort.onmessage = (event) => onDataPortMessage(state, event.data)
+    state.dataPortHandler = (event) => onDataPortMessage(state, event.data)
+    nativeMessagePortAddEventListener.call(state.dataPort, 'message', state.dataPortHandler)
+    nativeMessagePortStart.call(state.dataPort)
     const worker = mainWorldWorkers.get(state.deviceId)
     if (worker) {
-      const controlChannel = new MessageChannel()
-      worker.postMessage(
+      const controlChannel = new NativeMessageChannel()
+      nativeWorkerPostMessage.call(
+        worker,
         { type: 'setPorts', controlPort: controlChannel.port2, dataPort: dataChannel.port2 },
         [controlChannel.port2, dataChannel.port2]
       )
-      bridgePort.postMessage({ id: 0, action: 'dataPort', payload: { deviceId: state.deviceId } }, [
-        controlChannel.port1
-      ])
+      nativeMessagePortPostMessage.call(
+        bridgePort,
+        { id: 0, action: 'dataPort', payload: { deviceId: state.deviceId } },
+        [controlChannel.port1]
+      )
     } else {
-      bridgePort.postMessage({ id: 0, action: 'dataPort', payload: { deviceId: state.deviceId } }, [
-        dataChannel.port2
-      ])
+      nativeMessagePortPostMessage.call(
+        bridgePort,
+        { id: 0, action: 'dataPort', payload: { deviceId: state.deviceId } },
+        [dataChannel.port2]
+      )
     }
   }
 
@@ -483,10 +514,10 @@
         })
       })
     : new Promise((resolve) => {
-        const channel = new MessageChannel()
+        const channel = new NativeMessageChannel()
         bridgePort = channel.port1
         const target = window === window.top ? window : window.top
-        target.postMessage(null, '*', [channel.port2])
+        nativeWindowPostMessage.call(target, null, '*', [channel.port2])
         setupBridgePort()
         resolve()
       })
@@ -495,11 +526,12 @@
   /** @returns {void} */
   function setupBridgePort() {
     if (!bridgePort) return
-    bridgePort.onmessage = (event) => {
+    nativeMessagePortAddEventListener.call(bridgePort, 'message', (event) => {
       if (!event.data) return
       const handler = BRIDGE_MESSAGE_HANDLERS[event.data.type]
       if (handler) handler(event.data)
-    }
+    })
+    nativeMessagePortStart.call(bridgePort)
   }
 
   /**
@@ -510,9 +542,9 @@
     handleSpawnWorkerRequest(data).then((r) => {
       const msg = { type: 'spawnWorkerResponse', id: data.id, result: r.result }
       if (r.transfer) {
-        bridgePort.postMessage(msg, [r.transfer])
+        nativeMessagePortPostMessage.call(bridgePort, msg, [r.transfer])
       } else {
-        bridgePort.postMessage(msg)
+        nativeMessagePortPostMessage.call(bridgePort, msg)
       }
     })
   }
@@ -580,7 +612,11 @@
       if (payload && payload.data instanceof Uint8Array) {
         transfers.push(payload.data.buffer)
       }
-      bridgePort.postMessage(msg, transfers.length ? transfers : undefined)
+      nativeMessagePortPostMessage.call(
+        bridgePort,
+        msg,
+        transfers.length ? transfers : undefined
+      )
     })
   }
 
@@ -614,32 +650,6 @@
     } catch {
       deviceInfoCache = new Map()
       return deviceInfoCache
-    }
-  }
-
-  /**
-   * @param {import("./types.js").HIDDeviceInfo} deviceInfo
-   * @returns {Promise<void>}
-   */
-  async function pairDevice(deviceInfo) {
-    try {
-      pairedDevices = null
-      const result = await sendRequest('pairDevice', {
-        device: { deviceId: deviceInfo.deviceId }
-      })
-      if (result && result.success) {
-        pairedDevices = result.hashes || []
-        deviceInfoCache = null
-      } else {
-        logger.warn(
-          'pairDevice returned non-success for deviceId=' +
-            deviceInfo.deviceId +
-            ': ' +
-            http.name(result != null ? result.s : 0)
-        )
-      }
-    } catch (e) {
-      logger.warn('pairDevice error:', e != null ? (e.message != null ? e.message : e) : e)
     }
   }
 
@@ -749,7 +759,11 @@
           }
         }
       })
-      state.dataPort.postMessage(msg, transfers.length ? transfers : undefined)
+      nativeMessagePortPostMessage.call(
+        state.dataPort,
+        msg,
+        transfers.length ? transfers : undefined
+      )
     })
   }
 
@@ -882,8 +896,15 @@
             state.opened = false
             rejectPendingReports(state, new DOMException('Device closed', 'AbortError'))
             if (state.dataPort) {
-              state.dataPort.onmessage = null
-              state.dataPort.close()
+              if (state.dataPortHandler) {
+                nativeMessagePortRemoveEventListener.call(
+                  state.dataPort,
+                  'message',
+                  state.dataPortHandler
+                )
+                state.dataPortHandler = null
+              }
+              nativeMessagePortClose.call(state.dataPort)
               state.dataPort = null
             }
             this.dispatchEvent(new Event('close'))
@@ -1187,8 +1208,15 @@
         )
       }
       if (state.dataPort) {
-        state.dataPort.onmessage = null
-        state.dataPort.close()
+        if (state.dataPortHandler) {
+          nativeMessagePortRemoveEventListener.call(
+            state.dataPort,
+            'message',
+            state.dataPortHandler
+          )
+          state.dataPortHandler = null
+        }
+        nativeMessagePortClose.call(state.dataPort)
         state.dataPort = null
       }
       device.dispatchEvent(new Event('close'))
@@ -1476,24 +1504,12 @@
     return { filters, exclusionFilters }
   }
 
-  /**
-   * Persists the grant for the chosen devices and returns the polyfill
-   * instances. Devices granted together share one grant event: the group
-   * relationship is only knowable here, at grant time; persist it so forget
-   * can revoke the whole group (multi-interface devices).
-   * @param {object} result
-   * @returns {Promise<object[]>}
-   */
   async function grantRequestedDevices(result) {
     if (result.cancelled) return []
     const devices = result.devices
     if (!devices || devices.length === 0) return []
-    await Promise.all(devices.map((device) => pairDevice(device)))
-    if (devices.length > 1) {
-      sendRequest('recordGrantGroup', {
-        deviceIds: devices.map((device) => device.deviceId)
-      }).catch(() => {})
-    }
+    pairedDevices = null
+    deviceInfoCache = null
     return devices.map((device) => getOrCreateDevice(device))
   }
 
@@ -1537,7 +1553,7 @@
           reject(new DOMException(e != null ? e.message : 'requestDevice failed', 'NetworkError'))
         )
       }
-      bridgePort.postMessage({
+      nativeMessagePortPostMessage.call(bridgePort, {
         id,
         action: 'requestDevice',
         payload: { filters, exclusionFilters }
@@ -1709,11 +1725,12 @@
    */
   function PatchedWorker(url, opts) {
     const instance = new NativeWorker(url, opts)
-    const ch = new MessageChannel()
-    instance.postMessage(null, [ch.port1])
+    const ch = new NativeMessageChannel()
+    nativeWorkerPostMessage.call(instance, null, [ch.port1])
     bridgeReady.then(() => {
       if (!bridgePort) return
-      bridgePort.postMessage(
+      nativeMessagePortPostMessage.call(
+        bridgePort,
         {
           id: frameNonce + ':' + ++nextReqId,
           action: 'workerPort',
