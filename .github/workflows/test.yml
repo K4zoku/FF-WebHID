@@ -20,7 +20,7 @@ permissions:
   contents: read
 
 jobs:
-  build:
+  unit:
     name: Build and unit test
     runs-on: ubuntu-24.04
     steps:
@@ -56,7 +56,7 @@ jobs:
 
   e2e:
     name: E2E tests
-    needs: build
+    needs: unit
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -127,7 +127,7 @@ jobs:
 
   benchmark:
     name: Benchmark
-    needs: build
+    needs: unit
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
