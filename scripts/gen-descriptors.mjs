@@ -55,10 +55,6 @@ function logicalMax(v) {
 function unitExponent(e) {
   return Buffer.from([0x55, e & 0xff])
 }
-function unitBytes(b) {
-  return Buffer.from([0x65, b.length, ...b])
-}
-
 function usageMinimum(u) {
   return u <= 0xff ? Buffer.from([0x18, u]) : Buffer.from([0x19, u & 0xff, (u >> 8) & 0xff])
 }

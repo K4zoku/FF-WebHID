@@ -227,7 +227,7 @@
           string,
           arguments.length > 1 ? arguments[1] : undefined,
           null,
-          0x1fffffffffffff
+          Number.MAX_SAFE_INTEGER
         )
         return new Uint8Array(result.bytes)
       },
