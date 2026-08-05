@@ -490,26 +490,26 @@
     }
   })()
 
-  if (window === window.top) {
-    /**
-     * Reports iframe src URLs with allow="hid" to the background so cross-origin
-     * permissions can be tracked.
-     * @returns {void}
-     */
-    function reportIframes() {
-      const iframes = document.querySelectorAll('iframe[allow*="hid" i]')
-      for (const iframe of iframes) {
-        const src = iframe.src || iframe.getAttribute('src') || ''
-        if (!src) continue
-        browser.runtime
-          .sendMessage({
-            action: 'setFrameAllow',
-            url: src,
-            frameId: -1
-          })
-          .catch((e) => logger.debug('setFrameAllow failed', e))
-      }
+  /**
+   * Reports iframe src URLs with allow="hid" to the background so cross-origin
+   * permissions can be tracked.
+   * @returns {void}
+   */
+  function reportIframes() {
+    const iframes = document.querySelectorAll('iframe[allow*="hid" i]')
+    for (const iframe of iframes) {
+      const src = iframe.src || iframe.getAttribute('src') || ''
+      if (!src) continue
+      browser.runtime
+        .sendMessage({
+          action: 'setFrameAllow',
+          url: src,
+          frameId: -1
+        })
+        .catch((e) => logger.debug('setFrameAllow failed', e))
     }
+  }
+  if (window === window.top) {
     reportIframes()
     const observer = new MutationObserver(() => reportIframes())
     observer.observe(document.documentElement, {

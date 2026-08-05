@@ -1670,29 +1670,29 @@
   }
 
   const NativeWorker = globalThis.Worker
+  /**
+   * @param {string|URL} url
+   * @param {object} [opts]
+   * @returns {Worker}
+   */
+  function PatchedWorker(url, opts) {
+    const instance = new NativeWorker(url, opts)
+    const ch = new MessageChannel()
+    instance.postMessage(null, [ch.port1])
+    bridgeReady.then(() => {
+      if (!bridgePort) return
+      bridgePort.postMessage(
+        {
+          id: frameNonce + ':' + ++nextReqId,
+          action: 'workerPort',
+          payload: {}
+        },
+        [ch.port2]
+      )
+    })
+    return instance
+  }
   if (NativeWorker) {
-    /**
-     * @param {string|URL} url
-     * @param {object} [opts]
-     * @returns {Worker}
-     */
-    function PatchedWorker(url, opts) {
-      const instance = new NativeWorker(url, opts)
-      const ch = new MessageChannel()
-      instance.postMessage(null, [ch.port1])
-      bridgeReady.then(() => {
-        if (!bridgePort) return
-        bridgePort.postMessage(
-          {
-            id: frameNonce + ':' + ++nextReqId,
-            action: 'workerPort',
-            payload: {}
-          },
-          [ch.port2]
-        )
-      })
-      return instance
-    }
     PatchedWorker.prototype = NativeWorker.prototype
     Object.setPrototypeOf(PatchedWorker, NativeWorker)
     globalThis.Worker = PatchedWorker
