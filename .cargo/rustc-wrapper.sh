@@ -43,7 +43,7 @@ if [ -d "$PATCH_DIR" ]; then
 
   mkdir -p "$TARGET_PATCHED_DIR"
   rm -rf -- "$PATCHED_SRC"
-  cp -RL -- "$CARGO_MANIFEST_DIR" "$PATCHED_SRC"
+  cp -RLp -- "$CARGO_MANIFEST_DIR" "$PATCHED_SRC"
 
   for PATCH_FILE in "$PATCH_DIR"/*; do
     [ -f "$PATCH_FILE" ] || continue
@@ -57,6 +57,15 @@ if [ -d "$PATCH_DIR" ]; then
       echo "Not executable nor patch file: $PATCH_FILE"
     fi
   done
+
+  newest_patch=""
+  for f in "$PATCH_DIR"/*; do
+    [ -f "$f" ] || continue
+    [ "$f" -nt "$newest_patch" ] && newest_patch="$f"
+  done
+  if [ -n "$newest_patch" ]; then
+    find "$PATCHED_SRC" -type f -exec touch -r "$newest_patch" {} +
+  fi
 
   new_args=()
   for arg in "$@"; do

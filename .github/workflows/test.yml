@@ -61,10 +61,20 @@ jobs:
           version: v1
       - name: Install kernel modules
         run: sudo apt-get update && sudo apt-get install -y linux-modules-extra-$(uname -r)
-      - name: Install dependencies
-        run: |
-          npm ci
-          npx playwright install firefox
+      - name: Cache npm
+        uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          key: npm-${{ hashFiles('package-lock.json') }}
+      - name: Install npm dependencies
+        run: npm ci
+      - name: Cache Playwright browsers
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: ms-playwright-${{ hashFiles('package-lock.json') }}
+      - name: Install Playwright browsers
+        run: npx playwright install firefox
       - name: Build Rust binaries
         run: npm run build:rs:debug
       - name: Run unit tests

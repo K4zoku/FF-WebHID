@@ -137,13 +137,27 @@ jobs:
              "dist/webhid-linux-${{ matrix.arch }}-v${{ steps.variables.outputs.VERSION }}.rpm"
         shell: bash
 
+      - name: Cache WiX tool
+        if: runner.os == 'Windows'
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.nuget/packages
+            ~/.dotnet/tools
+            ~/.wix
+          key: wix-6.0.2
+
       - name: Build .msi (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          dotnet tool install --global wix --version 6.0.2
+          if (-not (Test-Path "$env:USERPROFILE\.dotnet\tools\wix.exe")) {
+            dotnet tool install --global wix --version 6.0.2
+          }
           $env:PATH = "$env:USERPROFILE\.dotnet\tools;$env:PATH"
-          wix extension add -g WixToolset.UI.wixext/6.0.2
+          if (-not (Test-Path "$env:USERPROFILE\.wix\extensions\WixToolset.UI.wixext\6.0.2")) {
+            wix extension add -g WixToolset.UI.wixext/6.0.2
+          }
           npm run build:msi -- --version="${{ steps.variables.outputs.VERSION }}" --arch=x86_64
           npm run build:msi -- --version="${{ steps.variables.outputs.VERSION }}" --arch=aarch64
 
