@@ -148,16 +148,10 @@ function pushInputBatch(batch, offset = 0) {
     count++
   }
   if (count > 0) {
-    // One port message per frame (the daemon batches reports into ~1ms
-    // frames at high polling rates), not one per report: per-message port
-    // overhead at 8000 msg/s drops reports under main-thread load (measured:
-    // worker parses all, page misses 0.2-0.4% mid-run).
     if (dataPort) {
       try {
         dataPort.postMessage({ type: 'inputReportBatch', reports }, transfers)
       } catch (e) {
-        // A closed/re-wired data port mid-batch must not drop the rest of
-        // the frame's reports.
         logger.warn('inputReportBatch postMessage failed', e)
       }
     }

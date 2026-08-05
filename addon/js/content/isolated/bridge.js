@@ -321,6 +321,23 @@
   }
 
   /**
+   * Asks the page to spawn a main-world worker in the given mode.
+   * @param {string} deviceId
+   * @param {string} mode
+   * @returns {Promise<object>}
+   */
+  async function attemptWorkerSpawn(deviceId, mode) {
+    if (mode === 'blob') {
+      return requestMainWorldSpawn({
+        mode: 'blob',
+        bundleText: await fetchWorkerBundle(),
+        deviceId
+      })
+    }
+    return requestMainWorldSpawn({ mode: 'shadow', deviceId })
+  }
+
+  /**
    * @param {string} deviceId
    * @param {string} sessionToken
    * @param {number} wsPort
@@ -347,17 +364,13 @@
       return false
     }
     try {
-      if (spawnMode === 'blob') {
-        spawnResult = await requestMainWorldSpawn({ mode: 'blob', bundleText: await fetchWorkerBundle(), deviceId })
-      } else {
-        spawnResult = await requestMainWorldSpawn({ mode: 'shadow', deviceId })
-      }
+      spawnResult = await attemptWorkerSpawn(deviceId, spawnMode)
     } catch (e) {
       logger.warn('worker spawn failed for', deviceId, '(', spawnMode, '):', e.message)
       if (spawnMode === 'shadow') {
         spawnMode = 'blob'
         try {
-          spawnResult = await requestMainWorldSpawn({ mode: 'blob', bundleText: await fetchWorkerBundle(), deviceId })
+          spawnResult = await attemptWorkerSpawn(deviceId, spawnMode)
         } catch (e2) {
           logger.warn('worker spawn retry failed for', deviceId, '(', spawnMode, '):', e2.message)
         }
@@ -537,6 +550,85 @@
     }
   }
 
+  /**
+   * @param {object} data
+   * @returns {void}
+   */
+  function handleSpawnWorkerResponse(data) {
+    const pending = pendingSpawns.get(data.id)
+    if (pending) {
+      clearTimeout(pending.timer)
+      pendingSpawns.delete(data.id)
+      pending.resolve(data.result || {})
+    }
+  }
+
+  /**
+   * @param {object} data
+   * @returns {void}
+   */
+  function handlePlaneResponse(data) {
+    const pending = pendingPlaneSpawns.get(data.id)
+    if (pending) {
+      clearTimeout(pending.timer)
+      pendingPlaneSpawns.delete(data.id)
+      pending.resolve(!!(data.result && data.result.ok))
+    }
+  }
+
+  /**
+   * @param {object} data
+   * @returns {void}
+   */
+  function handleDataPlaneEvent(data) {
+    const deviceId = data.deviceId
+    const ev = data.event || {}
+    if (ev.type === 'closed') {
+      inPageDevices.delete(deviceId)
+      let spawnPending = false
+      for (const [, entry] of pendingPlaneSpawns) {
+        if (entry.deviceId === deviceId) {
+          spawnPending = true
+          break
+        }
+      }
+      if (!spawnPending) {
+        replyToPage({
+          type: 'event',
+          event: { eventType: 'disconnect', deviceId: deviceId }
+        })
+      }
+    } else if (ev.type === 'auth-failed') {
+      inPageDevices.delete(deviceId)
+      refreshDataPlaneToken(deviceId)
+    }
+  }
+
+  /**
+   * @param {object} data
+   * @returns {void}
+   */
+  function handleWorkerErrorEvent(data) {
+    const deviceId = data.deviceId
+    logger.warn('worker errored for', deviceId, ':', data.message)
+    if (workers.has(deviceId)) {
+      workers.delete(deviceId)
+      connectParams.delete(deviceId)
+      replyToPage({
+        type: 'event',
+        event: { eventType: 'disconnect', deviceId: deviceId }
+      })
+    }
+  }
+
+  /** @type {Object<string, function>} */
+  const PAGE_PORT_HANDLERS = {
+    spawnWorkerResponse: handleSpawnWorkerResponse,
+    dataPlaneResponse: handlePlaneResponse,
+    dataPlaneEvent: handleDataPlaneEvent,
+    workerError: handleWorkerErrorEvent,
+  }
+
   window.addEventListener('message', (event) => {
     const port = event.ports != null ? event.ports[0] : undefined
     if (!port) return
@@ -554,63 +646,15 @@
       }
     }
     port.onmessage = (event) => {
-      if (event.data && event.data.type === 'spawnWorkerResponse') {
-        const pending = pendingSpawns.get(event.data.id)
-        if (pending) {
-          clearTimeout(pending.timer)
-          pendingSpawns.delete(event.data.id)
-          pending.resolve(event.data.result || {})
-        }
+      const data = event.data
+      if (!data) return
+      const handler = PAGE_PORT_HANDLERS[data.type]
+      if (handler) {
+        handler(data)
         return
       }
-      if (event.data && event.data.type === 'dataPlaneResponse') {
-        const pending = pendingPlaneSpawns.get(event.data.id)
-        if (pending) {
-          clearTimeout(pending.timer)
-          pendingPlaneSpawns.delete(event.data.id)
-          pending.resolve(!!(event.data.result && event.data.result.ok))
-        }
-        return
-      }
-      if (event.data && event.data.type === 'dataPlaneEvent') {
-        const deviceId = event.data.deviceId
-        const ev = event.data.event || {}
-        if (ev.type === 'closed') {
-          inPageDevices.delete(deviceId)
-          let spawnPending = false
-          for (const [, entry] of pendingPlaneSpawns) {
-            if (entry.deviceId === deviceId) {
-              spawnPending = true
-              break
-            }
-          }
-          if (!spawnPending) {
-            replyToPage({
-              type: 'event',
-              event: { eventType: 'disconnect', deviceId: deviceId }
-            })
-          }
-        } else if (ev.type === 'auth-failed') {
-          inPageDevices.delete(deviceId)
-          refreshDataPlaneToken(deviceId)
-        }
-        return
-      }
-      if (event.data && event.data.type === 'workerError') {
-        const deviceId = event.data.deviceId
-        logger.warn('worker errored for', deviceId, ':', event.data.message)
-        if (workers.has(deviceId)) {
-          workers.delete(deviceId)
-          connectParams.delete(deviceId)
-          replyToPage({
-            type: 'event',
-            event: { eventType: 'disconnect', deviceId: deviceId }
-          })
-        }
-        return
-      }
-      if (event.data != null && event.data.id != null) requestPortMap.set(event.data.id, port)
-      handleRequest(event.data, event.ports, source)
+      if (data.id != null) requestPortMap.set(data.id, port)
+      handleRequest(data, event.ports, source)
     }
     logger.debug('[bridge] page port established for', event.source === window ? 'window' : 'child')
   })
@@ -627,241 +671,304 @@
   /**
    * @param {object} data
    * @param {MessagePort[]} ports
-   * @param {Window|null} _source
    * @returns {Promise<void>}
    */
-  async function handleRequest(data, ports, _source) {
-    if (!data || data.id === undefined) return
+  async function handleWorkerPortRequest(data, ports) {
+    const p = ports && ports[0]
+    if (!p) return
+    const origin = getRequestOrigin(data)
+    portOrigin.set(p, origin || window.location.origin)
+    p.onmessage = (event) => {
+      if (event.data != null && event.data.id != null) requestPortMap.set(event.data.id, p)
+      handleRequest(event.data, event.ports, null)
+    }
+    replyToPage({ type: 'response', id: data.id, result: { ok: true } })
+  }
 
-    const { id, action: reqAction, payload } = data
-    let action = reqAction
-    logger.debug('req action=' + action + ' id=' + id)
-
-    if (action === 'workerPort') {
-      const p = ports && ports[0]
-      if (p) {
-        const origin = getRequestOrigin(data)
-        portOrigin.set(p, origin || window.location.origin)
-        p.onmessage = (event) => {
-          if (event.data != null && event.data.id != null) requestPortMap.set(event.data.id, p)
-          handleRequest(event.data, event.ports, null)
-        }
-        replyToPage({ type: 'response', id, result: { ok: true } })
-      }
+  /**
+   * @param {object} data
+   * @param {MessagePort[]} ports
+   * @returns {Promise<void>}
+   */
+  async function handleDataPortRequest(data, ports) {
+    const deviceId = data.payload.deviceId
+    const port = ports && ports[0]
+    if (!deviceId || !port) {
+      logger.warn('data-port: missing deviceId or port')
       return
     }
-
-    if (action === 'dataPort') {
-      const deviceId = payload.deviceId
-      const port = ports && ports[0]
-      if (!deviceId || !port) {
-        logger.warn('data-port: missing deviceId or port')
-        return
-      }
-      const allowed = await isDeviceAllowed(deviceId)
-      if (!allowed) {
-        logger.warn('data-port: not authorized for device', deviceId)
-        try {
-          port.close()
-        } catch (e) {
-          logger.debug('unauthorized port close failed', e)
-        }
-        return
-      }
-      if (workers.has(deviceId)) {
-        const proxy = makeWorkerProxy(port)
-        workers.set(deviceId, proxy)
-        proxy.onmessage = (event) => {
-          const data = event.data
-          if (!data || !data.type) return
-          if (data.type === 'ready') {
-            logger.info('worker ready for', deviceId)
-            workerReadyDevices.add(deviceId)
-            proxy.postMessage({
-              type: 'settings',
-              dataPlane: settings.dataPlane,
-              logLevel: settings.logLevel
-            })
-            return
-          }
-          if (data.type === 'auth-failed') {
-            logger.warn('worker auth-failed for', deviceId, 'code=' + data.code + '; re-opening')
-            if (workers.get(deviceId) === proxy) {
-              workers.delete(deviceId)
-              workerReadyDevices.delete(deviceId)
-              dataPorts.delete(deviceId)
-              refreshDataPlaneToken(deviceId)
-            }
-            return
-          }
-          if (data.type === 'closed') {
-            logger.warn('worker closed for', deviceId)
-            if (workers.get(deviceId) === proxy) {
-              workers.delete(deviceId)
-              workerReadyDevices.delete(deviceId)
-              dataPorts.delete(deviceId)
-              replyToPage({
-                type: 'event',
-                event: { eventType: 'disconnect', deviceId: deviceId }
-              })
-            }
-            return
-          }
-        }
-        const params = connectParams.get(deviceId)
-        if (params) {
-          connectParams.delete(deviceId)
-          proxy.postMessage(Object.assign({ type: 'connect' }, params))
-        }
-        logger.debug('worker control port received for device', deviceId)
-        return
-      }
-      dataPorts.set(deviceId, port)
-      logger.debug('data port received for device', deviceId)
-      port.onmessage = (event) => onDataPortMessage(deviceId, event.data)
-      return
-    }
-
-    if (action === 'getCspInfo') {
-      ;(async () => {
-        try {
-          const resp = await browser.runtime.sendMessage({ action: 'getCspInfo' })
-          replyToPage({ type: 'response', id, result: resp || {} })
-        } catch {
-          replyToPage({ type: 'response', id, result: {} })
-        }
-      })()
-      return
-    }
-
-    if (action === 'getPolicy') {
-      ;(async () => {
-        try {
-          const requestFrameUrl = (payload && payload.frameUrl) || ''
-          let hasAllowAttr = false
-          if (window === window.top && requestFrameUrl) {
-            for (const iframe of document.querySelectorAll('iframe[allow*="hid" i]')) {
-              const s = iframe.src || iframe.getAttribute('src') || ''
-              if (s === requestFrameUrl) {
-                hasAllowAttr = true
-                break
-              }
-            }
-          }
-          const policyUrl = requestFrameUrl || getRequestOrigin(data) || location.href
-          const resp = await browser.runtime.sendMessage({
-            action: 'getPolicy',
-            isCrossOrigin: payload && payload.isCrossOrigin ? true : false,
-            url: policyUrl,
-            hasAllowAttr
-          })
-          const result = resp ? resp.policy || { hid: 'allowed' } : { hid: 'allowed' }
-          result._dbg = {
-            requestFrameUrl,
-            hasAllowAttr,
-            top: window === window.top
-          }
-          replyToPage({ type: 'response', id, result })
-        } catch (e) {
-          replyToPage({
-            type: 'response',
-            id,
-            result: { hid: 'allowed', _err: String(e) }
-          })
-        }
-      })()
-      return
-    }
-
-    if (action === 'getSettings') {
+    const allowed = await isDeviceAllowed(deviceId)
+    if (!allowed) {
+      logger.warn('data-port: not authorized for device', deviceId)
       try {
-        const global = await loadGlobalSettings()
-        const origin = window.location.origin
-        if (origin) {
-          const site = await loadSiteSettings(origin)
-          for (const [k, v] of Object.entries(site)) global[k] = v
+        port.close()
+      } catch (e) {
+        logger.debug('unauthorized port close failed', e)
+      }
+      return
+    }
+    if (workers.has(deviceId)) {
+      const proxy = makeWorkerProxy(port)
+      workers.set(deviceId, proxy)
+      proxy.onmessage = (event) => {
+        const data = event.data
+        if (!data || !data.type) return
+        if (data.type === 'ready') {
+          logger.info('worker ready for', deviceId)
+          workerReadyDevices.add(deviceId)
+          proxy.postMessage({
+            type: 'settings',
+            dataPlane: settings.dataPlane,
+            logLevel: settings.logLevel
+          })
+          return
         }
-        settings.set(global)
-        replyToPage({ type: 'response', id, result: global })
-      } catch {
-        replyToPage({ type: 'response', id, result: {} })
-      }
-      return
-    }
-
-    if (
-      action === 'sendReport' ||
-      action === 'sendFeatureReport' ||
-      action === 'receiveFeatureReport'
-    ) {
-      if (!payload || !payload.deviceId) return
-      try {
-        const msg = Object.assign({ action }, payload || {})
-        const response = await browser.runtime.sendMessage(msg)
-        const transfers = response && response.d instanceof Uint8Array ? [response.d.buffer] : []
-        replyToPage(
-          { type: 'response', id, result: response },
-          transfers.length ? transfers : undefined
-        )
-      } catch {
-        replyToPage({ type: 'response', id, result: { s: 500 } })
-      }
-      return
-    }
-
-    if (action === 'requestDevice') {
-      const filters = (payload && payload.filters) || []
-      const exclusionFilters = (payload && payload.exclusionFilters) || []
-
-      if (settings.devicePickerMode === 'pageAction' || settings.devicePickerMode === 'window') {
-        browser.runtime
-          .sendMessage({
-            action: 'showPicker',
-            requestId: id,
-            filters,
-            exclusionFilters,
-            origin: getRequestOrigin(data),
-            mode: settings.devicePickerMode
-          })
-          .catch((e) => logger.debug('showPicker send failed', e))
-        const pickerTimeout = setTimeout(() => {
-          replyToPage({
-            type: 'response',
-            id,
-            result: { cancelled: true }
-          })
-        }, 30000)
-        const onPickerResult = (msg) => {
-          if (msg.action !== 'pickerResult' || msg.requestId !== id) return
-          clearTimeout(pickerTimeout)
-          browser.runtime.onMessage.removeListener(onPickerResult)
-          if (msg.selected && msg.devices) {
+        if (data.type === 'auth-failed') {
+          logger.warn('worker auth-failed for', deviceId, 'code=' + data.code + '; re-opening')
+          if (workers.get(deviceId) === proxy) {
+            workers.delete(deviceId)
+            workerReadyDevices.delete(deviceId)
+            dataPorts.delete(deviceId)
+            refreshDataPlaneToken(deviceId)
+          }
+          return
+        }
+        if (data.type === 'closed') {
+          logger.warn('worker closed for', deviceId)
+          if (workers.get(deviceId) === proxy) {
+            workers.delete(deviceId)
+            workerReadyDevices.delete(deviceId)
+            dataPorts.delete(deviceId)
             replyToPage({
-              type: 'response',
-              id,
-              result: { devices: msg.devices }
-            })
-          } else {
-            replyToPage({
-              type: 'response',
-              id,
-              result: { cancelled: true }
+              type: 'event',
+              event: { eventType: 'disconnect', deviceId: deviceId }
             })
           }
+          return
         }
-        browser.runtime.onMessage.addListener(onPickerResult)
-        return
       }
+      const params = connectParams.get(deviceId)
+      if (params) {
+        connectParams.delete(deviceId)
+        proxy.postMessage(Object.assign({ type: 'connect' }, params))
+      }
+      logger.debug('worker control port received for device', deviceId)
+      return
+    }
+    dataPorts.set(deviceId, port)
+    logger.debug('data port received for device', deviceId)
+    port.onmessage = (event) => onDataPortMessage(deviceId, event.data)
+  }
 
-      const result = await devicePicker.show(filters, exclusionFilters)
+  /**
+   * @param {object} data
+   * @returns {Promise<void>}
+   */
+  async function handleGetCspInfoRequest(data) {
+    try {
+      const resp = await browser.runtime.sendMessage({ action: 'getCspInfo' })
+      replyToPage({ type: 'response', id: data.id, result: resp || {} })
+    } catch {
+      replyToPage({ type: 'response', id: data.id, result: {} })
+    }
+  }
+
+  /**
+   * @param {object} data
+   * @returns {Promise<void>}
+   */
+  async function handleGetPolicyRequest(data) {
+    try {
+      const payload = data.payload || {}
+      const requestFrameUrl = payload.frameUrl || ''
+      let hasAllowAttr = false
+      if (window === window.top && requestFrameUrl) {
+        for (const iframe of document.querySelectorAll('iframe[allow*="hid" i]')) {
+          const s = iframe.src || iframe.getAttribute('src') || ''
+          if (s === requestFrameUrl) {
+            hasAllowAttr = true
+            break
+          }
+        }
+      }
+      const policyUrl = requestFrameUrl || getRequestOrigin(data) || location.href
+      const resp = await browser.runtime.sendMessage({
+        action: 'getPolicy',
+        isCrossOrigin: payload.isCrossOrigin ? true : false,
+        url: policyUrl,
+        hasAllowAttr
+      })
+      const result = resp ? resp.policy || { hid: 'allowed' } : { hid: 'allowed' }
+      result._dbg = {
+        requestFrameUrl,
+        hasAllowAttr,
+        top: window === window.top
+      }
+      replyToPage({ type: 'response', id: data.id, result })
+    } catch (e) {
       replyToPage({
         type: 'response',
-        id,
-        result: result.devices.length ? { devices: result.devices } : { cancelled: true }
+        id: data.id,
+        result: { hid: 'allowed', _err: String(e) }
       })
+    }
+  }
+
+  /**
+   * @param {object} data
+   * @returns {Promise<void>}
+   */
+  async function handleGetSettingsRequest(data) {
+    try {
+      const global = await loadGlobalSettings()
+      const origin = window.location.origin
+      if (origin) {
+        const site = await loadSiteSettings(origin)
+        for (const [k, v] of Object.entries(site)) global[k] = v
+      }
+      settings.set(global)
+      replyToPage({ type: 'response', id: data.id, result: global })
+    } catch {
+      replyToPage({ type: 'response', id: data.id, result: {} })
+    }
+  }
+
+  /**
+   * @param {object} data
+   * @returns {Promise<void>}
+   */
+  async function handleReportRequest(data) {
+    const payload = data.payload || {}
+    if (!payload.deviceId) return
+    try {
+      const msg = Object.assign({ action: data.action }, payload)
+      const response = await browser.runtime.sendMessage(msg)
+      const transfers = response && response.d instanceof Uint8Array ? [response.d.buffer] : []
+      replyToPage(
+        { type: 'response', id: data.id, result: response },
+        transfers.length ? transfers : undefined
+      )
+    } catch {
+      replyToPage({ type: 'response', id: data.id, result: { s: 500 } })
+    }
+  }
+
+  /**
+   * @param {object} data
+   * @returns {Promise<void>}
+   */
+  async function handleRequestDeviceRequest(data) {
+    const payload = data.payload || {}
+    const filters = payload.filters || []
+    const exclusionFilters = payload.exclusionFilters || []
+
+    if (settings.devicePickerMode === 'pageAction' || settings.devicePickerMode === 'window') {
+      browser.runtime
+        .sendMessage({
+          action: 'showPicker',
+          requestId: data.id,
+          filters,
+          exclusionFilters,
+          origin: getRequestOrigin(data),
+          mode: settings.devicePickerMode
+        })
+        .catch((e) => logger.debug('showPicker send failed', e))
+      const pickerTimeout = setTimeout(() => {
+        replyToPage({
+          type: 'response',
+          id: data.id,
+          result: { cancelled: true }
+        })
+      }, 30000)
+      const onPickerResult = (msg) => {
+        if (msg.action !== 'pickerResult' || msg.requestId !== data.id) return
+        clearTimeout(pickerTimeout)
+        browser.runtime.onMessage.removeListener(onPickerResult)
+        if (msg.selected && msg.devices) {
+          replyToPage({
+            type: 'response',
+            id: data.id,
+            result: { devices: msg.devices }
+          })
+        } else {
+          replyToPage({
+            type: 'response',
+            id: data.id,
+            result: { cancelled: true }
+          })
+        }
+      }
+      browser.runtime.onMessage.addListener(onPickerResult)
       return
     }
 
+    const result = await devicePicker.show(filters, exclusionFilters)
+    replyToPage({
+      type: 'response',
+      id: data.id,
+      result: result.devices.length ? { devices: result.devices } : { cancelled: true }
+    })
+  }
+
+  /**
+   * Runs the post-open data-plane spawn for a device.
+   * @param {object} response
+   * @returns {Promise<void>}
+   */
+  async function handleOpenSuccess(response) {
+    const deviceId = response.i
+    openDevices.add(deviceId)
+    sessionTokens.set(deviceId, response.t)
+    browser.runtime
+      .sendMessage({
+        action: 'deviceCountChanged',
+        count: openDevices.size
+      })
+      .catch((e) => logger.debug('deviceCountChanged (open) failed', e))
+    logger.debug('open ok deviceId=' + deviceId + ' wsPort=' + response.w)
+
+    const dataPlane = settings.dataPlane
+    if (dataPlane === 'ws') {
+      await spawnDataPlane(deviceId, response.t, response.w || wsPort)
+    } else if (dataPlane === 'wt') {
+      if (wtPort != null) {
+        if (settings.useWorker === false) {
+          spawnDataPlane(deviceId, response.t, null, { wtPort, wtCertHash })
+        } else {
+          await spawnDataPlane(deviceId, response.t, null, { wtPort, wtCertHash })
+        }
+      } else {
+        await spawnDataPlane(deviceId, response.t, response.w || wsPort)
+      }
+    }
+  }
+
+  /**
+   * Tears down the data plane after a device close.
+   * @param {object} payload
+   * @returns {void}
+   */
+  function handleCloseSuccess(payload) {
+    const deviceId = payload.deviceId
+    logger.debug('close deviceId=' + deviceId)
+    openDevices.delete(deviceId)
+    sessionTokens.delete(deviceId)
+    browser.runtime
+      .sendMessage({
+        action: 'deviceCountChanged',
+        count: openDevices.size
+      })
+      .catch((e) => logger.debug('deviceCountChanged (close) failed', e))
+    despawnDataPlane(deviceId)
+  }
+
+  /**
+   * Routes open/close and other pass-through device actions to the background.
+   * @param {object} data
+   * @returns {Promise<void>}
+   */
+  async function handleGenericRequest(data) {
+    const { id, action, payload } = data
     try {
       let response
       if (action === 'open') {
@@ -873,53 +980,17 @@
       }
       const msg = Object.assign({ action, origin: getRequestOrigin(data) }, payload || {})
       if (action === 'close') {
-        // The session token must ride on the close request itself; set it
-        // before sending (the cleanup branch below runs after the response).
         const sessionToken = sessionTokens.get(payload.deviceId)
         if (sessionToken) msg.T = sessionToken
       }
       response = await browser.runtime.sendMessage(msg)
 
       if (action === 'open' && http.isOk(response.s) && response.t) {
-        const deviceId = response.i
-        openDevices.add(deviceId)
-        sessionTokens.set(deviceId, response.t)
-        browser.runtime
-          .sendMessage({
-            action: 'deviceCountChanged',
-            count: openDevices.size
-          })
-          .catch((e) => logger.debug('deviceCountChanged (open) failed', e))
-        logger.debug('open ok deviceId=' + deviceId + ' wsPort=' + response.w)
-
-        const dataPlane = settings.dataPlane
-        if (dataPlane === 'ws') {
-          await spawnDataPlane(deviceId, response.t, response.w || wsPort)
-        } else if (dataPlane === 'wt') {
-          if (wtPort != null) {
-            if (settings.useWorker === false) {
-              spawnDataPlane(deviceId, response.t, null, { wtPort, wtCertHash })
-            } else {
-              await spawnDataPlane(deviceId, response.t, null, { wtPort, wtCertHash })
-            }
-          } else {
-            await spawnDataPlane(deviceId, response.t, response.w || wsPort)
-          }
-        }
+        await handleOpenSuccess(response)
       }
 
       if (action === 'close') {
-        const deviceId = payload.deviceId
-        logger.debug('close deviceId=' + deviceId)
-        openDevices.delete(deviceId)
-        sessionTokens.delete(deviceId)
-        browser.runtime
-          .sendMessage({
-            action: 'deviceCountChanged',
-            count: openDevices.size
-          })
-          .catch((e) => logger.debug('deviceCountChanged (close) failed', e))
-        despawnDataPlane(deviceId)
+        handleCloseSuccess(payload)
       }
 
       const transfers = response && response.d instanceof Uint8Array ? [response.d.buffer] : []
@@ -930,6 +1001,38 @@
     } catch {
       replyToPage({ type: 'response', id, result: { s: 500 } })
     }
+  }
+
+  /** @type {Object<string, function>} */
+  const REQUEST_HANDLERS = {
+    workerPort: handleWorkerPortRequest,
+    dataPort: handleDataPortRequest,
+    getCspInfo: handleGetCspInfoRequest,
+    getPolicy: handleGetPolicyRequest,
+    getSettings: handleGetSettingsRequest,
+    sendReport: handleReportRequest,
+    sendFeatureReport: handleReportRequest,
+    receiveFeatureReport: handleReportRequest,
+    requestDevice: handleRequestDeviceRequest,
+  }
+
+  /**
+   * @param {object} data
+   * @param {MessagePort[]} ports
+   * @param {Window|null} _source
+   * @returns {Promise<void>}
+   */
+  async function handleRequest(data, ports, _source) {
+    if (!data || data.id === undefined) return
+
+    logger.debug('req action=' + data.action + ' id=' + data.id)
+
+    const handler = REQUEST_HANDLERS[data.action]
+    if (handler) {
+      await handler(data, ports)
+      return
+    }
+    await handleGenericRequest(data, ports)
   }
 
   /** @returns {void} */
@@ -954,59 +1057,119 @@
       .catch((e) => logger.debug('deviceCountChanged (reset) failed', e))
   }
 
+  /**
+   * Forwards an NM input report to the page over the device's data port.
+   * @param {object} messageEvent
+   * @returns {boolean} true when a port handled the report
+   */
+  function forwardInputReportToPage(messageEvent) {
+    const port = dataPorts.get(messageEvent.deviceId)
+    if (!port) return false
+    const view = messageEvent.data
+    const buffer = view ? view.buffer || view : null
+    try {
+      port.postMessage(
+        {
+          type: 'inputReport',
+          reportId: messageEvent.reportId,
+          data: buffer
+        },
+        buffer ? [buffer] : []
+      )
+    } catch (e) {
+      logger.debug('forward inputReport to page failed', e)
+    }
+    return true
+  }
+
+  /**
+   * @param {object} message
+   * @returns {void}
+   */
+  function handleBackgroundEvent(message) {
+    const messageEvent = message.event
+    if (messageEvent.eventType === 'input_report') {
+      if (workerReadyDevices.has(messageEvent.deviceId)) return
+      if (forwardInputReportToPage(messageEvent)) return
+    }
+    if (messageEvent.eventType === 'disconnect') {
+      const port = dataPorts.get(messageEvent.deviceId)
+      if (port) {
+        try {
+          port.postMessage({ type: 'disconnect' })
+        } catch (e) {
+          logger.debug('forward disconnect to page failed', e)
+        }
+      }
+    }
+    if (
+      devicePicker &&
+      devicePicker.isOpen &&
+      (messageEvent.eventType === 'connect' || messageEvent.eventType === 'disconnect')
+    ) {
+      devicePicker.refreshDevices()
+    }
+    replyToPage({ type: 'event', event: messageEvent })
+  }
+
   browser.runtime.onMessage.addListener((message) => {
     if (message.action === 'globalReset') {
       handleGlobalReset()
       return
     }
     if (message.action === 'webhidDeviceEvent' && message.event) {
-      const messageEvent = message.event
-      if (messageEvent.eventType === 'input_report') {
-        // A ready worker data plane (WS/WT) already delivers this device's
-        // reports to the page. NM input events arriving here are duplicates
-        // from another session's NM mode (multi-tab, leftover session after a
-        // data-plane toggle); forwarding them double-delivers and reorders the
-        // stream (sawtooth analog graphs). Skip them while the worker is live.
-        if (workerReadyDevices.has(messageEvent.deviceId)) return
-        const port = dataPorts.get(messageEvent.deviceId)
-        if (port) {
-          const view = messageEvent.data
-          const buffer = view ? view.buffer || view : null
-          try {
-            port.postMessage(
-              {
-                type: 'inputReport',
-                reportId: messageEvent.reportId,
-                data: buffer
-              },
-              buffer ? [buffer] : []
-            )
-          } catch (e) {
-            logger.debug('forward inputReport to page failed', e)
-          }
-          return
-        }
-      }
-      if (messageEvent.eventType === 'disconnect') {
-        const port = dataPorts.get(messageEvent.deviceId)
-        if (port) {
-          try {
-            port.postMessage({ type: 'disconnect' })
-          } catch (e) {
-            logger.debug('forward disconnect to page failed', e)
-          }
-        }
-      }
-      if (
-        devicePicker &&
-        devicePicker.isOpen &&
-        (messageEvent.eventType === 'connect' || messageEvent.eventType === 'disconnect')
-      ) {
-        devicePicker.refreshDevices()
-      }
-      replyToPage({ type: 'event', event: messageEvent })
+      handleBackgroundEvent(message)
     }
   })
+
+  /**
+   * Sends the report result back over the device's data port.
+   * @param {object} msg
+   * @param {MessagePort|null} port
+   * @param {object|null} response
+   * @returns {void}
+   */
+  function handleWorkerReportResponse(msg, port, response) {
+    if (!port) return
+    const status = response ? response.s : 500
+    if (msg.type === 'receiveFeature') {
+      if (status === 403) {
+        try {
+          port.postMessage({
+            type: 'featureResult',
+            reqId: msg.reqId,
+            error: 'blocked'
+          })
+        } catch (e) {
+          logger.debug('postMessage featureResult blocked failed', e)
+        }
+        return
+      }
+      const data = http.isOk(status) && response.d ? response.d : null
+      try {
+        port.postMessage({
+          type: 'featureResult',
+          reqId: msg.reqId,
+          data: data || null
+        })
+      } catch (e) {
+        logger.debug('postMessage featureResult data failed', e)
+      }
+      return
+    }
+    let error = null
+    if (status === 403) error = 'blocked'
+    else if (!http.isOk(status)) error = 'send failed'
+    try {
+      port.postMessage({
+        type: msg.type === 'send' ? 'sendResult' : 'featureResult',
+        reqId: msg.reqId,
+        error
+      })
+    } catch (e) {
+      logger.debug('postMessage sendResult failed', e)
+    }
+  }
 
   /**
    * @param {string} deviceId
@@ -1025,64 +1188,22 @@
       const payload = { deviceId, reportId: msg.reportId }
       if (msg.type === 'send' || msg.type === 'sendFeature') payload.data = msg.data
       const port = dataPorts.get(deviceId)
-      const callback = (response) => {
-        if (!port) return
-        const status = response ? response.s : 500
-        if (msg.type === 'receiveFeature') {
-          if (status === 403) {
-            try {
-              port.postMessage({
-                type: 'featureResult',
-                reqId: msg.reqId,
-                error: 'blocked'
-              })
-            } catch (e) {
-              logger.debug('postMessage featureResult blocked failed', e)
-            }
-            return
-          }
-          const data = http.isOk(status) && response.d ? response.d : null
-          try {
-            port.postMessage({
-              type: 'featureResult',
-              reqId: msg.reqId,
-              data: data || null
-            })
-          } catch (e) {
-            logger.debug('postMessage featureResult data failed', e)
-          }
-        } else {
-          let error = null
-          if (status === 403) error = 'blocked'
-          else if (!http.isOk(status)) error = 'send failed'
-          try {
-            port.postMessage({
-              type: msg.type === 'send' ? 'sendResult' : 'featureResult',
-              reqId: msg.reqId,
-              error
-            })
-          } catch (e) {
-            logger.debug('postMessage sendResult failed', e)
-          }
-        }
-      }
       const m = Object.assign({ action }, payload)
       browser.runtime
         .sendMessage(m)
-        .then(callback)
-        .catch(() => callback({ s: 500 }))
-      return
+        .then(
+          (response) => handleWorkerReportResponse(msg, port, response),
+          () => handleWorkerReportResponse(msg, port, { s: 500 })
+        )
     }
   }
 
   /**
+   * Respawns the open devices' planes for the requested mode after a switch.
    * @param {string} dp
-   * @returns {Promise<void>}
+   * @returns {void}
    */
-  async function applyDataPlane(dp) {
-    for (const id of openDevices) {
-      await despawnDataPlane(id, { keepPort: true })
-    }
+  function respawnPlanesForMode(dp) {
     if (dp === 'ws') {
       for (const id of openDevices) {
         const token = sessionTokens.get(id)
@@ -1107,6 +1228,17 @@
         }
       }
     }
+  }
+
+  /**
+   * @param {string} dp
+   * @returns {Promise<void>}
+   */
+  async function applyDataPlane(dp) {
+    for (const id of openDevices) {
+      await despawnDataPlane(id, { keepPort: true })
+    }
+    respawnPlanesForMode(dp)
     for (const id of openDevices) {
       browser.runtime
         .sendMessage({

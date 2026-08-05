@@ -462,51 +462,51 @@
     if (!bridgePort) return
     bridgePort.onmessage = (event) => {
       if (!event.data) return
-      if (event.data.type === 'dataPlaneConnect') {
-        handleDataPlaneConnect(event.data)
-        return
-      }
-      if (event.data.type === 'dataPlaneDisconnect') {
-        handleDataPlaneDisconnect(event.data)
-        return
-      }
-      if (event.data.type === 'spawnWorkerRequest') {
-        handleSpawnWorkerRequest(event.data).then((r) => {
-          if (r.transfer) {
-            bridgePort.postMessage(
-              { type: 'spawnWorkerResponse', id: event.data.id, result: r.result },
-              [r.transfer]
-            )
-          } else {
-            bridgePort.postMessage({
-              type: 'spawnWorkerResponse',
-              id: event.data.id,
-              result: r.result,
-            })
-          }
-        })
-        return
-      }
-      if (event.data.type === 'wireWorkerPort') {
-        handleWireWorkerPort(event.data)
-        return
-      }
-      if (event.data.type === 'response') {
-        const handler = pending[event.data.id]
-        if (handler) {
-          delete pending[event.data.id]
-          handler(event.data.result)
-        }
-        return
-      }
-      if (event.data.type === 'settings') {
-        settings.set(event.data.settings || {})
-        return
-      }
-      if (event.data.type === 'event') {
-        dispatchDeviceEvent(event.data.event)
-      }
+      const handler = BRIDGE_MESSAGE_HANDLERS[event.data.type]
+      if (handler) handler(event.data)
     }
+  }
+
+  /**
+   * @param {object} data
+   * @returns {void}
+   */
+  function handleSpawnWorkerMessage(data) {
+    handleSpawnWorkerRequest(data).then((r) => {
+      const msg = { type: 'spawnWorkerResponse', id: data.id, result: r.result }
+      if (r.transfer) {
+        bridgePort.postMessage(msg, [r.transfer])
+      } else {
+        bridgePort.postMessage(msg)
+      }
+    })
+  }
+
+  /**
+   * @param {object} data
+   * @returns {void}
+   */
+  function handleResponseMessage(data) {
+    const handler = pending[data.id]
+    if (handler) {
+      delete pending[data.id]
+      handler(data.result)
+    }
+  }
+
+  /** @type {Object<string, function>} */
+  const BRIDGE_MESSAGE_HANDLERS = {
+    dataPlaneConnect: handleDataPlaneConnect,
+    dataPlaneDisconnect: handleDataPlaneDisconnect,
+    spawnWorkerRequest: handleSpawnWorkerMessage,
+    wireWorkerPort: handleWireWorkerPort,
+    response: handleResponseMessage,
+    settings: (data) => {
+      settings.set(data.settings || {})
+    },
+    event: (data) => {
+      dispatchDeviceEvent(data.event)
+    },
   }
 
   /**
@@ -673,6 +673,52 @@
   const deviceRegistry = new Map()
 
   /**
+   * Sends a report request over the in-page plane when one is open, else the
+   * device's data port, resolving with the daemon ack.
+   * @param {object} state
+   * @param {object} opts
+   * @param {number} opts.inPageType
+   * @param {string} opts.portType
+   * @param {number} opts.reportId
+   * @param {Uint8Array|null} opts.payload
+   * @param {(data?: Uint8Array) => unknown} opts.mapResolve
+   * @param {string} opts.failMessage
+   * @returns {Promise<unknown>}
+   */
+  function sendDeviceRequest(state, opts) {
+    const inPage = inPageRequest(
+      inPagePlanes.get(state.deviceId),
+      opts.inPageType,
+      opts.reportId,
+      opts.payload,
+      opts.mapResolve
+    )
+    if (inPage) return inPage
+    if (!state.dataPort) throw new Error('data port not connected')
+    const reqId = ++nextReqId
+    const msg = { type: opts.portType, reqId, reportId: opts.reportId }
+    const transfers = []
+    if (opts.payload) {
+      msg.data = opts.payload
+      transfers.push(opts.payload.buffer)
+    }
+    return new Promise((resolve, reject) => {
+      state.dataPending = state.dataPending || new Map()
+      state.dataPending.set(reqId, {
+        resolve: (data) => resolve(opts.mapResolve(data)),
+        reject: (e) => {
+          if (e && e.blocked) {
+            reject(new DOMException('Report is blocked', 'NotAllowedError'))
+          } else {
+            reject(new DOMException((e && e.message) || e || opts.failMessage, 'NetworkError'))
+          }
+        }
+      })
+      state.dataPort.postMessage(msg, transfers.length ? transfers : undefined)
+    })
+  }
+
+  /**
    * @constructor
    * @throws {TypeError}
    */
@@ -835,30 +881,13 @@
         const buffer = view.slice()
         try {
           logger.debug('sendReport reportId=' + reportId + ' len=' + buffer.length)
-          const inPage = inPageRequest(
-            inPagePlanes.get(state.deviceId),
-            MSG_SEND_REPORT,
+          return sendDeviceRequest(state, {
+            inPageType: MSG_SEND_REPORT,
+            portType: 'send',
             reportId,
-            buffer,
-            () => undefined
-          )
-          if (inPage) return inPage
-          if (!state.dataPort) throw new Error('data port not connected')
-          const reqId = ++nextReqId
-          const msg = { type: 'send', reqId, reportId, data: buffer }
-          return new Promise((resolve, reject) => {
-            state.dataPending = state.dataPending || new Map()
-            state.dataPending.set(reqId, {
-              resolve: () => resolve(),
-              reject: (e) => {
-                if (e && e.blocked) {
-                  reject(new DOMException('Report is blocked', 'NotAllowedError'))
-                } else {
-                  reject(new DOMException((e && e.message) || e || 'send failed', 'NetworkError'))
-                }
-              }
-            })
-            state.dataPort.postMessage(msg, [buffer.buffer])
+            payload: buffer,
+            mapResolve: () => undefined,
+            failMessage: 'send failed'
           })
         } catch (error) {
           throw new DOMException(error.message, 'NetworkError')
@@ -879,43 +908,17 @@
         if (!state.opened) throw new DOMException('Device is not open', 'InvalidStateError')
         validateReportId(reportId, state.collections)
         try {
-          const inPage = inPageRequest(
-            inPagePlanes.get(state.deviceId),
-            MSG_RECEIVE_FEATURE_REPORT,
+          return sendDeviceRequest(state, {
+            inPageType: MSG_RECEIVE_FEATURE_REPORT,
+            portType: 'receiveFeature',
             reportId,
-            null,
-            (data) => {
+            payload: null,
+            mapResolve: (data) => {
               if (!data) return new DataView(new ArrayBuffer(0))
               const b = data instanceof Uint8Array ? data : new Uint8Array(data)
               return new DataView(b.buffer, b.byteOffset, b.byteLength)
-            }
-          )
-          if (inPage) return inPage
-          if (!state.dataPort) throw new Error('data port not connected')
-          const reqId = ++nextReqId
-          return new Promise((resolve, reject) => {
-            state.dataPending = state.dataPending || new Map()
-            state.dataPending.set(reqId, {
-              resolve: (data) => {
-                if (!data) return resolve(new DataView(new ArrayBuffer(0)))
-                const buffer = data instanceof Uint8Array ? data : new Uint8Array(data)
-                resolve(new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength))
-              },
-              reject: (e) => {
-                if (e && e.blocked) {
-                  reject(new DOMException('Report is blocked', 'NotAllowedError'))
-                } else {
-                  reject(
-                    new DOMException((e && e.message) || e || 'receive failed', 'NetworkError')
-                  )
-                }
-              }
-            })
-            state.dataPort.postMessage({
-              type: 'receiveFeature',
-              reqId,
-              reportId
-            })
+            },
+            failMessage: 'receive failed'
           })
         } catch (error) {
           throw new DOMException(error.message, 'NetworkError')
@@ -943,30 +946,13 @@
         const buffer = view.slice()
         logger.debug('sendFeatureReport reportId=' + reportId + ' len=' + buffer.length)
         try {
-          const inPage = inPageRequest(
-            inPagePlanes.get(state.deviceId),
-            MSG_SEND_FEATURE_REPORT,
+          return sendDeviceRequest(state, {
+            inPageType: MSG_SEND_FEATURE_REPORT,
+            portType: 'sendFeature',
             reportId,
-            buffer,
-            () => undefined
-          )
-          if (inPage) return inPage
-          if (!state.dataPort) throw new Error('data port not connected')
-          const reqId = ++nextReqId
-          const msg = { type: 'sendFeature', reqId, reportId, data: buffer }
-          return new Promise((resolve, reject) => {
-            state.dataPending = state.dataPending || new Map()
-            state.dataPending.set(reqId, {
-              resolve: () => resolve(undefined),
-              reject: (e) => {
-                if (e && e.blocked) {
-                  reject(new DOMException('Report is blocked', 'NotAllowedError'))
-                } else {
-                  reject(new DOMException((e && e.message) || e || 'send failed', 'NetworkError'))
-                }
-              }
-            })
-            state.dataPort.postMessage(msg, [buffer.buffer])
+            payload: buffer,
+            mapResolve: () => undefined,
+            failMessage: 'send failed'
           })
         } catch (error) {
           throw new DOMException(error.message, 'NetworkError')
@@ -1198,53 +1184,83 @@
    * @param {object} data
    * @returns {void}
    */
-  function onDataPortMessage(state, data) {
-    if (!data) return
-    if (data.type === 'sendResult' || data.type === 'featureResult') {
-      const entry = state.dataPending != null ? state.dataPending.get(data.reqId) : undefined
-      if (!entry) return
-      state.dataPending.delete(data.reqId)
-      if (data.error) entry.reject(new Error(data.error))
-      else if (data.type === 'featureResult') entry.resolve(data.data)
-      else entry.resolve()
-      return
-    }
-    if (data.type === 'inputReportBatch') {
-      const device = state.self
-      if (device && Array.isArray(data.reports)) {
-        for (const r of data.reports) {
-          if (r == null) continue
-          const dataView = r.data ? new DataView(r.data) : new DataView(new ArrayBuffer(0))
-          device.dispatchEvent(
-            new HIDInputReportEvent('inputreport', {
-              device: device,
-              reportId: r.reportId,
-              data: dataView
-            })
-          )
-        }
-      }
-      return
-    }
-    if (data.type === 'inputReport') {
-      const dataView = data.data ? new DataView(data.data) : new DataView(new ArrayBuffer(0))
-      const device = state.self
-      if (device)
+  function handleReportResult(state, data) {
+    const entry = state.dataPending != null ? state.dataPending.get(data.reqId) : undefined
+    if (!entry) return
+    state.dataPending.delete(data.reqId)
+    if (data.error) entry.reject(new Error(data.error))
+    else if (data.type === 'featureResult') entry.resolve(data.data)
+    else entry.resolve()
+  }
+
+  /**
+   * @param {object} state
+   * @param {object} data
+   * @returns {void}
+   */
+  function handleInputReportBatch(state, data) {
+    const device = state.self
+    if (device && Array.isArray(data.reports)) {
+      for (const r of data.reports) {
+        if (r == null) continue
+        const dataView = r.data ? new DataView(r.data) : new DataView(new ArrayBuffer(0))
         device.dispatchEvent(
           new HIDInputReportEvent('inputreport', {
             device: device,
-            reportId: data.reportId,
+            reportId: r.reportId,
             data: dataView
           })
         )
-      return
+      }
     }
-    if (data.type === 'disconnect') {
-      deviceInfoCache = null
-      const device = state.self
-      if (device) device.dispatchEvent(new HIDConnectionEvent('disconnect', { device: device }))
-      return
-    }
+  }
+
+  /**
+   * @param {object} state
+   * @param {object} data
+   * @returns {void}
+   */
+  function handleInputReport(state, data) {
+    const dataView = data.data ? new DataView(data.data) : new DataView(new ArrayBuffer(0))
+    const device = state.self
+    if (device)
+      device.dispatchEvent(
+        new HIDInputReportEvent('inputreport', {
+          device: device,
+          reportId: data.reportId,
+          data: dataView
+        })
+      )
+  }
+
+  /**
+   * @param {object} state
+   * @returns {void}
+   */
+  function handleDataPortDisconnectEvent(state) {
+    deviceInfoCache = null
+    const device = state.self
+    if (device) device.dispatchEvent(new HIDConnectionEvent('disconnect', { device: device }))
+  }
+
+  /** @type {Object<string, function>} */
+  const DATA_PORT_MESSAGE_HANDLERS = {
+    sendResult: handleReportResult,
+    featureResult: handleReportResult,
+    inputReportBatch: handleInputReportBatch,
+    inputReport: handleInputReport,
+    disconnect: handleDataPortDisconnectEvent,
+  }
+
+  /**
+   * @param {object} state
+   * @param {object} data
+   * @returns {void}
+   */
+  function onDataPortMessage(state, data) {
+    if (!data) return
+    const handler = DATA_PORT_MESSAGE_HANDLERS[data.type]
+    if (handler) handler(state, data)
   }
 
   /**
@@ -1394,6 +1410,108 @@
     configurable: true
   })
 
+  /**
+   * Validates and normalizes requestDevice options.
+   * @param {object} options
+   * @returns {{filters: object[], exclusionFilters: object[]}}
+   * @throws {TypeError}
+   */
+  function normalizeRequestOptions(options) {
+    const filters = Array.isArray(options.filters) ? options.filters : []
+    for (const filter of filters) {
+      if (!isValidFilter(filter)) {
+        throw new TypeError('Invalid filter in HIDDeviceRequestOptions.filters')
+      }
+    }
+
+    let exclusionFilters = []
+    if (options.exclusionFilters !== undefined) {
+      exclusionFilters = Array.isArray(options.exclusionFilters) ? options.exclusionFilters : []
+      if (exclusionFilters.length === 0) {
+        throw new TypeError(
+          'HIDDeviceRequestOptions.exclusionFilters must not be empty when present'
+        )
+      }
+      for (const filter of exclusionFilters) {
+        if (!isValidFilter(filter)) {
+          throw new TypeError('Invalid filter in HIDDeviceRequestOptions.exclusionFilters')
+        }
+      }
+    }
+    return { filters, exclusionFilters }
+  }
+
+  /**
+   * Persists the grant for the chosen devices and returns the polyfill
+   * instances. Devices granted together share one grant event: the group
+   * relationship is only knowable here, at grant time; persist it so forget
+   * can revoke the whole group (multi-interface devices).
+   * @param {object} result
+   * @returns {Promise<object[]>}
+   */
+  async function grantRequestedDevices(result) {
+    if (result.cancelled) return []
+    const devices = result.devices
+    if (!devices || devices.length === 0) return []
+    await Promise.all(devices.map((device) => pairDevice(device)))
+    if (devices.length > 1) {
+      sendRequest('recordGrantGroup', {
+        deviceIds: devices.map((device) => device.deviceId)
+      }).catch(() => {})
+    }
+    return devices.map((device) => getOrCreateDevice(device))
+  }
+
+  /**
+   * @param {object} options
+   * @param {object[]} [options.filters]
+   * @param {object[]} [options.exclusionFilters]
+   * @returns {Promise<object[]>}
+   */
+  async function requestDeviceImpl(options = {}) {
+    if (isWorker) {
+      throw new DOMException('Not allowed in worker context', 'NotSupportedError')
+    }
+    const policy = await getPolicy()
+    if (policy && policy.hid === 'none') {
+      throw new DOMException('Access to HID is blocked by Permissions Policy', 'SecurityError')
+    }
+    if (
+      !isCalledFromConsole() &&
+      !settings.allowActivationlessRequestDevice &&
+      navigator.userActivation &&
+      !navigator.userActivation.isActive
+    ) {
+      throw new DOMException(
+        'Must be handling a user gesture to perform a hid.requestDevice() call.',
+        'SecurityError'
+      )
+    }
+    const { filters, exclusionFilters } = normalizeRequestOptions(options)
+
+    logger.debug(
+      'requestDevice filters=' +
+        JSON.stringify(filters) +
+        ' exclusionFilters=' +
+        JSON.stringify(exclusionFilters)
+    )
+    return new Promise((resolve, reject) => {
+      const id = frameNonce + ':' + ++nextReqId
+      pending[id] = (result) => {
+        grantRequestedDevices(result).then(resolve, (e) =>
+          reject(
+            new DOMException(e != null ? e.message : 'requestDevice failed', 'NetworkError')
+          )
+        )
+      }
+      bridgePort.postMessage({
+        id,
+        action: 'requestDevice',
+        payload: { filters, exclusionFilters }
+      })
+    })
+  }
+
   Object.defineProperties(HID.prototype, {
     getDevices: {
       /** @returns {Promise<object[]>} */
@@ -1428,89 +1546,7 @@
        * @param {object[]} [options.exclusionFilters]
        * @returns {Promise<object[]>}
        */
-      value: async function (options = {}) {
-        if (isWorker) {
-          throw new DOMException('Not allowed in worker context', 'NotSupportedError')
-        }
-        const policy = await getPolicy()
-        if (policy && policy.hid === 'none') {
-          throw new DOMException('Access to HID is blocked by Permissions Policy', 'SecurityError')
-        }
-        if (
-          !isCalledFromConsole() &&
-          !settings.allowActivationlessRequestDevice &&
-          navigator.userActivation &&
-          !navigator.userActivation.isActive
-        ) {
-          throw new DOMException(
-            'Must be handling a user gesture to perform a hid.requestDevice() call.',
-            'SecurityError'
-          )
-        }
-        const filters = Array.isArray(options.filters) ? options.filters : []
-        for (const filter of filters) {
-          if (!isValidFilter(filter)) {
-            throw new TypeError('Invalid filter in HIDDeviceRequestOptions.filters')
-          }
-        }
-
-        let exclusionFilters = []
-        if (options.exclusionFilters !== undefined) {
-          exclusionFilters = Array.isArray(options.exclusionFilters) ? options.exclusionFilters : []
-          if (exclusionFilters.length === 0) {
-            throw new TypeError(
-              'HIDDeviceRequestOptions.exclusionFilters must not be empty when present'
-            )
-          }
-          for (const filter of exclusionFilters) {
-            if (!isValidFilter(filter)) {
-              throw new TypeError('Invalid filter in HIDDeviceRequestOptions.exclusionFilters')
-            }
-          }
-        }
-
-        logger.debug(
-          'requestDevice filters=' +
-            JSON.stringify(filters) +
-            ' exclusionFilters=' +
-            JSON.stringify(exclusionFilters)
-        )
-        return new Promise((resolve, reject) => {
-          const id = frameNonce + ':' + ++nextReqId
-          pending[id] = async (result) => {
-            try {
-              if (result.cancelled) {
-                resolve([])
-                return
-              }
-              const devices = result.devices
-              if (!devices || devices.length === 0) {
-                resolve([])
-                return
-              }
-              await Promise.all(devices.map((device) => pairDevice(device)))
-              // Devices granted together share one grant event. The group
-              // relationship is only knowable here, at grant time; persist it
-              // so forget can revoke the whole group (multi-interface devices).
-              if (devices.length > 1) {
-                sendRequest('recordGrantGroup', {
-                  deviceIds: devices.map((device) => device.deviceId)
-                }).catch(() => {})
-              }
-              resolve(devices.map((device) => getOrCreateDevice(device)))
-            } catch (e) {
-              reject(
-                new DOMException(e != null ? e.message : 'requestDevice failed', 'NetworkError')
-              )
-            }
-          }
-          bridgePort.postMessage({
-            id,
-            action: 'requestDevice',
-            payload: { filters, exclusionFilters }
-          })
-        })
-      },
+      value: requestDeviceImpl,
       enumerable: false,
       configurable: true,
       writable: true
@@ -1597,70 +1633,32 @@
     return obj
   }
 
-  if (!isWorker) {
-    Object.defineProperty(globalThis, 'HID', {
-      value: HID,
-      writable: false,
-      configurable: true,
-      enumerable: false
-    })
-    Object.defineProperty(globalThis, 'HIDDevice', {
-      value: HIDDevice,
-      writable: false,
-      configurable: true,
-      enumerable: false
-    })
-    Object.defineProperty(globalThis, 'HIDInputReportEvent', {
-      value: HIDInputReportEvent,
-      writable: false,
-      configurable: true,
-      enumerable: false
-    })
-    Object.defineProperty(globalThis, 'HIDConnectionEvent', {
-      value: HIDConnectionEvent,
-      writable: false,
-      configurable: true,
-      enumerable: false
-    })
-  } else {
-    Object.defineProperty(self, 'HID', {
-      value: HID,
-      writable: false,
-      configurable: true,
-      enumerable: false
-    })
-    Object.defineProperty(self, 'HIDDevice', {
-      value: HIDDevice,
-      writable: false,
-      configurable: true,
-      enumerable: false
-    })
-    Object.defineProperty(self, 'HIDInputReportEvent', {
-      value: HIDInputReportEvent,
-      writable: false,
-      configurable: true,
-      enumerable: false
-    })
-    Object.defineProperty(self, 'HIDConnectionEvent', {
-      value: HIDConnectionEvent,
+  /**
+   * Exposes a polyfill global on the current realm (window or worker).
+   * @param {string} name
+   * @param {object} value
+   * @returns {void}
+   */
+  function defineWebhidGlobal(name, value) {
+    Object.defineProperty(isWorker ? self : globalThis, name, {
+      value,
       writable: false,
       configurable: true,
       enumerable: false
     })
   }
 
+  defineWebhidGlobal('HID', HID)
+  defineWebhidGlobal('HIDDevice', HIDDevice)
+  defineWebhidGlobal('HIDInputReportEvent', HIDInputReportEvent)
+  defineWebhidGlobal('HIDConnectionEvent', HIDConnectionEvent)
+
   hidInstance = createHID()
-  if (!isWorker) {
-    Object.defineProperty(Navigator.prototype, 'hid', {
-      get() {
-        return hidInstance
-      },
-      configurable: true,
-      enumerable: true
-    })
-  } else {
-    const navProto = Object.getPrototypeOf(self.navigator)
-    Object.defineProperty(navProto, 'hid', {
+
+  /** @returns {void} */
+  function installNavigatorHid() {
+    const target = isWorker ? Object.getPrototypeOf(self.navigator) : Navigator.prototype
+    Object.defineProperty(target, 'hid', {
       get() {
         return hidInstance
       },
@@ -1668,6 +1666,7 @@
       enumerable: true
     })
   }
+  installNavigatorHid()
 
   const NativeWorker = globalThis.Worker
   /**
