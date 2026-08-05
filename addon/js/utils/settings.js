@@ -8,9 +8,6 @@
 
   /** @type {import("../types.js").SettingsDefaults} */
   const GLOBAL_DEFAULTS = {
-    // WebTransport is the fastest Firefox data plane (no main-thread delivery
-    // gate, profiler-verified 2026-08); ws is the fallback on Firefox < 114
-    // where WebTransport does not exist.
     dataPlane: typeof WebTransport !== 'undefined' ? 'wt' : 'ws',
     logLevel: 1,
     daemonAsNmHost: false,

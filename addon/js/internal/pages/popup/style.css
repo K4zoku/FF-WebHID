@@ -68,7 +68,7 @@ input:checked + .slider:before {
   text-align: right;
 }
 
-/* ── Inline status (§2) ──────────────────── */
+
 .status-inline {
   display: inline-flex;
   align-items: center;
@@ -221,7 +221,7 @@ input:checked + .slider:before {
   padding: 8px 0;
 }
 
-/* ── In-page WT warning (§3) ─────────────── */
+
 .warning {
   margin: 4px 0 10px;
   padding: 8px 10px;
@@ -233,7 +233,7 @@ input:checked + .slider:before {
   color: var(--text);
 }
 
-/* ── macOS privacy link (§4) ─────────────── */
+
 .btn-link {
   display: inline-block;
   background: var(--surface-hover);
@@ -270,4 +270,4 @@ input:checked + .slider:before {
   text-decoration: underline;
 }
 
-/* ── Status indicator (§2) lives in the header now ───────────────── */
+

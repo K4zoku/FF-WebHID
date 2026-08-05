@@ -120,6 +120,59 @@
       return { reportId, items }
     }
 
+    /** @type {string[]} */
+    const UNIT_FACTOR_NAMES = ['Length', 'Mass', 'Time', 'Temperature', 'Current', 'LuminousIntensity']
+
+    /**
+     * Reads the six unit-factor exponents as a flat object keyed by
+     * `unitFactor<Name>Exponent`.
+     * @returns {object}
+     */
+    function readUnitFactors() {
+      const factors = {}
+      for (const name of UNIT_FACTOR_NAMES) {
+        factors['unitFactor' + name + 'Exponent'] = dv.getInt8(off++)
+      }
+      return factors
+    }
+
+    /**
+     * Reads either a usage range (isRange) or a usage list.
+     * @param {boolean} isRange
+     * @returns {{usages?: number[], usageMinimum?: number, usageMaximum?: number}}
+     */
+    function readUsages(isRange) {
+      if (isRange) {
+        const usageMinimum = dv.getUint32(off, true)
+        off += 4
+        const usageMaximum = dv.getUint32(off, true)
+        off += 4
+        return { usageMinimum, usageMaximum }
+      }
+      const count = readVarint()
+      const usages = []
+      for (let i = 0; i < count; i++) {
+        usages.push(dv.getUint32(off, true))
+        off += 4
+      }
+      return { usages }
+    }
+
+    /**
+     * Reads the localized string list of a field.
+     * @returns {string[]}
+     */
+    function readStrings() {
+      const stringsCount = readVarint()
+      const strings = []
+      for (let i = 0; i < stringsCount; i++) {
+        const byteLen = readVarint()
+        strings.push(new TextDecoder().decode(bin.subarray(off, off + byteLen)))
+        off += byteLen
+      }
+      return strings
+    }
+
     /**
      * Reads a field descriptor from the TLV stream.
      * @returns {object}
@@ -139,34 +192,10 @@
       off += 4
       const unitExponent = dv.getInt8(off++)
       const unitSystem = UNIT_SYSTEMS[dv.getUint8(off++)] || 'reserved'
-      const unitFactorLengthExponent = dv.getInt8(off++)
-      const unitFactorMassExponent = dv.getInt8(off++)
-      const unitFactorTimeExponent = dv.getInt8(off++)
-      const unitFactorTemperatureExponent = dv.getInt8(off++)
-      const unitFactorCurrentExponent = dv.getInt8(off++)
-      const unitFactorLuminousIntensityExponent = dv.getInt8(off++)
+      const unitFactors = readUnitFactors()
       const isRange = !!(flags & 4)
-      let usages, usageMinimum, usageMaximum
-      if (isRange) {
-        usageMinimum = dv.getUint32(off, true)
-        off += 4
-        usageMaximum = dv.getUint32(off, true)
-        off += 4
-      } else {
-        const count = readVarint()
-        usages = []
-        for (let i = 0; i < count; i++) {
-          usages.push(dv.getUint32(off, true))
-          off += 4
-        }
-      }
-      const stringsCount = readVarint()
-      const strings = []
-      for (let i = 0; i < stringsCount; i++) {
-        const byteLen = readVarint()
-        strings.push(new TextDecoder().decode(bin.subarray(off, off + byteLen)))
-        off += byteLen
-      }
+      const { usages, usageMinimum, usageMaximum } = readUsages(isRange)
+      const strings = readStrings()
       return {
         isAbsolute: !!(flags & 1),
         isArray: !!(flags & 2),
@@ -186,12 +215,7 @@
         physicalMaximum,
         unitExponent,
         unitSystem,
-        unitFactorLengthExponent,
-        unitFactorMassExponent,
-        unitFactorTimeExponent,
-        unitFactorTemperatureExponent,
-        unitFactorCurrentExponent,
-        unitFactorLuminousIntensityExponent,
+        ...unitFactors,
         usages,
         usageMinimum,
         usageMaximum,

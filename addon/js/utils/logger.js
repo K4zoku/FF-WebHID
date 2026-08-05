@@ -111,9 +111,6 @@
           }
         })
       }
-      // No browser.storage (page main world, plain worker): the host hands its
-      // settings store to the logger via bindSettings; live updates arrive there
-      // over postMessage instead of storage.onChanged.
     } catch (e) {
       console.debug('logger load failed', e)
     }

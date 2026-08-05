@@ -68,9 +68,6 @@
           open(info)
         }
       })
-      // Hover opens only over the (i) button itself, not the whole label row;
-      // the bubble stays open while the pointer moves from the icon down into
-      // it (its own enter handler cancels the pending close).
       btn.addEventListener('mouseenter', () => {
         if (closeTimer) {
           clearTimeout(closeTimer)

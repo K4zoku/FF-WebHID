@@ -61,9 +61,6 @@
 
   const settings = await loadSettings()
 
-  // ── View switching: Paired Devices <-> Settings (§1) ──────────────
-  // The gear button lives in the status footer and toggles between the two
-  // views; it shows an active state while the Settings view is open.
   const viewDevices = document.getElementById('view-devices')
   const viewSettings = document.getElementById('view-settings')
   const btnSettings = document.getElementById('btn-settings')
@@ -74,7 +71,6 @@
     btnSettings.classList.toggle('active', open)
   })
 
-  // ── Settings controls (§7 radios) ─────────────────────────────────
   /**
    * Checks the radio with the given name/value.
    * @param {string} name
@@ -186,10 +182,6 @@
     saveSetting('allowActivationlessRequestDevice', e.target.checked)
   })
 
-  // ── macOS Input Monitoring link (§4) ──────────────────────────────
-  // Shown only on macOS AND when the daemon reports it cannot read HID
-  // devices (Input Monitoring / TCC denied). The daemon probes this once at
-  // startup (macOS: IOHIDManagerOpen fails without TCC; Windows is always ok).
   /** @type {boolean} */
   let isMac = false
   /** @type {number} */
@@ -208,7 +200,6 @@
       .catch(() => {})
   }
 
-  // ── Status footer (§2) ────────────────────────────────────────────
   /**
    * The plane the configured settings call for.
    * @returns {{plane: string, mode: (string|null)}}
@@ -280,7 +271,6 @@
     }
   }
 
-  // ── Paired devices (§1, §9 group display) ─────────────────────────
   /** @returns {Promise<string[]>} */
   async function loadDevices() {
     if (!origin) return []
@@ -312,6 +302,107 @@
     }
     renderDevices()
     refreshStatus()
+  }
+
+  /**
+   * Resolves device info for every paired device, preferring the enumerate
+   * cache and falling back to per-device lookups.
+   * @param {string[]} hashes
+   * @param {import("../types.js").HIDDeviceInfo[]} cache
+   * @returns {Promise<Map<number, import("../types.js").HIDDeviceInfo>>}
+   */
+  async function loadDeviceInfo(hashes, cache) {
+    /** @type {Map<number, import("../types.js").HIDDeviceInfo>} */
+    const infoByHash = new Map()
+    for (const hash of hashes) {
+      const id = Number(hash)
+      let device = cache.find((d) => d.deviceId === id)
+      if (!device) {
+        try {
+          const r = await browser.runtime.sendMessage({
+            action: 'getDeviceInfo',
+            deviceId: id
+          })
+          device = r != null && r.device != null ? r.device : null
+        } catch (e) {
+          logger.debug('getDeviceInfo failed', e)
+        }
+      }
+      if (device) infoByHash.set(id, device)
+    }
+    return infoByHash
+  }
+
+  /**
+   * Builds one device card for a display group (all interfaces of one device).
+   * @param {number[]} members
+   * @param {Map<number, import("../types.js").HIDDeviceInfo>} infoByHash
+   * @param {Set<number>} openIds
+   * @param {import("../types.js").HIDDeviceInfo[]} cache
+   * @returns {{card: HTMLElement, open: boolean}}
+   */
+  function buildDeviceCard(members, infoByHash, openIds, cache) {
+    const primary = members[0]
+    /** @type {import("../types.js").HIDDeviceInfo|undefined} */
+    const device = infoByHash.get(primary)
+    const present = members.some((id) => cache.some((d) => d.deviceId === id))
+    const isDisconnected = !present
+    const cardOpen = present && members.some((id) => openIds.has(id))
+    const name = device ? device.productName || t('popupUnknown') : t('popupPairedDevice')
+    const type = guessDeviceType(device || { productName: name })
+    const vid = device ? device.vendorId || 0 : 0
+    const pid = device ? device.productId || 0 : 0
+    const manufacturer = device ? device.manufacturer || '' : ''
+
+    const card = document.createElement('div')
+    card.className = 'device-card'
+    card.setAttribute('role', 'listitem')
+    if (isDisconnected) card.classList.add('disconnected')
+    if (cardOpen) card.classList.add('open')
+
+    const icon = document.createElement('img')
+    icon.className = 'device-icon'
+    icon.src = browser.runtime.getURL(`res/${type}.svg`)
+    icon.alt = type
+    card.appendChild(icon)
+
+    const info = document.createElement('div')
+    info.className = 'device-info'
+
+    const nameEl = document.createElement('div')
+    nameEl.className = 'device-name'
+    nameEl.textContent = name
+    info.appendChild(nameEl)
+
+    if (manufacturer) {
+      const vendorEl = document.createElement('div')
+      vendorEl.className = 'device-vendor'
+      vendorEl.textContent = manufacturer
+      info.appendChild(vendorEl)
+    }
+
+    if (members.length > 1) {
+      const ifaceEl = document.createElement('div')
+      ifaceEl.className = 'device-vendor'
+      ifaceEl.textContent = t('pickerInterfaces', [String(members.length)])
+      info.appendChild(ifaceEl)
+    }
+
+    const vidEl = document.createElement('div')
+    vidEl.className = 'device-vid'
+    vidEl.textContent = `${vid.toString(16).padStart(4, '0')}:${pid.toString(16).padStart(4, '0')}`
+    info.appendChild(vidEl)
+
+    card.appendChild(info)
+
+    const btn = document.createElement('button')
+    btn.className = 'btn-revoke'
+    btn.textContent = t('popupRevoke')
+    btn.setAttribute('aria-label', t('popupRevoke') + ': ' + name)
+    btn.onclick = () => removeDevice(members)
+    card.appendChild(btn)
+
+    return { card, open: cardOpen }
   }
 
   /** @type {number} */
@@ -348,32 +439,13 @@
       const r = await browser.tabs.sendMessage(tab.id, {
         action: 'getOpenDeviceIds'
       })
-      var rIds = r != null ? r.ids : undefined
+      const rIds = r != null ? r.ids : undefined
       if (rIds) openIds = new Set(rIds.map((id) => Number(id)))
     } catch (e) {
       logger.debug('getOpenDeviceIds failed', e)
     }
 
-    // Resolve info for every paired device first so cards can be grouped the
-    // same way the picker groups them (by product name).
-    /** @type {Map<number, import("../types.js").HIDDeviceInfo>} */
-    const infoByHash = new Map()
-    for (const hash of hashes) {
-      const id = Number(hash)
-      let device = cache.find((d) => d.deviceId === id)
-      if (!device) {
-        try {
-          const r = await browser.runtime.sendMessage({
-            action: 'getDeviceInfo',
-            deviceId: id
-          })
-          device = r != null && r.device != null ? r.device : null
-        } catch (e) {
-          logger.debug('getDeviceInfo failed', e)
-        }
-      }
-      if (device) infoByHash.set(id, device)
-    }
+    const infoByHash = await loadDeviceInfo(hashes, cache)
     if (token !== renderToken) return
 
     const displayGroups = groupDevices(
@@ -384,68 +456,9 @@
     let cardCount = 0
     for (const [, devices] of displayGroups) {
       const members = devices.map((d) => d.deviceId)
-      const primary = members[0]
-      /** @type {import("../types.js").HIDDeviceInfo|undefined} */
-      const device = infoByHash.get(primary)
-      const present = members.some((id) => cache.some((d) => d.deviceId === id))
-      const isDisconnected = !present
-      const cardOpen = present && members.some((id) => openIds.has(id))
-      const name = device ? device.productName || t('popupUnknown') : t('popupPairedDevice')
-      const type = guessDeviceType(device || { productName: name })
-      const vid = device ? device.vendorId || 0 : 0
-      const pid = device ? device.productId || 0 : 0
-      const manufacturer = device ? device.manufacturer || '' : ''
-
-      const card = document.createElement('div')
-      card.className = 'device-card'
-      card.setAttribute('role', 'listitem')
-      if (isDisconnected) card.classList.add('disconnected')
-      if (cardOpen) card.classList.add('open')
-
-      const icon = document.createElement('img')
-      icon.className = 'device-icon'
-      icon.src = browser.runtime.getURL(`res/${type}.svg`)
-      icon.alt = type
-      card.appendChild(icon)
-
-      const info = document.createElement('div')
-      info.className = 'device-info'
-
-      const nameEl = document.createElement('div')
-      nameEl.className = 'device-name'
-      nameEl.textContent = name
-      info.appendChild(nameEl)
-
-      if (manufacturer) {
-        const vendorEl = document.createElement('div')
-        vendorEl.className = 'device-vendor'
-        vendorEl.textContent = manufacturer
-        info.appendChild(vendorEl)
-      }
-
-      if (members.length > 1) {
-        const ifaceEl = document.createElement('div')
-        ifaceEl.className = 'device-vendor'
-        ifaceEl.textContent = t('pickerInterfaces', [String(members.length)])
-        info.appendChild(ifaceEl)
-      }
-
-      const vidEl = document.createElement('div')
-      vidEl.className = 'device-vid'
-      vidEl.textContent = `${vid.toString(16).padStart(4, '0')}:${pid.toString(16).padStart(4, '0')}`
-      info.appendChild(vidEl)
-
-      card.appendChild(info)
-
-      const btn = document.createElement('button')
-      btn.className = 'btn-revoke'
-      btn.textContent = t('popupRevoke')
-      btn.setAttribute('aria-label', t('popupRevoke') + ': ' + name)
-      btn.onclick = () => removeDevice(members)
-      card.appendChild(btn)
-
+      const { card, open } = buildDeviceCard(members, infoByHash, openIds, cache)
       list.appendChild(card)
-      if (cardOpen) openCount++
+      if (open) openCount++
       cardCount++
     }
     document.getElementById('device-count').textContent = t('popupDeviceCount', [

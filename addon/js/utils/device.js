@@ -5,6 +5,17 @@
   /** @type {{[key: string]: string}} */
   const svgCache = {}
 
+  /** @type {Array<[RegExp, string]>} */
+  const TYPE_PATTERNS = [
+    [/mouse|trackball|trackpad|touchpad/i, 'mouse'],
+    [/keyboard|kbd/i, 'keyboard'],
+    [/joystick|flight.?stick|yoke|rudder|throttle/i, 'joystick'],
+    [/gamepad|controller|xbox|playstation|dualshock|dualsense|joycon|joy.con/i, 'controller'],
+    [/headset|headphone|earphone|\bmic(rophone)?\b|earbuds?/i, 'headset'],
+    [/speaker|soundbar|audio|\bdac\b|amplifier/i, 'speaker'],
+    [/webcam|camera|\bcam\b/i, 'camera']
+  ]
+
   /**
    * @param {import("../types.js").HIDDeviceInfo} device
    * @returns {string}
@@ -18,15 +29,22 @@
       if (u === 0x05) return 'controller'
     }
     const name = (device.productName || '').toLowerCase()
-    if (/mouse|trackball|trackpad|touchpad/i.test(name)) return 'mouse'
-    if (/keyboard|kbd/i.test(name)) return 'keyboard'
-    if (/joystick|flight.?stick|yoke|rudder|throttle/i.test(name)) return 'joystick'
-    if (/gamepad|controller|xbox|playstation|dualshock|dualsense|joycon|joy.con/i.test(name))
-      return 'controller'
-    if (/headset|headphone|earphone|\bmic(rophone)?\b|earbuds?/i.test(name)) return 'headset'
-    if (/speaker|soundbar|audio|\bdac\b|amplifier/i.test(name)) return 'speaker'
-    if (/webcam|camera|\bcam\b/i.test(name)) return 'camera'
+    for (const [pattern, type] of TYPE_PATTERNS) {
+      if (pattern.test(name)) return type
+    }
     return 'unknown'
+  }
+
+  /**
+   * @param {import("../types.js").HIDDeviceInfo} collection
+   * @param {number|undefined} usagePage
+   * @param {number|undefined} usage
+   * @returns {boolean}
+   */
+  function collectionMatchesUsage(collection, usagePage, usage) {
+    if (usagePage !== undefined && collection.usagePage !== usagePage) return false
+    if (usage !== undefined && collection.usage !== usage) return false
+    return true
   }
 
   /**
@@ -38,26 +56,12 @@
     if (filter.vendorId !== undefined && device.vendorId !== filter.vendorId) return false
     if (filter.productId !== undefined && device.productId !== filter.productId) return false
 
-    if (filter.usagePage !== undefined) {
-      let pageMatch = false
+    if (filter.usagePage !== undefined || filter.usage !== undefined) {
       const collections = device.collections || []
-      for (const collection of collections) {
-        if (collection.usagePage !== filter.usagePage) continue
-        if (filter.usage !== undefined && collection.usage !== filter.usage) continue
-        pageMatch = true
-        break
-      }
-      if (!pageMatch) return false
-    } else if (filter.usage !== undefined) {
-      let usageMatch = false
-      const collections = device.collections || []
-      for (const collection of collections) {
-        if (collection.usage === filter.usage) {
-          usageMatch = true
-          break
-        }
-      }
-      if (!usageMatch) return false
+      const matches = collections.some((c) =>
+        collectionMatchesUsage(c, filter.usagePage, filter.usage)
+      )
+      if (!matches) return false
     }
     return true
   }
@@ -90,8 +94,6 @@
   function groupDevices(devices) {
     const groups = new Map()
     for (const device of devices) {
-      // Group by product name like the physical-device heuristic; devices
-      // without a name must not merge into one bucket, so key them by id.
       const name = device.productName || String(device.deviceId)
       if (!groups.has(name)) groups.set(name, [])
       groups.get(name).push(device)

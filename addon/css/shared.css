@@ -6,8 +6,8 @@ body {
   font-size: 13px;
 }
 
-/* The UA `[hidden] { display: none }` loses to author display rules on the
-   same element (e.g. .setting { display: grid }), so enforce it globally. */
+
+
 [hidden] {
   display: none !important;
 }
@@ -101,7 +101,7 @@ select:hover {
   border-color: var(--accent);
 }
 
-/* ── Segmented radio controls (§7) ───────── */
+
 .seg-group {
   display: flex;
   flex-wrap: wrap;
@@ -151,7 +151,7 @@ select:hover {
   outline-offset: 1px;
 }
 
-/* ── Info popover (i) (§6) ───────────────── */
+
 .setting-info {
   position: relative;
 }
