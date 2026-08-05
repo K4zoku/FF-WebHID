@@ -21,6 +21,8 @@
 
   /** @type {Function|null} */
   let ttFactory = null
+  /** @type {Promise<boolean>} */
+  let ttReady = Promise.resolve(true)
   /** @type {object|null} */
   let hidInstance = null
 
@@ -206,6 +208,9 @@
       }
       return { result: { ok: true }, transfer: null }
     }
+    if (!(await ttReady)) {
+      return { result: { ok: false, error: 'Trusted Types policy unavailable' }, transfer: null }
+    }
     const makeUrl = ttFactory || ((s) => s)
     let worker
     try {
@@ -298,6 +303,16 @@
     if (typeof trustedTypes === 'undefined' || trustedTypes === null) return
     const nativeCreatePolicy = trustedTypes.createPolicy.bind(trustedTypes)
     let captured = false
+    let resolveReady
+    ttReady = new Promise((resolve) => {
+      resolveReady = resolve
+    })
+    const markCaptured = (policy) => {
+      if (captured) return
+      captured = true
+      ttFactory = (url) => policy.createScriptURL(url)
+      resolveReady(true)
+    }
     const claim = (name) => {
       try {
         return nativeCreatePolicy(name, { createScriptURL: (s) => s })
@@ -309,8 +324,7 @@
     trustedTypes.createPolicy = function (claimedName, pageRules) {
       if (captured) return nativeCreatePolicy(claimedName, pageRules)
       const policy = nativeCreatePolicy(claimedName, { createScriptURL: (s) => s })
-      captured = true
-      ttFactory = (url) => policy.createScriptURL(url)
+      markCaptured(policy)
       return makeWrappedPolicy(policy, claimedName, pageRules)
     }
 
@@ -324,14 +338,14 @@
             continue
           const policy = claim(name)
           if (policy) {
-            captured = true
-            ttFactory = (url) => policy.createScriptURL(url)
+            markCaptured(policy)
             installTtSharing(name, policy, nativeCreatePolicy)
             return
           }
         }
+        resolveReady(!(info && info.hasTrustedTypesRequire))
       })
-      .catch(() => {})
+      .catch(() => resolveReady(true))
   }
 
   /**
