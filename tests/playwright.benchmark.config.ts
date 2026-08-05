@@ -22,7 +22,7 @@ export default defineConfig({
           extensionPath: resolve(__dirname, '..', 'addon')
         },
         daemonMode: 'daemon-nm',
-        benchmarkRuns: 5,
+        benchmarkRuns: 10,
         launchOptions: {
           firefoxUserPrefs: { 'privacy.reduceTimerPrecision': false }
         }
@@ -42,7 +42,7 @@ export default defineConfig({
           extensionPath: resolve(__dirname, '..', 'addon')
         },
         daemonMode: 'daemon-nm',
-        benchmarkRuns: 5,
+        benchmarkRuns: 10,
         launchOptions: {
           firefoxUserPrefs: { 'privacy.reduceTimerPrecision': false }
         }
