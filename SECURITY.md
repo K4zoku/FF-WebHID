@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-Only the latest released version of FF-WebHID (addon and daemon) receives security fixes. Please make sure you're running the latest release before reporting an issue.
+Only the latest released version of FF-WebHID (the Firefox WebHID addon and daemon) receives security fixes. Please make sure you're running the latest release before reporting an issue.
 
 ## Reporting a Vulnerability
 
@@ -19,13 +19,13 @@ When reporting, please include as much of the following as you can:
 
 ## What's in Scope
 
-- The Firefox addon (background/worker/page scripts, daemon-side HID report descriptor parser via hidreport crate)
+- The Firefox addon (background/worker/page scripts, daemon-side HID (Human Interface Device) report descriptor parser via the hidreport crate)
 - The Rust daemon and native messaging host
 - The WebSocket data plane and its authentication mechanism
-- The HID device blocklist (FIDO/U2F security key protections; keyboard/mouse access is gated by OS permissions)
+- The HID device blocklist (FIDO (Fast IDentity Online)/U2F security key protections; keyboard/mouse access is gated by OS permissions)
 
 ## Response
 
-I'll try to acknowledge new reports within a few days and keep you updated as the issue is investigated and fixed. Once a fix is released, I'll credit you in the release notes unless you'd prefer to stay anonymous.
+New reports are acknowledged within a few days, and you'll receive updates as the issue is investigated and fixed. Once a fix is released, you'll be credited in the release notes unless you prefer to stay anonymous.
 
 Thank you for helping keep FF-WebHID and its users safe.

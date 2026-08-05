@@ -21,7 +21,7 @@
 
 <!-- How did you test this? Which platform(s)? Which HID device(s)? -->
 
-**Rust (daemon, NM host, mock)**
+### Rust (daemon, NM host, mock)
 
 - [ ] `cargo build --release` passes, if the change touches Rust code
 - [ ] `npm run lint:rs` (cargo clippy) passes with no new warnings
@@ -29,7 +29,7 @@
 - [ ] Tested against a real HID device if the change touches enumeration,
       report descriptor parsing, or the data plane
 
-**Addon (JS)**
+### Addon (JS)
 
 - [ ] `npm run lint:js` and `npm run lint` (web-ext) pass
 - [ ] `npm run test:browser` passes (no hardware needed)

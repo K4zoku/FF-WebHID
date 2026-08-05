@@ -296,12 +296,12 @@ Bridge sends `handshake` on init. The response contains `wsPort` (the daemon's W
 | `sendFeatureReport` (page-side) | **5 to 10 ms**                                              | **5 to 10 ms** (worker / in-page)                                   | **8 to 20 ms**      |
 | `receiveFeatureReport`          | **6 to 12 ms**                                              | **6 to 12 ms** (worker / in-page)                                   | **15 to 30 ms**     |
 | Input report (delivery)         | **1 to 5 ms** (MessagePort) / **2 to 6 ms** (port fallback) | **1 to 5 ms** (worker) / **1 to 6 ms** (in-page, main-thread parse) | **8 to 18 ms** (NM) |
-| `enumerate` (NM)                | --                                                          | **15 to 40 ms**                                                     |
-| `close` (NM)                    | --                                                          | **10 to 20 ms**                                                     |
-| `open` (always NM)              | --                                                          | **15 to 45 ms**                                                     |
-| `handshake` (NM)                | --                                                          | **5 to 10 ms**                                                      |
-| `getDevices` (cache hit)        | **<0.1 ms**                                                 | **<0.1 ms**                                                         |
-| `getDevices` (cache miss)       | --                                                          | **15 to 40 ms**                                                     |
+| `enumerate` (NM)                | --                                                          | --                                                                  | **15 to 40 ms**     |
+| `close` (NM)                    | --                                                          | --                                                                  | **10 to 20 ms**     |
+| `open` (always NM)              | --                                                          | --                                                                  | **15 to 45 ms**     |
+| `handshake` (NM)                | --                                                          | --                                                                  | **5 to 10 ms**      |
+| `getDevices` (cache hit)        | **<0.1 ms**                                                 | **<0.1 ms**                                                         | **<0.1 ms**         |
+| `getDevices` (cache miss)       | --                                                          | --                                                                  | **15 to 40 ms**     |
 
 ---
 

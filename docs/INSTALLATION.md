@@ -406,29 +406,29 @@ Then install the [browser extension](https://addons.mozilla.org/en-US/firefox/ad
 
 ### Linux
 
-| Setting           | Recommended                                      | Reason                                                                                    |
-| ----------------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------- |
-| Daemon as NM host | ON (recommended)                                  | Runs daemon as your user, no forwarder process / Unix socket, one less IPC hop. Needs udev `uaccess` rule. OFF only if you prefer a persistent root daemon + forwarder. |
-| Data Plane        | WS (default)                                      | Binary WS via worker with MessagePort for max performance. Switch to NM if WS is blocked. |
-| Device Picker Mode | modal (default)                                   | Inline dialog, least friction. pageAction/window available for single-device sites.       |
+| Setting            | Recommended      | Reason                                                                                                                                                                  |
+| ------------------ | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Daemon as NM host  | ON (recommended) | Runs daemon as your user, no forwarder process / Unix socket, one less IPC hop. Needs udev `uaccess` rule. OFF only if you prefer a persistent root daemon + forwarder. |
+| Data Plane         | WS (default)     | Binary WS via worker with MessagePort for max performance. Switch to NM if WS is blocked.                                                                               |
+| Device Picker Mode | modal (default)  | Inline dialog, least friction. pageAction/window available for single-device sites.                                                                                     |
 
 **Setup**: Install daemon (system package or `make install-system`). Recommended: install the udev rule (`sudo make install-udev-rule` or copy `99-webhid.rules`) and enable "Daemon as NM host" in the addon settings; no group membership needed. Alternative: keep the root daemon + thin forwarder and add your user to the `webhid` group (`sudo usermod -aG webhid $USER`, log out + back in).
 
 ### Windows
 
-| Setting           | Recommended  | Reason                                                                                                                          |
-| ----------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| Setting           | Recommended  | Reason                                                                                                                                           |
+| ----------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Daemon as NM host | ON (default) | Recommended mode: daemon speaks NM directly, no forwarder. Windows has no permission setup; daemon auto-detects via Firefox's 2 positional args. |
-| Data Plane        | WS (default) | Binary WS via worker with MessagePort for performance                                                                           |
+| Data Plane        | WS (default) | Binary WS via worker with MessagePort for performance                                                                                            |
 
 **Setup**: Install MSI or portable zip. `daemonAsNmHost` defaults to `true` on Windows (auto-detected). For forwarder mode, register `webhid.forwarder_nm_host.json` with `path` pointing to `webhid-native-messaging.exe`.
 
 ### macOS
 
-| Setting           | Recommended | Reason                                             |
-| ----------------- | ----------- | -------------------------------------------------- |
-| Daemon as NM host | ON          | Recommended mode: no forwarder / Unix socket, one less hop |
-| Data Plane        | WS (default) | WS worker + MessagePort works well on macOS        |
+| Setting           | Recommended  | Reason                                                     |
+| ----------------- | ------------ | ---------------------------------------------------------- |
+| Daemon as NM host | ON           | Recommended mode: no forwarder / Unix socket, one less hop |
+| Data Plane        | WS (default) | WS worker + MessagePort works well on macOS                |
 
 **Setup**: Install via Homebrew (`brew install webhid`) or manual. Recommended: stop the `brew services` daemon and enable "Daemon as NM host" in the addon settings. Grant HID permissions in System Settings → Privacy & Security → Input Monitoring if prompted.
 

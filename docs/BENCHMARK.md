@@ -269,16 +269,16 @@ pointerdown ← BENCHMARK START
 
 ### GC Analysis
 
-| Metric            | Run 1                   | Run 2                   | Run 3                   | Run 4                   |
+| Metric | Run 1 | Run 2 | Run 3 | Run 4 | Run 5 |
 | ----------------- | ----------------------- | ----------------------- | ----------------------- | ----------------------- |
-| GCMajor           | (none)                  | (none)                  | (none)                  | (none)                  | (none)                  |
+| GCMajor | (none) | (none) | (none) | (none) | (none) |
 | GCMinor in-window | 29 events, 23.4ms total | 34 events, 23.4ms total | 30 events, 21.4ms total | 36 events, 21.3ms total | 32 events, 22.9ms total |
 
 **Zero GCMajor across all 5 runs.** GCMinor work is consistent (~21-24ms) and negligible. The elimination of GCMajor is the single largest improvement from the zero-copy optimization.
 
 ### Data Plane JS CPU Time
 
-| Metric                                | Run 1             | Run 2             | Run 3             | Run 4             |
+| Metric | Run 1 | Run 2 | Run 3 | Run 4 | Run 5 |
 | ------------------------------------- | ----------------- | ----------------- | ----------------- | ----------------- |
 | WebHID extension JS on content thread | 0 samples (< 1ms) | 0 samples (< 1ms) | 0 samples (< 1ms) | 0 samples (< 1ms) | 0 samples (< 1ms) |
 
@@ -637,18 +637,18 @@ with whole-run walltime:
 
 **ws** (Firefox, daemon-nm deployment)
 
-| run | min  | p50  | p90  | p95  | max  | walltime |
-| --- | ---- | ---- | ---- | ---- | ---- | -------- |
-| #1  | 0.68 | 1.16 | 1.54 | 1.78 | 6.46 | 536.9    |
-| #2  | 0.64 | 1.12 | 1.54 | 1.76 | 4.76 | 516.5    |
-| #3  | 0.74 | 1.14 | 1.62 | 1.94 | 6.32 | 535.8    |
-| #4  | 0.68 | 1.08 | 1.52 | 1.80 | 4.56 | 499.8    |
-| #5  | 0.68 | 1.08 | 1.52 | 1.86 | 4.40 | 493.2    |
-| #6  | 0.64 | 1.08 | 1.58 | 1.84 | 14.08 | 535.9   |
-| #7  | 0.62 | 1.08 | 1.40 | 1.64 | 7.38 | 495.3    |
-| #8  | 0.70 | 1.06 | 1.46 | 1.60 | 4.28 | 498.2    |
-| #9  | 0.64 | 1.04 | 1.36 | 1.62 | 5.50 | 484.1    |
-| #10 | 0.68 | 1.02 | 1.34 | 1.60 | 5.98 | 481.1    |
+| run | min  | p50  | p90  | p95  | max   | walltime |
+| --- | ---- | ---- | ---- | ---- | ----- | -------- |
+| #1  | 0.68 | 1.16 | 1.54 | 1.78 | 6.46  | 536.9    |
+| #2  | 0.64 | 1.12 | 1.54 | 1.76 | 4.76  | 516.5    |
+| #3  | 0.74 | 1.14 | 1.62 | 1.94 | 6.32  | 535.8    |
+| #4  | 0.68 | 1.08 | 1.52 | 1.80 | 4.56  | 499.8    |
+| #5  | 0.68 | 1.08 | 1.52 | 1.86 | 4.40  | 493.2    |
+| #6  | 0.64 | 1.08 | 1.58 | 1.84 | 14.08 | 535.9    |
+| #7  | 0.62 | 1.08 | 1.40 | 1.64 | 7.38  | 495.3    |
+| #8  | 0.70 | 1.06 | 1.46 | 1.60 | 4.28  | 498.2    |
+| #9  | 0.64 | 1.04 | 1.36 | 1.62 | 5.50  | 484.1    |
+| #10 | 0.68 | 1.02 | 1.34 | 1.60 | 5.98  | 481.1    |
 
 **wt-inpage** (Firefox, daemon-nm deployment, WebTransport in-page)
 
@@ -799,12 +799,12 @@ also `loss-<mode>.json` for the loss project) and prints a `[profiler] saved
 
 Tunables (all optional):
 
-| Env | Default | Meaning |
-| --- | --- | --- |
+| Env                          | Default                                      | Meaning                           |
+| ---------------------------- | -------------------------------------------- | --------------------------------- |
 | `BENCHMARK_PROFILE_FEATURES` | `js,stackwalk,ipcmessages,cpu,cpuallthreads` | Comma-separated profiler features |
-| `BENCHMARK_PROFILE_THREADS` | `GeckoMain,Worker` | Comma-separated thread filters |
-| `BENCHMARK_PROFILE_ENTRIES` | `268435456` | Per-process buffer size in bytes |
-| `BENCHMARK_PROFILE_INTERVAL` | `1` | Sampling interval in ms |
+| `BENCHMARK_PROFILE_THREADS`  | `GeckoMain,Worker`                           | Comma-separated thread filters    |
+| `BENCHMARK_PROFILE_ENTRIES`  | `268435456`                                  | Per-process buffer size in bytes  |
+| `BENCHMARK_PROFILE_INTERVAL` | `1`                                          | Sampling interval in ms           |
 
 Notes:
 
