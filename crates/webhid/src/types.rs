@@ -1,10 +1,6 @@
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
-// ---------------------------------------------------------------------------
-// Shared device info
-// ---------------------------------------------------------------------------
-
 /// Information about a connected HID device, derived from hidapi + sysfs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -27,8 +23,6 @@ pub struct DeviceInfo {
     #[serde(default)]
     pub max_input_report_size: u32,
 }
-
-// ── Collections tree (parsed report descriptor) ───────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -118,10 +112,6 @@ pub struct Field {
     #[serde(default)]
     pub strings: Vec<String>,
 }
-
-// ---------------------------------------------------------------------------
-// IPC protocol  (native-messaging-process  <-->  daemon)
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -238,7 +228,6 @@ impl IpcResponse {
     }
 }
 
-// NM action codes (numeric, used in the "a" field)
 pub const ACT_ENUM: u8 = 1;
 pub const ACT_OPEN: u8 = 2;
 pub const ACT_CLOSE: u8 = 3;
@@ -248,29 +237,13 @@ pub const ACT_SEND_FEATURE: u8 = 6;
 pub const ACT_SET_DATA_PLANE: u8 = 7;
 pub const ACT_HANDSHAKE: u8 = 8;
 
-// NM event codes (numeric, used in the "e" field)
 pub const EVT_HANDSHAKE: u8 = 1;
 pub const EVT_CONNECT: u8 = 2;
 pub const EVT_DISCONNECT: u8 = 3;
-// input_report is packed ({"d":"..."}), no "e" field needed.
 
-// Packed binary message types (first byte of TLV payload).
-// Only hot-path messages with binary payload are packed; all others use JSON.
-// TLV layouts (all multi-byte integers are little-endian):
-//   input_report (daemon→addon):
-//     [0x01][devId u32][reportId u8][payloadLen u16][payload]
-//     (multi-report: reportId+len+payload repeated)
-//   send_report (addon→daemon):
-//     [0x02][reqId u32][devId u32][reportId u8][payloadLen u16][payload]
-//   send_feature_report (addon→daemon):
-//     [0x04][reqId u32][devId u32][reportId u8][payloadLen u16][payload]
 pub const PKG_INPUT_REPORT: u8 = 0x01;
 pub const PKG_SEND_REPORT: u8 = 0x02;
 pub const PKG_SEND_FEATURE_REPORT: u8 = 0x04;
-
-// ---------------------------------------------------------------------------
-// NM request (addon → daemon)
-// ---------------------------------------------------------------------------
 
 /// A request received from Firefox via stdin.
 /// Uses numeric action codes and single-char field names for minimal wire size.
@@ -370,10 +343,6 @@ pub fn parse_packed_send(buf: &[u8]) -> std::io::Result<(u32, u32, u8, &[u8])> {
     Ok((req_id, device_id, report_id, &buf[12..12 + payload_len]))
 }
 
-// ---------------------------------------------------------------------------
-// NM response / event (daemon → addon)
-// ---------------------------------------------------------------------------
-
 /// A response or event sent back to Firefox via stdout.
 /// Uses single-char field names for minimal wire size.
 /// Status uses HTTP semantics (200/201/204/4xx/5xx).
@@ -464,10 +433,6 @@ impl NmResponse {
     }
 }
 
-// ---------------------------------------------------------------------------
-// NmMessage: control response or packed data frame
-// ---------------------------------------------------------------------------
-
 /// Outbound NM message: either a structured control response/event,
 /// or a pre-encoded packed data frame `{"d":"<base64>"}`.
 #[derive(Debug)]
@@ -512,10 +477,6 @@ impl NmMessage {
         NmMessage::PackedData(buf)
     }
 }
-
-// ---------------------------------------------------------------------------
-// Base64 serde helpers
-// ---------------------------------------------------------------------------
 
 #[allow(dead_code)]
 pub(crate) mod base64_serde {
@@ -586,10 +547,6 @@ mod bytes_serde {
 mod tests {
     use super::*;
 
-    // ── hash_device_id is in lib.rs ────────────────────────────────────────
-
-    // ── NmRequest::id ──────────────────────────────────────────────────────
-
     #[test]
     fn test_nm_request_id_enumerate() {
         let req = NmRequest::Enumerate { id: Some(5) };
@@ -632,8 +589,6 @@ mod tests {
         assert_eq!(req.id(), Some(40));
     }
 
-    // ── parse_packed_send edge cases ──────────────────────────────────────
-
     #[test]
     fn test_parse_packed_send_short() {
         let err = parse_packed_send(&[0x02, 0x00]).unwrap_err();
@@ -647,16 +602,15 @@ mod tests {
             0x00,
             0x00,
             0x00,
-            0x00, // req_id
             0x00,
             0x00,
             0x00,
-            0x00, // dev_id
-            0x01, // report_id
+            0x00,
+            0x00,
+            0x01,
             0x10,
-            0x00, // payload_len = 16
+            0x00,
         ];
-        // Only 5 bytes of payload instead of 16
         buf.extend_from_slice(&[0; 5]);
         let err = parse_packed_send(&buf).unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
@@ -669,14 +623,14 @@ mod tests {
             0xEF,
             0xBE,
             0xAD,
-            0xDE, // req_id = 0xDEADBEEF
+            0xDE,
             0x78,
             0x56,
             0x34,
-            0x12, // dev_id = 0x12345678
-            0x00, // report_id = 0
+            0x12,
             0x00,
-            0x00, // payload_len = 0
+            0x00,
+            0x00,
         ];
         let (req_id, dev_id, report_id, data) = parse_packed_send(&buf).unwrap();
         assert_eq!(req_id, 0xDEADBEEF);
@@ -684,8 +638,6 @@ mod tests {
         assert_eq!(report_id, 0);
         assert!(data.is_empty());
     }
-
-    // ── NmMessage ─────────────────────────────────────────────────────────
 
     #[test]
     fn test_nm_message_control_json() {
@@ -701,11 +653,8 @@ mod tests {
         assert_eq!(json, r#"{"d":"AQID"}"#);
     }
 
-    // ── base64_opt_serde ──────────────────────────────────────────────────
-
     #[test]
     fn test_base64_opt_serde_none_in_nm_response() {
-        // NmResponse.data with value None should serialize without "d" field
         let r = NmResponse::err(404);
         let json = serde_json::to_string(&r).unwrap();
         assert_eq!(json, r#"{"s":404}"#);
@@ -713,13 +662,10 @@ mod tests {
 
     #[test]
     fn test_base64_opt_serde_some_in_nm_response() {
-        // NmResponse.data with Some value should serialize as base64
         let r = NmResponse::ok_with_data(vec![0xDE, 0xAD]);
         let json = serde_json::to_string(&r).unwrap();
         assert_eq!(json, r#"{"s":200,"d":"3q0="}"#);
     }
-
-    // ── Existing tests follow ─────────────────────────────────────────────
 
     #[test]
     fn test_nm_response_ok() {
@@ -789,7 +735,7 @@ mod tests {
             NmMessage::PackedData(buf) => {
                 assert_eq!(buf[0], PKG_INPUT_REPORT);
                 assert_eq!(&buf[1..5], &device_id.to_le_bytes());
-                assert_eq!(buf[5], 33); // reportId
+                assert_eq!(buf[5], 33);
                 let payload_len = u16::from_le_bytes([buf[6], buf[7]]) as usize;
                 assert_eq!(payload_len, 3);
                 assert_eq!(&buf[8..8 + payload_len], &payload);
@@ -806,7 +752,7 @@ mod tests {
         let mut buf = vec![PKG_SEND_REPORT];
         buf.extend_from_slice(&req_id.to_le_bytes());
         buf.extend_from_slice(&device_id.to_le_bytes());
-        buf.push(42); // reportId
+        buf.push(42);
         buf.extend_from_slice(&(payload.len() as u16).to_le_bytes());
         buf.extend_from_slice(&payload);
 
@@ -919,7 +865,6 @@ mod nm_response_tests {
         };
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("\"P\":1"), "json={json}");
-        // Round-trip field presence through serde.
         let value: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(value["P"], 1);
         assert_eq!(value["w"], 31337);

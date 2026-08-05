@@ -114,41 +114,62 @@ fn encode_report(buf: &mut Vec<u8>, tag: u8, report: &Report) {
     buf.extend_from_slice(&value);
 }
 
+/// Pack the field's boolean flags into the u16 bitfield used on the wire.
+/// Bit order matches the original flag encoding and must not change.
+fn encode_field_flags(field: &Field) -> u16 {
+    let bits = [
+        field.is_absolute,
+        field.is_array,
+        field.is_range,
+        field.is_constant,
+        field.is_linear,
+        field.is_volatile,
+        field.is_buffered_bytes,
+        field.has_null,
+        field.has_preferred_state,
+        field.wrap,
+    ];
+    let mut flags = 0u16;
+    for (i, set) in bits.into_iter().enumerate() {
+        if set {
+            flags |= 1u16 << i;
+        }
+    }
+    flags
+}
+
+/// Encode the usage block: either a min/max range pair, an explicit usage
+/// list, or an empty list (varint 0).
+fn encode_field_usages(value: &mut Vec<u8>, field: &Field) {
+    if field.is_range {
+        let min = field.usage_minimum.unwrap_or(0);
+        let max = field.usage_maximum.unwrap_or(0);
+        value.extend_from_slice(&min.to_le_bytes());
+        value.extend_from_slice(&max.to_le_bytes());
+    } else if let Some(usages) = &field.usages {
+        write_varint(value, usages.len() as u32);
+        for &u in usages {
+            value.extend_from_slice(&u.to_le_bytes());
+        }
+    } else {
+        write_varint(value, 0);
+    }
+}
+
+/// Encode the strings block: varint count, then varint-length-prefixed UTF-8.
+fn encode_field_strings(value: &mut Vec<u8>, strings: &[String]) {
+    write_varint(value, strings.len() as u32);
+    for s in strings {
+        let bytes = s.as_bytes();
+        write_varint(value, bytes.len() as u32);
+        value.extend_from_slice(bytes);
+    }
+}
+
 fn encode_field(buf: &mut Vec<u8>, field: &Field) {
     let mut value = Vec::new();
 
-    let mut flags = 0u16;
-    if field.is_absolute {
-        flags |= 1 << 0;
-    }
-    if field.is_array {
-        flags |= 1 << 1;
-    }
-    if field.is_range {
-        flags |= 1 << 2;
-    }
-    if field.is_constant {
-        flags |= 1 << 3;
-    }
-    if field.is_linear {
-        flags |= 1 << 4;
-    }
-    if field.is_volatile {
-        flags |= 1 << 5;
-    }
-    if field.is_buffered_bytes {
-        flags |= 1 << 6;
-    }
-    if field.has_null {
-        flags |= 1 << 7;
-    }
-    if field.has_preferred_state {
-        flags |= 1 << 8;
-    }
-    if field.wrap {
-        flags |= 1 << 9;
-    }
-    value.extend_from_slice(&flags.to_le_bytes());
+    value.extend_from_slice(&encode_field_flags(field).to_le_bytes());
 
     write_varint(&mut value, field.report_size);
     write_varint(&mut value, field.report_count);
@@ -165,32 +186,8 @@ fn encode_field(buf: &mut Vec<u8>, field: &Field) {
     value.push(field.unit_factor_current_exponent as i8 as u8);
     value.push(field.unit_factor_luminous_intensity_exponent as i8 as u8);
 
-    if field.is_range {
-        if let Some(min) = field.usage_minimum {
-            value.extend_from_slice(&min.to_le_bytes());
-        } else {
-            value.extend_from_slice(&0u32.to_le_bytes());
-        }
-        if let Some(max) = field.usage_maximum {
-            value.extend_from_slice(&max.to_le_bytes());
-        } else {
-            value.extend_from_slice(&0u32.to_le_bytes());
-        }
-    } else if let Some(ref usages) = field.usages {
-        write_varint(&mut value, usages.len() as u32);
-        for &u in usages {
-            value.extend_from_slice(&u.to_le_bytes());
-        }
-    } else {
-        write_varint(&mut value, 0);
-    }
-
-    write_varint(&mut value, field.strings.len() as u32);
-    for s in &field.strings {
-        let bytes = s.as_bytes();
-        write_varint(&mut value, bytes.len() as u32);
-        value.extend_from_slice(bytes);
-    }
+    encode_field_usages(&mut value, field);
+    encode_field_strings(&mut value, &field.strings);
 
     write_node_header(buf, TAG_FIELD, value.len());
     buf.extend_from_slice(&value);
@@ -257,101 +254,73 @@ fn decode_report(data: &[u8], off: &mut usize, end: usize) -> Report {
     Report { report_id, items }
 }
 
-fn decode_field(data: &[u8], off: &mut usize, end: usize) -> Field {
-    macro_rules! need {
-        ($n:expr) => {
-            *off + $n <= end
-        };
-    }
-    macro_rules! read_u32 {
-        () => {{
-            let v =
-                i32::from_le_bytes([data[*off], data[*off + 1], data[*off + 2], data[*off + 3]]);
-            *off += 4;
-            v
-        }};
-    }
-    macro_rules! read_u8 {
-        () => {{
-            let v = data[*off] as i8 as i32;
-            *off += 1;
-            v
-        }};
-    }
+/// Unchecked little-endian i32 read; advances `off` by 4. Mirrors the
+/// original `read_u32!` macro: callers are responsible for bounds.
+fn read_i32(data: &[u8], off: &mut usize) -> i32 {
+    let v = i32::from_le_bytes([data[*off], data[*off + 1], data[*off + 2], data[*off + 3]]);
+    *off += 4;
+    v
+}
 
-    if !need!(2) {
-        *off = end;
-        return Field::default();
+/// Unchecked i8-as-i32 read; advances `off` by 1, mirroring `read_u8!`.
+fn read_i8_i32(data: &[u8], off: &mut usize) -> i32 {
+    let v = data[*off] as i8 as i32;
+    *off += 1;
+    v
+}
+
+/// Fixed-size portion of a field's TLV value: flags, sizes, ranges and unit
+/// metadata.
+struct FieldFixed {
+    flags: u16,
+    report_size: u32,
+    report_count: u32,
+    logical_minimum: i32,
+    logical_maximum: i32,
+    physical_minimum: i32,
+    physical_maximum: i32,
+    unit_exponent: i32,
+    unit_system: String,
+    unit_factor_length_exponent: i32,
+    unit_factor_mass_exponent: i32,
+    unit_factor_time_exponent: i32,
+    unit_factor_temperature_exponent: i32,
+    unit_factor_current_exponent: i32,
+    unit_factor_luminous_intensity_exponent: i32,
+}
+
+/// Decode the fixed-size prefix of a field value. `None` on truncation.
+/// Bounds checks mirror the original: a 2-byte flags check and a single
+/// 16-byte check covering the four i32s; the trailing exponent bytes were
+/// read unchecked before and remain so.
+fn decode_field_fixed(data: &[u8], off: &mut usize, end: usize) -> Option<FieldFixed> {
+    if *off + 2 > end {
+        return None;
     }
     let flags = u16::from_le_bytes([data[*off], data[*off + 1]]);
     *off += 2;
     let report_size = read_varint(data, off);
     let report_count = read_varint(data, off);
 
-    if !need!(16) {
-        *off = end;
-        return Field::default();
+    if *off + 16 > end {
+        return None;
     }
-    let logical_minimum = read_u32!();
-    let logical_maximum = read_u32!();
-    let physical_minimum = read_u32!();
-    let physical_maximum = read_u32!();
-    let unit_exponent = read_u8!();
+    let logical_minimum = read_i32(data, off);
+    let logical_maximum = read_i32(data, off);
+    let physical_minimum = read_i32(data, off);
+    let physical_maximum = read_i32(data, off);
+    let unit_exponent = read_i8_i32(data, off);
     let unit_system = unit_system_from_tag(data[*off]);
     *off += 1;
-    let unit_factor_length_exponent = read_u8!();
-    let unit_factor_mass_exponent = read_u8!();
-    let unit_factor_time_exponent = read_u8!();
-    let unit_factor_temperature_exponent = read_u8!();
-    let unit_factor_current_exponent = read_u8!();
-    let unit_factor_luminous_intensity_exponent = read_u8!();
+    let unit_factor_length_exponent = read_i8_i32(data, off);
+    let unit_factor_mass_exponent = read_i8_i32(data, off);
+    let unit_factor_time_exponent = read_i8_i32(data, off);
+    let unit_factor_temperature_exponent = read_i8_i32(data, off);
+    let unit_factor_current_exponent = read_i8_i32(data, off);
+    let unit_factor_luminous_intensity_exponent = read_i8_i32(data, off);
 
-    let is_range = flags & (1 << 2) != 0;
-    let (usages, usage_minimum, usage_maximum) = if is_range {
-        if !need!(8) {
-            *off = end;
-            return Field::default();
-        }
-        let min = u32::from_le_bytes([data[*off], data[*off + 1], data[*off + 2], data[*off + 3]]);
-        *off += 4;
-        let max = u32::from_le_bytes([data[*off], data[*off + 1], data[*off + 2], data[*off + 3]]);
-        *off += 4;
-        (None, Some(min), Some(max))
-    } else {
-        let count = read_varint(data, off) as usize;
-        if !need!(count * 4) {
-            *off = end;
-            return Field::default();
-        }
-        let mut u = Vec::with_capacity(count);
-        for _ in 0..count {
-            u.push(u32::from_le_bytes([
-                data[*off],
-                data[*off + 1],
-                data[*off + 2],
-                data[*off + 3],
-            ]));
-            *off += 4;
-        }
-        (if u.is_empty() { None } else { Some(u) }, None, None)
-    };
-
-    let strings_count = read_varint(data, off) as usize;
-    let mut strings = Vec::with_capacity(strings_count);
-    for _ in 0..strings_count {
-        let byte_len = read_varint(data, off) as usize;
-        if !need!(byte_len) {
-            *off = end;
-            return Field::default();
-        }
-        strings.push(String::from_utf8_lossy(&data[*off..*off + byte_len]).to_string());
-        *off += byte_len;
-    }
-
-    Field {
-        usages,
-        usage_minimum,
-        usage_maximum,
+    Some(FieldFixed {
+        flags,
         report_size,
         report_count,
         logical_minimum,
@@ -366,16 +335,112 @@ fn decode_field(data: &[u8], off: &mut usize, end: usize) -> Field {
         unit_factor_temperature_exponent,
         unit_factor_current_exponent,
         unit_factor_luminous_intensity_exponent,
-        is_absolute: flags & (1 << 0) != 0,
-        is_array: flags & (1 << 1) != 0,
+    })
+}
+
+/// Decoded usage block: (usages, usage_minimum, usage_maximum).
+type DecodedUsages = Option<(Option<Vec<u32>>, Option<u32>, Option<u32>)>;
+
+/// Decode the usage block: (usages, usage_minimum, usage_maximum).
+/// `None` on truncation.
+fn decode_field_usages(data: &[u8], off: &mut usize, end: usize, is_range: bool) -> DecodedUsages {
+    if is_range {
+        if *off + 8 > end {
+            return None;
+        }
+        let min = u32::from_le_bytes([data[*off], data[*off + 1], data[*off + 2], data[*off + 3]]);
+        *off += 4;
+        let max = u32::from_le_bytes([data[*off], data[*off + 1], data[*off + 2], data[*off + 3]]);
+        *off += 4;
+        Some((None, Some(min), Some(max)))
+    } else {
+        let count = read_varint(data, off) as usize;
+        if *off + count * 4 > end {
+            return None;
+        }
+        let mut usages = Vec::with_capacity(count);
+        for _ in 0..count {
+            usages.push(u32::from_le_bytes([
+                data[*off],
+                data[*off + 1],
+                data[*off + 2],
+                data[*off + 3],
+            ]));
+            *off += 4;
+        }
+        Some((
+            if usages.is_empty() {
+                None
+            } else {
+                Some(usages)
+            },
+            None,
+            None,
+        ))
+    }
+}
+
+/// Decode the strings block: varint count, then varint-length-prefixed
+/// strings. `None` on truncation.
+fn decode_field_strings(data: &[u8], off: &mut usize, end: usize) -> Option<Vec<String>> {
+    let count = read_varint(data, off) as usize;
+    let mut strings = Vec::with_capacity(count);
+    for _ in 0..count {
+        let byte_len = read_varint(data, off) as usize;
+        if *off + byte_len > end {
+            return None;
+        }
+        strings.push(String::from_utf8_lossy(&data[*off..*off + byte_len]).to_string());
+        *off += byte_len;
+    }
+    Some(strings)
+}
+
+fn decode_field(data: &[u8], off: &mut usize, end: usize) -> Field {
+    let Some(fixed) = decode_field_fixed(data, off, end) else {
+        *off = end;
+        return Field::default();
+    };
+    let is_range = fixed.flags & (1 << 2) != 0;
+    let Some((usages, usage_minimum, usage_maximum)) =
+        decode_field_usages(data, off, end, is_range)
+    else {
+        *off = end;
+        return Field::default();
+    };
+    let Some(strings) = decode_field_strings(data, off, end) else {
+        *off = end;
+        return Field::default();
+    };
+
+    Field {
+        usages,
+        usage_minimum,
+        usage_maximum,
+        report_size: fixed.report_size,
+        report_count: fixed.report_count,
+        logical_minimum: fixed.logical_minimum,
+        logical_maximum: fixed.logical_maximum,
+        physical_minimum: fixed.physical_minimum,
+        physical_maximum: fixed.physical_maximum,
+        unit_exponent: fixed.unit_exponent,
+        unit_system: fixed.unit_system,
+        unit_factor_length_exponent: fixed.unit_factor_length_exponent,
+        unit_factor_mass_exponent: fixed.unit_factor_mass_exponent,
+        unit_factor_time_exponent: fixed.unit_factor_time_exponent,
+        unit_factor_temperature_exponent: fixed.unit_factor_temperature_exponent,
+        unit_factor_current_exponent: fixed.unit_factor_current_exponent,
+        unit_factor_luminous_intensity_exponent: fixed.unit_factor_luminous_intensity_exponent,
+        is_absolute: fixed.flags & (1 << 0) != 0,
+        is_array: fixed.flags & (1 << 1) != 0,
         is_range,
-        is_constant: flags & (1 << 3) != 0,
-        is_linear: flags & (1 << 4) != 0,
-        is_volatile: flags & (1 << 5) != 0,
-        is_buffered_bytes: flags & (1 << 6) != 0,
-        has_null: flags & (1 << 7) != 0,
-        has_preferred_state: flags & (1 << 8) != 0,
-        wrap: flags & (1 << 9) != 0,
+        is_constant: fixed.flags & (1 << 3) != 0,
+        is_linear: fixed.flags & (1 << 4) != 0,
+        is_volatile: fixed.flags & (1 << 5) != 0,
+        is_buffered_bytes: fixed.flags & (1 << 6) != 0,
+        has_null: fixed.flags & (1 << 7) != 0,
+        has_preferred_state: fixed.flags & (1 << 8) != 0,
+        wrap: fixed.flags & (1 << 9) != 0,
         strings,
     }
 }
@@ -490,24 +555,33 @@ mod tests {
         }]
     }
 
-    #[test]
-    fn test_roundtrip_basic() {
-        let original = make_test_collection();
+    fn encode_collections(collections: &[Collection]) -> Vec<u8> {
         let mut buf = Vec::new();
-        for col in &original {
+        for col in collections {
             encode_collection(&mut buf, col);
         }
+        buf
+    }
+
+    fn decode_collections(buf: &[u8]) -> Vec<Collection> {
         let mut off = 0;
         let mut decoded = Vec::new();
         while off < buf.len() {
             let tag = buf[off];
-            let node = decode_node(&buf, &mut off);
+            let node = decode_node(buf, &mut off);
             if tag == TAG_COLLECTION
                 && let Node::Collection(c) = node
             {
                 decoded.push(c);
             }
         }
+        decoded
+    }
+
+    #[test]
+    fn test_roundtrip_basic() {
+        let original = make_test_collection();
+        let decoded = decode_collections(&encode_collections(&original));
         assert_eq!(decoded.len(), original.len());
         let orig = &original[0];
         let dec = &decoded[0];
@@ -533,72 +607,61 @@ mod tests {
     #[test]
     fn test_roundtrip_empty() {
         let original: Vec<Collection> = vec![];
-        let mut buf = Vec::new();
-        for col in &original {
-            encode_collection(&mut buf, col);
-        }
-        assert!(buf.is_empty());
+        assert!(encode_collections(&original).is_empty());
     }
 
-    #[test]
-    fn test_roundtrip_range_field() {
-        let col = Collection {
+    fn make_range_field() -> Field {
+        Field {
+            usages: None,
+            usage_minimum: Some(0x10001),
+            usage_maximum: Some(0x10010),
+            report_size: 16,
+            report_count: 16,
+            logical_minimum: 0,
+            logical_maximum: 65535,
+            physical_minimum: 0,
+            physical_maximum: 65535,
+            unit_exponent: 0,
+            unit_system: "si-linear".to_string(),
+            unit_factor_length_exponent: 1,
+            unit_factor_mass_exponent: 0,
+            unit_factor_time_exponent: 0,
+            unit_factor_temperature_exponent: 0,
+            unit_factor_current_exponent: 0,
+            unit_factor_luminous_intensity_exponent: 0,
+            is_absolute: false,
+            is_array: true,
+            is_range: true,
+            is_constant: false,
+            is_linear: false,
+            is_volatile: true,
+            is_buffered_bytes: false,
+            has_null: true,
+            has_preferred_state: true,
+            wrap: false,
+            strings: vec!["Button".to_string()],
+        }
+    }
+
+    fn make_range_collection() -> Collection {
+        Collection {
             collection_type: 1,
             usage_page: Some(0x01),
             usage: Some(0x04),
             children: vec![],
             input_reports: vec![Report {
                 report_id: 1,
-                items: vec![Field {
-                    usages: None,
-                    usage_minimum: Some(0x10001),
-                    usage_maximum: Some(0x10010),
-                    report_size: 16,
-                    report_count: 16,
-                    logical_minimum: 0,
-                    logical_maximum: 65535,
-                    physical_minimum: 0,
-                    physical_maximum: 65535,
-                    unit_exponent: 0,
-                    unit_system: "si-linear".to_string(),
-                    unit_factor_length_exponent: 1,
-                    unit_factor_mass_exponent: 0,
-                    unit_factor_time_exponent: 0,
-                    unit_factor_temperature_exponent: 0,
-                    unit_factor_current_exponent: 0,
-                    unit_factor_luminous_intensity_exponent: 0,
-                    is_absolute: false,
-                    is_array: true,
-                    is_range: true,
-                    is_constant: false,
-                    is_linear: false,
-                    is_volatile: true,
-                    is_buffered_bytes: false,
-                    has_null: true,
-                    has_preferred_state: true,
-                    wrap: false,
-                    strings: vec!["Button".to_string()],
-                }],
+                items: vec![make_range_field()],
             }],
             output_reports: vec![],
             feature_reports: vec![],
-        };
-        let original = vec![col];
-        let mut buf = Vec::new();
-        for col in &original {
-            encode_collection(&mut buf, col);
         }
-        let mut off = 0;
-        let mut decoded = Vec::new();
-        while off < buf.len() {
-            let tag = buf[off];
-            let node = decode_node(&buf, &mut off);
-            if tag == TAG_COLLECTION
-                && let Node::Collection(c) = node
-            {
-                decoded.push(c);
-            }
-        }
+    }
+
+    #[test]
+    fn test_roundtrip_range_field() {
+        let original = vec![make_range_collection()];
+        let decoded = decode_collections(&encode_collections(&original));
         assert_eq!(decoded.len(), 1);
         let f = &decoded[0].input_reports[0].items[0];
         assert!(f.is_range);
@@ -621,29 +684,12 @@ mod tests {
 
     #[test]
     fn test_unknown_tag_skip() {
-        let mut buf = Vec::new();
-        encode_collection(&mut buf, &make_test_collection()[0]);
-        let mut unknown = Vec::new();
-        unknown.push(0xFF);
-        write_varint(&mut unknown, 5);
-        unknown.extend_from_slice(&[1, 2, 3, 4, 5]);
-        let mut after = Vec::new();
-        encode_collection(&mut after, &make_test_collection()[0]);
-        let mut full = Vec::new();
-        full.extend_from_slice(&buf);
-        full.extend_from_slice(&unknown);
-        full.extend_from_slice(&after);
-        let mut off = 0;
-        let mut count = 0;
-        while off < full.len() {
-            let tag = full[off];
-            let node = decode_node(&full, &mut off);
-            if tag == TAG_COLLECTION
-                && let Node::Collection(_) = node
-            {
-                count += 1;
-            }
-        }
-        assert_eq!(count, 2);
+        let mut full = encode_collections(&make_test_collection());
+        full.push(0xFF);
+        write_varint(&mut full, 5);
+        full.extend_from_slice(&[1, 2, 3, 4, 5]);
+        full.extend_from_slice(&encode_collections(&make_test_collection()));
+        let decoded = decode_collections(&full);
+        assert_eq!(decoded.len(), 2);
     }
 }

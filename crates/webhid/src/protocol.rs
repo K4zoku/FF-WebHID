@@ -1,5 +1,3 @@
-// Protocol framing: length-prefixed JSON messages.
-
 use std::io;
 
 use base64::Engine;
@@ -33,43 +31,55 @@ where
 
 pub async fn read_nm_request<R: AsyncRead + Unpin>(reader: &mut R) -> io::Result<NmRequest> {
     let v: serde_json::Value = read_message(reader).await?;
+    if let Some(req) = try_read_packed(&v)? {
+        return Ok(req);
+    }
+    read_json_request(&v)
+}
 
-    // Packed messages: {"d":"<b64>"} with no "a" field. msgType byte inside
-    // TLV discriminates send_report (0x02) vs send_feature_report (0x04).
-    // reqId is inside the TLV, not the JSON "n" field.
-    if let Some(d) = v.get("d").and_then(|x| x.as_str())
-        && v.get("a").is_none()
-    {
-        let packed = base64::engine::general_purpose::STANDARD
-            .decode(d)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("bad b64: {e}")))?;
-        if packed.is_empty() {
+/// Packed messages: {"d":"<b64>"} with no "a" field. msgType byte inside
+/// TLV discriminates send_report (0x02) vs send_feature_report (0x04).
+/// reqId is inside the TLV, not the JSON "n" field.
+/// Returns `None` when the message is not a packed frame.
+fn try_read_packed(v: &serde_json::Value) -> io::Result<Option<NmRequest>> {
+    let Some(d) = v.get("d").and_then(|x| x.as_str()) else {
+        return Ok(None);
+    };
+    if v.get("a").is_some() {
+        return Ok(None);
+    }
+    let packed = base64::engine::general_purpose::STANDARD
+        .decode(d)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("bad b64: {e}")))?;
+    if packed.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "empty packed TLV",
+        ));
+    }
+    let req = match packed[0] {
+        PKG_SEND_REPORT => NmRequest::SendReport { id: None, packed },
+        PKG_SEND_FEATURE_REPORT => {
+            let (req_id, device_id, report_id, data) = parse_packed_send(&packed)?;
+            NmRequest::SendFeatureReport {
+                id: Some(req_id),
+                device_id,
+                report_id,
+                data: data.to_vec(),
+            }
+        }
+        other => {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "empty packed TLV",
+                format!("unknown packed msgType: {other:#x}"),
             ));
         }
-        return Ok(match packed[0] {
-            PKG_SEND_REPORT => NmRequest::SendReport { id: None, packed },
-            PKG_SEND_FEATURE_REPORT => {
-                let (req_id, device_id, report_id, data) = parse_packed_send(&packed)?;
-                NmRequest::SendFeatureReport {
-                    id: Some(req_id),
-                    device_id,
-                    report_id,
-                    data: data.to_vec(),
-                }
-            }
-            other => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("unknown packed msgType: {other:#x}"),
-                ));
-            }
-        });
-    }
+    };
+    Ok(Some(req))
+}
 
-    // Non-packed messages: dispatch by "a" field.
+/// Non-packed messages: dispatch by the numeric "a" field.
+fn read_json_request(v: &serde_json::Value) -> io::Result<NmRequest> {
     let action = v
         .get("a")
         .and_then(|x| x.as_u64())
@@ -80,32 +90,32 @@ pub async fn read_nm_request<R: AsyncRead + Unpin>(reader: &mut R) -> io::Result
         crate::ACT_ENUM => NmRequest::Enumerate { id },
         crate::ACT_OPEN => NmRequest::Open {
             id,
-            device_id: get_u32(&v, "i")?,
+            device_id: get_u32(v, "i")?,
         },
         crate::ACT_CLOSE => NmRequest::Close {
             id,
-            device_id: get_u32(&v, "i")?,
+            device_id: get_u32(v, "i")?,
             session_token: v.get("T").and_then(|x| x.as_str()).map(String::from),
         },
         crate::ACT_SEND_REPORT => NmRequest::SendReport {
             id,
-            packed: get_b64(&v, "d")?,
+            packed: get_b64(v, "d")?,
         },
         crate::ACT_RECV_FEATURE => NmRequest::ReceiveFeatureReport {
             id,
-            device_id: get_u32(&v, "i")?,
-            report_id: get_u8(&v, "r")?,
+            device_id: get_u32(v, "i")?,
+            report_id: get_u8(v, "r")?,
         },
         crate::ACT_SEND_FEATURE => NmRequest::SendFeatureReport {
             id,
-            device_id: get_u32(&v, "i")?,
-            report_id: get_u8(&v, "r")?,
-            data: get_b64(&v, "d")?,
+            device_id: get_u32(v, "i")?,
+            report_id: get_u8(v, "r")?,
+            data: get_b64(v, "d")?,
         },
         crate::ACT_SET_DATA_PLANE => NmRequest::SetDataPlane {
             id,
-            device_id: get_u32(&v, "i")?,
-            mode: get_str(&v, "m")?,
+            device_id: get_u32(v, "i")?,
+            mode: get_str(v, "m")?,
             session_token: v.get("T").and_then(|x| x.as_str()).map(String::from),
         },
         crate::ACT_HANDSHAKE => NmRequest::Handshake { id },
@@ -215,7 +225,6 @@ mod tests {
     #[tokio::test]
     async fn test_rejects_oversized_message() {
         let mut buf = Vec::new();
-        // length prefix = 2 MiB  ( > MAX_MSG = 1 MiB )
         buf.extend_from_slice(&(2_000_000u32).to_le_bytes());
         buf.resize(buf.len() + 2_000_000, 0);
 
@@ -227,34 +236,30 @@ mod tests {
 
     #[tokio::test]
     async fn test_empty_writer_flushes() {
-        // write_message should still flush even for a minimal payload
         let mut buf = Vec::new();
         write_message(&mut buf, &true).await.unwrap();
         assert!(!buf.is_empty());
     }
 
-    #[tokio::test]
-    async fn test_read_nm_request_numeric_action() {
-        use crate::NmRequest;
-        // Enumerate: {"a":1}
+    /// Frame `json` as a length-prefixed message and parse it as an NmRequest.
+    async fn read_json(json: serde_json::Value) -> io::Result<NmRequest> {
         let mut buf = Vec::new();
-        write_message(&mut buf, &serde_json::json!({"a": 1}))
+        write_message(&mut buf, &json).await.unwrap();
+        let mut r: &[u8] = &buf;
+        read_nm_request(&mut r).await
+    }
+
+    #[tokio::test]
+    async fn test_read_nm_request_enumerate() {
+        let req = read_json(serde_json::json!({"a": 1})).await.unwrap();
+        assert!(matches!(req, NmRequest::Enumerate { id: None }));
+    }
+
+    #[tokio::test]
+    async fn test_read_nm_request_open() {
+        let req = read_json(serde_json::json!({"a": 2, "n": 5, "i": 305419896}))
             .await
             .unwrap();
-        let mut r: &[u8] = &buf;
-        let req = read_nm_request(&mut r).await.unwrap();
-        assert!(matches!(req, NmRequest::Enumerate { id: None }));
-
-        // Open with id + deviceId
-        let mut buf = Vec::new();
-        write_message(
-            &mut buf,
-            &serde_json::json!({"a": 2, "n": 5, "i": 305419896}),
-        )
-        .await
-        .unwrap();
-        let mut r: &[u8] = &buf;
-        let req = read_nm_request(&mut r).await.unwrap();
         match req {
             NmRequest::Open { id, device_id } => {
                 assert_eq!(id, Some(5));
@@ -262,73 +267,60 @@ mod tests {
             }
             _ => panic!("expected Open"),
         }
+    }
 
-        // Handshake
-        let mut buf = Vec::new();
-        write_message(&mut buf, &serde_json::json!({"a": 8, "n": 7}))
+    #[tokio::test]
+    async fn test_read_nm_request_handshake() {
+        let req = read_json(serde_json::json!({"a": 8, "n": 7}))
             .await
             .unwrap();
-        let mut r: &[u8] = &buf;
-        let req = read_nm_request(&mut r).await.unwrap();
         assert!(matches!(req, NmRequest::Handshake { id: Some(7) }));
+    }
 
-        // Unknown action → error
-        let mut buf = Vec::new();
-        write_message(&mut buf, &serde_json::json!({"a": 99}))
-            .await
-            .unwrap();
-        let mut r: &[u8] = &buf;
-        let err = read_nm_request(&mut r).await.unwrap_err();
+    #[tokio::test]
+    async fn test_read_nm_request_unknown_action() {
+        let err = read_json(serde_json::json!({"a": 99})).await.unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
 
-        // Missing 'a' → error
-        let mut buf = Vec::new();
-        write_message(&mut buf, &serde_json::json!({"n": 1}))
-            .await
-            .unwrap();
-        let mut r: &[u8] = &buf;
-        let err = read_nm_request(&mut r).await.unwrap_err();
+    #[tokio::test]
+    async fn test_read_nm_request_missing_action() {
+        let err = read_json(serde_json::json!({"n": 1})).await.unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
 
-        // Packed sendReport: {"d":"<b64>"} with no "a" field. msgType 0x02.
-        // TLV: [0x02][reqId u32 LE][devId u32 LE][reportId u8][payloadLen u16 LE][payload]
+    #[tokio::test]
+    async fn test_read_nm_request_packed_send_report() {
         use base64::Engine;
         let mut tlv = vec![0x02u8];
-        tlv.extend_from_slice(&42u32.to_le_bytes()); // reqId
-        tlv.extend_from_slice(&0xCAFEBABEu32.to_le_bytes()); // deviceId
-        tlv.push(7); // reportId
-        tlv.extend_from_slice(&3u16.to_le_bytes()); // payloadLen
-        tlv.extend_from_slice(&[0xAA, 0xBB, 0xCC]); // payload
+        tlv.extend_from_slice(&42u32.to_le_bytes());
+        tlv.extend_from_slice(&0xCAFEBABEu32.to_le_bytes());
+        tlv.push(7);
+        tlv.extend_from_slice(&3u16.to_le_bytes());
+        tlv.extend_from_slice(&[0xAA, 0xBB, 0xCC]);
         let b64 = base64::engine::general_purpose::STANDARD.encode(&tlv);
-        let mut buf = Vec::new();
-        write_message(&mut buf, &serde_json::json!({"d": b64}))
-            .await
-            .unwrap();
-        let mut r: &[u8] = &buf;
-        let req = read_nm_request(&mut r).await.unwrap();
+        let req = read_json(serde_json::json!({"d": b64})).await.unwrap();
         match req {
             NmRequest::SendReport { id, packed } => {
-                assert_eq!(id, None); // id is inside TLV, not JSON
+                assert_eq!(id, None);
                 assert_eq!(packed[0], 0x02);
                 assert_eq!(packed.len(), tlv.len());
             }
             _ => panic!("expected SendReport"),
         }
+    }
 
-        // Packed sendFeatureReport: msgType 0x04
+    #[tokio::test]
+    async fn test_read_nm_request_packed_send_feature_report() {
+        use base64::Engine;
         let mut tlv = vec![0x04u8];
-        tlv.extend_from_slice(&99u32.to_le_bytes()); // reqId
-        tlv.extend_from_slice(&0x12345678u32.to_le_bytes()); // deviceId
-        tlv.push(1); // reportId
-        tlv.extend_from_slice(&2u16.to_le_bytes()); // payloadLen
-        tlv.extend_from_slice(&[0xDD, 0xEE]); // payload
+        tlv.extend_from_slice(&99u32.to_le_bytes());
+        tlv.extend_from_slice(&0x12345678u32.to_le_bytes());
+        tlv.push(1);
+        tlv.extend_from_slice(&2u16.to_le_bytes());
+        tlv.extend_from_slice(&[0xDD, 0xEE]);
         let b64 = base64::engine::general_purpose::STANDARD.encode(&tlv);
-        let mut buf = Vec::new();
-        write_message(&mut buf, &serde_json::json!({"d": b64}))
-            .await
-            .unwrap();
-        let mut r: &[u8] = &buf;
-        let req = read_nm_request(&mut r).await.unwrap();
+        let req = read_json(serde_json::json!({"d": b64})).await.unwrap();
         match req {
             NmRequest::SendFeatureReport {
                 id,
@@ -343,16 +335,14 @@ mod tests {
             }
             _ => panic!("expected SendFeatureReport"),
         }
+    }
 
-        // Packed with unknown msgType → error
+    #[tokio::test]
+    async fn test_read_nm_request_packed_unknown_msg_type() {
+        use base64::Engine;
         let tlv = vec![0xFFu8, 0, 0, 0, 0];
         let b64 = base64::engine::general_purpose::STANDARD.encode(&tlv);
-        let mut buf = Vec::new();
-        write_message(&mut buf, &serde_json::json!({"d": b64}))
-            .await
-            .unwrap();
-        let mut r: &[u8] = &buf;
-        let err = read_nm_request(&mut r).await.unwrap_err();
+        let err = read_json(serde_json::json!({"d": b64})).await.unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
     }
 }

@@ -172,10 +172,6 @@ fn candidate_sockets() -> Vec<String> {
 #[cfg(target_os = "windows")]
 const DEFAULT_PIPE: &str = r"\\.\pipe\webhid";
 
-// ---------------------------------------------------------------------------
-// Entry point
-// ---------------------------------------------------------------------------
-
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
     if std::env::args().any(|a| a == "--version" || a == "-V") {
@@ -184,150 +180,130 @@ async fn main() -> anyhow::Result<()> {
     }
 
     webhid::logging::init_logger();
+    apply_hardening();
 
-    #[cfg(feature = "hardening")]
-    {
-        webhid::security::apply_prctl_hardening();
-        webhid::security::apply_seccomp_filter(&NM_SYSCALLS);
+    let daemon = connect_to_daemon().await?;
+    run_forwarders(daemon).await
+}
+
+/// Apply prctl + seccomp hardening (Linux release builds with the
+/// `hardening` feature; no-op everywhere else).
+#[cfg(feature = "hardening")]
+fn apply_hardening() {
+    webhid::security::apply_prctl_hardening();
+    webhid::security::apply_seccomp_filter(&NM_SYSCALLS);
+}
+
+#[cfg(not(feature = "hardening"))]
+fn apply_hardening() {}
+
+/// Connect to the daemon socket, retrying every candidate path with
+/// exponential backoff until `CONNECT_TIMEOUT_MS` elapses. On timeout,
+/// writes an error frame to stdout (so the addon sees it) and errors out.
+#[cfg(unix)]
+async fn connect_to_daemon() -> anyhow::Result<tokio::net::UnixStream> {
+    let candidates = candidate_sockets();
+    let mut delay = 100u64;
+    let mut total_waited = 0u64;
+    loop {
+        match try_connect_candidates(&candidates).await {
+            Ok((stream, path)) => {
+                log::info!("connected to daemon at {path}");
+                return Ok(stream);
+            }
+            Err(last_err) => {
+                if total_waited >= CONNECT_TIMEOUT_MS {
+                    let msg = format!(
+                        "cannot connect to webhid-daemon (tried {}): {last_err}\n\
+                         Check: (1) daemon running? systemctl status webhid-daemon\n\
+                         (2) socket path correct? (3) user in webhid group? sudo usermod -aG webhid $USER",
+                        candidates.join(", "),
+                    );
+                    log::error!("{msg}");
+                    let mut stdout = tokio::io::stdout();
+                    write_error_frame(&mut stdout, &msg).await;
+                    return Err(anyhow::anyhow!(msg));
+                }
+                log::warn!("daemon connect failed ({last_err}), retry in {delay}ms");
+                tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
+                total_waited += delay;
+                delay = (delay * 2).min(2000);
+            }
+        }
     }
+}
 
-    #[cfg(unix)]
-    let daemon = {
-        let candidates = candidate_sockets();
-        let mut delay = 100u64;
-        let mut total_waited = 0u64;
-        let (stream, connected_path) = loop {
-            let mut last_err = None;
-            let matched = 'candidates: {
-                for path in &candidates {
-                    match connect_to_path(path).await {
-                        Ok(s) => break 'candidates Some((s, path.clone())),
-                        Err(e) => last_err = Some(e),
-                    }
+/// Try every candidate socket path once, returning the first success.
+#[cfg(unix)]
+async fn try_connect_candidates(
+    candidates: &[String],
+) -> std::io::Result<(tokio::net::UnixStream, String)> {
+    let mut last_err = None;
+    for path in candidates {
+        match connect_to_path(path).await {
+            Ok(s) => return Ok((s, path.clone())),
+            Err(e) => last_err = Some(e),
+        }
+    }
+    Err(last_err.expect("candidate_sockets returned zero entries"))
+}
+
+/// Connect to the daemon named pipe, retrying with exponential backoff
+/// until `CONNECT_TIMEOUT_MS` elapses. On timeout, writes an error frame to
+/// stdout (so the addon sees it) and errors out.
+#[cfg(windows)]
+async fn connect_to_daemon() -> anyhow::Result<tokio::net::windows::named_pipe::NamedPipeClient> {
+    use tokio::net::windows::named_pipe::ClientOptions;
+    let pipe_name = std::env::var("WEBHID_PIPE").unwrap_or_else(|_| DEFAULT_PIPE.to_string());
+    let mut delay = 100u64;
+    let mut total_waited = 0u64;
+    loop {
+        match ClientOptions::new().open(&pipe_name) {
+            Ok(s) => {
+                log::info!("connected to daemon at {pipe_name}");
+                return Ok(s);
+            }
+            Err(e) => {
+                if total_waited >= CONNECT_TIMEOUT_MS {
+                    let msg = format!(
+                        "cannot connect to daemon pipe '{pipe_name}' after retries: {e}\n\
+                         Check: (1) daemon running? (2) pipe name correct?",
+                    );
+                    log::error!("{msg}");
+                    let mut stdout = tokio::io::stdout();
+                    write_error_frame(&mut stdout, &msg).await;
+                    return Err(anyhow::anyhow!(msg));
                 }
-                None
-            };
-            if let Some((s, p)) = matched {
-                break (s, p);
+                log::warn!("daemon connect failed ({e}), retry in {delay}ms");
+                tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
+                total_waited += delay;
+                delay = (delay * 2).min(2000);
             }
-            let last_err = last_err.expect("candidate_sockets returned zero entries");
-            if total_waited >= CONNECT_TIMEOUT_MS {
-                let msg = format!(
-                    "cannot connect to webhid-daemon (tried {}): {last_err}\n\
-                     Check: (1) daemon running? systemctl status webhid-daemon\n\
-                     (2) socket path correct? (3) user in webhid group? sudo usermod -aG webhid $USER",
-                    candidates.join(", "),
-                );
-                log::error!("{msg}");
-                let mut stdout = tokio::io::stdout();
-                write_error_frame(&mut stdout, &msg).await;
-                return Err(anyhow::anyhow!(msg));
-            }
-            log::warn!("daemon connect failed ({last_err}), retry in {delay}ms");
-            tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
-            total_waited += delay;
-            delay = (delay * 2).min(2000);
-        };
-        log::info!("connected to daemon at {connected_path}");
-        stream
-    };
+        }
+    }
+}
 
-    #[cfg(windows)]
-    let daemon = {
-        use tokio::net::windows::named_pipe::ClientOptions;
-        let pipe_name = std::env::var("WEBHID_PIPE").unwrap_or_else(|_| DEFAULT_PIPE.to_string());
-        let mut delay = 100u64;
-        let mut total_waited = 0u64;
-        let stream = loop {
-            match ClientOptions::new().open(&pipe_name) {
-                Ok(s) => break s,
-                Err(e) => {
-                    if total_waited >= CONNECT_TIMEOUT_MS {
-                        let msg = format!(
-                            "cannot connect to daemon pipe '{pipe_name}' after retries: {e}\n\
-                             Check: (1) daemon running? (2) pipe name correct?",
-                        );
-                        log::error!("{msg}");
-                        let mut stdout = tokio::io::stdout();
-                        write_error_frame(&mut stdout, &msg).await;
-                        return Err(anyhow::anyhow!(msg));
-                    }
-                    log::warn!("daemon connect failed ({e}), retry in {delay}ms");
-                    tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
-                    total_waited += delay;
-                    delay = (delay * 2).min(2000);
-                }
-            }
-        };
-        log::info!("connected to daemon at {pipe_name}");
-        stream
-    };
+#[cfg(not(any(unix, windows)))]
+async fn connect_to_daemon() -> anyhow::Result<std::io::Empty> {
+    Err(anyhow::anyhow!("IPC not supported on this platform"))
+}
 
-    #[cfg(not(any(unix, windows)))]
-    let daemon = {
-        return Err(anyhow::anyhow!("IPC not supported on this platform"));
-    };
-
+/// Split the daemon connection and run the two byte-forwarding directions
+/// concurrently. Returns when either direction ends (the other is dropped,
+/// which tears the process down after `main` returns).
+async fn run_forwarders<S>(daemon: S) -> anyhow::Result<()>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
     let (daemon_r, daemon_w) = tokio::io::split(daemon);
-    let mut daemon_r = BufReader::new(daemon_r);
-    let mut daemon_w = BufWriter::new(daemon_w);
+    let daemon_r = BufReader::new(daemon_r);
+    let daemon_w = BufWriter::new(daemon_w);
 
-    let mut stdin = BufReader::new(tokio::io::stdin());
-    let mut stdout = BufWriter::with_capacity(256 * 1024, tokio::io::stdout());
+    let stdin = BufReader::new(tokio::io::stdin());
+    let stdout = BufWriter::with_capacity(256 * 1024, tokio::io::stdout());
 
-    // ── stdin → daemon ───────────────────────────────────────────────────
-    let forward_to_daemon = tokio::spawn(async move {
-        let mut buf = Vec::with_capacity(4096);
-        loop {
-            match read_frame(&mut stdin, &mut buf).await {
-                Ok(false) => break, // EOF
-                Ok(true) => {}
-                Err(e) => {
-                    log::info!("stdin read error: {e}");
-                    break;
-                }
-            }
-            let len = u32::try_from(buf.len()).unwrap_or(0).to_le_bytes();
-            let len_io = std::io::IoSlice::new(&len);
-            let buf_io = std::io::IoSlice::new(&buf);
-            if let Err(e) = daemon_w.write_vectored(&[len_io, buf_io]).await {
-                log::warn!("daemon write error: {e}");
-                break;
-            }
-            if let Err(e) = daemon_w.flush().await {
-                log::warn!("daemon flush error: {e}");
-                break;
-            }
-        }
-        log::debug!("stdin → daemon forwarder exited");
-    });
-
-    // ── daemon → stdout ──────────────────────────────────────────────────
-    let forward_to_stdout = tokio::spawn(async move {
-        let mut buf = Vec::with_capacity(4096);
-        loop {
-            match read_frame(&mut daemon_r, &mut buf).await {
-                Ok(false) => break,
-                Ok(true) => {}
-                Err(e) => {
-                    log::warn!("daemon read error: {e}");
-                    break;
-                }
-            }
-            let len = u32::try_from(buf.len()).unwrap_or(0).to_le_bytes();
-            let len_io = std::io::IoSlice::new(&len);
-            let buf_io = std::io::IoSlice::new(&buf);
-            if let Err(e) = stdout.write_vectored(&[len_io, buf_io]).await {
-                log::warn!("stdout write error: {e}");
-                break;
-            }
-            if let Err(e) = stdout.flush().await {
-                log::warn!("stdout flush error: {e}");
-                break;
-            }
-        }
-        log::debug!("daemon → stdout forwarder exited");
-    });
+    let forward_to_daemon = tokio::spawn(forward_stdin_to_daemon(stdin, daemon_w));
+    let forward_to_stdout = tokio::spawn(forward_daemon_to_stdout(daemon_r, stdout));
 
     tokio::select! {
         _ = forward_to_daemon => {},
@@ -337,9 +313,67 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Raw length-prefixed frame helpers
-// ---------------------------------------------------------------------------
+/// Forward length-prefixed frames from the NM host's stdin to the daemon.
+async fn forward_stdin_to_daemon<R, W>(mut stdin: R, mut daemon_w: W)
+where
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    let mut buf = Vec::with_capacity(4096);
+    loop {
+        match read_frame(&mut stdin, &mut buf).await {
+            Ok(false) => break,
+            Ok(true) => {}
+            Err(e) => {
+                log::info!("stdin read error: {e}");
+                break;
+            }
+        }
+        let len = u32::try_from(buf.len()).unwrap_or(0).to_le_bytes();
+        let len_io = std::io::IoSlice::new(&len);
+        let buf_io = std::io::IoSlice::new(&buf);
+        if let Err(e) = daemon_w.write_vectored(&[len_io, buf_io]).await {
+            log::warn!("daemon write error: {e}");
+            break;
+        }
+        if let Err(e) = daemon_w.flush().await {
+            log::warn!("daemon flush error: {e}");
+            break;
+        }
+    }
+    log::debug!("stdin → daemon forwarder exited");
+}
+
+/// Forward length-prefixed frames from the daemon to the NM host's stdout.
+async fn forward_daemon_to_stdout<R, W>(mut daemon_r: R, mut stdout: W)
+where
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    let mut buf = Vec::with_capacity(4096);
+    loop {
+        match read_frame(&mut daemon_r, &mut buf).await {
+            Ok(false) => break,
+            Ok(true) => {}
+            Err(e) => {
+                log::warn!("daemon read error: {e}");
+                break;
+            }
+        }
+        let len = u32::try_from(buf.len()).unwrap_or(0).to_le_bytes();
+        let len_io = std::io::IoSlice::new(&len);
+        let buf_io = std::io::IoSlice::new(&buf);
+        if let Err(e) = stdout.write_vectored(&[len_io, buf_io]).await {
+            log::warn!("stdout write error: {e}");
+            break;
+        }
+        if let Err(e) = stdout.flush().await {
+            log::warn!("stdout flush error: {e}");
+            break;
+        }
+    }
+    log::debug!("daemon → stdout forwarder exited");
+}
 
 /// Read a single length-prefixed frame into `buf`.
 ///
@@ -371,8 +405,6 @@ async fn read_frame<R: AsyncRead + Unpin>(
 mod tests {
     use super::*;
 
-    // ── read_frame ────────────────────────────────────────────────────────
-
     #[tokio::test]
     async fn test_read_frame_normal() {
         let payload = b"hello";
@@ -397,7 +429,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_read_frame_partial_header() {
-        // Only 2 bytes of the 4-byte length prefix → UnexpectedEof → Ok(false)
         let mut partial: &[u8] = &[0x00, 0x01];
         let mut buf = Vec::new();
         let result = read_frame(&mut partial, &mut buf).await;
@@ -431,7 +462,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_read_frame_empty_payload() {
-        let frame = 0u32.to_le_bytes(); // len = 0
+        let frame = 0u32.to_le_bytes();
         let mut reader: &[u8] = &frame;
         let mut buf = Vec::new();
         let result = read_frame(&mut reader, &mut buf).await;
@@ -440,13 +471,10 @@ mod tests {
         assert!(buf.is_empty());
     }
 
-    // ── write_error_frame ─────────────────────────────────────────────────
-
     #[tokio::test]
     async fn test_write_error_frame_format() {
         let mut output = Vec::new();
         write_error_frame(&mut output, "test error").await;
-        // Frame format: [len: u32 LE][json bytes]
         assert!(output.len() >= 4, "should have length prefix");
         let json_len = u32::from_le_bytes([output[0], output[1], output[2], output[3]]) as usize;
         assert_eq!(output.len(), 4 + json_len);

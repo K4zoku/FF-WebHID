@@ -27,8 +27,6 @@ mod macos;
 #[cfg(not(target_os = "windows"))]
 use anyhow::Context as _;
 
-// ── Windows stub ─────────────────────────────────────────────────────────
-
 #[cfg(target_os = "windows")]
 fn main() -> std::process::ExitCode {
     eprintln!("webhid-mock: Windows is not supported.");
@@ -40,8 +38,6 @@ fn main() -> std::process::ExitCode {
     );
     std::process::ExitCode::from(1)
 }
-
-// ── Linux / macOS main ───────────────────────────────────────────────────
 
 #[cfg(not(target_os = "windows"))]
 fn main() -> std::process::ExitCode {
@@ -72,11 +68,6 @@ fn run_spawn(opts: SpawnOpts) -> anyhow::Result<()> {
     macos::run_spawn(opts)
 }
 
-// ── CLI parsing ──────────────────────────────────────────────────────────
-//
-// Hand-rolled to avoid pulling in clap (matches the rest of the workspace,
-// which has zero CLI deps). Supports only the few flags we need.
-
 #[cfg(not(target_os = "windows"))]
 struct Args {
     command: Command,
@@ -101,6 +92,36 @@ struct SpawnOpts {
 }
 
 #[cfg(not(target_os = "windows"))]
+struct ArgState {
+    vid: Option<u16>,
+    pid: Option<u16>,
+    name: String,
+    descriptor_path: String,
+    usage_page: Option<u16>,
+    usage: Option<u16>,
+    bus: u16,
+    version: u16,
+    country: u8,
+}
+
+#[cfg(not(target_os = "windows"))]
+impl Default for ArgState {
+    fn default() -> Self {
+        ArgState {
+            vid: None,
+            pid: None,
+            name: String::new(),
+            descriptor_path: String::new(),
+            usage_page: None,
+            usage: None,
+            bus: 0x03,
+            version: 0,
+            country: 0,
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
 fn parse_args() -> anyhow::Result<Args> {
     let mut argv = std::env::args().skip(1);
     let sub = argv.next().unwrap_or_default();
@@ -113,72 +134,65 @@ fn parse_args() -> anyhow::Result<Args> {
         anyhow::bail!("unknown subcommand '{sub}'. Expected: spawn. See --help.");
     }
 
-    let mut vid: Option<u16> = None;
-    let mut pid: Option<u16> = None;
-    let mut name = String::new();
-    let mut descriptor_path = String::new();
-    let mut usage_page: Option<u16> = None;
-    let mut usage: Option<u16> = None;
-    let mut bus: u16 = 0x03;
-    let mut version: u16 = 0;
-    let mut country: u8 = 0;
-
+    let mut state = ArgState::default();
     while let Some(flag) = argv.next() {
         let val = argv
             .next()
             .ok_or_else(|| anyhow::anyhow!("flag '{flag}' requires a value"))?;
-        match flag.as_str() {
-            "--vid" | "-v" => {
-                vid = Some(parse_u16(&val).context("--vid")?);
-            }
-            "--pid" | "-p" => {
-                pid = Some(parse_u16(&val).context("--pid")?);
-            }
-            "--name" | "-n" => {
-                name = val;
-            }
-            "--descriptor" | "-d" => {
-                descriptor_path = val;
-            }
-            "--usage-page" => {
-                usage_page = Some(parse_u16(&val).context("--usage-page")?);
-            }
-            "--usage" => {
-                usage = Some(parse_u16(&val).context("--usage")?);
-            }
-            "--bus" => {
-                bus = parse_u16(&val).context("--bus")?;
-            }
-            "--version" => {
-                version = parse_u16(&val).context("--version")?;
-            }
-            "--country" => {
-                country = parse_u8(&val).context("--country")?;
-            }
-            other => anyhow::bail!("unknown flag '{other}'"),
-        }
+        apply_flag(&mut state, &flag, val)?;
     }
 
-    let vid = vid.ok_or_else(|| anyhow::anyhow!("--vid is required"))?;
-    let pid = pid.ok_or_else(|| anyhow::anyhow!("--pid is required"))?;
-    if descriptor_path.is_empty() {
+    finish_args(state)
+}
+
+/// Apply one `--flag` to the parsed state. Every flag takes exactly one
+/// value; `val` is that value.
+#[cfg(not(target_os = "windows"))]
+fn apply_flag(state: &mut ArgState, flag: &str, val: String) -> anyhow::Result<()> {
+    match flag {
+        "--vid" | "-v" => state.vid = Some(parse_u16(&val).context("--vid")?),
+        "--pid" | "-p" => state.pid = Some(parse_u16(&val).context("--pid")?),
+        "--name" | "-n" => state.name = val,
+        "--descriptor" | "-d" => state.descriptor_path = val,
+        "--usage-page" => state.usage_page = Some(parse_u16(&val).context("--usage-page")?),
+        "--usage" => state.usage = Some(parse_u16(&val).context("--usage")?),
+        "--bus" => state.bus = parse_u16(&val).context("--bus")?,
+        "--version" => state.version = parse_u16(&val).context("--version")?,
+        "--country" => state.country = parse_u8(&val).context("--country")?,
+        other => anyhow::bail!("unknown flag '{other}'"),
+    }
+    Ok(())
+}
+
+/// Validate the parsed state and assemble the final `Args`.
+#[cfg(not(target_os = "windows"))]
+fn finish_args(state: ArgState) -> anyhow::Result<Args> {
+    let vid = state
+        .vid
+        .ok_or_else(|| anyhow::anyhow!("--vid is required"))?;
+    let pid = state
+        .pid
+        .ok_or_else(|| anyhow::anyhow!("--pid is required"))?;
+    if state.descriptor_path.is_empty() {
         anyhow::bail!("--descriptor is required");
     }
-    if name.is_empty() {
-        name = format!("webhid-mock {:04x}:{:04x}", vid, pid);
-    }
+    let name = if state.name.is_empty() {
+        format!("webhid-mock {:04x}:{:04x}", vid, pid)
+    } else {
+        state.name
+    };
 
     Ok(Args {
         command: Command::Spawn(SpawnOpts {
             vid,
             pid,
             name,
-            descriptor_path,
-            usage_page,
-            usage,
-            bus,
-            version,
-            country,
+            descriptor_path: state.descriptor_path,
+            usage_page: state.usage_page,
+            usage: state.usage,
+            bus: state.bus,
+            version: state.version,
+            country: state.country,
         }),
     })
 }
@@ -237,8 +251,6 @@ fn print_usage() {
     eprintln!("OS events (output reports, get/set report queries) are echoed to stdout");
     eprintln!("as JSON. On stdin EOF, the device is destroyed and the process exits.");
 }
-
-// ── Shared device abstraction + JSON command handling ────────────────────
 
 /// A spawned virtual HID device. Platform backends implement this in
 /// `linux.rs` / `macos.rs`; the JSON command handler only needs input

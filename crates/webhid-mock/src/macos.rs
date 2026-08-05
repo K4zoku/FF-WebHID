@@ -43,8 +43,6 @@ use core_foundation_sys::dictionary::{
 
 use crate::{CmdResult, MockDevice, SpawnOpts, emit_stdout, handle_command};
 
-// ── IOKit bindings ───────────────────────────────────────────────────────
-
 type IOHIDUserDeviceRef = *mut c_void;
 
 /// `IOHIDReportType` from IOKit/hid/IOHIDKeys.h.
@@ -97,8 +95,6 @@ unsafe extern "C" {
     static kCFRunLoopDefaultMode: CFStringRef;
 }
 
-// ── Report callbacks (run loop thread) ───────────────────────────────────
-
 extern "C" fn get_report_cb(
     _refcon: *mut c_void,
     report_type: IOHIDReportType,
@@ -111,8 +107,6 @@ extern "C" fn get_report_cb(
         "id": report_id,
         "reportType": report_type,
     }));
-    // Success with the buffer left untouched (zeros), matching the Linux
-    // backend's empty get-report reply.
     K_IO_RETURN_SUCCESS
 }
 
@@ -126,14 +120,10 @@ extern "C" fn set_report_cb(
     let bytes: &[u8] = if report.is_null() || report_length <= 0 {
         &[]
     } else {
-        // SAFETY: IOKit guarantees the buffer is valid for `report_length`
-        // bytes for the duration of the callback.
         unsafe { std::slice::from_raw_parts(report, report_length as usize) }
     };
 
     if report_type == K_IO_HID_REPORT_TYPE_OUTPUT {
-        // Match the Linux event shape: numbered reports carry the report ID
-        // as data[0] (tests assert output.data[0] === reportId).
         let data: Vec<u8> = if report_id != 0 {
             let mut v = Vec::with_capacity(bytes.len() + 1);
             v.push(report_id as u8);
@@ -157,8 +147,6 @@ extern "C" fn set_report_cb(
     K_IO_RETURN_SUCCESS
 }
 
-// ── MockDevice impl ──────────────────────────────────────────────────────
-
 /// Send/Sync wrapper for the raw device ref.
 ///
 /// SAFETY: `IOHIDUserDeviceHandleReport` is a Mach IPC call into the kernel
@@ -177,8 +165,6 @@ struct MacOSDevice {
 
 impl MockDevice for MacOSDevice {
     fn send_input(&self, payload: &[u8]) -> anyhow::Result<()> {
-        // IOHIDUserDeviceHandleReport copies the report into a Mach message;
-        // the HID stack caps reports at 8 KB, far above any test fixture.
         let ret = unsafe {
             IOHIDUserDeviceHandleReport(
                 self.device.0 as IOHIDUserDeviceRef,
@@ -193,8 +179,6 @@ impl MockDevice for MacOSDevice {
     }
 }
 
-// ── Device properties ────────────────────────────────────────────────────
-
 /// Build the `IOHIDUserDeviceCreate` property dictionary. Keys are the
 /// string literals behind the `kIOHID*Key` macros in IOKit/hid/IOHIDKeys.h
 /// (macros, not exported symbols, so we construct them directly).
@@ -205,8 +189,6 @@ impl MockDevice for MacOSDevice {
 /// CFString. Returns a create-rule (+1) reference; intentionally never
 /// released since the device lives until process exit.
 fn build_properties(opts: &SpawnOpts, rd: &[u8]) -> CFDictionaryRef {
-    // Owners keep every key/value alive until CFDictionaryCreate (which
-    // retains its contents) returns.
     let mut keys: Vec<CFString> = Vec::new();
     let mut values: Vec<CFType> = Vec::new();
     let mut push = |key: &str, value: CFType| {
@@ -214,38 +196,8 @@ fn build_properties(opts: &SpawnOpts, rd: &[u8]) -> CFDictionaryRef {
         values.push(value);
     };
 
-    push("ReportDescriptor", CFData::from_buffer(rd).as_CFType());
-    push("VendorID", CFNumber::from(opts.vid as i64).as_CFType());
-    push("ProductID", CFNumber::from(opts.pid as i64).as_CFType());
-    push("Product", CFString::new(&opts.name).as_CFType());
-    push("Manufacturer", CFString::new("webhid-mock").as_CFType());
-    push(
-        "VersionNumber",
-        CFNumber::from(opts.version as i64).as_CFType(),
-    );
-
-    if opts.country != 0 {
-        push(
-            "CountryCode",
-            CFNumber::from(opts.country as i64).as_CFType(),
-        );
-    }
-    // Map the Linux bus-type flag to an IOKit transport string. Unknown
-    // values omit the property (the HID stack defaults sanely).
-    let transport = match opts.bus {
-        0x03 => Some("USB"),
-        0x05 => Some("Bluetooth"),
-        _ => None,
-    };
-    if let Some(t) = transport {
-        push("Transport", CFString::new(t).as_CFType());
-    }
-    if let Some(up) = opts.usage_page {
-        push("PrimaryUsagePage", CFNumber::from(up as i64).as_CFType());
-    }
-    if let Some(u) = opts.usage {
-        push("PrimaryUsage", CFNumber::from(u as i64).as_CFType());
-    }
+    push_identity_properties(&mut push, opts, rd);
+    push_optional_properties(&mut push, opts);
 
     let key_refs: Vec<CFTypeRef> = keys.iter().map(|k| k.as_CFTypeRef()).collect();
     let value_refs: Vec<CFTypeRef> = values.iter().map(|v| v.as_CFTypeRef()).collect();
@@ -263,7 +215,42 @@ fn build_properties(opts: &SpawnOpts, rd: &[u8]) -> CFDictionaryRef {
     dict
 }
 
-// ── Spawn + event loop ───────────────────────────────────────────────────
+/// Push the properties every device has: report descriptor + USB identity.
+fn push_identity_properties(push: &mut impl FnMut(&str, CFType), opts: &SpawnOpts, rd: &[u8]) {
+    push("ReportDescriptor", CFData::from_buffer(rd).as_CFType());
+    push("VendorID", CFNumber::from(opts.vid as i64).as_CFType());
+    push("ProductID", CFNumber::from(opts.pid as i64).as_CFType());
+    push("Product", CFString::new(&opts.name).as_CFType());
+    push("Manufacturer", CFString::new("webhid-mock").as_CFType());
+    push(
+        "VersionNumber",
+        CFNumber::from(opts.version as i64).as_CFType(),
+    );
+}
+
+/// Push the optional properties: country code, transport, usage page/usage.
+fn push_optional_properties(push: &mut impl FnMut(&str, CFType), opts: &SpawnOpts) {
+    if opts.country != 0 {
+        push(
+            "CountryCode",
+            CFNumber::from(opts.country as i64).as_CFType(),
+        );
+    }
+    let transport = match opts.bus {
+        0x03 => Some("USB"),
+        0x05 => Some("Bluetooth"),
+        _ => None,
+    };
+    if let Some(t) = transport {
+        push("Transport", CFString::new(t).as_CFType());
+    }
+    if let Some(up) = opts.usage_page {
+        push("PrimaryUsagePage", CFNumber::from(up as i64).as_CFType());
+    }
+    if let Some(u) = opts.usage {
+        push("PrimaryUsage", CFNumber::from(u as i64).as_CFType());
+    }
+}
 
 pub fn run_spawn(opts: SpawnOpts) -> anyhow::Result<()> {
     let rd = std::fs::read(&opts.descriptor_path)
@@ -275,7 +262,6 @@ pub fn run_spawn(opts: SpawnOpts) -> anyhow::Result<()> {
     );
 
     let props = build_properties(&opts, &rd);
-    // NULL allocator = kCFAllocatorDefault.
     let device = unsafe { IOHIDUserDeviceCreate(std::ptr::null(), props) };
     if device.is_null() {
         anyhow::bail!(
@@ -315,8 +301,6 @@ pub fn run_spawn(opts: SpawnOpts) -> anyhow::Result<()> {
     };
     std::thread::spawn(move || stdin_loop(dev));
 
-    // Services get/set-report callbacks until process exit (the stdin
-    // thread exits the process on destroy/EOF).
     CFRunLoop::run_current();
     Ok(())
 }

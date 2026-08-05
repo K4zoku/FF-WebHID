@@ -8,10 +8,10 @@ pub use types::*;
 
 /// FNV-1a 32-bit hash of a device path/syspath for a stable u32 device identifier.
 pub fn hash_device_id(path: &str) -> u32 {
-    let mut hash: u32 = 0x811c9dc5; // FNV offset basis
+    let mut hash: u32 = 0x811c9dc5;
     for b in path.bytes() {
         hash ^= b as u32;
-        hash = hash.wrapping_mul(0x01000193); // FNV prime
+        hash = hash.wrapping_mul(0x01000193);
     }
     hash
 }
@@ -22,7 +22,6 @@ mod tests {
 
     #[test]
     fn test_hash_device_id_empty() {
-        // FNV-1a of empty string
         assert_eq!(hash_device_id(""), 0x811c9dc5);
     }
 
