@@ -1,4 +1,4 @@
-(function () {
+;(function () {
   const webhid = globalThis.webhid
 
   /**
@@ -18,9 +18,65 @@
     const moreLabel = t('infoPopoverMore')
     /** @type {ReturnType<typeof setTimeout>|null} */
     let closeTimer = null
+    /** @type {(() => void)|null} */
+    let repositionHandler = null
+
+    /** @returns {void} */
+    function disableReposition() {
+      if (!repositionHandler) return
+      window.removeEventListener('resize', repositionHandler)
+      document.removeEventListener('scroll', repositionHandler, true)
+      repositionHandler = null
+    }
+
+    /**
+     * Anchors the bubble to the (i) button in viewport coordinates, flips it
+     * above the button when there is no room below, and points the arrow at
+     * the button. Fixed positioning floats the bubble above the settings
+     * grid instead of being sized by it.
+     * @param {Element} info
+     * @returns {void}
+     */
+    function positionPopover(info) {
+      const btn = info.querySelector('.info-popover-btn')
+      const pop = info.querySelector('.info-popover')
+      if (!btn || !pop) return
+      const btnRect = btn.getBoundingClientRect()
+      const popW = pop.offsetWidth
+      const popH = pop.offsetHeight
+      const gap = 8
+      const margin = 8
+      let top = btnRect.bottom + gap
+      let arrowPos = 'top'
+      if (top + popH + margin > window.innerHeight) {
+        top = btnRect.top - popH - gap
+        arrowPos = 'bottom'
+      }
+      pop.style.top = Math.max(margin, top) + 'px'
+      const left = Math.max(margin, Math.min(btnRect.left, window.innerWidth - popW - margin))
+      pop.style.left = left + 'px'
+      pop.dataset.arrowPos = arrowPos
+      const btnCenter = btnRect.left + btnRect.width / 2
+      const arrowLeft = Math.max(6, Math.min(btnCenter - left - 4, popW - 14))
+      pop.style.setProperty('--arrow-left', arrowLeft + 'px')
+    }
+
+    /**
+     * Keeps the open bubble anchored while the window resizes or the page
+     * scrolls (capture catches scrolls inside overflow containers).
+     * @param {Element} info
+     * @returns {void}
+     */
+    function enableReposition(info) {
+      disableReposition()
+      repositionHandler = () => positionPopover(info)
+      window.addEventListener('resize', repositionHandler)
+      document.addEventListener('scroll', repositionHandler, true)
+    }
 
     /** @returns {void} */
     function closeAll() {
+      disableReposition()
       if (closeTimer) {
         clearTimeout(closeTimer)
         closeTimer = null
@@ -46,6 +102,8 @@
       info.classList.add('open')
       const btn = info.querySelector('.info-popover-btn')
       if (btn) btn.setAttribute('aria-expanded', 'true')
+      positionPopover(info)
+      enableReposition(info)
     }
 
     scope.querySelectorAll('.setting-info').forEach((info) => {

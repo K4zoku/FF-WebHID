@@ -6,8 +6,6 @@ body {
   font-size: 13px;
 }
 
-
-
 [hidden] {
   display: none !important;
 }
@@ -101,7 +99,6 @@ select:hover {
   border-color: var(--accent);
 }
 
-
 .seg-group {
   display: flex;
   flex-wrap: wrap;
@@ -151,7 +148,6 @@ select:hover {
   outline-offset: 1px;
 }
 
-
 .setting-info {
   position: relative;
 }
@@ -187,10 +183,10 @@ select:hover {
 
 .info-popover {
   display: none;
-  position: absolute;
+  position: fixed;
   top: calc(100% + 8px);
   left: 8px;
-  z-index: 20;
+  z-index: 100;
   max-width: 300px;
   padding: 8px 10px;
   background: var(--surface-raised);
@@ -204,16 +200,25 @@ select:hover {
 }
 
 .info-popover::before {
-  content: "";
+  content: '';
   position: absolute;
   top: -5px;
-  left: 14px;
+  left: var(--arrow-left, 14px);
   width: 8px;
   height: 8px;
   background: var(--surface-raised);
   border-left: 1px solid var(--border-default);
   border-top: 1px solid var(--border-default);
   transform: rotate(45deg);
+}
+
+.info-popover[data-arrow-pos='bottom']::before {
+  top: auto;
+  bottom: -5px;
+  border-left: none;
+  border-top: none;
+  border-right: 1px solid var(--border-default);
+  border-bottom: 1px solid var(--border-default);
 }
 
 .info-popover p {
