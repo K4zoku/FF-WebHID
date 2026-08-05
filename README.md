@@ -8,7 +8,12 @@
 
 ## What is this?
 
-WebHID is a web standard that lets websites communicate directly with supported USB devices. Sites use it for game controllers, drawing tablets, stream decks, MIDI devices, and specialized input gear. Firefox does not support WebHID out of the box, so this addon fills the gap. Install the addon plus a small background daemon, and WebHID websites work as if Firefox supported them natively.
+WebHID is a web standard that lets websites communicate directly with supported USB devices. Sites use it for game controllers, drawing tablets, stream decks, MIDI devices, and specialized input gear. Firefox does not support WebHID out of the box[^1][^2], so this addon fills the gap. Install the addon plus a small background daemon, and WebHID websites work as if Firefox supported them natively.
+
+
+[^1]: [MDN: WebHID API](https://developer.mozilla.org/en-US/docs/Web/API/WebHID_API): browser compatibility shows no Firefox support.
+
+[^2]: [Mozilla standards position on WebHID](https://github.com/mozilla/standards-positions/issues/459): negative.
 
 ## Features
 
@@ -25,7 +30,7 @@ WebHID is a web standard that lets websites communicate directly with supported 
 
 The addon needs two parts:
 
-1. The Firefox addon: [![Firefox](https://img.shields.io/badge/Firefox-Get%20the%20Addon-0060E0?style=for-the-badge&logo=firefox&logoColor=FFBD4F)](https://addons.mozilla.org/en-US/firefox/addon/webhid/)
+1. The Firefox addon: [![Firefox](https://img.shields.io/badge/Firefox-Get%20the%20Addon-0060E0?style=flat&logo=firefox&logoColor=FFBD4F)](https://addons.mozilla.org/en-US/firefox/addon/webhid/)
 2. A small background daemon for your operating system, from [GitHub Releases](https://github.com/K4zoku/FF-WebHID/releases).
 
 Step-by-step instructions for Linux, macOS, and Windows: [docs/INSTALLATION.md](docs/INSTALLATION.md).
