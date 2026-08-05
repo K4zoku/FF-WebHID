@@ -117,6 +117,12 @@ Init time per mode (open = device open through data-plane ready; warmup =
 wall time of the warm-up; total = page load through run #1's send-start):
 
 ```mermaid
+---
+config:
+  themeVariables:
+    xyChart:
+      plotColorPalette: '#55b4d4, #fa8532, #86b300'
+---
 xychart
     title "Init time per mode (ms)"
     x-axis [nm, ws, wt-inpage, wt, native]
@@ -142,7 +148,7 @@ p50 round-trip latency per run, all modes:
 config:
   themeVariables:
     xyChart:
-      plotColorPalette: '#4d78dd, #ff9200, #00b359, #c7366c, #888888'
+      plotColorPalette: '#55b4d4, #fa8532, #86b300, #f07171, #828e9f'
 ---
 xychart
     title "Per-run p50 round-trip latency (ms)"
@@ -162,7 +168,7 @@ Whole-run walltime per run, all modes:
 config:
   themeVariables:
     xyChart:
-      plotColorPalette: '#4d78dd, #ff9200, #00b359, #c7366c, #888888'
+      plotColorPalette: '#55b4d4, #fa8532, #86b300, #f07171, #828e9f'
 ---
 xychart
     title "Whole-run walltime (ms)"
@@ -180,16 +186,25 @@ Line colors (both charts, in series order):
 ```mermaid
 flowchart LR
     nm["nm"]:::m1 ~~~ ws["ws"]:::m2 ~~~ wtip["wt-inpage"]:::m3 ~~~ wt["wt"]:::m4 ~~~ nat["native"]:::m5
-    classDef m1 fill:#4d78dd,stroke:#4d78dd,color:#fff
-    classDef m2 fill:#ff9200,stroke:#ff9200,color:#fff
-    classDef m3 fill:#00b359,stroke:#00b359,color:#fff
-    classDef m4 fill:#c7366c,stroke:#c7366c,color:#fff
-    classDef m5 fill:#888888,stroke:#888888,color:#fff
+    classDef m1 fill:#55b4d4,stroke:#55b4d4,color:#fff
+    classDef m2 fill:#fa8532,stroke:#fa8532,color:#fff
+    classDef m3 fill:#86b300,stroke:#86b300,color:#fff
+    classDef m4 fill:#f07171,stroke:#f07171,color:#fff
+    classDef m5 fill:#828e9f,stroke:#828e9f,color:#fff
 ```
 
 Per-report round-trip latency (ms):
 
 ```mermaid
+---
+config:
+  themeVariables:
+    cScale0: '#55b4d4'
+    cScale1: '#fa8532'
+    cScale2: '#86b300'
+    cScale3: '#f07171'
+    cScale4: '#828e9f'
+---
 radar-beta
   title Per-report latency by mode
   axis p50["p50"], p90["p90"], p95["p95"], mx["max"]
@@ -206,6 +221,15 @@ radar-beta
 Whole-run walltime (ms):
 
 ```mermaid
+---
+config:
+  themeVariables:
+    cScale0: '#55b4d4'
+    cScale1: '#fa8532'
+    cScale2: '#86b300'
+    cScale3: '#f07171'
+    cScale4: '#828e9f'
+---
 radar-beta
   title Whole-run walltime by mode
   axis p50["p50"], p90["p90"], p95["p95"], mx["max"]
