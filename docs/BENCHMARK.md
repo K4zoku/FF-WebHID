@@ -126,6 +126,8 @@ xychart
     bar "total" [330.7, 208.1, 184.6, 211.5, 62.4]
 ```
 
+Bar order in each group: open, warmup, total.
+
 Per-run round-trip latency (p50) and whole-run walltime, for all 10 runs of
 each mode, are charted below. Per-run percentiles, whole-run aggregates, and
 the delta vs the native baseline are in the collapsible dataset section at
@@ -133,9 +135,15 @@ the end.
 
 ### Per-run charts
 
-p50 round-trip latency per run, Firefox modes (native per-run numbers are in the dataset, aggregates in the delta table):
+p50 round-trip latency per run, all modes:
 
 ```mermaid
+---
+config:
+  themeVariables:
+    xyChart:
+      plotColorPalette: '#4d78dd, #ff9200, #00b359, #c7366c, #888888'
+---
 xychart
     title "Per-run p50 round-trip latency (ms)"
     x-axis "run" [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
@@ -144,11 +152,18 @@ xychart
     line "ws" [1.16, 1.12, 1.14, 1.08, 1.08, 1.08, 1.08, 1.06, 1.04, 1.02]
     line "wt-inpage" [1.18, 1.10, 1.12, 1.08, 1.04, 1.04, 1.06, 1.04, 0.98, 1.02]
     line "wt" [1.06, 1.00, 0.96, 0.96, 0.96, 0.94, 0.92, 0.94, 0.96, 0.96]
+    line "native" [0.36, 0.27, 0.24, 0.30, 0.27, 0.23, 0.23, 0.23, 0.25, 0.50]
 ```
 
-Whole-run walltime per run:
+Whole-run walltime per run, all modes:
 
 ```mermaid
+---
+config:
+  themeVariables:
+    xyChart:
+      plotColorPalette: '#4d78dd, #ff9200, #00b359, #c7366c, #888888'
+---
 xychart
     title "Whole-run walltime (ms)"
     x-axis "run" [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
@@ -158,6 +173,18 @@ xychart
     line "wt-inpage" [486.2, 461.8, 467.9, 518.3, 436.6, 416.7, 446.3, 417.8, 402.0, 440.0]
     line "wt" [490.0, 452.9, 432.4, 453.0, 434.7, 421.3, 417.9, 433.3, 434.0, 448.5]
     line "native" [184.9, 108.2, 113.9, 114.1, 112.7, 116.0, 112.5, 114.3, 106.6, 168.0]
+```
+
+Line colors (both charts, in series order):
+
+```mermaid
+flowchart LR
+    nm["nm"]:::m1 ~~~ ws["ws"]:::m2 ~~~ wtip["wt-inpage"]:::m3 ~~~ wt["wt"]:::m4 ~~~ nat["native"]:::m5
+    classDef m1 fill:#4d78dd,stroke:#4d78dd,color:#fff
+    classDef m2 fill:#ff9200,stroke:#ff9200,color:#fff
+    classDef m3 fill:#00b359,stroke:#00b359,color:#fff
+    classDef m4 fill:#c7366c,stroke:#c7366c,color:#fff
+    classDef m5 fill:#888888,stroke:#888888,color:#fff
 ```
 
 Per-report round-trip latency (ms):
