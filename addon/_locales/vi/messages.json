@@ -24,7 +24,7 @@
     "message": "Kênh dữ liệu"
   },
   "popupDataPlaneDesc": {
-    "message": "WebSocket, WebTransport, hoặc Native Messaging"
+    "message": "WebTransport (trong worker), WebTransport (trong trang), WebSocket, hoặc Native Messaging"
   },
   "popupDataPlaneWs": {
     "message": "WebSocket"
@@ -101,12 +101,6 @@
   "popupDeviceCount": {
     "message": "($1/$2)"
   },
-  "popupUseWorker": {
-    "message": "Dùng Worker"
-  },
-  "popupUseWorkerDesc": {
-    "message": "Tắt: WebTransport kết nối trực tiếp trong trang (dùng CPU main thread; ổn ở tốc độ report thường). WebSocket vẫn cần worker."
-  },
   "popupInPageWtWarning": {
     "message": "WebTransport trong trang có thể hiện cảnh báo quyền mạng cục bộ của Firefox (\"wants to access other apps and services on this device\"). Hãy tick \"Remember my choice for this site\" trước khi bấm Allow, nếu không sẽ bị hỏi lại mỗi lần tải trang."
   },
@@ -156,13 +150,16 @@
     "message": "Kênh dữ liệu"
   },
   "settingsDataPlaneDesc": {
-    "message": "**WebSocket**: Web Worker giữ kết nối WS tới daemon; input report chuyển tới trang qua postMessage (ngoài main thread).\n**WebTransport**: cùng kiến trúc worker qua QUIC, hoặc ngay trong trang khi tắt Use Worker.\n**Native Messaging**: toàn bộ dữ liệu (sendReport, input reports, feature reports) qua NM host. Không WS. Fallback khi WS/WT bị chặn."
+    "message": "**WebTransport** (mặc định): tùy chọn nhanh nhất; chạy trong background worker nên trang mượt hơn.\n**WebTransport (in-page)**: kết nối trực tiếp trong trang; ổn ở tốc độ report thường, dùng nhiều CPU trang hơn. Dùng khi site chặn background worker (CSP) nhưng vẫn cho phép kết nối; các tùy chọn dùng worker sẽ fallback sang Native Messaging. Firefox hỏi quyền local-network (\"Allow\") một lần trước kết nối in-page đầu tiên; tick \"Remember my choice for this site\". Reload trang sau khi thay đổi.\n**WebSocket**: fallback khi không có WebTransport (Firefox cũ).\n**Native Messaging**: tùy chọn chậm nhất nhưng tương thích nhất; dùng khi chính sách bảo mật của site chặn các tùy chọn khác."
   },
   "settingsDataPlaneWs": {
     "message": "WebSocket"
   },
   "settingsDataPlaneWt": {
     "message": "WebTransport"
+  },
+  "settingsDataPlaneWtInpage": {
+    "message": "WebTransport (in-page)"
   },
   "settingsDataPlaneNm": {
     "message": "Native Messaging"
@@ -186,7 +183,7 @@
     "message": "Worker Polyfill"
   },
   "settingsWorkerPolyfillDesc": {
-    "message": "Chèn stub WebHID API vào Worker scripts (new Worker(), new SharedWorker()). Method ném NotSupportedError cho tới khi giao tiếp worker đầy đủ được triển khai. Reload trang sau khi thay đổi."
+    "message": "Chèn đầy đủ WebHID API vào Worker scripts (new Worker()). requestDevice() chỉ khả dụng trên trang, đúng theo spec. Reload trang sau khi thay đổi."
   },
   "settingsAllowActivationless": {
     "message": "Cho phép requestDevice() không cần user activation"
@@ -228,7 +225,7 @@
     "message": "Chế độ tạo Worker"
   },
   "settingsWorkerSpawnModeDesc": {
-    "message": "**Shadow URL** (mặc định trên MV3): tạo data worker qua new Worker(location.href) với StreamFilter chặn request tự tham chiếu. Thất bại nếu server từ chối hoặc require-trusted-types-for hạn chế.\n**Blob + CSP rewrite** (mặc định trên MV2): tạo worker từ URL blob:; nới lỏng directive worker-src và connect-src của trang."
+    "message": "**Shadow URL** (mặc định trên MV3): tạo data worker qua new Worker(location.href) với StreamFilter chặn request tự tham chiếu; tôn trọng cài đặt bảo mật của trang và không thay đổi gì trên trang. Thất bại nếu server từ chối hoặc require-trusted-types-for hạn chế.\n**Blob + CSP rewrite** (mặc định trên MV2): tạo worker từ URL blob:; nới lỏng directive worker-src và connect-src của trang. Hoạt động đầy đủ trên MV2; trên MV3 chỉ rewrite được CSP khai báo trong meta tag, nên CSP qua header vẫn chặn."
   },
   "settingsWorkerSpawnShadow": {
     "message": "Shadow URL"
@@ -236,17 +233,14 @@
   "settingsWorkerSpawnBlob": {
     "message": "Blob + ghi đè CSP"
   },
-  "settingsUseWorker": {
-    "message": "Dùng Worker"
-  },
-  "settingsUseWorkerDesc": {
-    "message": "Bật: data plane WS/WT chạy trong Web Worker riêng (ngoài main thread, khuyến nghị).\nTắt: WebTransport kết nối trực tiếp trong trang, report được dispatch trên main thread (dùng chung CPU với rendering; ổn ở tốc độ report thường). Firefox hỏi quyền local-network (\"Allow\") một lần cho trang trước khi kết nối in-page đầu tiên; worker được miễn prompt này. WebSocket vẫn cần worker vì HSTS đổi ws:// thành wss:// trên trang. Reload trang sau khi đổi."
-  },
   "segDataPlaneWs": {
     "message": "WS"
   },
   "segDataPlaneWt": {
     "message": "WT"
+  },
+  "segDataPlaneWtInpage": {
+    "message": "WTI"
   },
   "segDataPlaneNm": {
     "message": "NM"

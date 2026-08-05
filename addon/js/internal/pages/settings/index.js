@@ -19,7 +19,6 @@
   for (const key of [
     'daemonAsNmHost',
     'workerPolyfillEnabled',
-    'useWorker',
     'allowActivationlessRequestDevice'
   ]) {
     document.getElementById(key).checked = current[key]
@@ -46,25 +45,30 @@
     return radio ? radio.value : ''
   }
 
-  setRadioValue('dataPlane', current.dataPlane)
+  /**
+   * Maps stored settings (dataPlane + useWorker) to the Data Plane radio value.
+   * @param {object} s
+   * @returns {string}
+   */
+  function effectiveDataPlaneValue(s) {
+    return s.dataPlane === 'wt' && s.useWorker === false ? 'wt-inpage' : s.dataPlane
+  }
+
+  setRadioValue('dataPlane', effectiveDataPlaneValue(current))
   setRadioValue('devicePickerMode', current.devicePickerMode || GLOBAL_DEFAULTS.devicePickerMode)
   setRadioValue('workerSpawnMode', current.workerSpawnMode || GLOBAL_DEFAULTS.workerSpawnMode)
   setRadioValue('logLevel', String(current.logLevel))
-  const useWorkerCheckbox = document.getElementById('useWorker')
-  useWorkerCheckbox.checked = current.useWorker !== false
 
   /**
    * Shows only the options that apply to the current data plane:
-   * useWorker only matters for WT (WS always needs the worker, NM needs
-   * neither); workerSpawnMode matters only when a worker will actually spawn.
+   * workerSpawnMode matters only when a worker will actually spawn (WT
+   * worker or WS).
    * @returns {void}
    */
   function updatePlaneVisibility() {
     const dp = currentRadioValue('dataPlane')
-    const useWorker = useWorkerCheckbox.checked
-    document.getElementById('useWorker-setting').style.display = dp === 'wt' ? '' : 'none'
     document.getElementById('workerSpawnMode-setting').style.display =
-      dp !== 'nm' && useWorker ? '' : 'none'
+      dp === 'wt' || dp === 'ws' ? '' : 'none'
   }
   updatePlaneVisibility()
 
@@ -85,15 +89,40 @@
   for (const key of [
     'daemonAsNmHost',
     'workerPolyfillEnabled',
-    'useWorker',
     'allowActivationlessRequestDevice'
   ]) {
     document.getElementById(key).addEventListener('change', async (e) => {
       await saveGlobalSetting(key, e.target.checked)
-      if (key === 'useWorker') updatePlaneVisibility()
       showStatus(`${key} = ${e.target.checked}`)
     })
   }
+
+  /**
+   * Saves the Data Plane radio selection. WebTransport (in-page) is stored as
+   * dataPlane=wt + useWorker=false, WebTransport (worker) as dataPlane=wt +
+   * useWorker=true; the backend keeps reading the useWorker flag.
+   * @param {string} value
+   * @returns {Promise<void>}
+   */
+  async function saveDataPlane(value) {
+    if (value === 'wt-inpage') {
+      await saveGlobalSetting('dataPlane', 'wt')
+      await saveGlobalSetting('useWorker', false)
+    } else if (value === 'wt') {
+      await saveGlobalSetting('dataPlane', 'wt')
+      await saveGlobalSetting('useWorker', true)
+    } else {
+      await saveGlobalSetting('dataPlane', value)
+    }
+  }
+  document.querySelectorAll('input[name="dataPlane"]').forEach((radio) => {
+    radio.addEventListener('change', async () => {
+      if (!radio.checked) return
+      await saveDataPlane(radio.value)
+      updatePlaneVisibility()
+      showStatus(`dataPlane = ${radio.value}`)
+    })
+  })
 
   /**
    * @param {string} name
@@ -105,12 +134,10 @@
       radio.addEventListener('change', async () => {
         if (!radio.checked) return
         await saveGlobalSetting(name, transform ? transform(radio.value) : radio.value)
-        if (name === 'dataPlane') updatePlaneVisibility()
         showStatus(`${name} = ${radio.value}`)
       })
     })
   }
-  bindRadioGroup('dataPlane')
   bindRadioGroup('devicePickerMode')
   bindRadioGroup('workerSpawnMode')
   bindRadioGroup('logLevel', (v) => parseInt(v, 10))

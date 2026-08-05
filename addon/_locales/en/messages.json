@@ -24,7 +24,7 @@
     "message": "Data Plane"
   },
   "popupDataPlaneDesc": {
-    "message": "WebSocket, WebTransport, or Native Messaging"
+    "message": "WebTransport (in a worker), WebTransport (in the page), WebSocket, or Native Messaging"
   },
   "popupDataPlaneWs": {
     "message": "WebSocket"
@@ -101,12 +101,6 @@
   "popupDeviceCount": {
     "message": "($1/$2)"
   },
-  "popupUseWorker": {
-    "message": "Use Worker"
-  },
-  "popupUseWorkerDesc": {
-    "message": "Off: WebTransport connects directly in the page (main-thread CPU; fine at normal report rates). WebSocket still needs the worker."
-  },
   "popupInPageWtWarning": {
     "message": "In-page WebTransport may trigger a Firefox local-network permission prompt (\"wants to access other apps and services on this device\"). Tick \"Remember my choice for this site\" before clicking Allow, otherwise you will be asked again on every page load."
   },
@@ -156,13 +150,16 @@
     "message": "Data Plane"
   },
   "settingsDataPlaneDesc": {
-    "message": "**WebSocket**: a Web Worker owns the WS connection; input reports are forwarded to the page via postMessage (off main thread).\n**WebTransport**: the same worker model over QUIC, or directly in the page when Use Worker is off.\n**Native Messaging**: all data (sendReport, input reports, feature reports) goes through the NM host. No WS. Fallback when WS/WT are blocked."
+    "message": "**WebTransport** (default): the fastest option; runs in a background worker so pages stay smooth.\n**WebTransport (in-page)**: connects directly in the page; fine at normal report rates, uses more page CPU. Use it when the site blocks background workers (CSP) but still allows the connection; the worker-based options would fall back to Native Messaging there. Firefox asks a one-time local-network permission (\"Allow\") before the first in-page connection; tick \"Remember my choice for this site\". Reload pages after changing.\n**WebSocket**: fallback when WebTransport is not available (older Firefox).\n**Native Messaging**: the slowest but most compatible option; use when a site's security policy blocks the others."
   },
   "settingsDataPlaneWs": {
     "message": "WebSocket"
   },
   "settingsDataPlaneWt": {
     "message": "WebTransport"
+  },
+  "settingsDataPlaneWtInpage": {
+    "message": "WebTransport (in-page)"
   },
   "settingsDataPlaneNm": {
     "message": "Native Messaging"
@@ -186,7 +183,7 @@
     "message": "Worker Polyfill"
   },
   "settingsWorkerPolyfillDesc": {
-    "message": "Inject WebHID API stubs into Worker scripts (new Worker(), new SharedWorker()). Methods throw NotSupportedError until full worker communication is implemented. Reload pages after changing."
+    "message": "Injects the full WebHID API into Worker scripts (new Worker()). requestDevice() stays page-only, as the spec requires. Reload pages after changing."
   },
   "settingsAllowActivationless": {
     "message": "Allow activation-less requestDevice()"
@@ -228,7 +225,7 @@
     "message": "Worker Spawn Mode"
   },
   "settingsWorkerSpawnModeDesc": {
-    "message": "**Shadow URL** (default on MV3): spawns the data worker via new Worker(location.href) with a StreamFilter intercepting the synthetic self-request. Fails if the server rejects it or if require-trusted-types-for is restrictive.\n**Blob + CSP rewrite** (default on MV2): spawns the worker from a blob: URL; relaxes the page's worker-src and connect-src directives."
+    "message": "**Shadow URL** (default on MV3): spawns the data worker via new Worker(location.href) with a StreamFilter intercepting the synthetic self-request; respects the page's security settings and changes nothing about the page. Fails if the server rejects it or if require-trusted-types-for is restrictive.\n**Blob + CSP rewrite** (default on MV2): spawns the worker from a blob: URL; relaxes the page's worker-src and connect-src directives. Works fully on MV2; on MV3 only a meta-tag CSP can be rewritten, so header-based policies still block it."
   },
   "settingsWorkerSpawnShadow": {
     "message": "Shadow URL"
@@ -236,17 +233,14 @@
   "settingsWorkerSpawnBlob": {
     "message": "Blob + CSP rewrite"
   },
-  "settingsUseWorker": {
-    "message": "Use Worker"
-  },
-  "settingsUseWorkerDesc": {
-    "message": "On: the WS/WT data plane runs in a dedicated Web Worker (off main thread, recommended).\nOff: WebTransport connects directly in the page (main-thread CPU; fine at normal report rates). Firefox asks a one-time local-network permission (\"Allow\") for the page before the first in-page WebTransport connection; workers are exempt. WebSocket still needs the worker because HSTS rewrites ws:// to wss:// on pages. Reload pages after changing."
-  },
   "segDataPlaneWs": {
     "message": "WS"
   },
   "segDataPlaneWt": {
     "message": "WT"
+  },
+  "segDataPlaneWtInpage": {
+    "message": "WTI"
   },
   "segDataPlaneNm": {
     "message": "NM"

@@ -44,20 +44,12 @@
               <h3 id="popupDataPlane" data-i18n="popupDataPlane">Data Plane</h3>
               <div class="info-popover">
                 <p data-i18n-md="popupDataPlaneDesc">
-                  WebSocket, WebTransport, or Native Messaging
+                  WebTransport (in a worker), WebTransport (in the page), WebSocket, or Native
+                  Messaging
                 </p>
               </div>
             </div>
             <div role="radiogroup" class="seg-group" aria-labelledby="popupDataPlane">
-              <label class="seg-option" data-i18n-attr="title:settingsDataPlaneWs">
-                <input
-                  type="radio"
-                  name="dataPlane"
-                  value="ws"
-                  data-i18n-attr="aria-label:settingsDataPlaneWs"
-                />
-                <span class="seg-label" data-i18n="segDataPlaneWs">WS</span>
-              </label>
               <label class="seg-option" data-i18n-attr="title:settingsDataPlaneWt">
                 <input
                   type="radio"
@@ -66,6 +58,24 @@
                   data-i18n-attr="aria-label:settingsDataPlaneWt"
                 />
                 <span class="seg-label" data-i18n="segDataPlaneWt">WT</span>
+              </label>
+              <label class="seg-option" data-i18n-attr="title:settingsDataPlaneWtInpage">
+                <input
+                  type="radio"
+                  name="dataPlane"
+                  value="wt-inpage"
+                  data-i18n-attr="aria-label:settingsDataPlaneWtInpage"
+                />
+                <span class="seg-label" data-i18n="segDataPlaneWtInpage">WTI</span>
+              </label>
+              <label class="seg-option" data-i18n-attr="title:settingsDataPlaneWs">
+                <input
+                  type="radio"
+                  name="dataPlane"
+                  value="ws"
+                  data-i18n-attr="aria-label:settingsDataPlaneWs"
+                />
+                <span class="seg-label" data-i18n="segDataPlaneWs">WS</span>
               </label>
               <label class="seg-option" data-i18n-attr="title:settingsDataPlaneNm">
                 <input
@@ -77,21 +87,6 @@
                 <span class="seg-label" data-i18n="segDataPlaneNm">NM</span>
               </label>
             </div>
-          </div>
-          <div class="setting" id="useWorker-setting">
-            <div class="setting-info">
-              <h3 id="popupUseWorker" data-i18n="popupUseWorker">Use Worker</h3>
-              <div class="info-popover">
-                <p data-i18n-md="popupUseWorkerDesc">
-                  Off: WebTransport connects directly in the page (main-thread CPU). WebSocket still
-                  needs the worker.
-                </p>
-              </div>
-            </div>
-            <label class="toggle">
-              <input type="checkbox" id="useWorker" aria-labelledby="popupUseWorker" />
-              <span class="slider" role="presentation"></span>
-            </label>
           </div>
           <div id="warning-inpage-wt" class="warning" role="status" hidden>
             <span data-i18n="popupInPageWtWarning"></span>
@@ -107,11 +102,7 @@
                 </p>
               </div>
             </div>
-            <div
-              role="radiogroup"
-              class="seg-group"
-              aria-labelledby="popupDevicePickerMode"
-            >
+            <div role="radiogroup" class="seg-group" aria-labelledby="popupDevicePickerMode">
               <label class="seg-option" data-i18n-attr="title:settingsDevicePickerModal">
                 <input
                   type="radio"
@@ -188,11 +179,7 @@
                 </p>
               </div>
             </div>
-            <div
-              role="radiogroup"
-              class="seg-group"
-              aria-labelledby="popupWorkerSpawnMode"
-            >
+            <div role="radiogroup" class="seg-group" aria-labelledby="popupWorkerSpawnMode">
               <label class="seg-option" data-i18n-attr="title:settingsWorkerSpawnShadow">
                 <input
                   type="radio"
