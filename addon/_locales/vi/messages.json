@@ -8,6 +8,9 @@
   "popupTitle": {
     "message": "WebHID"
   },
+  "popupBack": {
+    "message": "Quay lại"
+  },
   "popupPairedDevices": {
     "message": "Thiết bị đã cho phép"
   },
@@ -21,7 +24,7 @@
     "message": "Kênh dữ liệu"
   },
   "popupDataPlaneDesc": {
-    "message": "WebSocket, WebTransport, or Native Messaging"
+    "message": "WebSocket, WebTransport, hoặc Native Messaging"
   },
   "popupDataPlaneWs": {
     "message": "WebSocket"
@@ -80,6 +83,9 @@
   "popupGlobalSettings": {
     "message": "Cài đặt chung →"
   },
+  "popupManageDevices": {
+    "message": "Quản lý tất cả thiết bị đã ghép →"
+  },
   "popupNoSite": {
     "message": "(không có trang)"
   },
@@ -95,6 +101,48 @@
   "popupDeviceCount": {
     "message": "($1/$2)"
   },
+  "popupUseWorker": {
+    "message": "Dùng Worker"
+  },
+  "popupUseWorkerDesc": {
+    "message": "Tắt: WebTransport kết nối trực tiếp trong trang (dùng CPU main thread; ổn ở tốc độ report thường). WebSocket vẫn cần worker."
+  },
+  "popupInPageWtWarning": {
+    "message": "WebTransport trong trang có thể hiện cảnh báo quyền mạng cục bộ của Firefox (\"wants to access other apps and services on this device\"). Hãy tick \"Remember my choice for this site\" trước khi bấm Allow, nếu không sẽ bị hỏi lại mỗi lần tải trang."
+  },
+  "statusReady": {
+    "message": "Sẵn sàng"
+  },
+  "statusFallback": {
+    "message": "Fallback: $1"
+  },
+  "statusOffline": {
+    "message": "Daemon ngoại tuyến"
+  },
+  "statusOfflineGuidance": {
+    "message": "Kiểm tra daemon đang chạy (systemctl status webhid-daemon), user của bạn nằm trong nhóm webhid, và udev rules đã cài."
+  },
+  "planeNameWS": {
+    "message": "WebSocket"
+  },
+  "planeNameWT": {
+    "message": "WebTransport"
+  },
+  "planeNameNM": {
+    "message": "Native Messaging"
+  },
+  "infoPopoverMore": {
+    "message": "Thông tin thêm"
+  },
+  "macPrivacyTitle": {
+    "message": "Input Monitoring trên macOS"
+  },
+  "macPrivacyDesc": {
+    "message": "Cho phép daemon đọc thiết bị HID: System Settings → Privacy & Security → Input Monitoring. Nếu link không mở đúng tab, hãy tìm thủ công và bật cho daemon."
+  },
+  "macPrivacyOpen": {
+    "message": "Mở Privacy Settings"
+  },
   "settingsTitle": {
     "message": "Cài đặt WebHID"
   },
@@ -102,13 +150,13 @@
     "message": "Daemon as NM host"
   },
   "settingsDaemonAsNmHostDesc": {
-    "message": "Nói chuyện trực tiếp với daemon qua native messaging (bỏ qua forwarder `webhid-native-messaging` và Unix socket). Yêu cầu cài manifest `webhid.daemon_nm_host` và daemon chạy dưới user của bạn (kèm udev rule). Độ trễ thấp hơn, nhưng không có fallback daemon root. Addon tự kết nối lại khi bật tắt."
+    "message": "Nói chuyện trực tiếp với daemon qua native messaging, bỏ qua forwarder và Unix socket. Yêu cầu manifest daemon_nm_host và daemon chạy dưới user của bạn (kèm udev rule). Độ trễ thấp hơn, không có fallback daemon root. Tự kết nối lại."
   },
   "settingsDataPlane": {
     "message": "Kênh dữ liệu"
   },
   "settingsDataPlaneDesc": {
-    "message": "**WebSocket**: spawn Web Worker giữ kết nối WS tới daemon. Input report được chuyển tới page qua `postMessage` với ArrayBuffer transfer (ngoài main thread, zero-copy). Không SAB, không COOP/COEP.\n**WebTransport**: cùng kiến trúc worker, hoặc ngay trong page khi tắt Use Worker (xem toggle đó), qua QUIC với chứng chỉ tự ký pinned bằng `serverCertificateHashes` (tốn CPU TLS/QUIC trên loopback).\n**Native Messaging**: chuyển toàn bộ dữ liệu (sendReport, input reports, feature reports) qua NM host bằng content-script bridge. Không WS. Fallback khi WS bị chặn."
+    "message": "**WebSocket**: Web Worker giữ kết nối WS tới daemon; input report chuyển tới trang qua postMessage (ngoài main thread).\n**WebTransport**: cùng kiến trúc worker qua QUIC, hoặc ngay trong trang khi tắt Use Worker.\n**Native Messaging**: toàn bộ dữ liệu (sendReport, input reports, feature reports) qua NM host. Không WS. Fallback khi WS/WT bị chặn."
   },
   "settingsDataPlaneWs": {
     "message": "WebSocket"
@@ -123,7 +171,7 @@
     "message": "Chế độ chọn thiết bị"
   },
   "settingsDevicePickerModeDesc": {
-    "message": "**Modal**: hiện overlay shadow DOM trên trang khi gọi `requestDevice()` (mặc định, khớp hành vi WebHID gốc).\n**Page Action**: chuyển icon thanh URL sang chế độ báo và mở device picker dạng popup. Người dùng phải bấm icon để mở picker. Chỉ Firefox, Chromium sẽ fallback về modal."
+    "message": "**Modal**: overlay shadow DOM trên trang khi gọi requestDevice() (mặc định).\n**Page Action**: picker dạng popup ở thanh URL; người dùng bấm icon để mở. Chỉ Firefox, Chromium fallback về modal.\n**Window**: cửa sổ popup riêng."
   },
   "settingsDevicePickerModal": {
     "message": "Modal (overlay)"
@@ -138,19 +186,19 @@
     "message": "Worker Polyfill"
   },
   "settingsWorkerPolyfillDesc": {
-    "message": "Chèn stub WebHID API vào Web Worker scripts (`new Worker()`, `new SharedWorker()`). Worker có `navigator.hid`, `HIDDevice` và các constructor liên quan. Các method ném `NotSupportedError` cho tới khi giao tiếp worker đầy đủ được triển khai. Có thể ghi đè per-site từ popup. Reload trang sau khi thay đổi."
+    "message": "Chèn stub WebHID API vào Worker scripts (new Worker(), new SharedWorker()). Method ném NotSupportedError cho tới khi giao tiếp worker đầy đủ được triển khai. Reload trang sau khi thay đổi."
   },
   "settingsAllowActivationless": {
     "message": "Cho phép requestDevice() không cần user activation"
   },
   "settingsAllowActivationlessDesc": {
-    "message": "Bỏ qua yêu cầu user activation cho `navigator.hid.requestDevice()` trên trang này. Khác với spec WebHID, nơi `requestDevice()` phải được gọi trong cử chỉ người dùng. Dùng làm workaround cho trang gọi `requestDevice()` từ handler bất đồng bộ (ví dụ sau khi fetch dữ liệu), khi cử chỉ có thể đã hết hạn lúc lời gọi chạy. Bộ chọn thiết bị vẫn yêu cầu người dùng chọn rõ ràng, và kiểm tra Permissions Policy không bị ảnh hưởng. Có thể ghi đè per-site từ popup. Reload trang sau khi thay đổi."
+    "message": "Bỏ qua yêu cầu user activation cho requestDevice() trên trang này. Sai lệch spec; workaround cho trang gọi từ handler bất đồng bộ. Bộ chọn vẫn yêu cầu người dùng chọn rõ ràng. Reload trang sau khi thay đổi."
   },
   "settingsLogLevel": {
     "message": "Mức độ log"
   },
   "settingsLogLevelDesc": {
-    "message": "Kiểm soát độ chi tiết console output. Error = chỉ lỗi, Warn = +cảnh báo, Info = +thông tin, Debug = +debug (bao gồm timing hiệu năng). Reload trang sau khi thay đổi."
+    "message": "Độ chi tiết console: Error = chỉ lỗi, Warn = +cảnh báo, Info = +thông tin, Debug = +debug (bao gồm timing). Reload trang sau khi thay đổi."
   },
   "pickerTitle": {
     "message": "Chọn thiết bị"
@@ -180,7 +228,7 @@
     "message": "Chế độ tạo Worker"
   },
   "settingsWorkerSpawnModeDesc": {
-    "message": "**Shadow URL** (mặc định trên MV3): tạo data worker qua `new Worker(location.href)` với StreamFilter chặn request tự tham chiếu. Không đụng gì tới trang ngoài một request tổng hợp. Thất bại nếu server từ chối request đó hoặc nếu `require-trusted-types-for` đang bật với allow-list hạn chế.\n**Blob + CSP rewrite** (mặc định trên MV2): tạo worker từ URL `blob:` được tạo từ extension worker bundle. Không phụ thuộc network, nhưng nới lỏng directive CSP `worker-src` và `connect-src` của trang để cho phép `blob:` và `ws://127.0.0.1:*`."
+    "message": "**Shadow URL** (mặc định trên MV3): tạo data worker qua new Worker(location.href) với StreamFilter chặn request tự tham chiếu. Thất bại nếu server từ chối hoặc require-trusted-types-for hạn chế.\n**Blob + CSP rewrite** (mặc định trên MV2): tạo worker từ URL blob:; nới lỏng directive worker-src và connect-src của trang."
   },
   "settingsWorkerSpawnShadow": {
     "message": "Shadow URL"
@@ -192,12 +240,36 @@
     "message": "Dùng Worker"
   },
   "settingsUseWorkerDesc": {
-    "message": "Bật: data plane WS/WT chạy trong Web Worker riêng (ngoài main thread, khuyến nghị).\nTắt: WebTransport kết nối trực tiếp trong page, không dùng worker, report được dispatch trên main thread (dùng chung CPU với rendering; ổn ở tốc độ report thường, chưa benchmark). Firefox hỏi quyền local-network \\\"Allow\\\" một lần cho page trước khi kết nối WebTransport đầu tiên tới daemon; worker được miễn prompt này. WebSocket vẫn cần worker vì HSTS đổi `ws://` thành `wss://` trên page, nên tùy chọn WS vẫn dùng worker. Native Messaging không bị ảnh hưởng. Reload pages sau khi đổi."
+    "message": "Bật: data plane WS/WT chạy trong Web Worker riêng (ngoài main thread, khuyến nghị).\nTắt: WebTransport kết nối trực tiếp trong trang, report được dispatch trên main thread (dùng chung CPU với rendering; ổn ở tốc độ report thường). Firefox hỏi quyền local-network (\"Allow\") một lần cho trang trước khi kết nối in-page đầu tiên; worker được miễn prompt này. WebSocket vẫn cần worker vì HSTS đổi ws:// thành wss:// trên trang. Reload trang sau khi đổi."
   },
-  "popupUseWorker": {
-    "message": "Dùng Worker"
+  "segDataPlaneWs": {
+    "message": "WS"
   },
-  "popupUseWorkerDesc": {
-    "message": "Tắt: WebTransport kết nối trực tiếp trong page (dùng CPU main thread; ổn ở tốc độ report thường). WebSocket vẫn cần worker."
+  "segDataPlaneWt": {
+    "message": "WT"
+  },
+  "segDataPlaneNm": {
+    "message": "NM"
+  },
+  "segPickerModal": {
+    "message": "Modal"
+  },
+  "segPickerPageAction": {
+    "message": "Page Action"
+  },
+  "segPickerWindow": {
+    "message": "Window"
+  },
+  "segSpawnShadow": {
+    "message": "Shadow"
+  },
+  "segSpawnBlob": {
+    "message": "Blob"
+  },
+  "devicesTitle": {
+    "message": "Thiết bị đã ghép (mọi trang)"
+  },
+  "devicesNone": {
+    "message": "Chưa có thiết bị nào được ghép."
   }
 }

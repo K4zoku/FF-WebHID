@@ -90,7 +90,9 @@
   function groupDevices(devices) {
     const groups = new Map()
     for (const device of devices) {
-      const name = device.productName || 'Unknown Device'
+      // Group by product name like the physical-device heuristic; devices
+      // without a name must not merge into one bucket, so key them by id.
+      const name = device.productName || String(device.deviceId)
       if (!groups.has(name)) groups.set(name, [])
       groups.get(name).push(device)
     }

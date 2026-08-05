@@ -3,7 +3,7 @@
   const { deviceCache } = webhid.import('bgState')
 
   const DB_NAME = 'webhid-store'
-  const DB_VERSION = 1
+  const DB_VERSION = 2
   let dbPromise = null
 
   /**
@@ -21,6 +21,13 @@
         }
         if (!db.objectStoreNames.contains('origins')) {
           db.createObjectStore('origins', { keyPath: ['origin', 'deviceId'] })
+        }
+        if (!db.objectStoreNames.contains('grantGroups')) {
+          const store = db.createObjectStore('grantGroups', {
+            keyPath: 'id',
+            autoIncrement: true
+          })
+          store.createIndex('byOrigin', 'origin', { unique: false })
         }
       }
       req.onsuccess = () => resolve(req.result)
@@ -160,6 +167,91 @@
     await txDone(tx)
   }
 
+  /**
+   * Records a grant group: the device IDs granted together by one
+   * requestDevice() call for one origin. Singleton grants are not recorded;
+   * their forget semantics are plain per-device revocation.
+   * @param {string} origin
+   * @param {number[]} deviceIds
+   * @returns {Promise<void>}
+   */
+  async function recordGrantGroup(origin, deviceIds) {
+    if (!origin || !Array.isArray(deviceIds) || deviceIds.length < 2) return
+    try {
+      const db = await openDb()
+      const tx = db.transaction('grantGroups', 'readwrite')
+      tx.objectStore('grantGroups').add({
+        origin,
+        deviceIds: deviceIds.map((id) => Number(id)),
+        grantedAt: Date.now()
+      })
+      await txDone(tx)
+    } catch (e) {
+      logger.debug('recordGrantGroup failed', e)
+    }
+  }
+
+  /**
+   * Returns all grant groups recorded for an origin.
+   * @param {string} origin
+   * @returns {Promise<Array<{id: number, origin: string, deviceIds: number[]}>>}
+   */
+  async function getGrantGroupsForOrigin(origin) {
+    try {
+      const db = await openDb()
+      const tx = db.transaction('grantGroups', 'readonly')
+      return await new Promise((resolve, reject) => {
+        const req = tx.objectStore('grantGroups').index('byOrigin').getAll(origin)
+        req.onsuccess = () => resolve(req.result || [])
+        req.onerror = () => reject(req.error)
+      })
+    } catch {
+      return []
+    }
+  }
+
+  /**
+   * Deletes grant groups by id.
+   * @param {number[]} groupIds
+   * @returns {Promise<void>}
+   */
+  async function deleteGrantGroups(groupIds) {
+    if (!groupIds || !groupIds.length) return
+    try {
+      const db = await openDb()
+      const tx = db.transaction('grantGroups', 'readwrite')
+      const store = tx.objectStore('grantGroups')
+      for (const id of groupIds) store.delete(id)
+      await txDone(tx)
+    } catch (e) {
+      logger.debug('deleteGrantGroups failed', e)
+    }
+  }
+
+  /**
+   * Returns every currently allowed (origin, deviceId) pair, grouped by origin.
+   * @returns {Promise<Map<string, number[]>>}
+   */
+  async function getAllAllowedByOrigin() {
+    try {
+      const db = await openDb()
+      const tx = db.transaction('origins', 'readonly')
+      const rows = await new Promise((resolve, reject) => {
+        const req = tx.objectStore('origins').getAll()
+        req.onsuccess = () => resolve(req.result || [])
+        req.onerror = () => reject(req.error)
+      })
+      const map = new Map()
+      for (const row of rows) {
+        if (!map.has(row.origin)) map.set(row.origin, [])
+        map.get(row.origin).push(row.deviceId)
+      }
+      return map
+    } catch {
+      return new Map()
+    }
+  }
+
   webhid.export('bgStorage', {
     openDb,
     saveDeviceInfo,
@@ -168,6 +260,10 @@
     removeDeviceInfo,
     getAllowedDevices,
     addAllowedDevice,
-    removeAllowedDevice
+    removeAllowedDevice,
+    recordGrantGroup,
+    getGrantGroupsForOrigin,
+    deleteGrantGroups,
+    getAllAllowedByOrigin
   })
 })()

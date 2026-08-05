@@ -1,16 +1,18 @@
-(async () => {
+;(async () => {
   const { logger } = webhid
   const localizeHTML = webhid.import('localizeHTML')
   const loadGlobalSettings = webhid.import('loadGlobalSettings')
   const saveGlobalSetting = webhid.import('saveGlobalSetting')
   const GLOBAL_DEFAULTS = webhid.import('GLOBAL_DEFAULTS')
   const syncBrowserTheme = webhid.import('syncBrowserTheme')
+  const initInfoPopovers = webhid.import('initInfoPopovers')
   logger.initLogger('settings')
 
   syncBrowserTheme()
   if (browser.theme) browser.theme.onUpdated.addListener(syncBrowserTheme)
 
   localizeHTML(document)
+  initInfoPopovers(document)
 
   const current = await loadGlobalSettings()
 
@@ -23,15 +25,31 @@
     document.getElementById(key).checked = current[key]
   }
 
-  const logLevelSelect = document.getElementById('logLevel')
-  logLevelSelect.value = String(current.logLevel)
+  /**
+   * Checks the radio with the given name/value.
+   * @param {string} name
+   * @param {string} value
+   * @returns {void}
+   */
+  function setRadioValue(name, value) {
+    const radio = document.querySelector(`input[name="${name}"][value="${value}"]`)
+    if (radio) radio.checked = true
+  }
 
-  const dataPlaneSelect = document.getElementById('dataPlane')
-  dataPlaneSelect.value = current.dataPlane
-  const devicePickerModeSelect = document.getElementById('devicePickerMode')
-  devicePickerModeSelect.value = current.devicePickerMode || GLOBAL_DEFAULTS.devicePickerMode
-  const workerSpawnModeSelect = document.getElementById('workerSpawnMode')
-  workerSpawnModeSelect.value = current.workerSpawnMode || GLOBAL_DEFAULTS.workerSpawnMode
+  /**
+   * Returns the value of the checked radio in the group.
+   * @param {string} name
+   * @returns {string}
+   */
+  function currentRadioValue(name) {
+    const radio = document.querySelector(`input[name="${name}"]:checked`)
+    return radio ? radio.value : ''
+  }
+
+  setRadioValue('dataPlane', current.dataPlane)
+  setRadioValue('devicePickerMode', current.devicePickerMode || GLOBAL_DEFAULTS.devicePickerMode)
+  setRadioValue('workerSpawnMode', current.workerSpawnMode || GLOBAL_DEFAULTS.workerSpawnMode)
+  setRadioValue('logLevel', String(current.logLevel))
   const useWorkerCheckbox = document.getElementById('useWorker')
   useWorkerCheckbox.checked = current.useWorker !== false
 
@@ -42,7 +60,7 @@
    * @returns {void}
    */
   function updatePlaneVisibility() {
-    const dp = dataPlaneSelect.value
+    const dp = currentRadioValue('dataPlane')
     const useWorker = useWorkerCheckbox.checked
     document.getElementById('useWorker-setting').style.display = dp === 'wt' ? '' : 'none'
     document.getElementById('workerSpawnMode-setting').style.display =
@@ -76,22 +94,24 @@
       showStatus(`${key} = ${e.target.checked}`)
     })
   }
-  logLevelSelect.addEventListener('change', async (e) => {
-    const val = parseInt(e.target.value, 10)
-    await saveGlobalSetting('logLevel', val)
-    showStatus(`logLevel = ${e.target.value}`)
-  })
-  dataPlaneSelect.addEventListener('change', async (e) => {
-    await saveGlobalSetting('dataPlane', e.target.value)
-    updatePlaneVisibility()
-    showStatus(`dataPlane = ${e.target.value}`)
-  })
-  devicePickerModeSelect.addEventListener('change', async (e) => {
-    await saveGlobalSetting('devicePickerMode', e.target.value)
-    showStatus(`devicePickerMode = ${e.target.value}`)
-  })
-  workerSpawnModeSelect.addEventListener('change', async (e) => {
-    await saveGlobalSetting('workerSpawnMode', e.target.value)
-    showStatus(`workerSpawnMode = ${e.target.value}`)
-  })
+
+  /**
+   * @param {string} name
+   * @param {(value: string) => any} [transform]
+   * @returns {void}
+   */
+  function bindRadioGroup(name, transform) {
+    document.querySelectorAll(`input[name="${name}"]`).forEach((radio) => {
+      radio.addEventListener('change', async () => {
+        if (!radio.checked) return
+        await saveGlobalSetting(name, transform ? transform(radio.value) : radio.value)
+        if (name === 'dataPlane') updatePlaneVisibility()
+        showStatus(`${name} = ${radio.value}`)
+      })
+    })
+  }
+  bindRadioGroup('dataPlane')
+  bindRadioGroup('devicePickerMode')
+  bindRadioGroup('workerSpawnMode')
+  bindRadioGroup('logLevel', (v) => parseInt(v, 10))
 })()

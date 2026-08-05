@@ -25,6 +25,27 @@
       sendResponse({ ids: Array.from(openDevices) })
       return true
     }
+    if (request.action === 'getDataPlaneStatus') {
+      const planes = []
+      const seen = new Set()
+      for (const [deviceId, transport] of deviceTransports) {
+        if (workers.has(deviceId)) {
+          planes.push({ deviceId, plane: transport, mode: 'worker' })
+          seen.add(deviceId)
+        }
+      }
+      for (const deviceId of inPageDevices) {
+        if (!seen.has(deviceId)) {
+          planes.push({ deviceId, plane: 'wt', mode: 'inpage' })
+          seen.add(deviceId)
+        }
+      }
+      for (const deviceId of nmPlanes) {
+        if (!seen.has(deviceId)) planes.push({ deviceId, plane: 'nm', mode: null })
+      }
+      sendResponse({ planes, defaultPlane: settings.dataPlane })
+      return true
+    }
   })
 
   /** @type {Map<string, object>} */
@@ -33,6 +54,10 @@
   const workerReadyDevices = new Set()
   /** @type {Map<string, object>} */
   const connectParams = new Map()
+  /** @type {Map<string, string>} */
+  const deviceTransports = new Map()
+  /** @type {Set<string>} */
+  const nmPlanes = new Set()
   /** @type {Map<string, MessagePort>} */
   const dataPorts = new Map()
   /** @type {number|null} */
@@ -161,6 +186,8 @@
       dataPorts.delete(deviceId)
     }
     connectParams.delete(deviceId)
+    deviceTransports.delete(deviceId)
+    nmPlanes.delete(deviceId)
     spawnGen.delete(deviceId)
   }
 
@@ -341,6 +368,7 @@
       return false
     }
     workers.set(deviceId, null)
+    deviceTransports.set(deviceId, opts.wtPort != null ? 'wt' : 'ws')
     connectParams.set(deviceId, {
       transport: opts.wtPort != null ? 'wt' : 'ws',
       wsPort: opts.wtPort != null ? undefined : wsPort,
@@ -418,6 +446,8 @@
     }
     if (!ok && spawnGen.get(deviceId) === gen) {
       logger.warn('data plane spawn failed for', deviceId, '; falling back to NM')
+      nmPlanes.add(deviceId)
+      deviceTransports.delete(deviceId)
       browser.runtime
         .sendMessage({
           action: 'setDataPlane',
@@ -877,7 +907,6 @@
 
       if (action === 'close') {
         const deviceId = payload.deviceId
-        const sessionToken = sessionTokens.get(deviceId)
         logger.debug('close deviceId=' + deviceId)
         openDevices.delete(deviceId)
         sessionTokens.delete(deviceId)

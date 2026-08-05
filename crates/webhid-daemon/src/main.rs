@@ -133,6 +133,9 @@ async fn main() -> anyhow::Result<()> {
 
     let device_mgr = Arc::new(DeviceManager::new(event_tx.clone()));
 
+    hid::set_hid_permission(hid::probe_hid_permission());
+    log::info!("HID permission status: {}", hid::hid_permission());
+
     let actual_ws_port = {
         let event_tx_clone = event_tx.clone();
         let device_mgr_clone = Arc::clone(&device_mgr);

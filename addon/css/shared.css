@@ -6,6 +6,12 @@ body {
   font-size: 13px;
 }
 
+/* The UA `[hidden] { display: none }` loses to author display rules on the
+   same element (e.g. .setting { display: grid }), so enforce it globally. */
+[hidden] {
+  display: none !important;
+}
+
 h1 {
   font-size: 1.5em;
   border-bottom: 1px solid var(--border-subtle);
@@ -70,7 +76,7 @@ p {
 }
 
 .slider:before {
-  content: "";
+  content: '';
   position: absolute;
   background: var(--toggle-knob);
   border-radius: 50%;
@@ -93,4 +99,125 @@ select {
 
 select:hover {
   border-color: var(--accent);
+}
+
+/* ── Segmented radio controls (§7) ───────── */
+.seg-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: flex-end;
+  align-self: center;
+}
+
+.seg-option {
+  position: relative;
+  display: inline-flex;
+}
+
+.seg-option input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.seg-label {
+  display: inline-block;
+  padding: 4px 10px;
+  font-size: 0.78em;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-hover);
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.seg-option:hover .seg-label {
+  border-color: var(--accent);
+}
+
+.seg-option input:checked + .seg-label {
+  background: var(--accent-selected);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.seg-option input:focus-visible + .seg-label {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ── Info popover (i) (§6) ───────────────── */
+.setting-info {
+  position: relative;
+}
+
+.setting-info h3 {
+  display: inline-block;
+  margin-right: 2px;
+}
+
+.info-popover-btn {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  margin-left: 6px;
+  line-height: 1;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--surface-hover);
+  color: var(--text-muted);
+  font-size: 0.7em;
+  font-weight: 700;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  vertical-align: 1px;
+}
+
+.info-popover-btn:hover,
+.info-popover-btn[aria-expanded='true'] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.info-popover {
+  display: none;
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 8px;
+  z-index: 20;
+  max-width: 300px;
+  padding: 8px 10px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-drop);
+}
+
+.setting-info.open .info-popover {
+  display: block;
+}
+
+.info-popover::before {
+  content: "";
+  position: absolute;
+  top: -5px;
+  left: 14px;
+  width: 8px;
+  height: 8px;
+  background: var(--surface-raised);
+  border-left: 1px solid var(--border-default);
+  border-top: 1px solid var(--border-default);
+  transform: rotate(45deg);
+}
+
+.info-popover p {
+  margin: 0;
+  font-size: 0.8em;
+  line-height: 1.45;
 }

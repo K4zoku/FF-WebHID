@@ -12,113 +12,142 @@
       <h1 data-i18n="settingsTitle">WebHID Settings</h1>
       <div class="setting">
         <div class="setting-info">
-          <h3 data-i18n="settingsDaemonAsNmHost">Daemon as NM host</h3>
-          <p data-i18n-md="settingsDaemonAsNmHostDesc">
-            Talk to the daemon directly over native messaging (skip the
-            <code>webhid-native-messaging</code> forwarder and Unix socket).
-            Requires the <code>webhid.daemon_nm_host</code> native-messaging
-            manifest to be installed and the daemon to run as your user (with
-            the udev rule). Lower latency, but no root-daemon fallback. The
-            addon reconnects automatically when toggled.
-          </p>
+          <h3 id="settingsDaemonAsNmHost" data-i18n="settingsDaemonAsNmHost">Daemon as NM host</h3>
+          <div class="info-popover">
+            <p data-i18n-md="settingsDaemonAsNmHostDesc">
+              Talk to the daemon directly over native messaging (skip the
+              <code>webhid-native-messaging</code> forwarder and Unix socket). Requires the
+              <code>webhid.daemon_nm_host</code> native-messaging manifest to be installed and the
+              daemon to run as your user (with the udev rule). Lower latency, but no root-daemon
+              fallback. The addon reconnects automatically when toggled.
+            </p>
+          </div>
         </div>
         <label class="toggle">
-          <input
-            type="checkbox"
-            id="daemonAsNmHost"
-            aria-labelledby="settingsDaemonAsNmHost"
-          />
+          <input type="checkbox" id="daemonAsNmHost" aria-labelledby="settingsDaemonAsNmHost" />
           <span class="slider" role="presentation"></span>
         </label>
       </div>
       <div class="setting">
         <div class="setting-info">
-          <h3 data-i18n="settingsDataPlane">Data Plane</h3>
-          <p data-i18n-md="settingsDataPlaneDesc">
-            <strong>WebSocket</strong>: spawn a Web Worker that owns the WS
-            connection to the daemon. Input reports are forwarded to the page
-            via <code>postMessage</code> with ArrayBuffer transfer
-            (off-main-thread, zero-copy). No SAB, no COOP/COEP.<br /><strong
-              >WebTransport</strong
-            >: same worker architecture, but over QUIC with a self-signed cert
-            pinned via <code>serverCertificateHashes</code> (TLS/QUIC CPU cost
-            on loopback).<br /><strong>Native Messaging</strong>: route all
-            data (sendReport, input reports, feature reports) through the NM
-            host via the content-script bridge. No WS. Fallback when WS is
-            blocked.
-          </p>
+          <h3 id="settingsDataPlane" data-i18n="settingsDataPlane">Data Plane</h3>
+          <div class="info-popover">
+            <p data-i18n-md="settingsDataPlaneDesc">
+              <strong>WebSocket</strong>: a Web Worker owns the WS connection to the daemon. Input
+              reports are forwarded to the page via <code>postMessage</code> with ArrayBuffer
+              transfer (off-main-thread, zero-copy).<br /><strong>WebTransport</strong>: the same
+              worker architecture over QUIC, or directly in the page when Use Worker is off.<br /><strong
+                >Native Messaging</strong
+              >: route all data through the NM host via the content-script bridge. No WS. Fallback
+              when WS/WT are blocked.
+            </p>
+          </div>
         </div>
-        <select id="dataPlane" aria-labelledby="settingsDataPlane">
-          <option value="ws" data-i18n="settingsDataPlaneWs">
-            WebSocket (Worker)
-          </option>
-          <option value="wt" data-i18n="settingsDataPlaneWt">
-            WebTransport (Worker)
-          </option>
-          <option value="nm" data-i18n="settingsDataPlaneNm">
-            Native Messaging (via bridge)
-          </option>
-        </select>
+        <div role="radiogroup" class="seg-group" aria-labelledby="settingsDataPlane">
+
+          <label class="seg-option" data-i18n-attr="title:settingsDataPlaneWs">
+                <input
+                  type="radio"
+                  name="dataPlane"
+                  value="ws"
+                  data-i18n-attr="aria-label:settingsDataPlaneWs"
+                />
+                <span class="seg-label" data-i18n="segDataPlaneWs">WebSocket</span>
+              </label>
+          <label class="seg-option" data-i18n-attr="title:settingsDataPlaneWt">
+                <input
+                  type="radio"
+                  name="dataPlane"
+                  value="wt"
+                  data-i18n-attr="aria-label:settingsDataPlaneWt"
+                />
+                <span class="seg-label" data-i18n="segDataPlaneWt">WebTransport</span>
+              </label>
+          <label class="seg-option" data-i18n-attr="title:settingsDataPlaneNm">
+                <input
+                  type="radio"
+                  name="dataPlane"
+                  value="nm"
+                  data-i18n-attr="aria-label:settingsDataPlaneNm"
+                />
+                <span class="seg-label" data-i18n="segDataPlaneNm">Native Messaging</span>
+              </label>
+        
+            </div>
       </div>
       <div class="setting" id="useWorker-setting">
         <div class="setting-info">
-          <h3 data-i18n="settingsUseWorker">Use Worker</h3>
-          <p data-i18n-md="settingsUseWorkerDesc">
-            On: the WS/WT data plane runs in a dedicated Web Worker
-            (off-main-thread, recommended). Off: WebTransport connects directly
-            in the page (main-thread CPU). WebSocket still needs the worker
-            (HSTS rewrites <code>ws://</code> to <code>wss://</code> on the
-            page). Reload pages after changing.
-          </p>
+          <h3 id="settingsUseWorker" data-i18n="settingsUseWorker">Use Worker</h3>
+          <div class="info-popover">
+            <p data-i18n-md="settingsUseWorkerDesc">
+              On: the WS/WT data plane runs in a dedicated Web Worker (off-main-thread,
+              recommended). Off: WebTransport connects directly in the page (main-thread CPU).
+              WebSocket still needs the worker (HSTS rewrites <code>ws://</code> to
+              <code>wss://</code> on the page). Reload pages after changing.
+            </p>
+          </div>
         </div>
         <label class="toggle">
-          <input
-            type="checkbox"
-            id="useWorker"
-            aria-labelledby="settingsUseWorker"
-          />
+          <input type="checkbox" id="useWorker" aria-labelledby="settingsUseWorker" />
           <span class="slider" role="presentation"></span>
         </label>
       </div>
       <div class="setting">
         <div class="setting-info">
-          <h3 data-i18n="settingsDevicePickerMode">Device Picker Mode</h3>
-          <p data-i18n-md="settingsDevicePickerModeDesc">
-            <strong>Modal</strong>: show a shadow DOM overlay on the page when
-            <code>requestDevice()</code> is called (default, matches native
-            WebHID behavior).<br /><strong>Page Action</strong>: switch the url
-            bar icon to alert mode and open the device picker as a popup. User
-            must click the icon to open the picker. Firefox only, Chromium will
-            fall back to modal.
-          </p>
+          <h3 id="settingsDevicePickerMode" data-i18n="settingsDevicePickerMode">
+            Device Picker Mode
+          </h3>
+          <div class="info-popover">
+            <p data-i18n-md="settingsDevicePickerModeDesc">
+              <strong>Modal</strong>: shadow-DOM overlay on the page when
+              <code>requestDevice()</code> is called (default).<br /><strong>Page Action</strong>:
+              URL-bar popup picker; the user clicks the icon to open it. Firefox only, Chromium
+              falls back to modal.<br /><strong>Window</strong>: separate popup window.
+            </p>
+          </div>
         </div>
-        <select
-          id="devicePickerMode"
-          aria-labelledby="settingsDevicePickerMode"
-        >
-          <option value="modal" data-i18n="settingsDevicePickerModal">
-            Modal (overlay)
-          </option>
-          <option value="pageAction" data-i18n="settingsDevicePickerPageAction">
-            Page Action (url bar popup)
-          </option>
-          <option value="window" data-i18n="settingsDevicePickerWindow">
-            Window (separate popup window)
-          </option>
-        </select>
+        <div role="radiogroup" class="seg-group" aria-labelledby="settingsDevicePickerMode">
+
+          <label class="seg-option" data-i18n-attr="title:settingsDevicePickerModal">
+                <input
+                  type="radio"
+                  name="devicePickerMode"
+                  value="modal"
+                  data-i18n-attr="aria-label:settingsDevicePickerModal"
+                />
+                <span class="seg-label" data-i18n="segPickerModal">Modal (overlay)</span>
+              </label>
+          <label class="seg-option" data-i18n-attr="title:settingsDevicePickerPageAction">
+                <input
+                  type="radio"
+                  name="devicePickerMode"
+                  value="pageAction"
+                  data-i18n-attr="aria-label:settingsDevicePickerPageAction"
+                />
+                <span class="seg-label" data-i18n="segPickerPageAction">Page Action (url bar popup)</span>
+              </label>
+          <label class="seg-option" data-i18n-attr="title:settingsDevicePickerWindow">
+                <input
+                  type="radio"
+                  name="devicePickerMode"
+                  value="window"
+                  data-i18n-attr="aria-label:settingsDevicePickerWindow"
+                />
+                <span class="seg-label" data-i18n="segPickerWindow">Window (separate popup window)</span>
+              </label>
+        
+            </div>
       </div>
       <div class="setting">
         <div class="setting-info">
-          <h3 data-i18n="settingsWorkerPolyfill">Worker Polyfill</h3>
-          <p data-i18n-md="settingsWorkerPolyfillDesc">
-            Inject WebHID API stubs into Web Worker scripts (<code
-              >new Worker()</code
-            >, <code>new SharedWorker()</code>). Workers get
-            <code>navigator.hid</code>, <code>HIDDevice</code>, and related
-            constructors. Methods throw <code>NotSupportedError</code> until
-            full worker communication is implemented. Can be overridden per-site
-            from the popup. Reload pages after changing.
-          </p>
+          <h3 id="settingsWorkerPolyfill" data-i18n="settingsWorkerPolyfill">Worker Polyfill</h3>
+          <div class="info-popover">
+            <p data-i18n-md="settingsWorkerPolyfillDesc">
+              Inject WebHID API stubs into Web Worker scripts (<code>new Worker()</code>,
+              <code>new SharedWorker()</code>). Methods throw <code>NotSupportedError</code> until
+              full worker communication is implemented. Reload pages after changing.
+            </p>
+          </div>
         </div>
         <label class="toggle">
           <input
@@ -131,13 +160,15 @@
       </div>
       <div class="setting">
         <div class="setting-info">
-          <h3 data-i18n="settingsAllowActivationless">
+          <h3 id="settingsAllowActivationless" data-i18n="settingsAllowActivationless">
             Allow activation-less requestDevice()
           </h3>
-          <p data-i18n-md="settingsAllowActivationlessDesc">
-            Skip the user-activation requirement for
-            <code>navigator.hid.requestDevice()</code> calls on this site.
-          </p>
+          <div class="info-popover">
+            <p data-i18n-md="settingsAllowActivationlessDesc">
+              Skip the user-activation requirement for
+              <code>navigator.hid.requestDevice()</code> calls on this site.
+            </p>
+          </div>
         </div>
         <label class="toggle">
           <input
@@ -150,29 +181,95 @@
       </div>
       <div class="setting" id="workerSpawnMode-setting">
         <div class="setting-info">
-          <h3 data-i18n="settingsWorkerSpawnMode">Worker Spawn Mode</h3>
-          <p data-i18n-md="settingsWorkerSpawnModeDesc"><strong>Shadow URL</strong> (default on MV3): spawns the data worker via <code>new Worker(location.href)</code> with a StreamFilter intercepting the synthetic self-request. Touches nothing about the page except one synthetic request. Fails if the server rejects that request or if <code>require-trusted-types-for</code> is active with a restrictive allow-list.<br /><strong>Blob + CSP rewrite</strong> (default on MV2): spawns the worker from a <code>blob:</code> URL created from the extension's worker bundle. No network dependency, but relaxes the page's <code>worker-src</code> and <code>connect-src</code> CSP directives to allow <code>blob:</code> and <code>ws://127.0.0.1:*</code>.</p>
+          <h3 id="settingsWorkerSpawnMode" data-i18n="settingsWorkerSpawnMode">
+            Worker Spawn Mode
+          </h3>
+          <div class="info-popover">
+            <p data-i18n-md="settingsWorkerSpawnModeDesc">
+              <strong>Shadow URL</strong> (default on MV3): spawns the data worker via
+              <code>new Worker(location.href)</code> with a StreamFilter intercepting the synthetic
+              self-request. Fails if the server rejects it or if
+              <code>require-trusted-types-for</code> is restrictive.<br /><strong
+                >Blob + CSP rewrite</strong
+              >
+              (default on MV2): spawns the worker from a <code>blob:</code> URL; relaxes the page's
+              <code>worker-src</code> and <code>connect-src</code> directives.
+            </p>
+          </div>
         </div>
-        <select id="workerSpawnMode" aria-labelledby="settingsWorkerSpawnMode">
-          <option value="shadow" data-i18n="settingsWorkerSpawnShadow">Shadow URL (default)</option>
-          <option value="blob" data-i18n="settingsWorkerSpawnBlob">Blob + CSP rewrite</option>
-        </select>
+        <div role="radiogroup" class="seg-group" aria-labelledby="settingsWorkerSpawnMode">
+
+          <label class="seg-option" data-i18n-attr="title:settingsWorkerSpawnShadow">
+                <input
+                  type="radio"
+                  name="workerSpawnMode"
+                  value="shadow"
+                  data-i18n-attr="aria-label:settingsWorkerSpawnShadow"
+                />
+                <span class="seg-label" data-i18n="segSpawnShadow">Shadow URL</span>
+              </label>
+          <label class="seg-option" data-i18n-attr="title:settingsWorkerSpawnBlob">
+                <input
+                  type="radio"
+                  name="workerSpawnMode"
+                  value="blob"
+                  data-i18n-attr="aria-label:settingsWorkerSpawnBlob"
+                />
+                <span class="seg-label" data-i18n="segSpawnBlob">Blob + CSP rewrite</span>
+              </label>
+        
+            </div>
       </div>
       <div class="setting">
         <div class="setting-info">
-          <h3 data-i18n="settingsLogLevel">Log Level</h3>
-          <p data-i18n-md="settingsLogLevelDesc">
-            Controls console output verbosity. Error = errors only, Warn =
-            +warnings, Info = +info, Debug = +debug (includes performance
-            timing). Reload pages after changing.
-          </p>
+          <h3 id="settingsLogLevel" data-i18n="settingsLogLevel">Log Level</h3>
+          <div class="info-popover">
+            <p data-i18n-md="settingsLogLevelDesc">
+              Console verbosity: Error = errors only, Warn = +warnings, Info = +info, Debug = +debug
+              (includes timing). Reload pages after changing.
+            </p>
+          </div>
         </div>
-        <select id="logLevel" aria-labelledby="settingsLogLevel">
-          <option value="0" data-i18n="logLevelError">Error</option>
-          <option value="1" data-i18n="logLevelWarn">Warn</option>
-          <option value="2" data-i18n="logLevelInfo">Info</option>
-          <option value="3" data-i18n="logLevelDebug">Debug</option>
-        </select>
+        <div role="radiogroup" class="seg-group" aria-labelledby="settingsLogLevel">
+
+          <label class="seg-option" data-i18n-attr="title:logLevelError">
+                <input
+                  type="radio"
+                  name="logLevel"
+                  value="0"
+                  data-i18n-attr="aria-label:logLevelError"
+                />
+                <span class="seg-label" data-i18n="logLevelError">Error</span>
+              </label>
+          <label class="seg-option" data-i18n-attr="title:logLevelWarn">
+                <input
+                  type="radio"
+                  name="logLevel"
+                  value="1"
+                  data-i18n-attr="aria-label:logLevelWarn"
+                />
+                <span class="seg-label" data-i18n="logLevelWarn">Warn</span>
+              </label>
+          <label class="seg-option" data-i18n-attr="title:logLevelInfo">
+                <input
+                  type="radio"
+                  name="logLevel"
+                  value="2"
+                  data-i18n-attr="aria-label:logLevelInfo"
+                />
+                <span class="seg-label" data-i18n="logLevelInfo">Info</span>
+              </label>
+          <label class="seg-option" data-i18n-attr="title:logLevelDebug">
+                <input
+                  type="radio"
+                  name="logLevel"
+                  value="3"
+                  data-i18n-attr="aria-label:logLevelDebug"
+                />
+                <span class="seg-label" data-i18n="logLevelDebug">Debug</span>
+              </label>
+        
+            </div>
       </div>
       <div class="status" id="status" role="status" aria-live="polite"></div>
     </main>
@@ -183,6 +280,7 @@
     <script src="../../../../js/utils/logger.js"></script>
     <script src="../../../../js/utils/settings.js"></script>
     <script src="../../../../js/utils/theme-sync.js"></script>
+    <script src="../../../../js/utils/popover.js"></script>
     <script src="index.js"></script>
   </body>
 </html>

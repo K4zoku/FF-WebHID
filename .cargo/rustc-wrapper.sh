@@ -11,9 +11,15 @@ if [ "$(uname -s)" != "Linux" ]; then
 fi
 
 # --- Redirect all output to log file except for the final exec'd command ---
+# Logging is a debugging side-channel and must never break the build: a root
+# build can collide with a user-owned /tmp/fixup-log.txt (sticky /tmp, no
+# DAC override), so a failed redirect continues without the log.
 LOG_FILE="/tmp/fixup-log.txt"
 exec 3>&1 4>&2
-exec >>"$LOG_FILE" 2>&1
+if ! exec >>"$LOG_FILE" 2>&1; then
+  echo "warning: cannot write $LOG_FILE; continuing without patch log" >&2
+  exec 1>&3 2>&4
+fi
 
 # --- Constants and Paths ---
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/../" && pwd)

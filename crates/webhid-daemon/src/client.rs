@@ -100,20 +100,27 @@ async fn dispatch(
             Err(_) => NmResponse::err(500),
         },
 
-        NmRequest::Open { device_id, .. } => match device_mgr.open(device_id) {
-            Ok((dev_id, session_token)) => {
-                NmResponse::ok_opened(dev_id, session_token, Some(ws_port))
-            }
-            Err(e) => {
-                let msg = e.to_string();
-                let code = if msg.contains("not found") || msg.contains("No such") {
-                    404
-                } else {
-                    500
-                };
-                NmResponse::err(code)
-            }
-        },
+        NmRequest::Open { device_id, .. } => {
+            let mut resp = match device_mgr.open(device_id) {
+                Ok((dev_id, session_token)) => {
+                    NmResponse::ok_opened(dev_id, session_token, Some(ws_port))
+                }
+                Err(e) => {
+                    let msg = e.to_string();
+                    let code = if msg.contains("not found") || msg.contains("No such") {
+                        404
+                    } else {
+                        500
+                    };
+                    NmResponse::err(code)
+                }
+            };
+            // The open itself may have just refined the permission status
+            // (Linux: EACCES on the real open); report it right here so the
+            // addon does not need a follow-up handshake.
+            resp.hid_permission = Some(crate::hid::hid_permission());
+            resp
+        }
 
         NmRequest::Close {
             device_id,
@@ -253,6 +260,7 @@ async fn dispatch(
                 ws_nonce: Some(device_mgr.ws_nonce().to_string()),
                 wt_port,
                 wt_cert_hash,
+                hid_permission: Some(crate::hid::hid_permission()),
                 ..Default::default()
             }
         }

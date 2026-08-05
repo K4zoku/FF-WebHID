@@ -398,6 +398,8 @@ pub struct NmResponse {
     pub wt_port: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "H")]
     pub wt_cert_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "P")]
+    pub hid_permission: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "e")]
     pub event_type: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "v")]
@@ -897,5 +899,36 @@ mod tests {
             let de: IpcResponse = serde_json::from_str(&json).unwrap();
             assert_eq!(de.id(), resp.id());
         }
+    }
+}
+
+#[cfg(test)]
+mod nm_response_tests {
+    use super::*;
+
+    #[test]
+    fn test_nm_response_hid_permission_serializes_as_p() {
+        let resp = NmResponse {
+            status: Some(200),
+            ws_port: Some(31337),
+            ws_nonce: Some("nonce".into()),
+            wt_port: Some(4433),
+            wt_cert_hash: Some("abc".into()),
+            hid_permission: Some(1),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"P\":1"), "json={json}");
+        // Round-trip field presence through serde.
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(value["P"], 1);
+        assert_eq!(value["w"], 31337);
+    }
+
+    #[test]
+    fn test_nm_response_hid_permission_omitted_when_none() {
+        let resp = NmResponse::ok();
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(!json.contains("\"P\""), "json={json}");
     }
 }

@@ -1489,6 +1489,14 @@
                 return
               }
               await Promise.all(devices.map((device) => pairDevice(device)))
+              // Devices granted together share one grant event. The group
+              // relationship is only knowable here, at grant time; persist it
+              // so forget can revoke the whole group (multi-interface devices).
+              if (devices.length > 1) {
+                sendRequest('recordGrantGroup', {
+                  deviceIds: devices.map((device) => device.deviceId)
+                }).catch(() => {})
+              }
               resolve(devices.map((device) => getOrCreateDevice(device)))
             } catch (e) {
               reject(

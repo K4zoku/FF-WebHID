@@ -39,6 +39,7 @@
     reconnectTimer: null,
     reconnectDelay: 1000,
     nmHostName: 'webhid.forwarder_nm_host',
+    lastError: null,
 
     connect() {
       if (this.port) return Promise.resolve()
@@ -46,11 +47,13 @@
       try {
         this.port = browser.runtime.connectNative(this.nmHostName)
         this.reconnectDelay = 1000
+        this.lastError = null
         logger.debug('connected')
 
         this.port.onMessage.addListener((message) => {
           if (message.E !== undefined && message.s !== undefined && message.n === undefined) {
             logger.error('host error: ' + message.E)
+            this.lastError = String(message.E)
             for (const [, p] of this.pending) p.resolve(message)
             this.pending.clear()
             return

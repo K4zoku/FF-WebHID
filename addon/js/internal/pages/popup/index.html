@@ -10,127 +10,278 @@
   <body>
     <div id="header" role="banner">
       <h1 data-i18n="popupTitle">WebHID</h1>
+      <span id="status" class="status-inline" role="status" aria-live="polite">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span id="status-text"></span>
+      </span>
       <span id="site-name" class="muted" aria-live="polite"></span>
+      <button
+        id="btn-settings"
+        class="icon-btn"
+        type="button"
+        data-i18n-attr="aria-label:popupSettings"
+      >
+        <span aria-hidden="true">⚙️</span>
+      </button>
     </div>
     <main role="main">
-      <div id="devices-section">
-        <h2 data-i18n="popupPairedDevices">
-          Paired Devices
-          <span id="device-count" class="muted" aria-live="polite"></span>
-        </h2>
-        <div id="device-list" role="list"></div>
-        <div id="no-devices" class="muted" data-i18n="popupNoDevices" role="status">
-          No devices paired for this site.
-        </div>
-      </div>
-      <div id="settings-section">
-        <h2 data-i18n="popupSettings">Settings</h2>
-        <div class="setting">
-          <div class="setting-info">
-            <h3 data-i18n="popupDataPlane">Data Plane</h3>
-            <p data-i18n="popupDataPlaneDesc">WebSocket, WebTransport, or Native Messaging</p>
+      <section id="view-devices">
+        <div id="devices-section">
+          <h2>
+            <span data-i18n="popupPairedDevices">Paired Devices</span>
+            <span id="device-count" class="muted" aria-live="polite"></span>
+          </h2>
+          <div id="device-list" role="list"></div>
+          <div id="no-devices" class="muted" data-i18n="popupNoDevices" role="status">
+            No devices paired for this site.
           </div>
-          <select id="dataPlane" aria-labelledby="popupDataPlane">
-            <option value="ws" data-i18n="popupDataPlaneWs">WebSocket (Worker)</option>
-            <option value="wt" data-i18n="popupDataPlaneWt">WebTransport (Worker)</option>
-            <option value="nm" data-i18n="popupDataPlaneNm">Native Messaging</option>
-          </select>
         </div>
-        <div class="setting" id="useWorker-setting">
-          <div class="setting-info">
-            <h3 data-i18n="popupUseWorker">Use Worker</h3>
-            <p data-i18n="popupUseWorkerDesc">
-              Off: WebTransport connects directly in the page (main-thread CPU)
-            </p>
+      </section>
+      <section id="view-settings" hidden>
+        <div id="settings-section">
+          <div class="setting">
+            <div class="setting-info">
+              <h3 id="popupDataPlane" data-i18n="popupDataPlane">Data Plane</h3>
+              <div class="info-popover">
+                <p data-i18n-md="popupDataPlaneDesc">
+                  WebSocket, WebTransport, or Native Messaging
+                </p>
+              </div>
+            </div>
+            <div role="radiogroup" class="seg-group" aria-labelledby="popupDataPlane">
+              <label class="seg-option" data-i18n-attr="title:settingsDataPlaneWs">
+                <input
+                  type="radio"
+                  name="dataPlane"
+                  value="ws"
+                  data-i18n-attr="aria-label:settingsDataPlaneWs"
+                />
+                <span class="seg-label" data-i18n="segDataPlaneWs">WS</span>
+              </label>
+              <label class="seg-option" data-i18n-attr="title:settingsDataPlaneWt">
+                <input
+                  type="radio"
+                  name="dataPlane"
+                  value="wt"
+                  data-i18n-attr="aria-label:settingsDataPlaneWt"
+                />
+                <span class="seg-label" data-i18n="segDataPlaneWt">WT</span>
+              </label>
+              <label class="seg-option" data-i18n-attr="title:settingsDataPlaneNm">
+                <input
+                  type="radio"
+                  name="dataPlane"
+                  value="nm"
+                  data-i18n-attr="aria-label:settingsDataPlaneNm"
+                />
+                <span class="seg-label" data-i18n="segDataPlaneNm">NM</span>
+              </label>
+            </div>
           </div>
-          <label class="toggle">
-            <input
-              type="checkbox"
-              id="useWorker"
-              aria-labelledby="popupUseWorker"
-            />
-            <span class="slider" role="presentation"></span>
-          </label>
-        </div>
-        <div class="setting">
-          <div class="setting-info">
-            <h3 data-i18n="popupDevicePickerMode">Device Picker Mode</h3>
-            <p data-i18n="popupDevicePickerModeDesc">
-              How the device chooser is presented on this site
-            </p>
+          <div class="setting" id="useWorker-setting">
+            <div class="setting-info">
+              <h3 id="popupUseWorker" data-i18n="popupUseWorker">Use Worker</h3>
+              <div class="info-popover">
+                <p data-i18n-md="popupUseWorkerDesc">
+                  Off: WebTransport connects directly in the page (main-thread CPU). WebSocket still
+                  needs the worker.
+                </p>
+              </div>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="useWorker" aria-labelledby="popupUseWorker" />
+              <span class="slider" role="presentation"></span>
+            </label>
           </div>
-          <select id="devicePickerMode" aria-labelledby="popupDevicePickerMode">
-            <option value="modal" data-i18n="settingsDevicePickerModal">Modal (overlay)</option>
-            <option value="pageAction" data-i18n="settingsDevicePickerPageAction">
-              Page Action (URL bar popup)
-            </option>
-            <option value="window" data-i18n="settingsDevicePickerWindow">
-              Window (separate popup window)
-            </option>
-          </select>
-        </div>
-        <div class="setting">
-          <div class="setting-info">
-            <h3 data-i18n="popupWorkerPolyfill">Worker Polyfill</h3>
-            <p data-i18n="popupWorkerPolyfillDesc">
-              Inject WebHID stubs into Worker scripts on this site
-            </p>
+          <div id="warning-inpage-wt" class="warning" role="status" hidden>
+            <span data-i18n="popupInPageWtWarning"></span>
           </div>
-          <label class="toggle">
-            <input
-              type="checkbox"
-              id="workerPolyfillEnabled"
-              aria-labelledby="popupWorkerPolyfill"
-            />
-            <span class="slider" role="presentation"></span>
-          </label>
-        </div>
-        <div class="setting">
-          <div class="setting-info">
-            <h3 data-i18n="popupAllowActivationless">
-              Allow requestDevice() without user gesture
-            </h3>
-            <p data-i18n="popupAllowActivationlessDesc">
-              Skip the user-activation check when this site calls
-              requestDevice()
-            </p>
+          <div class="setting">
+            <div class="setting-info">
+              <h3 id="popupDevicePickerMode" data-i18n="popupDevicePickerMode">
+                Device Picker Mode
+              </h3>
+              <div class="info-popover">
+                <p data-i18n-md="popupDevicePickerModeDesc">
+                  How the device chooser is presented on this site
+                </p>
+              </div>
+            </div>
+            <div
+              role="radiogroup"
+              class="seg-group"
+              aria-labelledby="popupDevicePickerMode"
+            >
+              <label class="seg-option" data-i18n-attr="title:settingsDevicePickerModal">
+                <input
+                  type="radio"
+                  name="devicePickerMode"
+                  value="modal"
+                  data-i18n-attr="aria-label:settingsDevicePickerModal"
+                />
+                <span class="seg-label" data-i18n="segPickerModal">Modal</span>
+              </label>
+              <label class="seg-option" data-i18n-attr="title:settingsDevicePickerPageAction">
+                <input
+                  type="radio"
+                  name="devicePickerMode"
+                  value="pageAction"
+                  data-i18n-attr="aria-label:settingsDevicePickerPageAction"
+                />
+                <span class="seg-label" data-i18n="segPickerPageAction">Page Action</span>
+              </label>
+              <label class="seg-option" data-i18n-attr="title:settingsDevicePickerWindow">
+                <input
+                  type="radio"
+                  name="devicePickerMode"
+                  value="window"
+                  data-i18n-attr="aria-label:settingsDevicePickerWindow"
+                />
+                <span class="seg-label" data-i18n="segPickerWindow">Window</span>
+              </label>
+            </div>
           </div>
-          <label class="toggle">
-            <input
-              type="checkbox"
-              id="allowActivationlessRequestDevice"
-              aria-labelledby="popupAllowActivationless"
-            />
-            <span class="slider" role="presentation"></span>
-          </label>
-        </div>
-        <div class="setting" id="workerSpawnMode-setting">
-          <div class="setting-info">
-            <h3 data-i18n="popupWorkerSpawnMode">Worker Spawn Mode</h3>
-            <p data-i18n="popupWorkerSpawnModeDesc">How the data worker is created on this site</p>
+          <div class="setting">
+            <div class="setting-info">
+              <h3 id="popupWorkerPolyfill" data-i18n="popupWorkerPolyfill">Worker Polyfill</h3>
+              <div class="info-popover">
+                <p data-i18n-md="popupWorkerPolyfillDesc">
+                  Inject WebHID API into Worker scripts on this site
+                </p>
+              </div>
+            </div>
+            <label class="toggle">
+              <input
+                type="checkbox"
+                id="workerPolyfillEnabled"
+                aria-labelledby="popupWorkerPolyfill"
+              />
+              <span class="slider" role="presentation"></span>
+            </label>
           </div>
-          <select id="workerSpawnMode" aria-labelledby="popupWorkerSpawnMode">
-            <option value="shadow" data-i18n="settingsWorkerSpawnShadow">Shadow URL</option>
-            <option value="blob" data-i18n="settingsWorkerSpawnBlob">Blob + CSP rewrite</option>
-          </select>
-        </div>
-        <div class="setting">
-          <div class="setting-info">
-            <h3 data-i18n="popupLogLevel">Log Level</h3>
-            <p data-i18n="popupLogLevelDesc">Console output verbosity for this site</p>
+          <div class="setting">
+            <div class="setting-info">
+              <h3 id="popupAllowActivationless" data-i18n="popupAllowActivationless">
+                Allow requestDevice() without user gesture
+              </h3>
+              <div class="info-popover">
+                <p data-i18n-md="popupAllowActivationlessDesc">
+                  Skip the user-activation check when this site calls requestDevice()
+                </p>
+              </div>
+            </div>
+            <label class="toggle">
+              <input
+                type="checkbox"
+                id="allowActivationlessRequestDevice"
+                aria-labelledby="popupAllowActivationless"
+              />
+              <span class="slider" role="presentation"></span>
+            </label>
           </div>
-          <select id="logLevel" aria-labelledby="popupLogLevel">
-            <option value="0" data-i18n="logLevelError">Error</option>
-            <option value="1" data-i18n="logLevelWarn">Warn</option>
-            <option value="2" data-i18n="logLevelInfo">Info</option>
-            <option value="3" data-i18n="logLevelDebug">Debug</option>
-          </select>
+          <div class="setting" id="workerSpawnMode-setting">
+            <div class="setting-info">
+              <h3 id="popupWorkerSpawnMode" data-i18n="popupWorkerSpawnMode">Worker Spawn Mode</h3>
+              <div class="info-popover">
+                <p data-i18n-md="popupWorkerSpawnModeDesc">
+                  How the data worker is created on this site
+                </p>
+              </div>
+            </div>
+            <div
+              role="radiogroup"
+              class="seg-group"
+              aria-labelledby="popupWorkerSpawnMode"
+            >
+              <label class="seg-option" data-i18n-attr="title:settingsWorkerSpawnShadow">
+                <input
+                  type="radio"
+                  name="workerSpawnMode"
+                  value="shadow"
+                  data-i18n-attr="aria-label:settingsWorkerSpawnShadow"
+                />
+                <span class="seg-label" data-i18n="segSpawnShadow">Shadow</span>
+              </label>
+              <label class="seg-option" data-i18n-attr="title:settingsWorkerSpawnBlob">
+                <input
+                  type="radio"
+                  name="workerSpawnMode"
+                  value="blob"
+                  data-i18n-attr="aria-label:settingsWorkerSpawnBlob"
+                />
+                <span class="seg-label" data-i18n="segSpawnBlob">Blob</span>
+              </label>
+            </div>
+          </div>
+          <div class="setting">
+            <div class="setting-info">
+              <h3 id="popupLogLevel" data-i18n="popupLogLevel">Log Level</h3>
+              <div class="info-popover">
+                <p data-i18n-md="popupLogLevelDesc">Console output verbosity for this site</p>
+              </div>
+            </div>
+            <div role="radiogroup" class="seg-group" aria-labelledby="popupLogLevel">
+              <label class="seg-option" data-i18n-attr="title:logLevelError">
+                <input
+                  type="radio"
+                  name="logLevel"
+                  value="0"
+                  data-i18n-attr="aria-label:logLevelError"
+                />
+                <span class="seg-label" data-i18n="logLevelError">Error</span>
+              </label>
+              <label class="seg-option" data-i18n-attr="title:logLevelWarn">
+                <input
+                  type="radio"
+                  name="logLevel"
+                  value="1"
+                  data-i18n-attr="aria-label:logLevelWarn"
+                />
+                <span class="seg-label" data-i18n="logLevelWarn">Warn</span>
+              </label>
+              <label class="seg-option" data-i18n-attr="title:logLevelInfo">
+                <input
+                  type="radio"
+                  name="logLevel"
+                  value="2"
+                  data-i18n-attr="aria-label:logLevelInfo"
+                />
+                <span class="seg-label" data-i18n="logLevelInfo">Info</span>
+              </label>
+              <label class="seg-option" data-i18n-attr="title:logLevelDebug">
+                <input
+                  type="radio"
+                  name="logLevel"
+                  value="3"
+                  data-i18n-attr="aria-label:logLevelDebug"
+                />
+                <span class="seg-label" data-i18n="logLevelDebug">Debug</span>
+              </label>
+            </div>
+          </div>
+          <div id="mac-privacy" class="setting" hidden>
+            <div class="setting-info">
+              <h3 data-i18n="macPrivacyTitle">macOS Input Monitoring</h3>
+              <p class="muted" data-i18n="macPrivacyDesc"></p>
+            </div>
+            <a
+              id="mac-privacy-link"
+              class="btn-link"
+              href="x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_ListenEvent"
+              data-i18n="macPrivacyOpen"
+            >
+              Open Privacy Settings
+            </a>
+          </div>
         </div>
-      </div>
-      <div id="default-note" class="muted" data-i18n="popupDefaultNote">
-        Changes here override defaults for this site.
-      </div>
-      <a id="open-settings" href="#" data-i18n="popupGlobalSettings">Global settings →</a>
+        <div id="default-note" class="muted" data-i18n="popupDefaultNote">
+          Changes here override defaults for this site.
+        </div>
+        <a id="manage-devices" href="#" data-i18n="popupManageDevices">
+          Manage all paired devices →
+        </a>
+        <a id="open-settings" href="#" data-i18n="popupGlobalSettings"> Global settings → </a>
+      </section>
     </main>
     <script src="../../../../js/utils/bootstrap.js"></script>
     <script src="../../../../js/utils/i18n.js"></script>
@@ -140,6 +291,7 @@
     <script src="../../../../js/utils/device.js"></script>
     <script src="../../../../js/utils/settings.js"></script>
     <script src="../../../../js/utils/theme-sync.js"></script>
+    <script src="../../../../js/utils/popover.js"></script>
     <script src="index.js"></script>
   </body>
 </html>

@@ -141,7 +141,10 @@ fn read_raw_report_descriptor(info: &HidDeviceInfo) -> Vec<u8> {
 }
 
 fn read_raw_report_descriptor_with_api(api: &HidApi, info: &HidDeviceInfo) -> Vec<u8> {
-    let Ok(dev) = api.open_path(info.path()) else {
+    let opened = api.open_path(info.path());
+    #[cfg(unix)]
+    note_open_result(&opened);
+    let Ok(dev) = opened else {
         return Vec::new();
     };
     let mut buf = vec![0u8; hidapi::MAX_REPORT_DESCRIPTOR_SIZE];
@@ -273,7 +276,10 @@ pub fn open_by_device_id(device_id: u32) -> anyhow::Result<(DeviceInfo, bool, Hi
                 continue;
             }
             let numbered = uses_numbered_reports(&desc);
-            let dev = api.open_path(info.path())?;
+            let opened = api.open_path(info.path());
+            #[cfg(unix)]
+            note_open_result(&opened);
+            let dev = opened?;
             return Ok((device_info, numbered, dev));
         }
     }
@@ -403,6 +409,115 @@ pub fn info_by_raw_path(raw_path: &str) -> Option<DeviceInfo> {
         }
     }
     None
+}
+
+// ---------------------------------------------------------------------------
+// HID permission status (unix only; Windows needs no permission)
+// ---------------------------------------------------------------------------
+
+use std::sync::atomic::{AtomicU8, Ordering};
+
+/// Cached HID permission status: 0 = ok, 1 = missing, 2 = unknown.
+/// The daemon probes once at startup; permission state (TCC on macOS, group
+/// membership / udev on Linux) is fixed for the process lifetime.
+static HID_PERMISSION: AtomicU8 = AtomicU8::new(2);
+
+/// Stores the probed HID permission status.
+pub fn set_hid_permission(v: u8) {
+    HID_PERMISSION.store(v, Ordering::Relaxed);
+}
+
+/// Returns the cached HID permission status (0 ok, 1 missing, 2 unknown).
+pub fn hid_permission() -> u8 {
+    HID_PERMISSION.load(Ordering::Relaxed)
+}
+
+/// Probes whether the daemon can read HID devices.
+///
+/// Windows needs no permission, so it is always ok. On macOS, Input
+/// Monitoring (TCC) gates IOHIDManager: `IOHIDManagerOpen` returns
+/// kIOReturnNotPermitted when the daemon is not allowed, while the bundled
+/// hidapi silently enumerates zero devices in that case, so the probe calls
+/// the manager directly. On other unixes, enumerate and try opening the
+/// first device: an EACCES open means missing permission, an empty list is
+/// ambiguous (no devices present).
+pub fn probe_hid_permission() -> u8 {
+    #[cfg(target_os = "windows")]
+    {
+        return 0;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        return macos_hid_permission_probe();
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        unix_hid_permission_probe()
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        return 2;
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_hid_permission_probe() -> u8 {
+    use std::ffi::c_void;
+
+    const KIOHID_OPTIONS_NONE: i32 = 0;
+    const KIORETURN_SUCCESS: i32 = 0;
+
+    unsafe {
+        let mgr = IOHIDManagerCreate(std::ptr::null(), KIOHID_OPTIONS_NONE);
+        if mgr.is_null() {
+            return 2;
+        }
+        IOHIDManagerSetDeviceMatching(mgr, std::ptr::null());
+        let ret = IOHIDManagerOpen(mgr, KIOHID_OPTIONS_NONE);
+        let _ = IOHIDManagerClose(mgr, KIOHID_OPTIONS_NONE);
+        CFRelease(mgr.cast());
+        if ret == KIORETURN_SUCCESS {
+            0
+        } else {
+            1
+        }
+    }
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn unix_hid_permission_probe() -> u8 {
+    // Permission state is not knowable at boot without a device to open:
+    // enumeration lists /sys nodes without needing access, and the EACCES
+    // only surfaces on a real open. Report unknown; real open attempts
+    // update the status via note_open_result.
+    2
+}
+
+/// Updates the cached HID permission status from a real hidapi open result:
+/// success means access works, EACCES/EPERM means the permission is missing,
+/// any other error leaves the current status untouched.
+#[cfg(unix)]
+fn note_open_result<T>(res: &Result<T, hidapi::HidError>) {
+    match res {
+        Ok(_) => set_hid_permission(0),
+        Err(hidapi::HidError::IoError { error })
+            if matches!(error.raw_os_error(), Some(libc::EACCES) | Some(libc::EPERM)) =>
+        {
+            set_hid_permission(1);
+        }
+        Err(_) => {}
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[link(name = "IOKit", kind = "framework")]
+#[link(name = "CoreFoundation", kind = "framework")]
+extern "C" {
+    fn IOHIDManagerCreate(allocator: *const std::ffi::c_void, options: i32) -> *mut std::ffi::c_void;
+    fn IOHIDManagerSetDeviceMatching(manager: *mut std::ffi::c_void, matching: *const std::ffi::c_void);
+    fn IOHIDManagerOpen(manager: *mut std::ffi::c_void, options: i32) -> i32;
+    fn IOHIDManagerClose(manager: *mut std::ffi::c_void, options: i32) -> i32;
+    fn CFRelease(cf: *const std::ffi::c_void);
 }
 
 // ---------------------------------------------------------------------------

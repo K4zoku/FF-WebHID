@@ -8,6 +8,9 @@
   "popupTitle": {
     "message": "WebHID"
   },
+  "popupBack": {
+    "message": "Back"
+  },
   "popupPairedDevices": {
     "message": "Paired Devices"
   },
@@ -80,6 +83,9 @@
   "popupGlobalSettings": {
     "message": "Global settings →"
   },
+  "popupManageDevices": {
+    "message": "Manage all paired devices →"
+  },
   "popupNoSite": {
     "message": "(no site)"
   },
@@ -95,6 +101,48 @@
   "popupDeviceCount": {
     "message": "($1/$2)"
   },
+  "popupUseWorker": {
+    "message": "Use Worker"
+  },
+  "popupUseWorkerDesc": {
+    "message": "Off: WebTransport connects directly in the page (main-thread CPU; fine at normal report rates). WebSocket still needs the worker."
+  },
+  "popupInPageWtWarning": {
+    "message": "In-page WebTransport may trigger a Firefox local-network permission prompt (\"wants to access other apps and services on this device\"). Tick \"Remember my choice for this site\" before clicking Allow, otherwise you will be asked again on every page load."
+  },
+  "statusReady": {
+    "message": "Ready"
+  },
+  "statusFallback": {
+    "message": "Fallback: $1"
+  },
+  "statusOffline": {
+    "message": "Daemon offline"
+  },
+  "statusOfflineGuidance": {
+    "message": "Check that the daemon is running (systemctl status webhid-daemon), that your user is in the webhid group, and that the udev rules are installed."
+  },
+  "planeNameWS": {
+    "message": "WebSocket"
+  },
+  "planeNameWT": {
+    "message": "WebTransport"
+  },
+  "planeNameNM": {
+    "message": "Native Messaging"
+  },
+  "infoPopoverMore": {
+    "message": "More info"
+  },
+  "macPrivacyTitle": {
+    "message": "macOS Input Monitoring"
+  },
+  "macPrivacyDesc": {
+    "message": "Allow the daemon to read HID devices: System Settings → Privacy & Security → Input Monitoring. If the link does not open the right tab, find it manually and enable the daemon."
+  },
+  "macPrivacyOpen": {
+    "message": "Open Privacy Settings"
+  },
   "settingsTitle": {
     "message": "WebHID Settings"
   },
@@ -102,13 +150,13 @@
     "message": "Daemon as NM host"
   },
   "settingsDaemonAsNmHostDesc": {
-    "message": "Talk to the daemon directly over native messaging (skip the `webhid-native-messaging` forwarder and Unix socket). Requires the `webhid.daemon_nm_host` native-messaging manifest to be installed and the daemon to run as your user (with the udev rule). Lower latency, but no root-daemon fallback. The addon reconnects automatically when toggled."
+    "message": "Talk to the daemon directly over native messaging, skipping the forwarder and Unix socket. Requires the daemon_nm_host manifest and the daemon running as your user (with the udev rule). Lower latency, no root-daemon fallback. Reconnects automatically."
   },
   "settingsDataPlane": {
     "message": "Data Plane"
   },
   "settingsDataPlaneDesc": {
-    "message": "**WebSocket**: spawn Web Worker giữ kết nối WS tới daemon. Input report được chuyển tới page qua `postMessage` với ArrayBuffer transfer (ngoài main thread, zero-copy). Không SAB, không COOP/COEP.\n**WebTransport**: cùng kiến trúc worker, hoặc ngay trong page khi tắt Use Worker (xem toggle đó), qua QUIC với chứng chỉ tự ký pinned bằng `serverCertificateHashes` (tốn CPU TLS/QUIC trên loopback).\n**Native Messaging**: chuyển toàn bộ dữ liệu (sendReport, input reports, feature reports) qua NM host bằng content-script bridge. Không WS. Fallback khi WS bị chặn."
+    "message": "**WebSocket**: a Web Worker owns the WS connection; input reports are forwarded to the page via postMessage (off main thread).\n**WebTransport**: the same worker model over QUIC, or directly in the page when Use Worker is off.\n**Native Messaging**: all data (sendReport, input reports, feature reports) goes through the NM host. No WS. Fallback when WS/WT are blocked."
   },
   "settingsDataPlaneWs": {
     "message": "WebSocket"
@@ -123,7 +171,7 @@
     "message": "Device Picker Mode"
   },
   "settingsDevicePickerModeDesc": {
-    "message": "**Modal**: show a shadow DOM overlay on the page when `requestDevice()` is called (default, matches native WebHID behavior).\n**Page Action**: switch the url bar icon to alert mode and open the device picker as a popup. User must click the icon to open the picker. Firefox only, Chromium will fall back to modal."
+    "message": "**Modal**: shadow-DOM overlay on the page when requestDevice() is called (default).\n**Page Action**: URL-bar popup picker; the user clicks the icon to open it. Firefox only, Chromium falls back to modal.\n**Window**: separate popup window."
   },
   "settingsDevicePickerModal": {
     "message": "Modal (overlay)"
@@ -138,19 +186,19 @@
     "message": "Worker Polyfill"
   },
   "settingsWorkerPolyfillDesc": {
-    "message": "Inject WebHID API stubs into Web Worker scripts (`new Worker()`, `new SharedWorker()`). Workers get `navigator.hid`, `HIDDevice`, and related constructors. Methods throw `NotSupportedError` until full worker communication is implemented. Can be overridden per-site from the popup. Reload pages after changing."
+    "message": "Inject WebHID API stubs into Worker scripts (new Worker(), new SharedWorker()). Methods throw NotSupportedError until full worker communication is implemented. Reload pages after changing."
   },
   "settingsAllowActivationless": {
     "message": "Allow activation-less requestDevice()"
   },
   "settingsAllowActivationlessDesc": {
-    "message": "Skip the user-activation requirement for `navigator.hid.requestDevice()` calls on this site. This deviates from the WebHID spec, where `requestDevice()` must be called within a user gesture. Intended as a workaround for sites that call `requestDevice()` from an async handler (for example after a network fetch), where the gesture may have expired by the time the call runs. The device chooser still requires explicit user selection, and the Permissions Policy check is unaffected. Can be overridden per-site from the popup. Reload pages after changing."
+    "message": "Skip the user-activation requirement for requestDevice() on this site. Spec deviation; workaround for sites that call it from an async handler. The chooser still requires explicit user selection. Reload pages after changing."
   },
   "settingsLogLevel": {
     "message": "Log Level"
   },
   "settingsLogLevelDesc": {
-    "message": "Controls console output verbosity. Error = errors only, Warn = +warnings, Info = +info, Debug = +debug (includes performance timing). Reload pages after changing."
+    "message": "Console verbosity: Error = errors only, Warn = +warnings, Info = +info, Debug = +debug (includes timing). Reload pages after changing."
   },
   "pickerTitle": {
     "message": "Select a HID Device"
@@ -180,7 +228,7 @@
     "message": "Worker Spawn Mode"
   },
   "settingsWorkerSpawnModeDesc": {
-    "message": "**Shadow URL** (default on MV3): spawns the data worker via `new Worker(location.href)` with a StreamFilter intercepting the synthetic self-request. Touches nothing about the page except one synthetic request. Fails if the server rejects that request or if `require-trusted-types-for` is active with a restrictive allow-list.\n**Blob + CSP rewrite** (default on MV2): spawns the worker from a `blob:` URL created from the extension's worker bundle. No network dependency, but relaxes the page's `worker-src` and `connect-src` CSP directives to allow `blob:` and `ws://127.0.0.1:*`."
+    "message": "**Shadow URL** (default on MV3): spawns the data worker via new Worker(location.href) with a StreamFilter intercepting the synthetic self-request. Fails if the server rejects it or if require-trusted-types-for is restrictive.\n**Blob + CSP rewrite** (default on MV2): spawns the worker from a blob: URL; relaxes the page's worker-src and connect-src directives."
   },
   "settingsWorkerSpawnShadow": {
     "message": "Shadow URL"
@@ -189,15 +237,39 @@
     "message": "Blob + CSP rewrite"
   },
   "settingsUseWorker": {
-    "message": "Dùng Worker"
+    "message": "Use Worker"
   },
   "settingsUseWorkerDesc": {
-    "message": "Bật: data plane WS/WT chạy trong Web Worker riêng (ngoài main thread, khuyến nghị).\nTắt: WebTransport kết nối trực tiếp trong page, không dùng worker, report được dispatch trên main thread (dùng chung CPU với rendering; ổn ở tốc độ report thường, chưa benchmark). Firefox hỏi quyền local-network \\\"Allow\\\" một lần cho page trước khi kết nối WebTransport đầu tiên tới daemon; worker được miễn prompt này. WebSocket vẫn cần worker vì HSTS đổi `ws://` thành `wss://` trên page, nên tùy chọn WS vẫn dùng worker. Native Messaging không bị ảnh hưởng. Reload pages sau khi đổi."
+    "message": "On: the WS/WT data plane runs in a dedicated Web Worker (off main thread, recommended).\nOff: WebTransport connects directly in the page (main-thread CPU; fine at normal report rates). Firefox asks a one-time local-network permission (\"Allow\") for the page before the first in-page WebTransport connection; workers are exempt. WebSocket still needs the worker because HSTS rewrites ws:// to wss:// on pages. Reload pages after changing."
   },
-  "popupUseWorker": {
-    "message": "Dùng Worker"
+  "segDataPlaneWs": {
+    "message": "WS"
   },
-  "popupUseWorkerDesc": {
-    "message": "Tắt: WebTransport kết nối trực tiếp trong page (dùng CPU main thread; ổn ở tốc độ report thường). WebSocket vẫn cần worker."
+  "segDataPlaneWt": {
+    "message": "WT"
+  },
+  "segDataPlaneNm": {
+    "message": "NM"
+  },
+  "segPickerModal": {
+    "message": "Modal"
+  },
+  "segPickerPageAction": {
+    "message": "Page Action"
+  },
+  "segPickerWindow": {
+    "message": "Window"
+  },
+  "segSpawnShadow": {
+    "message": "Shadow"
+  },
+  "segSpawnBlob": {
+    "message": "Blob"
+  },
+  "devicesTitle": {
+    "message": "Paired Devices (all sites)"
+  },
+  "devicesNone": {
+    "message": "No devices paired on any site."
   }
 }

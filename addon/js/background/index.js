@@ -22,7 +22,11 @@
     removeDeviceInfo,
     getAllowedDevices,
     addAllowedDevice,
-    removeAllowedDevice
+    removeAllowedDevice,
+    recordGrantGroup,
+    getGrantGroupsForOrigin,
+    deleteGrantGroups,
+    getAllAllowedByOrigin
   } = webhid.import('bgStorage')
   const { registerDeviceTab, unregisterDeviceTab, isTabAuthorizedForDevice, purgeTab } =
     webhid.import('bgStateOps')
@@ -33,6 +37,9 @@
   const STORAGE_SCHEMA_VERSION = 1
   const VERSION_KEY = 'meta :: storage :: version'
   const GLOBAL_NAMES = new Set(SETTING_NAMES)
+
+  /** @type {number} */
+  let lastHidPermission = 2
 
   /**
    * Migrates legacy browser.storage.local entries to the IndexedDB schema.
@@ -915,6 +922,81 @@
           .catch(() => sendResponse({ s: 500 }))
         return true
 
+      case 'getBackendStatus':
+        (async () => {
+          try {
+            const resp = await NativeMessaging.handshake()
+            if (typeof resp.P === 'number') lastHidPermission = resp.P
+            sendResponse({
+              nmConnected: NativeMessaging.port != null,
+              daemonReachable: http.isOk(resp.s),
+              hidPermission: typeof resp.P === 'number' ? resp.P : lastHidPermission,
+              lastError: NativeMessaging.lastError || null
+            })
+          } catch {
+            sendResponse({
+              nmConnected: NativeMessaging.port != null,
+              daemonReachable: false,
+              hidPermission: lastHidPermission,
+              lastError: NativeMessaging.lastError || null
+            })
+          }
+        })()
+        return true
+
+      case 'recordGrantGroup':
+        (async () => {
+          try {
+            if (!request.origin || !Array.isArray(request.deviceIds)) {
+              sendResponse({ success: false })
+              return
+            }
+            await recordGrantGroup(request.origin, request.deviceIds)
+            sendResponse({ success: true })
+          } catch (e) {
+            sendResponse({ success: false, error: e.message })
+          }
+        })()
+        return true
+
+      case 'getGrantGroups':
+        (async () => {
+          try {
+            const groups = await getGrantGroupsForOrigin(request.origin)
+            sendResponse({ success: true, groups })
+          } catch {
+            sendResponse({ success: false, groups: [] })
+          }
+        })()
+        return true
+
+      case 'getAllPairedDevices':
+        (async () => {
+          try {
+            const byOrigin = await getAllAllowedByOrigin()
+            const origins = []
+            for (const [origin, deviceIds] of byOrigin.entries()) {
+              const devices = []
+              for (const deviceId of deviceIds) {
+                const info = await getDeviceInfo(deviceId)
+                devices.push({
+                  deviceId,
+                  name: info ? info.productName || '' : '',
+                  vendorId: info ? info.vendorId || 0 : 0,
+                  productId: info ? info.productId || 0 : 0,
+                  manufacturer: info ? info.manufacturer || '' : ''
+                })
+              }
+              origins.push({ origin, devices })
+            }
+            origins.sort((a, b) => a.origin.localeCompare(b.origin))
+            sendResponse({ success: true, origins })
+          } catch (e) {
+            sendResponse({ success: false, error: e.message, origins: [] })
+          }
+        })()
+        return true
+
       case 'open': {
         const tabId = sender.tab != null ? sender.tab.id : undefined
         getAllowedDevices(request.origin).then((deviceIds) => {
@@ -924,6 +1006,9 @@
           }
           NativeMessaging.openDevice(request.deviceId)
             .then((response) => {
+              // The daemon refreshes its permission status on the real open
+              // (Linux EACCES); keep the freshest value for getBackendStatus.
+              if (typeof response.P === 'number') lastHidPermission = response.P
               if (http.isOk(response.s) && response.i) registerDeviceTab(response.i, tabId)
               sendResponse(response)
             })
@@ -955,9 +1040,30 @@
               sendResponse({ success: false, error: 'no origin' })
               return
             }
-            await removeAllowedDevice(origin, request.deviceId)
-            removeDeviceInfo(request.deviceId)
-            await NativeMessaging.closeDevice(request.deviceId).catch(() => {})
+            // Devices granted together by one requestDevice() call must be
+            // forgotten as a group: revoking one interface must not leave the
+            // others with live access. Callers may pass a whole display group
+            // (deviceIds) or a single device (deviceId); grant groups are
+            // unioned across all of them.
+            const targetIds =
+              Array.isArray(request.deviceIds) && request.deviceIds.length
+                ? request.deviceIds.map((id) => Number(id))
+                : [Number(request.deviceId)]
+            const groups = await getGrantGroupsForOrigin(origin)
+            const memberGroups = groups.filter((g) =>
+              g.deviceIds.some((id) => targetIds.includes(id))
+            )
+            /** @type {Set<number>} */
+            const toRevoke = new Set(targetIds)
+            for (const g of memberGroups) {
+              for (const id of g.deviceIds) toRevoke.add(Number(id))
+            }
+            for (const deviceId of toRevoke) {
+              await removeAllowedDevice(origin, deviceId)
+              removeDeviceInfo(deviceId)
+              await NativeMessaging.closeDevice(deviceId).catch(() => {})
+            }
+            await deleteGrantGroups(memberGroups.map((g) => g.id))
             const tabs = await browser.tabs.query({})
             for (const tab of tabs) {
               if (!tab.url) continue
@@ -968,13 +1074,15 @@
                 continue
               }
               if (tabOrigin !== origin) continue
-              unregisterDeviceTab(request.deviceId, tab.id)
-              browser.tabs
-                .sendMessage(tab.id, {
-                  action: 'webhidDeviceEvent',
-                  event: { eventType: 'revoked', deviceId: request.deviceId }
-                })
-                .catch(() => {})
+              for (const deviceId of toRevoke) {
+                unregisterDeviceTab(deviceId, tab.id)
+                browser.tabs
+                  .sendMessage(tab.id, {
+                    action: 'webhidDeviceEvent',
+                    event: { eventType: 'revoked', deviceId }
+                  })
+                  .catch(() => {})
+              }
               const deviceIds = await getAllowedDevices(origin)
               browser.tabs
                 .sendMessage(tab.id, {

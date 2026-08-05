@@ -25,15 +25,108 @@ input:checked + .slider:before {
 
 #header {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
-  margin-bottom: 4px;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+#header h1 {
+  font-size: 1.1em;
+  margin: 0;
+  border: none;
+  padding: 0;
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.icon-btn:hover,
+.icon-btn.active {
+  background: var(--accent-surface);
+  color: var(--accent);
 }
 
 #site-name {
+  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: right;
+}
+
+/* ── Inline status (§2) ──────────────────── */
+.status-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.75em;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--status-color, var(--text-muted));
+  flex-shrink: 0;
+  position: relative;
+}
+
+#status.state-ok .status-dot {
+  --status-color: var(--ok);
+}
+
+#status.state-ok .status-dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--ok);
+  animation: status-ping 1.8s ease-out infinite;
+}
+
+#status.state-warn .status-dot {
+  --status-color: var(--warn);
+}
+
+#status.state-warn .status-dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--warn);
+  animation: status-ping 3.2s ease-out infinite;
+}
+
+#status.state-error .status-dot {
+  --status-color: var(--danger);
+}
+
+@keyframes status-ping {
+  0% {
+    transform: scale(1);
+    opacity: 0.7;
+  }
+  80%,
+  100% {
+    transform: scale(2.6);
+    opacity: 0;
+  }
 }
 
 .device-card {
@@ -64,7 +157,7 @@ input:checked + .slider:before {
 }
 
 .device-card.disconnected .device-name::after {
-  content: " (disconnected)";
+  content: ' (disconnected)';
   font-weight: 400;
   color: var(--text-muted);
   font-size: 0.9em;
@@ -128,10 +221,41 @@ input:checked + .slider:before {
   padding: 8px 0;
 }
 
+/* ── In-page WT warning (§3) ─────────────── */
+.warning {
+  margin: 4px 0 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--warn);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg), var(--warn) 12%);
+  font-size: 0.8em;
+  line-height: 1.4;
+  color: var(--text);
+}
+
+/* ── macOS privacy link (§4) ─────────────── */
+.btn-link {
+  display: inline-block;
+  background: var(--surface-hover);
+  color: var(--accent);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  font-size: 0.8em;
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn-link:hover {
+  border-color: var(--accent);
+}
+
 #default-note {
   margin-top: 12px;
 }
 
+#manage-devices,
 #open-settings {
   display: block;
   margin-top: 8px;
@@ -141,6 +265,9 @@ input:checked + .slider:before {
   font-size: 0.85em;
 }
 
+#manage-devices:hover,
 #open-settings:hover {
   text-decoration: underline;
 }
+
+/* ── Status indicator (§2) lives in the header now ───────────────── */
