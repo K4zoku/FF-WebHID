@@ -69,6 +69,12 @@ jobs:
           git config --global --add safe.directory "${GITHUB_WORKSPACE}"
           echo "VERSION=$(git describe --tags | sed 's/^v//;s/_/./;s/\([^-]*-g\)/r\1/;s/-/./g')" >> "$GITHUB_OUTPUT"
 
+      - name: Cache npm
+        if: runner.os == 'Linux'
+        uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          key: npm-${{ hashFiles('package-lock.json') }}
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
