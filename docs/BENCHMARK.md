@@ -165,7 +165,7 @@ Per-report round-trip latency (ms):
 ```mermaid
 radar-beta
   title Per-report latency by mode
-  axis p50["p50"], p90["p90"], p95["p95"], max["max"]
+  axis p50["p50"], p90["p90"], p95["p95"], mx["max"]
   curve nm["nm"]{1.88, 2.47, 2.73, 9.29}
   curve ws["ws"]{1.08, 1.52, 1.77, 5.74}
   curve wtip["wt-inpage"]{1.06, 1.39, 1.56, 5.38}
@@ -181,7 +181,7 @@ Whole-run walltime (ms):
 ```mermaid
 radar-beta
   title Whole-run walltime by mode
-  axis p50["p50"], p90["p90"], p95["p95"], max["max"]
+  axis p50["p50"], p90["p90"], p95["p95"], mx["max"]
   curve nm["nm"]{932.5, 1134.0, 1134.0, 1134.0}
   curve ws["ws"]{499.8, 536.9, 536.9, 536.9}
   curve wtip["wt-inpage"]{446.3, 518.3, 518.3, 518.3}
