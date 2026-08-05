@@ -11,10 +11,6 @@ thread_local! {
 
 const DEFAULT_READ_SIZE: usize = 4096;
 
-// ---------------------------------------------------------------------------
-// device_id: stable, platform-independent identifier
-// ---------------------------------------------------------------------------
-
 /// Generate a stable `u32` device identifier from the device path.
 ///
 /// Uses FNV-1a 32-bit hash of the platform-specific device path
@@ -49,10 +45,6 @@ fn resolve_linux_syspath(devnode: &str) -> Option<String> {
     }
     Some(base)
 }
-
-// ---------------------------------------------------------------------------
-// Enumeration
-// ---------------------------------------------------------------------------
 
 /// Return every currently connected HID device via hidapi.
 ///
@@ -155,18 +147,12 @@ fn read_raw_report_descriptor_with_api(api: &HidApi, info: &HidDeviceInfo) -> Ve
     buf
 }
 
-// ---------------------------------------------------------------------------
-// Blocklist: security keys that must never be exposed to web pages
-// ---------------------------------------------------------------------------
-
 /// Known FIDO/U2F security key devices.  These devices can be used to
 /// exfiltrate credentials if a malicious page gains raw HID access, so we
 /// block them entirely, one-to-one with the per-product entries in
 /// Chromium's `hid_blocklist.cc`.
 const BLOCKED_DEVICES: &[(u16, u16)] = &[
-    // KEY-ID
     (0x096e, 0x0850),
-    // Feitian
     (0x096e, 0x0852),
     (0x096e, 0x0853),
     (0x096e, 0x0854),
@@ -174,11 +160,8 @@ const BLOCKED_DEVICES: &[(u16, u16)] = &[
     (0x096e, 0x0858),
     (0x096e, 0x085a),
     (0x096e, 0x085b),
-    // HyperFIDO
     (0x096e, 0x0880),
-    // HID Global BlueTrust Token
     (0x09c3, 0x0023),
-    // Yubikey
     (0x1050, 0x0010),
     (0x1050, 0x0018),
     (0x1050, 0x0030),
@@ -200,33 +183,19 @@ const BLOCKED_DEVICES: &[(u16, u16)] = &[
     (0x1050, 0x0406),
     (0x1050, 0x0407),
     (0x1050, 0x0410),
-    // U2F Zero
     (0x10c4, 0x8acf),
-    // Mooltipass Mini-BLE
     (0x1209, 0x4321),
-    // Mooltipass Arduino sketch
     (0x1209, 0x4322),
-    // Google Titan
     (0x18d1, 0x5026),
-    // VASCO
     (0x1a44, 0x00bb),
-    // OnlyKey
     (0x1d50, 0x60fc),
-    // Keydo AES
     (0x1e0d, 0xf1ae),
-    // Neowave Keydo
     (0x1e0d, 0xf1d0),
-    // Thetis
     (0x1ea8, 0xf025),
-    // Nitrokey
     (0x20a0, 0x4287),
-    // JaCarta
     (0x24dc, 0x0101),
-    // Happlink
     (0x2581, 0xf1d0),
-    // Bluink
     (0x2abe, 0x1002),
-    // Feitian USB, HyperFIDO
     (0x2ccf, 0x0880),
 ];
 
@@ -256,10 +225,6 @@ pub fn is_blocked_by_vendor_product(info: &webhid::DeviceInfo) -> bool {
     crate::blocklist::device_is_blocked(rules, info.vendor_id, info.product_id)
 }
 
-// ---------------------------------------------------------------------------
-// Open
-// ---------------------------------------------------------------------------
-
 /// Open a device by its stable `device_id` (u32 FNV-1a hash of path).
 /// Returns (DeviceInfo, uses_numbered_reports, HidDevice) for I/O.
 pub fn open_by_device_id(device_id: u32) -> anyhow::Result<(DeviceInfo, bool, HidDevice)> {
@@ -285,10 +250,6 @@ pub fn open_by_device_id(device_id: u32) -> anyhow::Result<(DeviceInfo, bool, Hi
     }
     Err(anyhow::anyhow!("device_id '{}' not found", device_id))
 }
-
-// ---------------------------------------------------------------------------
-// Read / write
-// ---------------------------------------------------------------------------
 
 /// Scan a raw HID report descriptor for the presence of any `Report ID`
 /// global item (tag `0x84`).
@@ -411,10 +372,6 @@ pub fn info_by_raw_path(raw_path: &str) -> Option<DeviceInfo> {
     None
 }
 
-// ---------------------------------------------------------------------------
-// HID permission status (unix only; Windows needs no permission)
-// ---------------------------------------------------------------------------
-
 use std::sync::atomic::{AtomicU8, Ordering};
 
 /// Cached HID permission status: 0 = ok, 1 = missing, 2 = unknown.
@@ -474,20 +431,12 @@ fn macos_hid_permission_probe() -> u8 {
         let ret = IOHIDManagerOpen(mgr, KIOHID_OPTIONS_NONE);
         let _ = IOHIDManagerClose(mgr, KIOHID_OPTIONS_NONE);
         CFRelease(mgr.cast());
-        if ret == KIORETURN_SUCCESS {
-            0
-        } else {
-            1
-        }
+        if ret == KIORETURN_SUCCESS { 0 } else { 1 }
     }
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
 fn unix_hid_permission_probe() -> u8 {
-    // Permission state is not knowable at boot without a device to open:
-    // enumeration lists /sys nodes without needing access, and the EACCES
-    // only surfaces on a real open. Report unknown; real open attempts
-    // update the status via note_open_result.
     2
 }
 
@@ -496,8 +445,6 @@ fn unix_hid_permission_probe() -> u8 {
 /// any other error leaves the current status untouched.
 #[cfg(unix)]
 fn note_open_result<T>(res: &Result<T, hidapi::HidError>) {
-    // POSIX errno values, stable across Linux/macOS/BSD (libc is a
-    // Linux-only dependency of this crate).
     const EACCES: i32 = 13;
     const EPERM: i32 = 1;
     match res {
@@ -515,8 +462,6 @@ fn note_open_result<T>(res: &Result<T, hidapi::HidError>) {
 #[link(name = "IOKit", kind = "framework")]
 #[link(name = "CoreFoundation", kind = "framework")]
 unsafe extern "C" {
-    // Signatures must match the declarations in hotplug.rs (IOOptionBits is
-    // u32); clashing extern declarations are a compile warning.
     fn IOHIDManagerCreate(
         allocator: *const std::ffi::c_void,
         options: u32,
@@ -530,10 +475,6 @@ unsafe extern "C" {
     fn CFRelease(cf: *const std::ffi::c_void);
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 #[cfg(test)]
 mod tests {
     use super::uses_numbered_reports;
@@ -545,106 +486,60 @@ mod tests {
 
     #[test]
     fn test_uses_numbered_reports_no_report_id() {
-        // HID descriptor for a simple mouse (no Report ID)
         let desc = vec![
-            0x05, 0x01, // Usage Page (Generic Desktop)
-            0x09, 0x02, // Usage (Mouse)
-            0xA1, 0x01, // Collection (Application)
-            0x09, 0x01, // Usage (Pointer)
-            0x75, 0x08, // Report Size (8)
-            0x95, 0x03, // Report Count (3)
-            0x81, 0x02, // Input (Data,Var,Abs)
-            0xC0, // End Collection
+            0x05, 0x01, 0x09, 0x02, 0xA1, 0x01, 0x09, 0x01, 0x75, 0x08, 0x95, 0x03, 0x81, 0x02,
+            0xC0,
         ];
         assert!(!uses_numbered_reports(&desc));
     }
 
     #[test]
     fn test_uses_numbered_reports_with_report_id() {
-        // HID descriptor with Report ID = 1
         let desc = vec![
-            0x05, 0x01, // Usage Page (Generic Desktop)
-            0x09, 0x02, // Usage (Mouse)
-            0xA1, 0x01, // Collection (Application)
-            0x85, 0x01, // Report ID (1)
-            0x09, 0x01, // Usage (Pointer)
-            0x75, 0x08, // Report Size (8)
-            0x95, 0x03, // Report Count (3)
-            0x81, 0x02, // Input (Data,Var,Abs)
-            0xC0, // End Collection
+            0x05, 0x01, 0x09, 0x02, 0xA1, 0x01, 0x85, 0x01, 0x09, 0x01, 0x75, 0x08, 0x95, 0x03,
+            0x81, 0x02, 0xC0,
         ];
         assert!(uses_numbered_reports(&desc));
     }
 
     #[test]
     fn test_uses_numbered_reports_long_item_skipped() {
-        // Long item (0xFE) followed by normal items – no Report ID
-        // Long item: 0xFE, data_size, tag, data...
         let desc = vec![
-            0xFE, 0x02, 0x00, 0x00, 0x00, // Long item with 2 data bytes (all zero)
-            0x05, 0x01, // Usage Page (Generic Desktop)
-            0x09, 0x02, // Usage (Mouse)
-            0xA1, 0x01, // Collection
-            0x75, 0x08, // Report Size
-            0x95, 0x01, // Report Count
-            0x81, 0x02, // Input
-            0xC0, // End Collection
+            0xFE, 0x02, 0x00, 0x00, 0x00, 0x05, 0x01, 0x09, 0x02, 0xA1, 0x01, 0x75, 0x08, 0x95,
+            0x01, 0x81, 0x02, 0xC0,
         ];
         assert!(!uses_numbered_reports(&desc));
     }
 
     #[test]
     fn test_uses_numbered_reports_report_id_after_long_item() {
-        // Long item: [0xFE, data_size=0, tag=0x00] (3 bytes total)
-        // Parser skips 3+0=3 bytes from start, landing on 0x85
         let desc = vec![
-            0xFE, 0x00, 0x00, // Long item (data_size=0, tag=0x00)
-            0x85, 0x02, // Report ID (2)
-            0x75, 0x08, // Report Size
-            0x95, 0x01, // Report Count
-            0x81, 0x02, // Input
+            0xFE, 0x00, 0x00, 0x85, 0x02, 0x75, 0x08, 0x95, 0x01, 0x81, 0x02,
         ];
         assert!(uses_numbered_reports(&desc));
     }
 
     #[test]
     fn test_uses_numbered_reports_truncated_long_item() {
-        // Only the 0xFE prefix byte, no data_size – should not panic
         assert!(!uses_numbered_reports(&[0xFE]));
     }
 
     #[test]
     fn test_uses_numbered_reports_just_long_item_no_tag() {
-        // 0xFE + data_size(0) = 2 bytes, parser skips 3+0=3 bytes from i=0
-        // i becomes 3, which is >= len(2), returns false
         assert!(!uses_numbered_reports(&[0xFE, 0x00]));
     }
 
     #[test]
     fn test_uses_numbered_reports_report_id_at_end() {
-        let desc = vec![
-            0x05, 0x01, // Usage Page
-            0x09, 0x02, // Usage
-            0xA1, 0x01, // Collection
-            0x85, 0x01, // Report ID (1) – at the end
-        ];
+        let desc = vec![0x05, 0x01, 0x09, 0x02, 0xA1, 0x01, 0x85, 0x01];
         assert!(uses_numbered_reports(&desc));
     }
 
     #[test]
     fn test_uses_numbered_reports_non_report_id_global_items() {
-        // Usage Page, Logical Minimum/Maximum, Report Size, Report Count etc.
-        // No Report ID – should return false
         let desc = vec![
-            0x05, 0x01, // Usage Page (Generic Desktop)
-            0x15, 0x00, // Logical Minimum (0)
-            0x25, 0x01, // Logical Maximum (1)
-            0x75, 0x08, // Report Size (8)
-            0x95, 0x01, // Report Count (1)
-            0x35, 0x00, // Physical Minimum (0)
-            0x45, 0x00, // Physical Maximum (0)
-            0x65, 0x00, // Unit (None)
-            0x55, 0x00, // Unit Exponent (0)
+            0x05, 0x01, 0x15, 0x00, 0x25, 0x01, 0x75, 0x08, 0x95, 0x01, 0x35, 0x00, 0x45, 0x00,
+            0x65, 0x00, 0x55, 0x00,
         ];
         assert!(!uses_numbered_reports(&desc));
     }

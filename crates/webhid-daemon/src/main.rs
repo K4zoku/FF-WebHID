@@ -1,11 +1,11 @@
 mod batching;
 mod blocklist;
 mod client;
-mod report_blocking;
 mod descriptor;
 mod device_mgr;
 mod hid;
 mod hotplug;
+mod report_blocking;
 mod security;
 mod websocket;
 mod webtransport;
@@ -51,10 +51,8 @@ fn resolve_socket_path() -> String {
     #[cfg(target_os = "linux")]
     {
         if unsafe { libc::geteuid() } == 0 {
-            // Root/system daemon: abstract socket (no filesystem entry → no symlink attack)
             return "@webhid".to_string();
         }
-        // User-mode: filesystem socket (parent dir is 0700, no cross-user symlink risk)
         if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR")
             && !dir.is_empty()
         {

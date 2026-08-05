@@ -66,26 +66,13 @@ fn build_filter(syscalls: &[libc::c_long]) -> Vec<libc::sock_filter> {
 
     let mut insns = Vec::new();
 
-    // ── Architecture check ───────────────────────────────────────────
     unsafe {
         insns.push(BPF_STMT(
             (BPF_LD | BPF_W | BPF_ABS) as u16,
             SECCOMP_DATA_ARCH_OFFSET,
         ));
-        // Arch mismatch kills. Classic BPF jt/jf are "skip N" counts: on a match
-        // (jt=1) skip the KILL below and fall into the per-syscall checks; on a
-        // mismatch (jf=0) execute the KILL. Swapping these inverts the check and
-        // kills every syscall on the native arch.
-        insns.push(BPF_JUMP(
-            (BPF_JMP | BPF_JEQ) as u16,
-            AUDIT_ARCH,
-            1,
-            0,
-        ));
-        insns.push(BPF_STMT(
-            (BPF_RET | BPF_K) as u16,
-            SECCOMP_RET_KILL_PROCESS,
-        ));
+        insns.push(BPF_JUMP((BPF_JMP | BPF_JEQ) as u16, AUDIT_ARCH, 1, 0));
+        insns.push(BPF_STMT((BPF_RET | BPF_K) as u16, SECCOMP_RET_KILL_PROCESS));
 
         insns.push(BPF_STMT(
             (BPF_LD | BPF_W | BPF_ABS) as u16,
@@ -93,19 +80,11 @@ fn build_filter(syscalls: &[libc::c_long]) -> Vec<libc::sock_filter> {
         ));
 
         for &nr in syscalls {
-            insns.push(BPF_JUMP(
-                (BPF_JMP | BPF_JEQ) as u16,
-                nr as u32,
-                0,
-                1,
-            ));
+            insns.push(BPF_JUMP((BPF_JMP | BPF_JEQ) as u16, nr as u32, 0, 1));
             insns.push(BPF_STMT((BPF_RET | BPF_K) as u16, SECCOMP_RET_ALLOW));
         }
 
-        insns.push(BPF_STMT(
-            (BPF_RET | BPF_K) as u16,
-            SECCOMP_RET_KILL_PROCESS,
-        ));
+        insns.push(BPF_STMT((BPF_RET | BPF_K) as u16, SECCOMP_RET_KILL_PROCESS));
     }
 
     insns
@@ -113,8 +92,8 @@ fn build_filter(syscalls: &[libc::c_long]) -> Vec<libc::sock_filter> {
 
 #[cfg(all(feature = "hardening", target_os = "linux", not(debug_assertions)))]
 #[cfg(target_arch = "x86_64")]
-const AUDIT_ARCH: u32 = 0xC000_003E; // AUDIT_ARCH_X86_64
+const AUDIT_ARCH: u32 = 0xC000_003E;
 
 #[cfg(all(feature = "hardening", target_os = "linux", not(debug_assertions)))]
 #[cfg(target_arch = "aarch64")]
-const AUDIT_ARCH: u32 = 0xC000_00B7; // AUDIT_ARCH_AARCH64
+const AUDIT_ARCH: u32 = 0xC000_00B7;
