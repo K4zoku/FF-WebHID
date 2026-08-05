@@ -1,36 +1,90 @@
-<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Trusted Types Policy</title></head>
-<body>
-<script>
-window.tests = window.tests || { helper: {}, results: {} };
-var R = window.tests.results;
-R.hasTrustedTypes = typeof trustedTypes !== 'undefined';
-if (!R.hasTrustedTypes) {
-  R.skipped = true;
-} else {
-  R.extHidden = typeof (navigator.hid && navigator.hid[Symbol.for('webhid.createTtUrl')]);
-  try {
-    var pagePolicy = trustedTypes.createPolicy('webhid-worker', { createScriptURL: function (s) { return s + '#page'; } });
-    R.swallowedType = typeof pagePolicy.createScriptURL;
-    R.swallowedChain = String(pagePolicy.createScriptURL('https://x/worker.js'));
-    R.wrappedInstanceof = pagePolicy instanceof TrustedTypePolicy;
-    R.wrappedName = pagePolicy.name;
-    R.wrappedHasOwnScriptURL = Object.prototype.hasOwnProperty.call(pagePolicy, 'createScriptURL');
-    R.wrappedHasOwnHtml = Object.prototype.hasOwnProperty.call(pagePolicy, 'createHTML');
-    R.wrappedHasOwnScript = Object.prototype.hasOwnProperty.call(pagePolicy, 'createScript');
-  } catch (e) { R.swallowedType = e.name; }
-  try {
-    trustedTypes.createPolicy('webhid-worker', {});
-    R.secondCall = 'no-throw';
-  } catch (e) { R.secondCall = e.name; }
-  try {
-    trustedTypes.createPolicy('default', { createScriptURL: function (s) { return s; } });
-    R.defaultCreated = 'ok';
-  } catch (e) { R.defaultCreated = e.name; }
-  try {
-    trustedTypes.createPolicy('default', {});
-    R.defaultDup = 'no-throw';
-  } catch (e) { R.defaultDup = e.name; }
-}
-</script>
-</body></html>
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Trusted Types Policy</title>
+  </head>
+  <body>
+    <script>
+      window.tests = window.tests || { helper: {}, results: {} }
+      var R = window.tests.results
+      R.hasTrustedTypes = typeof trustedTypes !== 'undefined'
+      if (!R.hasTrustedTypes) {
+        R.skipped = true
+      } else {
+        R.extHidden = typeof (navigator.hid && navigator.hid[Symbol.for('webhid.createTtUrl')])
+        try {
+          var pagePolicy = trustedTypes.createPolicy('webhid-worker', {
+            createScriptURL: function (s) {
+              return s + '#page'
+            }
+          })
+          R.swallowedType = typeof pagePolicy.createScriptURL
+          R.swallowedChain = String(pagePolicy.createScriptURL('https://x/worker.js'))
+          R.wrappedInstanceof = pagePolicy instanceof TrustedTypePolicy
+          R.wrappedName = pagePolicy.name
+          R.wrappedHasOwnScriptURL = Object.prototype.hasOwnProperty.call(
+            pagePolicy,
+            'createScriptURL'
+          )
+          R.wrappedHasOwnHtml = Object.prototype.hasOwnProperty.call(pagePolicy, 'createHTML')
+          R.wrappedHasOwnScript = Object.prototype.hasOwnProperty.call(pagePolicy, 'createScript')
+          try {
+            pagePolicy.createHTML('x')
+            R.htmlCall = 'no-throw'
+          } catch (e) {
+            R.htmlCall = e.name
+            R.htmlErrorMessage = e.message
+          }
+          try {
+            pagePolicy.createScript('x')
+            R.scriptCall = 'no-throw'
+          } catch (e) {
+            R.scriptCall = e.name
+            R.scriptErrorMessage = e.message
+          }
+        } catch (e) {
+          R.swallowedType = e.name
+        }
+        try {
+          trustedTypes.createPolicy('webhid-worker', {})
+          R.secondCall = 'no-throw'
+        } catch (e) {
+          R.secondCall = e.name
+        }
+        try {
+          var defaultPolicy = trustedTypes.createPolicy('default', {
+            createScriptURL: function (s) {
+              return s
+            }
+          })
+          R.defaultCreated = 'ok'
+          R.nativeHtmlType = typeof defaultPolicy.createHTML
+          R.nativeScriptType = typeof defaultPolicy.createScript
+          try {
+            defaultPolicy.createHTML('x')
+            R.nativeHtmlCall = 'no-throw'
+          } catch (e) {
+            R.nativeHtmlCall = e.name
+            R.nativeHtmlErrorMessage = e.message
+          }
+          try {
+            defaultPolicy.createScript('x')
+            R.nativeScriptCall = 'no-throw'
+          } catch (e) {
+            R.nativeScriptCall = e.name
+            R.nativeScriptErrorMessage = e.message
+          }
+        } catch (e) {
+          R.defaultCreated = e.name
+        }
+        try {
+          trustedTypes.createPolicy('default', {})
+          R.defaultDup = 'no-throw'
+        } catch (e) {
+          R.defaultDup = e.name
+        }
+      }
+    </script>
+  </body>
+</html>

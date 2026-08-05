@@ -1,0 +1,38 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Trusted Types Missing URL Rule</title>
+  </head>
+  <body>
+    <script>
+      window.tests = window.tests || { helper: {}, results: {} }
+      var R = window.tests.results
+      R.hasTrustedTypes = typeof trustedTypes !== 'undefined'
+      if (!R.hasTrustedTypes) {
+        R.skipped = true
+      } else {
+        try {
+          var pagePolicy = trustedTypes.createPolicy('uRGq7', {
+            createHTML: function (s) {
+              return s
+            }
+          })
+          R.urlType = typeof pagePolicy.createScriptURL
+          R.htmlType = typeof pagePolicy.createHTML
+          try {
+            pagePolicy.createScriptURL('https://x/worker.js')
+            R.urlCall = 'no-throw'
+          } catch (e) {
+            R.urlCall = e.name
+            R.urlError = e.message
+          }
+          document.body.innerHTML = pagePolicy.createHTML('<p id="sink-ok">ok</p>')
+          R.sink = document.getElementById('sink-ok') ? 'ok' : 'missing'
+        } catch (e) {
+          R.error = e.name + ': ' + e.message
+        }
+      }
+    </script>
+  </body>
+</html>

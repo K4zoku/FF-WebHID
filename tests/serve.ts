@@ -41,6 +41,8 @@ const PAGES: Record<string, string> = {
   '/iframe-child-with-allow': loadPage('iframe-child.html'),
   '/worker-check': loadPage('worker-check.html'),
   '/tt-policy': loadPage('tt-policy.html'),
+  '/tt-policy-sinks': loadPage('tt-policy-sinks.html'),
+  '/tt-policy-no-url': loadPage('tt-policy-no-url.html'),
   '/tt-policy-restricted': loadPage('tt-policy-restricted.html'),
   '/worker.js': loadPage('worker.js'),
   '/sri-check': loadPage('sri-check.html'),
@@ -141,6 +143,12 @@ const HEADERS: Record<string, Record<string, string | string[]>> = {
   },
   '/tt-policy': {
     'Content-Security-Policy': 'trusted-types webhid-worker default'
+  },
+  '/tt-policy-sinks': {
+    'Content-Security-Policy': "require-trusted-types-for 'script'; trusted-types uRGq7 default"
+  },
+  '/tt-policy-no-url': {
+    'Content-Security-Policy': 'trusted-types uRGq7 default'
   },
   '/tt-policy-restricted': {
     'Content-Security-Policy': 'trusted-types uRGq7 default'

@@ -1,0 +1,40 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Trusted Types Sinks</title>
+  </head>
+  <body>
+    <script>
+      window.tests = window.tests || { helper: {}, results: {} }
+      var R = window.tests.results
+      R.hasTrustedTypes = typeof trustedTypes !== 'undefined'
+      if (!R.hasTrustedTypes) {
+        R.skipped = true
+      } else {
+        try {
+          var pagePolicy = trustedTypes.createPolicy('uRGq7', {
+            createScriptURL: function (s) {
+              return s + '#page'
+            },
+            createHTML: function (s) {
+              return s
+            },
+            createScript: function (s) {
+              return s
+            }
+          })
+          R.policyCreated = true
+          R.scriptURL = String(pagePolicy.createScriptURL('https://x/worker.js'))
+          R.policyHasHTML = typeof pagePolicy.createHTML === 'function'
+          R.policyHasScript = typeof pagePolicy.createScript === 'function'
+          document.body.innerHTML = pagePolicy.createHTML('<p id="sink-ok">ok</p>')
+          R.sink = document.getElementById('sink-ok') ? 'ok' : 'missing'
+        } catch (e) {
+          R.policyCreated = false
+          R.error = e.name + ': ' + e.message
+        }
+      }
+    </script>
+  </body>
+</html>

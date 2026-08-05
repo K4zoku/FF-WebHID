@@ -313,9 +313,14 @@
       ttFactory = (url) => policy.createScriptURL(url)
       resolveReady(true)
     }
+    const baseRules = {
+      createScriptURL: (s) => s,
+      createHTML: (s) => s,
+      createScript: (s) => s
+    }
     const claim = (name) => {
       try {
-        return nativeCreatePolicy(name, { createScriptURL: (s) => s })
+        return nativeCreatePolicy(name, baseRules)
       } catch {
         return null
       }
@@ -323,7 +328,7 @@
 
     trustedTypes.createPolicy = function (claimedName, pageRules) {
       if (captured) return nativeCreatePolicy(claimedName, pageRules)
-      const policy = nativeCreatePolicy(claimedName, { createScriptURL: (s) => s })
+      const policy = nativeCreatePolicy(claimedName, baseRules)
       markCaptured(policy)
       return makeWrappedPolicy(policy, claimedName, pageRules)
     }
@@ -357,29 +362,40 @@
   function makeWrappedPolicy(policy, name, pageRules) {
     const proto =
       typeof TrustedTypePolicy !== 'undefined' ? TrustedTypePolicy.prototype : Object.prototype
-    const wrapper = Object.create(proto)
+    const wrapperProto = Object.create(proto)
+    const wrapper = Object.create(wrapperProto)
     const rules = pageRules || {}
-    const define = (prop, value) => {
-      Object.defineProperty(wrapper, prop, {
+    const define = (target, prop, value) => {
+      Object.defineProperty(target, prop, {
         value,
         writable: false,
         enumerable: false,
         configurable: false
       })
     }
-    define('name', name)
-    const origScriptURL = policy.createScriptURL.bind(policy)
-    if (typeof rules.createScriptURL === 'function') {
+    const defineMissing = (method) => {
+      define(wrapperProto, method, () => {
+        throw new TypeError('TrustedTypePolicy.' + method + ': Function missing.')
+      })
+    }
+    define(wrapper, 'name', name)
+    if (
+      typeof rules.createScriptURL === 'function' &&
+      typeof policy.createScriptURL === 'function'
+    ) {
       const pageFn = rules.createScriptURL
-      define('createScriptURL', (s) => origScriptURL(pageFn(s)))
+      const origScriptURL = policy.createScriptURL.bind(policy)
+      define(wrapper, 'createScriptURL', (s) => origScriptURL(pageFn(s)))
     } else {
-      define('createScriptURL', origScriptURL)
+      defineMissing('createScriptURL')
     }
     for (const m of ['createHTML', 'createScript']) {
-      if (typeof rules[m] === 'function') {
+      if (typeof rules[m] === 'function' && typeof policy[m] === 'function') {
         const pageFn = rules[m]
         const orig = policy[m].bind(policy)
-        define(m, (s) => orig(pageFn(s)))
+        define(wrapper, m, (s) => orig(pageFn(s)))
+      } else if (typeof rules[m] !== 'function') {
+        defineMissing(m)
       }
     }
     return wrapper
