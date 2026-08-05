@@ -1,15 +1,10 @@
-(function () {
+;(function () {
   const webhid = globalThis.webhid
   const logger = webhid.import('logger')
   const { workerPolyfillSites, permissionsPolicy } = webhid.import('bgState')
   const { ensureWorkerBundle, ensureWorkerPolyfillBundle } = webhid.import('bgBundle')
-  const {
-    parseCspForWorkerSpawn,
-    rewriteCspValue,
-    rewriteCspForBlob,
-    urlOrigin,
-    frameKey
-  } = webhid.import('bgCsp')
+  const { parseCspForWorkerSpawn, rewriteCspValue, rewriteCspForBlob, urlOrigin, frameKey } =
+    webhid.import('bgCsp')
   const siteSettingKey = webhid.import('siteSettingKey')
 
   const isMv2 = browser.runtime.getManifest().manifest_version === 2
@@ -251,7 +246,7 @@
         const info = parseCspForWorkerSpawn([csp], mode, origin)
         if (!info) return tag
         metaInfos.push(info)
-        if (!info.needsBlobFallback) return tag
+        if (mode !== 'blob' || !info.needsBlobFallback) return tag
         const { value, modified } = rewriteCspValue(csp, info)
         if (!modified) return tag
         anyChange = true
@@ -260,23 +255,30 @@
 
       if (metaInfos.length) {
         const key = `csp:${frameKey(details.tabId, details.frameId, origin)}`
-        browser.storage.session.get(key).then((r) => {
-          const existing = r[key]
-          const merged = {
-            workerSrc: metaInfos[0].workerSrc ?? existing?.workerSrc,
-            connectSrc: metaInfos[0].connectSrc ?? existing?.connectSrc,
-            workerSrcBlocked: metaInfos.some((i) => i.workerSrcBlocked) || !!existing?.workerSrcBlocked,
-            connectSrcBlocked: metaInfos.some((i) => i.connectSrcBlocked) || !!existing?.connectSrcBlocked,
-            hasTrustedTypesRequire:
-              metaInfos.some((i) => i.hasTrustedTypesRequire) || !!existing?.hasTrustedTypesRequire,
-            shadowBlocked: metaInfos.some((i) => i.shadowBlocked) || !!existing?.shadowBlocked,
-            metaShadowBlocked:
-              metaInfos.some((i) => i.shadowBlocked) || !!existing?.metaShadowBlocked,
-            headerShadowBlocked: !!existing?.headerShadowBlocked,
-            needsBlobFallback: metaInfos.some((i) => i.needsBlobFallback) || !!existing?.needsBlobFallback,
-          }
-          browser.storage.session.set({ [key]: merged }).catch(() => {})
-        }).catch(() => {})
+        browser.storage.session
+          .get(key)
+          .then((r) => {
+            const existing = r[key]
+            const merged = {
+              workerSrc: metaInfos[0].workerSrc ?? existing?.workerSrc,
+              connectSrc: metaInfos[0].connectSrc ?? existing?.connectSrc,
+              workerSrcBlocked:
+                metaInfos.some((i) => i.workerSrcBlocked) || !!existing?.workerSrcBlocked,
+              connectSrcBlocked:
+                metaInfos.some((i) => i.connectSrcBlocked) || !!existing?.connectSrcBlocked,
+              hasTrustedTypesRequire:
+                metaInfos.some((i) => i.hasTrustedTypesRequire) ||
+                !!existing?.hasTrustedTypesRequire,
+              shadowBlocked: metaInfos.some((i) => i.shadowBlocked) || !!existing?.shadowBlocked,
+              metaShadowBlocked:
+                metaInfos.some((i) => i.shadowBlocked) || !!existing?.metaShadowBlocked,
+              headerShadowBlocked: !!existing?.headerShadowBlocked,
+              needsBlobFallback:
+                metaInfos.some((i) => i.needsBlobFallback) || !!existing?.needsBlobFallback
+            }
+            browser.storage.session.set({ [key]: merged }).catch(() => {})
+          })
+          .catch(() => {})
       }
 
       if (!anyChange) {
@@ -298,7 +300,11 @@
       process(true)
     }
     filter.onerror = () => {
-      try { filter.disconnect() } catch { return }
+      try {
+        filter.disconnect()
+      } catch {
+        return
+      }
     }
   }
 
@@ -349,7 +355,8 @@
       }
     }
     if (cspInfo) {
-      browser.storage.session.set({ [key]: cspInfo })
+      browser.storage.session
+        .set({ [key]: cspInfo })
         .catch((e) => logger.debug('csp session store failed', e))
     } else {
       browser.storage.session.remove(key).catch(() => {})
@@ -443,7 +450,8 @@
           return handleShadowUrl(details)
         }
         const isShadowUrl =
-          details.documentUrl !== undefined && sameUrlModuloFragment(details.url, details.documentUrl)
+          details.documentUrl !== undefined &&
+          sameUrlModuloFragment(details.url, details.documentUrl)
         if (isShadowUrl) return handleShadowUrl(details)
         return handleInjection(details, settings)
       },

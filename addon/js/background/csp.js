@@ -1,6 +1,49 @@
-(function () {
+;(function () {
   const webhid = globalThis.webhid
 
+  const CSP_DIRECTIVE_NAMES = new Set([
+    'default-src',
+    'script-src',
+    'script-src-elem',
+    'script-src-attr',
+    'style-src',
+    'style-src-elem',
+    'style-src-attr',
+    'img-src',
+    'connect-src',
+    'worker-src',
+    'child-src',
+    'frame-src',
+    'font-src',
+    'media-src',
+    'object-src',
+    'manifest-src',
+    'prefetch-src',
+    'navigate-to',
+    'form-action',
+    'base-uri',
+    'sandbox',
+    'frame-ancestors',
+    'plugin-types',
+    'report-uri',
+    'report-to',
+    'upgrade-insecure-requests',
+    'block-all-mixed-content',
+    'require-sri-for',
+    'trusted-types',
+    'require-trusted-types-for'
+  ])
+
+  /**
+   * @param {string} csp
+   * @returns {boolean}
+   */
+  function hasUnseparatedDirective(csp) {
+    return csp.split(';').some((raw) => {
+      const parts = raw.trim().split(/\s+/)
+      return parts.slice(1).some((token) => CSP_DIRECTIVE_NAMES.has(token.toLowerCase()))
+    })
+  }
   /**
    * @param {string} url
    * @returns {string}
@@ -53,8 +96,13 @@
    */
   function sourceListAllowsWorker(list, origin) {
     const tokens = list.split(/\s+/)
-    return tokens.includes('*') || tokens.includes("'self'") || tokens.includes(origin)
-      || tokens.includes('http:') || tokens.includes('https:')
+    return (
+      tokens.includes('*') ||
+      tokens.includes("'self'") ||
+      tokens.includes(origin) ||
+      tokens.includes('http:') ||
+      tokens.includes('https:')
+    )
   }
 
   /**
@@ -78,50 +126,77 @@
    * @returns {{value: string, modified: boolean}}
    */
   function rewriteCspValue(csp, cspInfo) {
-    const { directives, order } = parseDirectives(csp || '')
+    const original = csp || ''
+    if (hasUnseparatedDirective(original)) return { value: original, modified: false }
+    const { directives } = parseDirectives(original)
+    const segments = original.split(';')
     let modified = false
 
+    /**
+     * @param {string} name
+     * @param {string} token
+     * @returns {boolean}
+     */
+    function appendToDirective(name, token) {
+      const index = segments.findIndex((segment) => {
+        const parts = segment.trim().split(/\s+/)
+        return parts[0]?.toLowerCase() === name
+      })
+      if (index === -1) return false
+      const parts = segments[index].trim().split(/\s+/)
+      if (parts.slice(1).includes(token)) return false
+      segments[index] = segments[index].trim() + ' ' + token
+      return true
+    }
+
+    /**
+     * @param {string} name
+     * @param {string} value
+     * @returns {void}
+     */
+    function appendDirective(name, value) {
+      const segment = name + (value ? ' ' + value : '')
+      const trailingEmpty = segments.length > 0 && !segments[segments.length - 1].trim()
+      const index = trailingEmpty ? segments.length - 1 : segments.length
+      segments.splice(index, 0, segment)
+    }
+
     if (directives['worker-src'] !== undefined) {
-      if (!directives['worker-src'].includes('blob:')) {
-        directives['worker-src'] = directives['worker-src'] + ' blob:'
-        modified = true
+      if (!directives['worker-src'].split(/\s+/).includes('blob:')) {
+        modified = appendToDirective('worker-src', 'blob:') || modified
       }
     } else {
       const fallback = directives['script-src'] ?? directives['default-src']
       if (fallback !== undefined) {
-        directives['worker-src'] = fallback + ' blob:'
-        order.push('worker-src')
+        appendDirective('worker-src', fallback + ' blob:')
         modified = true
       }
     }
 
     if (directives['connect-src'] !== undefined) {
       if (!sourceListAllowsDaemonConnects(directives['connect-src'])) {
-        directives['connect-src'] =
-          directives['connect-src'] + ' ws://127.0.0.1:* https://127.0.0.1:*'
-        modified = true
+        modified = appendToDirective('connect-src', 'ws://127.0.0.1:*') || modified
+        modified = appendToDirective('connect-src', 'https://127.0.0.1:*') || modified
       }
     } else if (directives['default-src'] !== undefined) {
-      directives['connect-src'] =
+      appendDirective(
+        'connect-src',
         directives['default-src'] + ' ws://127.0.0.1:* https://127.0.0.1:*'
-      order.push('connect-src')
+      )
       modified = true
     }
 
     if (cspInfo.hasTrustedTypesRequire) {
       const ttList = directives['trusted-types']
       if (ttList === undefined) {
-        directives['trusted-types'] = 'webhid-worker'
-        order.push('trusted-types')
+        appendDirective('trusted-types', 'webhid-worker')
         modified = true
-      } else if (!ttList.includes('webhid-worker')) {
-        directives['trusted-types'] = ttList + ' webhid-worker'
-        modified = true
+      } else if (!ttList.split(/\s+/).includes('webhid-worker')) {
+        modified = appendToDirective('trusted-types', 'webhid-worker') || modified
       }
     }
 
-    const rebuilt = order.map((name) => name + (directives[name] ? ' ' + directives[name] : '')).join('; ')
-    return { value: rebuilt, modified }
+    return { value: segments.join(';'), modified }
   }
 
   /**
@@ -158,7 +233,8 @@
     const trustedTypesNames = []
     for (const csp of cspValues.flatMap((v) => v.split(','))) {
       const { directives } = parseDirectives(csp)
-      const effWorker = directives['worker-src'] ?? directives['script-src'] ?? directives['default-src']
+      const effWorker =
+        directives['worker-src'] ?? directives['script-src'] ?? directives['default-src']
       const effConnect = directives['connect-src'] ?? directives['default-src']
       if (workerSrc === undefined) workerSrc = effWorker
       if (connectSrc === undefined) connectSrc = effConnect
@@ -188,7 +264,7 @@
       hasTrustedTypesRequire,
       trustedTypesNames,
       shadowBlocked,
-      needsBlobFallback,
+      needsBlobFallback
     }
   }
 
@@ -200,6 +276,6 @@
     sourceListAllowsDaemonConnects,
     rewriteCspValue,
     rewriteCspForBlob,
-    parseCspForWorkerSpawn,
+    parseCspForWorkerSpawn
   })
 })()

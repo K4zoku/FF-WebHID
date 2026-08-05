@@ -1,4 +1,4 @@
-(function () {
+;(function () {
   'use strict'
 
   /** @type {import("./types.js").Logger} */
@@ -241,6 +241,10 @@
         origin: window.location.origin
       })
       if (info && info.needsBlobFallback) {
+        if (mode === 'shadow') {
+          cachedSpawnMode = 'nm'
+          return 'nm'
+        }
         const mv2 = browser.runtime.getManifest().manifest_version === 2
         if (!mv2 && info.headerShadowBlocked) {
           cachedSpawnMode = 'nm'
@@ -249,7 +253,9 @@
         cachedSpawnMode = 'blob'
         return 'blob'
       }
-    } catch (e) { logger.debug('getCspInfo failed', e) }
+    } catch (e) {
+      logger.debug('getCspInfo failed', e)
+    }
     cachedSpawnMode = 'shadow'
     return 'shadow'
   }
@@ -309,13 +315,13 @@
           }
         }
       },
-      configurable: true,
+      configurable: true
     })
     Object.defineProperty(proxy, 'onerror', {
       set(fn) {
         onerrorHandler = fn
       },
-      configurable: true,
+      configurable: true
     })
     return proxy
   }
@@ -367,14 +373,6 @@
       spawnResult = await attemptWorkerSpawn(deviceId, spawnMode)
     } catch (e) {
       logger.warn('worker spawn failed for', deviceId, '(', spawnMode, '):', e.message)
-      if (spawnMode === 'shadow') {
-        spawnMode = 'blob'
-        try {
-          spawnResult = await attemptWorkerSpawn(deviceId, spawnMode)
-        } catch (e2) {
-          logger.warn('worker spawn retry failed for', deviceId, '(', spawnMode, '):', e2.message)
-        }
-      }
     }
     if (!spawnResult || !spawnResult.ok) return false
 
@@ -475,7 +473,7 @@
     }
   }
 
-  (async () => {
+  ;(async () => {
     try {
       const resp = await browser.runtime.sendMessage({ action: 'handshake' })
       if (http.isOk(resp.s) && resp.w) {
@@ -626,7 +624,7 @@
     spawnWorkerResponse: handleSpawnWorkerResponse,
     dataPlaneResponse: handlePlaneResponse,
     dataPlaneEvent: handleDataPlaneEvent,
-    workerError: handleWorkerErrorEvent,
+    workerError: handleWorkerErrorEvent
   }
 
   window.addEventListener('message', (event) => {
@@ -1013,7 +1011,7 @@
     sendReport: handleReportRequest,
     sendFeatureReport: handleReportRequest,
     receiveFeatureReport: handleReportRequest,
-    requestDevice: handleRequestDeviceRequest,
+    requestDevice: handleRequestDeviceRequest
   }
 
   /**
@@ -1189,12 +1187,10 @@
       if (msg.type === 'send' || msg.type === 'sendFeature') payload.data = msg.data
       const port = dataPorts.get(deviceId)
       const m = Object.assign({ action }, payload)
-      browser.runtime
-        .sendMessage(m)
-        .then(
-          (response) => handleWorkerReportResponse(msg, port, response),
-          () => handleWorkerReportResponse(msg, port, { s: 500 })
-        )
+      browser.runtime.sendMessage(m).then(
+        (response) => handleWorkerReportResponse(msg, port, response),
+        () => handleWorkerReportResponse(msg, port, { s: 500 })
+      )
     }
   }
 

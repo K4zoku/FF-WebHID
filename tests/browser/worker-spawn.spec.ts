@@ -1,369 +1,633 @@
-import { test, expect } from '../helpers/browser.js';
-import type { Page } from '@playwright/test';
-
-type BackgroundPage = { evaluate: Page['evaluate'] };
+import { test, expect } from '../helpers/browser.js'
+import type { Page } from '@playwright/test'
+type BackgroundPage = { evaluate: Page['evaluate'] }
+type BackgroundCsp = {
+  rewriteCspValue: (
+    csp: string,
+    info: { hasTrustedTypesRequire: boolean }
+  ) => { value: string; modified: boolean }
+}
+type BackgroundGlobals = { webhid?: { import(name: string): BackgroundCsp } }
 
 interface CspInfo {
-  workerSrc?: string;
-  connectSrc?: string;
-  workerSrcBlocked: boolean;
-  connectSrcBlocked: boolean;
-  hasTrustedTypesRequire: boolean;
-  shadowBlocked: boolean;
-  headerShadowBlocked?: boolean;
-  metaShadowBlocked?: boolean;
-  needsBlobFallback: boolean;
-  rewrittenCsp?: string[];
+  workerSrc?: string
+  connectSrc?: string
+  workerSrcBlocked: boolean
+  connectSrcBlocked: boolean
+  hasTrustedTypesRequire: boolean
+  shadowBlocked: boolean
+  headerShadowBlocked?: boolean
+  metaShadowBlocked?: boolean
+  needsBlobFallback: boolean
+  rewrittenCsp?: string[]
 }
 
 async function readCspEntries(backgroundPage: BackgroundPage): Promise<CspInfo[]> {
-  await expect.poll(() => backgroundPage.evaluate(async () => {
-    const all: Record<string, unknown> = await browser.storage.session.get(null);
-    return Object.keys(all).filter((k) => k.startsWith('csp:')).length;
-  }), { timeout: 5000 }).toBeGreaterThan(0);
+  await expect
+    .poll(
+      () =>
+        backgroundPage.evaluate(async () => {
+          const all: Record<string, unknown> = await browser.storage.session.get(null)
+          return Object.keys(all).filter((k) => k.startsWith('csp:')).length
+        }),
+      { timeout: 5000 }
+    )
+    .toBeGreaterThan(0)
   return backgroundPage.evaluate(async () => {
-    const all: Record<string, unknown> = await browser.storage.session.get(null);
+    const all: Record<string, unknown> = await browser.storage.session.get(null)
     return Object.entries(all)
       .filter(([k]) => k.startsWith('csp:'))
       .map(([, v]) => v)
-      .filter((v): v is CspInfo => typeof v === 'object' && v !== null && 'needsBlobFallback' in v);
-  });
+      .filter((v): v is CspInfo => typeof v === 'object' && v !== null && 'needsBlobFallback' in v)
+  })
 }
 
 async function clearSession(backgroundPage: BackgroundPage): Promise<void> {
-  await backgroundPage.evaluate(async () => { await browser.storage.session.clear(); });
+  await backgroundPage.evaluate(async () => {
+    await browser.storage.session.clear()
+  })
 }
 
 async function isMv2(backgroundPage: BackgroundPage): Promise<boolean> {
-  return backgroundPage.evaluate(() => browser.runtime.getManifest().manifest_version === 2);
+  return backgroundPage.evaluate(() => browser.runtime.getManifest().manifest_version === 2)
 }
 
 type WorkerSpawnWindow = {
-  tests?: { results?: { workerStatus?: Record<string, string> } };
-};
+  tests?: { results?: { workerStatus?: Record<string, string> } }
+}
 
 async function waitForStatus(sharedPage: Page, id: string): Promise<string | undefined> {
   await sharedPage.waitForFunction(
     (key) => {
-      const statuses = (window as unknown as WorkerSpawnWindow).tests?.results?.workerStatus;
-      return statuses !== undefined && statuses[key] !== undefined && statuses[key] !== 'loading';
+      const statuses = (window as unknown as WorkerSpawnWindow).tests?.results?.workerStatus
+      return statuses !== undefined && statuses[key] !== undefined && statuses[key] !== 'loading'
     },
     id,
-    { timeout: 10000 },
-  );
+    { timeout: 10000 }
+  )
   return sharedPage.evaluate(
     (key) => (window as unknown as WorkerSpawnWindow).tests?.results?.workerStatus?.[key],
-    id,
-  );
+    id
+  )
 }
 
 test.describe('Worker spawn mode detection', () => {
-  test('no CSP: blob worker allowed, no csp session entry', async ({ backgroundPage, sharedPage, pageUrl }) => {
-    await clearSession(backgroundPage);
-    await sharedPage.goto(pageUrl('/worker-spawn-no-csp'), { waitUntil: 'domcontentloaded', timeout: 15000 });
-    const status = await waitForStatus(sharedPage, 'blob-status');
-    expect(status).toBe('blob-ready');
+  test('no CSP: blob worker allowed, no csp session entry', async ({
+    backgroundPage,
+    sharedPage,
+    pageUrl
+  }) => {
+    await clearSession(backgroundPage)
+    await sharedPage.goto(pageUrl('/worker-spawn-no-csp'), {
+      waitUntil: 'domcontentloaded',
+      timeout: 15000
+    })
+    const status = await waitForStatus(sharedPage, 'blob-status')
+    expect(status).toBe('blob-ready')
     const count = await backgroundPage.evaluate(async () => {
-      const all = await browser.storage.session.get(null);
-      return Object.keys(all).filter((k) => k.startsWith('csp:')).length;
-    });
-    expect(count).toBe(0);
-  });
+      const all = await browser.storage.session.get(null)
+      return Object.keys(all).filter((k) => k.startsWith('csp:')).length
+    })
+    expect(count).toBe(0)
+  })
 
-  test('restrictive CSP: rewrite allows blob worker, same-origin still blocked', async ({ backgroundPage, sharedPage, pageUrl }) => {
-    await clearSession(backgroundPage);
-    await sharedPage.goto(pageUrl('/worker-spawn-csp-restrictive'), { waitUntil: 'domcontentloaded', timeout: 15000 });
-    const entries = await readCspEntries(backgroundPage);
-    expect(entries.length).toBeGreaterThan(0);
-    const cspInfo = entries[0];
-    expect(cspInfo.workerSrcBlocked).toBe(true);
-    expect(cspInfo.connectSrcBlocked).toBe(true);
-    expect(cspInfo.headerShadowBlocked).toBe(true);
-    expect(cspInfo.needsBlobFallback).toBe(true);
+  test('restrictive CSP: rewrite allows blob worker, same-origin still blocked', async ({
+    backgroundPage,
+    sharedPage,
+    pageUrl
+  }) => {
+    await clearSession(backgroundPage)
+    await sharedPage.goto(pageUrl('/worker-spawn-csp-restrictive'), {
+      waitUntil: 'domcontentloaded',
+      timeout: 15000
+    })
+    const entries = await readCspEntries(backgroundPage)
+    expect(entries.length).toBeGreaterThan(0)
+    const cspInfo = entries[0]
+    expect(cspInfo.workerSrcBlocked).toBe(true)
+    expect(cspInfo.connectSrcBlocked).toBe(true)
+    expect(cspInfo.headerShadowBlocked).toBe(true)
+    expect(cspInfo.needsBlobFallback).toBe(true)
     if (await isMv2(backgroundPage)) {
-      expect(cspInfo.rewrittenCsp).toBeTruthy();
-      const rewritten = cspInfo.rewrittenCsp![0];
-      expect(rewritten).toContain("worker-src 'none' blob:");
-      expect(rewritten).toContain("connect-src 'none' ws://127.0.0.1:*");
-      expect(rewritten).not.toContain('script-src');
-      expect(rewritten).not.toContain('default-src');
+      expect(cspInfo.rewrittenCsp).toBeTruthy()
+      const rewritten = cspInfo.rewrittenCsp![0]
+      expect(rewritten).toContain("worker-src 'none' blob:")
+      expect(rewritten).toContain("connect-src 'none' ws://127.0.0.1:*")
+      expect(rewritten).not.toContain('script-src')
+      expect(rewritten).not.toContain('default-src')
     } else {
-      expect(cspInfo.rewrittenCsp).toBeUndefined();
+      expect(cspInfo.rewrittenCsp).toBeUndefined()
     }
-    const sameOriginStatus = await waitForStatus(sharedPage, 'same-origin-status');
-    expect(sameOriginStatus).toMatch(/^same-origin-(error|threw|timeout)/);
-  });
+    const sameOriginStatus = await waitForStatus(sharedPage, 'same-origin-status')
+    expect(sameOriginStatus).toMatch(/^same-origin-(error|threw|timeout)/)
+  })
 
-  test('worker-src self + connect-src self: fallback triggered by connect-src only', async ({ backgroundPage, sharedPage, pageUrl }) => {
-    await clearSession(backgroundPage);
-    await sharedPage.goto(pageUrl('/worker-spawn-csp'), { waitUntil: 'domcontentloaded', timeout: 15000 });
-    const entries = await readCspEntries(backgroundPage);
-    expect(entries.length).toBeGreaterThan(0);
-    const cspInfo = entries[0];
-    expect(cspInfo.workerSrcBlocked).toBe(false);
-    expect(cspInfo.connectSrcBlocked).toBe(true);
-    expect(cspInfo.needsBlobFallback).toBe(true);
-  });
+  test('worker-src self + connect-src self: fallback triggered by connect-src only', async ({
+    backgroundPage,
+    sharedPage,
+    pageUrl
+  }) => {
+    await clearSession(backgroundPage)
+    await sharedPage.goto(pageUrl('/worker-spawn-csp'), {
+      waitUntil: 'domcontentloaded',
+      timeout: 15000
+    })
+    const entries = await readCspEntries(backgroundPage)
+    expect(entries.length).toBeGreaterThan(0)
+    const cspInfo = entries[0]
+    expect(cspInfo.workerSrcBlocked).toBe(false)
+    expect(cspInfo.connectSrcBlocked).toBe(true)
+    expect(cspInfo.needsBlobFallback).toBe(true)
+  })
 
-  test('connect-src-only CSP triggers fallback', async ({ backgroundPage, sharedPage, pageUrl }) => {
-    await clearSession(backgroundPage);
-    await sharedPage.goto(pageUrl('/worker-spawn-csp-connect'), { waitUntil: 'domcontentloaded', timeout: 15000 });
-    const entries = await readCspEntries(backgroundPage);
-    expect(entries.length).toBeGreaterThan(0);
-    const cspInfo = entries[0];
-    expect(cspInfo.connectSrcBlocked).toBe(true);
-    expect(cspInfo.workerSrcBlocked).toBe(false);
-    expect(cspInfo.needsBlobFallback).toBe(true);
-  });
+  test('connect-src-only CSP triggers fallback', async ({
+    backgroundPage,
+    sharedPage,
+    pageUrl
+  }) => {
+    await clearSession(backgroundPage)
+    await sharedPage.goto(pageUrl('/worker-spawn-csp-connect'), {
+      waitUntil: 'domcontentloaded',
+      timeout: 15000
+    })
+    const entries = await readCspEntries(backgroundPage)
+    expect(entries.length).toBeGreaterThan(0)
+    const cspInfo = entries[0]
+    expect(cspInfo.connectSrcBlocked).toBe(true)
+    expect(cspInfo.workerSrcBlocked).toBe(false)
+    expect(cspInfo.needsBlobFallback).toBe(true)
+  })
 
   test('allowing CSP: no fallback needed', async ({ backgroundPage, sharedPage, pageUrl }) => {
-    await clearSession(backgroundPage);
-    await sharedPage.goto(pageUrl('/worker-spawn-csp-allowing'), { waitUntil: 'domcontentloaded', timeout: 15000 });
-    const entries = await readCspEntries(backgroundPage);
-    expect(entries.length).toBeGreaterThan(0);
-    expect(entries[0].needsBlobFallback).toBe(false);
-    const status = await waitForStatus(sharedPage, 'blob-status');
-    expect(status).toBe('blob-ready');
-  });
+    await clearSession(backgroundPage)
+    await sharedPage.goto(pageUrl('/worker-spawn-csp-allowing'), {
+      waitUntil: 'domcontentloaded',
+      timeout: 15000
+    })
+    const entries = await readCspEntries(backgroundPage)
+    expect(entries.length).toBeGreaterThan(0)
+    expect(entries[0].needsBlobFallback).toBe(false)
+    const status = await waitForStatus(sharedPage, 'blob-status')
+    expect(status).toBe('blob-ready')
+  })
 
-  test('trusted-types page triggers fallback detection', async ({ backgroundPage, sharedPage, pageUrl }) => {
-    await clearSession(backgroundPage);
-    await sharedPage.goto(pageUrl('/worker-spawn-csp-trusted-types'), { waitUntil: 'domcontentloaded', timeout: 15000 });
-    const entries = await readCspEntries(backgroundPage);
-    expect(entries.length).toBeGreaterThan(0);
-    const cspInfo = entries[0];
-    expect(cspInfo.hasTrustedTypesRequire).toBe(true);
-    expect(cspInfo.needsBlobFallback).toBe(true);
-  });
+  test('trusted-types page triggers fallback detection', async ({
+    backgroundPage,
+    sharedPage,
+    pageUrl
+  }) => {
+    await clearSession(backgroundPage)
+    await sharedPage.goto(pageUrl('/worker-spawn-csp-trusted-types'), {
+      waitUntil: 'domcontentloaded',
+      timeout: 15000
+    })
+    const entries = await readCspEntries(backgroundPage)
+    expect(entries.length).toBeGreaterThan(0)
+    const cspInfo = entries[0]
+    expect(cspInfo.hasTrustedTypesRequire).toBe(true)
+    expect(cspInfo.needsBlobFallback).toBe(true)
+  })
 
-  test('meta CSP: rewritten via StreamFilter, blob worker runs', async ({ backgroundPage, sharedPage, pageUrl }) => {
-    await clearSession(backgroundPage);
-    await sharedPage.goto(pageUrl('/worker-spawn-csp-meta'), { waitUntil: 'domcontentloaded', timeout: 15000 });
-    const entries = await readCspEntries(backgroundPage);
-    expect(entries.length).toBeGreaterThan(0);
-    const cspInfo = entries[0];
-    expect(cspInfo.workerSrcBlocked).toBe(true);
-    expect(cspInfo.connectSrcBlocked).toBe(true);
-    expect(cspInfo.metaShadowBlocked).toBe(true);
-    expect(cspInfo.headerShadowBlocked).toBeFalsy();
-    expect(cspInfo.needsBlobFallback).toBe(true);
-    const blobStatus = await waitForStatus(sharedPage, 'blob-status');
-    expect(blobStatus).toBe('blob-ready');
-    const sameOriginStatus = await waitForStatus(sharedPage, 'same-origin-status');
-    expect(sameOriginStatus).toMatch(/^same-origin-(error|threw|timeout)/);
-  });
-
-  test('site setting blob forces fallback and rewrite', async ({ backgroundPage, sharedPage, pageUrl, servers }) => {
-    const origin = `http://localhost:${servers.main.port}`;
-    const siteKey = `settings :: ${origin} :: workerSpawnMode`;
-    await clearSession(backgroundPage);
-    await backgroundPage.evaluate((key) => browser.storage.local.set({ [key]: 'blob' }), siteKey);
-
-    await sharedPage.goto(pageUrl('/worker-spawn-csp'), { waitUntil: 'domcontentloaded', timeout: 15000 });
-    const entries = await readCspEntries(backgroundPage);
-
-    await backgroundPage.evaluate((key) => browser.storage.local.remove([key]), siteKey);
-
-    expect(entries.length).toBeGreaterThan(0);
-    const cspInfo = entries[0];
-    expect(cspInfo.needsBlobFallback).toBe(true);
-    if (await isMv2(backgroundPage)) {
-      expect(cspInfo.rewrittenCsp).toBeTruthy();
-      const rewritten = cspInfo.rewrittenCsp![0];
-      expect(rewritten).toContain("worker-src 'self' blob:");
-      expect(rewritten).toContain("connect-src 'self' ws://127.0.0.1:*");
-    } else {
-      expect(cspInfo.rewrittenCsp).toBeUndefined();
+  test('meta CSP: blob mode rewrites via StreamFilter', async ({
+    backgroundPage,
+    sharedPage,
+    pageUrl,
+    servers
+  }) => {
+    const origin = `http://localhost:${servers.main.port}`
+    const siteKey = `settings :: ${origin} :: workerSpawnMode`
+    await clearSession(backgroundPage)
+    await backgroundPage.evaluate((key) => browser.storage.local.set({ [key]: 'blob' }), siteKey)
+    try {
+      await sharedPage.goto(pageUrl('/worker-spawn-csp-meta'), {
+        waitUntil: 'domcontentloaded',
+        timeout: 15000
+      })
+      const entries = await readCspEntries(backgroundPage)
+      expect(entries.length).toBeGreaterThan(0)
+      const cspInfo = entries[0]
+      expect(cspInfo.connectSrcBlocked).toBe(true)
+      expect(cspInfo.metaShadowBlocked).toBe(true)
+      expect(cspInfo.headerShadowBlocked).toBeFalsy()
+      expect(cspInfo.needsBlobFallback).toBe(true)
+      const blobStatus = await waitForStatus(sharedPage, 'blob-status')
+      expect(blobStatus).toBe('blob-ready')
+      const sameOriginStatus = await waitForStatus(sharedPage, 'same-origin-status')
+      expect(sameOriginStatus).toMatch(/^same-origin-(error|threw|timeout)/)
+    } finally {
+      await backgroundPage.evaluate((key) => browser.storage.local.remove(key), siteKey)
     }
-  });
+  })
 
-  test('default-src none: worker and connect both blocked via fallback', async ({ backgroundPage, sharedPage, pageUrl }) => {
-    await clearSession(backgroundPage);
-    await sharedPage.goto(pageUrl('/worker-spawn-csp-default-none'), { waitUntil: 'domcontentloaded', timeout: 15000 });
-    const entries = await readCspEntries(backgroundPage);
-    const cspInfo = entries[0];
-    expect(cspInfo.workerSrcBlocked).toBe(true);
-    expect(cspInfo.connectSrcBlocked).toBe(true);
-    expect(cspInfo.needsBlobFallback).toBe(true);
-  });
+  test('shadow mode leaves meta CSP untouched', async ({
+    backgroundPage,
+    sharedPage,
+    pageUrl,
+    servers
+  }) => {
+    const origin = `http://localhost:${servers.main.port}`
+    const siteKey = `settings :: ${origin} :: workerSpawnMode`
+    await clearSession(backgroundPage)
+    await backgroundPage.evaluate((key) => browser.storage.local.set({ [key]: 'shadow' }), siteKey)
+    try {
+      await sharedPage.goto(pageUrl('/worker-spawn-csp-meta'), {
+        waitUntil: 'domcontentloaded',
+        timeout: 15000
+      })
+      const content = await sharedPage
+        .locator('meta[http-equiv="Content-Security-Policy"]')
+        .getAttribute('content')
+      expect(content).toBe("worker-src 'none'; connect-src 'none'")
+    } finally {
+      await backgroundPage.evaluate((key) => browser.storage.local.remove(key), siteKey)
+    }
+  })
+  test('shadow mode leaves iframe meta CSP untouched', async ({
+    backgroundPage,
+    sharedPage,
+    pageUrl,
+    servers
+  }) => {
+    const origin = `http://localhost:${servers.main.port}`
+    const siteKey = `settings :: ${origin} :: workerSpawnMode`
+    await clearSession(backgroundPage)
+    await backgroundPage.evaluate((key) => browser.storage.local.set({ [key]: 'shadow' }), siteKey)
+    try {
+      await sharedPage.goto(pageUrl('/worker-spawn-no-csp'), {
+        waitUntil: 'domcontentloaded',
+        timeout: 15000
+      })
+      await sharedPage.evaluate((src) => {
+        const iframe = document.createElement('iframe')
+        iframe.src = src
+        document.body.appendChild(iframe)
+      }, pageUrl('/worker-spawn-csp-meta'))
+      await expect
+        .poll(() =>
+          sharedPage.frames().some((frame) => frame.url().includes('/worker-spawn-csp-meta'))
+        )
+        .toBe(true)
+      const child = sharedPage
+        .frames()
+        .find((frame) => frame.url().includes('/worker-spawn-csp-meta'))
+      expect(child).toBeDefined()
+      const content = await child!
+        .locator('meta[http-equiv="Content-Security-Policy"]')
+        .getAttribute('content')
+      expect(content).toBe("worker-src 'none'; connect-src 'none'")
+    } finally {
+      await backgroundPage.evaluate((key) => browser.storage.local.remove(key), siteKey)
+    }
+  })
+  test('malformed meta CSP is left unchanged instead of being reserialized', async ({
+    backgroundPage
+  }) => {
+    const original =
+      "default-src 'none' script-src 'self'; style-src 'unsafe-inline' img-src 'self' connect-src 'self'"
+    const result = await backgroundPage.evaluate((csp) => {
+      const globals = globalThis as unknown as BackgroundGlobals
+      const cspModule = globals.webhid?.import('bgCsp')
+      return cspModule?.rewriteCspValue(csp, { hasTrustedTypesRequire: true })
+    }, original)
+    expect(result).toEqual({ value: original, modified: false })
+  })
 
-  test('script-src none: worker blocked via script-src fallback, connect unrestricted', async ({ backgroundPage, sharedPage, pageUrl }) => {
-    await clearSession(backgroundPage);
-    await sharedPage.goto(pageUrl('/worker-spawn-csp-script-none'), { waitUntil: 'domcontentloaded', timeout: 15000 });
-    const entries = await readCspEntries(backgroundPage);
-    const cspInfo = entries[0];
-    expect(cspInfo.workerSrcBlocked).toBe(true);
-    expect(cspInfo.connectSrcBlocked).toBe(false);
-    expect(cspInfo.needsBlobFallback).toBe(true);
-  });
+  test('site setting blob forces fallback and rewrite', async ({
+    backgroundPage,
+    sharedPage,
+    pageUrl,
+    servers
+  }) => {
+    const origin = `http://localhost:${servers.main.port}`
+    const siteKey = `settings :: ${origin} :: workerSpawnMode`
+    await clearSession(backgroundPage)
+    await backgroundPage.evaluate((key) => browser.storage.local.set({ [key]: 'blob' }), siteKey)
 
-  test('default-src self: worker allowed, connect blocked', async ({ backgroundPage, sharedPage, pageUrl }) => {
-    await clearSession(backgroundPage);
-    await sharedPage.goto(pageUrl('/worker-spawn-csp-default-self'), { waitUntil: 'domcontentloaded', timeout: 15000 });
-    const entries = await readCspEntries(backgroundPage);
-    const cspInfo = entries[0];
-    expect(cspInfo.workerSrcBlocked).toBe(false);
-    expect(cspInfo.connectSrcBlocked).toBe(true);
-    expect(cspInfo.needsBlobFallback).toBe(true);
-  });
+    await sharedPage.goto(pageUrl('/worker-spawn-csp'), {
+      waitUntil: 'domcontentloaded',
+      timeout: 15000
+    })
+    const entries = await readCspEntries(backgroundPage)
 
-  test('worker-src none alone: worker blocked only', async ({ backgroundPage, sharedPage, pageUrl }) => {
-    await clearSession(backgroundPage);
-    await sharedPage.goto(pageUrl('/worker-spawn-csp-worker-none'), { waitUntil: 'domcontentloaded', timeout: 15000 });
-    const entries = await readCspEntries(backgroundPage);
-    const cspInfo = entries[0];
-    expect(cspInfo.workerSrcBlocked).toBe(true);
-    expect(cspInfo.connectSrcBlocked).toBe(false);
-    expect(cspInfo.needsBlobFallback).toBe(true);
-  });
+    await backgroundPage.evaluate((key) => browser.storage.local.remove([key]), siteKey)
+
+    expect(entries.length).toBeGreaterThan(0)
+    const cspInfo = entries[0]
+    expect(cspInfo.needsBlobFallback).toBe(true)
+    if (await isMv2(backgroundPage)) {
+      expect(cspInfo.rewrittenCsp).toBeTruthy()
+      const rewritten = cspInfo.rewrittenCsp![0]
+      expect(rewritten).toContain("worker-src 'self' blob:")
+      expect(rewritten).toContain("connect-src 'self' ws://127.0.0.1:*")
+    } else {
+      expect(cspInfo.rewrittenCsp).toBeUndefined()
+    }
+  })
+
+  test('default-src none: worker and connect both blocked via fallback', async ({
+    backgroundPage,
+    sharedPage,
+    pageUrl
+  }) => {
+    await clearSession(backgroundPage)
+    await sharedPage.goto(pageUrl('/worker-spawn-csp-default-none'), {
+      waitUntil: 'domcontentloaded',
+      timeout: 15000
+    })
+    const entries = await readCspEntries(backgroundPage)
+    const cspInfo = entries[0]
+    expect(cspInfo.workerSrcBlocked).toBe(true)
+    expect(cspInfo.connectSrcBlocked).toBe(true)
+    expect(cspInfo.needsBlobFallback).toBe(true)
+  })
+
+  test('script-src none: worker blocked via script-src fallback, connect unrestricted', async ({
+    backgroundPage,
+    sharedPage,
+    pageUrl
+  }) => {
+    await clearSession(backgroundPage)
+    await sharedPage.goto(pageUrl('/worker-spawn-csp-script-none'), {
+      waitUntil: 'domcontentloaded',
+      timeout: 15000
+    })
+    const entries = await readCspEntries(backgroundPage)
+    const cspInfo = entries[0]
+    expect(cspInfo.workerSrcBlocked).toBe(true)
+    expect(cspInfo.connectSrcBlocked).toBe(false)
+    expect(cspInfo.needsBlobFallback).toBe(true)
+  })
+
+  test('default-src self: worker allowed, connect blocked', async ({
+    backgroundPage,
+    sharedPage,
+    pageUrl
+  }) => {
+    await clearSession(backgroundPage)
+    await sharedPage.goto(pageUrl('/worker-spawn-csp-default-self'), {
+      waitUntil: 'domcontentloaded',
+      timeout: 15000
+    })
+    const entries = await readCspEntries(backgroundPage)
+    const cspInfo = entries[0]
+    expect(cspInfo.workerSrcBlocked).toBe(false)
+    expect(cspInfo.connectSrcBlocked).toBe(true)
+    expect(cspInfo.needsBlobFallback).toBe(true)
+  })
+
+  test('worker-src none alone: worker blocked only', async ({
+    backgroundPage,
+    sharedPage,
+    pageUrl
+  }) => {
+    await clearSession(backgroundPage)
+    await sharedPage.goto(pageUrl('/worker-spawn-csp-worker-none'), {
+      waitUntil: 'domcontentloaded',
+      timeout: 15000
+    })
+    const entries = await readCspEntries(backgroundPage)
+    const cspInfo = entries[0]
+    expect(cspInfo.workerSrcBlocked).toBe(true)
+    expect(cspInfo.connectSrcBlocked).toBe(false)
+    expect(cspInfo.needsBlobFallback).toBe(true)
+  })
 
   test('report-only CSP is ignored', async ({ backgroundPage, sharedPage, pageUrl }) => {
-    await clearSession(backgroundPage);
-    await sharedPage.goto(pageUrl('/worker-spawn-csp-report-only'), { waitUntil: 'domcontentloaded', timeout: 15000 });
+    await clearSession(backgroundPage)
+    await sharedPage.goto(pageUrl('/worker-spawn-csp-report-only'), {
+      waitUntil: 'domcontentloaded',
+      timeout: 15000
+    })
     const count = await backgroundPage.evaluate(async () => {
-      const all = await browser.storage.session.get(null);
-      return Object.keys(all).filter((k) => k.startsWith('csp:')).length;
-    });
-    expect(count).toBe(0);
-  });
+      const all = await browser.storage.session.get(null)
+      return Object.keys(all).filter((k) => k.startsWith('csp:')).length
+    })
+    expect(count).toBe(0)
+  })
 
-  test('multiple CSP headers: a resource must pass every policy', async ({ backgroundPage, sharedPage, pageUrl }) => {
-    await clearSession(backgroundPage);
-    await sharedPage.goto(pageUrl('/worker-spawn-csp-multi'), { waitUntil: 'domcontentloaded', timeout: 15000 });
-    const entries = await readCspEntries(backgroundPage);
-    const cspInfo = entries[0];
-    expect(cspInfo.workerSrcBlocked).toBe(false);
-    expect(cspInfo.connectSrcBlocked).toBe(true);
-    expect(cspInfo.needsBlobFallback).toBe(true);
-  });
+  test('multiple CSP headers: a resource must pass every policy', async ({
+    backgroundPage,
+    sharedPage,
+    pageUrl
+  }) => {
+    await clearSession(backgroundPage)
+    await sharedPage.goto(pageUrl('/worker-spawn-csp-multi'), {
+      waitUntil: 'domcontentloaded',
+      timeout: 15000
+    })
+    const entries = await readCspEntries(backgroundPage)
+    const cspInfo = entries[0]
+    expect(cspInfo.workerSrcBlocked).toBe(false)
+    expect(cspInfo.connectSrcBlocked).toBe(true)
+    expect(cspInfo.needsBlobFallback).toBe(true)
+  })
 
-  test('duplicate directive: first occurrence wins', async ({ backgroundPage, sharedPage, pageUrl }) => {
-    await clearSession(backgroundPage);
-    await sharedPage.goto(pageUrl('/worker-spawn-csp-dup'), { waitUntil: 'domcontentloaded', timeout: 15000 });
-    const entries = await readCspEntries(backgroundPage);
-    const cspInfo = entries[0];
-    expect(cspInfo.workerSrcBlocked).toBe(false);
-    expect(cspInfo.needsBlobFallback).toBe(false);
-  });
+  test('duplicate directive: first occurrence wins', async ({
+    backgroundPage,
+    sharedPage,
+    pageUrl
+  }) => {
+    await clearSession(backgroundPage)
+    await sharedPage.goto(pageUrl('/worker-spawn-csp-dup'), {
+      waitUntil: 'domcontentloaded',
+      timeout: 15000
+    })
+    const entries = await readCspEntries(backgroundPage)
+    const cspInfo = entries[0]
+    expect(cspInfo.workerSrcBlocked).toBe(false)
+    expect(cspInfo.needsBlobFallback).toBe(false)
+  })
 
-  test('wildcard and ws: scheme sources: no fallback needed', async ({ backgroundPage, sharedPage, pageUrl }) => {
+  test('wildcard and ws: scheme sources: no fallback needed', async ({
+    backgroundPage,
+    sharedPage,
+    pageUrl
+  }) => {
     for (const route of ['/worker-spawn-csp-star', '/worker-spawn-csp-ws-scheme']) {
-      await clearSession(backgroundPage);
-      await sharedPage.goto(pageUrl(route), { waitUntil: 'domcontentloaded', timeout: 15000 });
-      const entries = await readCspEntries(backgroundPage);
-      expect(entries[0].needsBlobFallback).toBe(false);
+      await clearSession(backgroundPage)
+      await sharedPage.goto(pageUrl(route), { waitUntil: 'domcontentloaded', timeout: 15000 })
+      const entries = await readCspEntries(backgroundPage)
+      expect(entries[0].needsBlobFallback).toBe(false)
     }
-  });
+  })
 
-  test('rewrite creates worker-src from the script-src fallback', async ({ backgroundPage, sharedPage, pageUrl }) => {
-    await clearSession(backgroundPage);
-    await sharedPage.goto(pageUrl('/worker-spawn-csp-rewrite-script'), { waitUntil: 'domcontentloaded', timeout: 15000 });
-    const entries = await readCspEntries(backgroundPage);
-    const cspInfo = entries[0];
-    expect(cspInfo.needsBlobFallback).toBe(true);
+  test('rewrite creates worker-src from the script-src fallback', async ({
+    backgroundPage,
+    sharedPage,
+    pageUrl
+  }) => {
+    await clearSession(backgroundPage)
+    await sharedPage.goto(pageUrl('/worker-spawn-csp-rewrite-script'), {
+      waitUntil: 'domcontentloaded',
+      timeout: 15000
+    })
+    const entries = await readCspEntries(backgroundPage)
+    const cspInfo = entries[0]
+    expect(cspInfo.needsBlobFallback).toBe(true)
     if (await isMv2(backgroundPage)) {
-      expect(cspInfo.rewrittenCsp).toBeTruthy();
-      const rewritten = cspInfo.rewrittenCsp![0];
-      expect(rewritten).toContain("worker-src 'self' blob:");
-      expect(rewritten).toContain("script-src 'self'");
-      expect(rewritten).not.toContain("script-src 'self' blob:");
-      expect(rewritten).toContain("connect-src 'self' ws://127.0.0.1:*");
+      expect(cspInfo.rewrittenCsp).toBeTruthy()
+      const rewritten = cspInfo.rewrittenCsp![0]
+      expect(rewritten).toContain("worker-src 'self' blob:")
+      expect(rewritten).toContain("script-src 'self'")
+      expect(rewritten).not.toContain("script-src 'self' blob:")
+      expect(rewritten).toContain("connect-src 'self' ws://127.0.0.1:*")
     } else {
-      expect(cspInfo.rewrittenCsp).toBeUndefined();
+      expect(cspInfo.rewrittenCsp).toBeUndefined()
     }
-  });
+  })
 
-  test('rewrite creates worker-src and connect-src from the default-src fallback', async ({ backgroundPage, sharedPage, pageUrl }) => {
-    await clearSession(backgroundPage);
-    await sharedPage.goto(pageUrl('/worker-spawn-csp-rewrite-default'), { waitUntil: 'domcontentloaded', timeout: 15000 });
-    const entries = await readCspEntries(backgroundPage);
-    const cspInfo = entries[0];
-    expect(cspInfo.needsBlobFallback).toBe(true);
+  test('rewrite creates worker-src and connect-src from the default-src fallback', async ({
+    backgroundPage,
+    sharedPage,
+    pageUrl
+  }) => {
+    await clearSession(backgroundPage)
+    await sharedPage.goto(pageUrl('/worker-spawn-csp-rewrite-default'), {
+      waitUntil: 'domcontentloaded',
+      timeout: 15000
+    })
+    const entries = await readCspEntries(backgroundPage)
+    const cspInfo = entries[0]
+    expect(cspInfo.needsBlobFallback).toBe(true)
     if (await isMv2(backgroundPage)) {
-      expect(cspInfo.rewrittenCsp).toBeTruthy();
-      const rewritten = cspInfo.rewrittenCsp![0];
-      expect(rewritten).toContain("worker-src 'self' blob:");
-      expect(rewritten).toContain("connect-src 'self' ws://127.0.0.1:*");
-      expect(rewritten).toContain("default-src 'self'");
-      expect(rewritten).not.toContain("default-src 'self' blob:");
+      expect(cspInfo.rewrittenCsp).toBeTruthy()
+      const rewritten = cspInfo.rewrittenCsp![0]
+      expect(rewritten).toContain("worker-src 'self' blob:")
+      expect(rewritten).toContain("connect-src 'self' ws://127.0.0.1:*")
+      expect(rewritten).toContain("default-src 'self'")
+      expect(rewritten).not.toContain("default-src 'self' blob:")
     } else {
-      expect(cspInfo.rewrittenCsp).toBeUndefined();
+      expect(cspInfo.rewrittenCsp).toBeUndefined()
     }
-  });
+  })
 
-  test('rewrite is a no-op when the policy already allows blob and the daemon WS', async ({ backgroundPage, sharedPage, pageUrl, servers }) => {
-    const origin = `http://localhost:${servers.main.port}`;
-    const siteKey = `settings :: ${origin} :: workerSpawnMode`;
-    await clearSession(backgroundPage);
-    await backgroundPage.evaluate((key) => browser.storage.local.set({ [key]: 'blob' }), siteKey);
+  test('rewrite is a no-op when the policy already allows blob and the daemon WS', async ({
+    backgroundPage,
+    sharedPage,
+    pageUrl,
+    servers
+  }) => {
+    const origin = `http://localhost:${servers.main.port}`
+    const siteKey = `settings :: ${origin} :: workerSpawnMode`
+    await clearSession(backgroundPage)
+    await backgroundPage.evaluate((key) => browser.storage.local.set({ [key]: 'blob' }), siteKey)
 
-    await sharedPage.goto(pageUrl('/worker-spawn-csp-allowing'), { waitUntil: 'domcontentloaded', timeout: 15000 });
-    const entries = await readCspEntries(backgroundPage);
+    await sharedPage.goto(pageUrl('/worker-spawn-csp-allowing'), {
+      waitUntil: 'domcontentloaded',
+      timeout: 15000
+    })
+    const entries = await readCspEntries(backgroundPage)
 
-    await backgroundPage.evaluate((key) => browser.storage.local.remove([key]), siteKey);
+    await backgroundPage.evaluate((key) => browser.storage.local.remove([key]), siteKey)
 
-    const cspInfo = entries[0];
-    expect(cspInfo.needsBlobFallback).toBe(true);
-    expect(cspInfo.rewrittenCsp).toBeUndefined();
-  });
+    const cspInfo = entries[0]
+    expect(cspInfo.needsBlobFallback).toBe(true)
+    expect(cspInfo.rewrittenCsp).toBeUndefined()
+  })
 
-  test('rewrite appends webhid-worker to an existing trusted-types list', async ({ backgroundPage, sharedPage, pageUrl }) => {
-    await clearSession(backgroundPage);
-    await sharedPage.goto(pageUrl('/worker-spawn-csp-tt-append'), { waitUntil: 'domcontentloaded', timeout: 15000 });
-    const entries = await readCspEntries(backgroundPage);
-    const cspInfo = entries[0];
-    expect(cspInfo.hasTrustedTypesRequire).toBe(true);
+  test('rewrite appends webhid-worker to an existing trusted-types list', async ({
+    backgroundPage,
+    sharedPage,
+    pageUrl
+  }) => {
+    await clearSession(backgroundPage)
+    await sharedPage.goto(pageUrl('/worker-spawn-csp-tt-append'), {
+      waitUntil: 'domcontentloaded',
+      timeout: 15000
+    })
+    const entries = await readCspEntries(backgroundPage)
+    const cspInfo = entries[0]
+    expect(cspInfo.hasTrustedTypesRequire).toBe(true)
     if (await isMv2(backgroundPage)) {
-      expect(cspInfo.rewrittenCsp).toBeTruthy();
-      expect(cspInfo.rewrittenCsp![0]).toContain('trusted-types foo webhid-worker');
+      expect(cspInfo.rewrittenCsp).toBeTruthy()
+      expect(cspInfo.rewrittenCsp![0]).toContain('trusted-types foo webhid-worker')
     } else {
-      expect(cspInfo.rewrittenCsp).toBeUndefined();
+      expect(cspInfo.rewrittenCsp).toBeUndefined()
     }
-  });
+  })
 
-  test('rewrite adds a trusted-types directive when absent', async ({ backgroundPage, sharedPage, pageUrl }) => {
-    await clearSession(backgroundPage);
-    await sharedPage.goto(pageUrl('/worker-spawn-csp-tt-new'), { waitUntil: 'domcontentloaded', timeout: 15000 });
-    const entries = await readCspEntries(backgroundPage);
-    const cspInfo = entries[0];
-    expect(cspInfo.hasTrustedTypesRequire).toBe(true);
+  test('rewrite adds a trusted-types directive when absent', async ({
+    backgroundPage,
+    sharedPage,
+    pageUrl
+  }) => {
+    await clearSession(backgroundPage)
+    await sharedPage.goto(pageUrl('/worker-spawn-csp-tt-new'), {
+      waitUntil: 'domcontentloaded',
+      timeout: 15000
+    })
+    const entries = await readCspEntries(backgroundPage)
+    const cspInfo = entries[0]
+    expect(cspInfo.hasTrustedTypesRequire).toBe(true)
     if (await isMv2(backgroundPage)) {
-      expect(cspInfo.rewrittenCsp).toBeTruthy();
-      expect(cspInfo.rewrittenCsp![0]).toContain('trusted-types webhid-worker');
+      expect(cspInfo.rewrittenCsp).toBeTruthy()
+      expect(cspInfo.rewrittenCsp![0]).toContain('trusted-types webhid-worker')
     } else {
-      expect(cspInfo.rewrittenCsp).toBeUndefined();
+      expect(cspInfo.rewrittenCsp).toBeUndefined()
     }
-  });
+  })
 
-  test('header and meta CSP together: flags merged', async ({ backgroundPage, sharedPage, pageUrl }) => {
-    await clearSession(backgroundPage);
-    await sharedPage.goto(pageUrl('/worker-spawn-csp-both'), { waitUntil: 'domcontentloaded', timeout: 15000 });
-    const entries = await readCspEntries(backgroundPage);
-    const cspInfo = entries[0];
-    expect(cspInfo.workerSrcBlocked).toBe(true);
-    expect(cspInfo.connectSrcBlocked).toBe(true);
-    expect(cspInfo.headerShadowBlocked).toBe(true);
-    expect(cspInfo.metaShadowBlocked).toBe(true);
-    const blobStatus = await waitForStatus(sharedPage, 'blob-status');
-    expect(blobStatus).toBe('blob-ready');
-  });
+  test('header and meta CSP together: flags merged in blob mode', async ({
+    backgroundPage,
+    sharedPage,
+    pageUrl,
+    servers
+  }) => {
+    const origin = `http://localhost:${servers.main.port}`
+    const siteKey = `settings :: ${origin} :: workerSpawnMode`
+    await clearSession(backgroundPage)
+    await backgroundPage.evaluate((key) => browser.storage.local.set({ [key]: 'blob' }), siteKey)
+    try {
+      await sharedPage.goto(pageUrl('/worker-spawn-csp-both'), {
+        waitUntil: 'domcontentloaded',
+        timeout: 15000
+      })
+      const entries = await readCspEntries(backgroundPage)
+      const cspInfo = entries[0]
+      expect(cspInfo.workerSrcBlocked).toBe(true)
+      expect(cspInfo.connectSrcBlocked).toBe(true)
+      expect(cspInfo.headerShadowBlocked).toBe(true)
+      expect(cspInfo.metaShadowBlocked).toBe(true)
+      const blobStatus = await waitForStatus(sharedPage, 'blob-status')
+      expect(blobStatus).toBe('blob-ready')
+    } finally {
+      await backgroundPage.evaluate((key) => browser.storage.local.remove(key), siteKey)
+    }
+  })
 
   test('workerSpawnMode default matches the manifest version', async ({ backgroundPage }) => {
     const mode = await backgroundPage.evaluate(() => {
-      const w = (globalThis as { webhid?: { import(name: string): Record<string, unknown> } }).webhid;
-      return w ? w.import('GLOBAL_DEFAULTS')['workerSpawnMode'] : undefined;
-    });
-    expect(mode).toBe((await isMv2(backgroundPage)) ? 'blob' : 'shadow');
-  });
+      const w = (globalThis as { webhid?: { import(name: string): Record<string, unknown> } })
+        .webhid
+      return w ? w.import('GLOBAL_DEFAULTS')['workerSpawnMode'] : undefined
+    })
+    expect(mode).toBe((await isMv2(backgroundPage)) ? 'blob' : 'shadow')
+  })
 
-  test('navigating from a CSP page to a no-CSP page clears the entry', async ({ backgroundPage, sharedPage, pageUrl }) => {
-    await clearSession(backgroundPage);
-    await sharedPage.goto(pageUrl('/worker-spawn-csp'), { waitUntil: 'domcontentloaded', timeout: 15000 });
-    await readCspEntries(backgroundPage);
-    await sharedPage.goto(pageUrl('/worker-spawn-no-csp'), { waitUntil: 'domcontentloaded', timeout: 15000 });
-    await expect.poll(() => backgroundPage.evaluate(async () => {
-      const all = await browser.storage.session.get(null);
-      return Object.keys(all).filter((k) => k.startsWith('csp:')).length;
-    }), { timeout: 5000 }).toBe(0);
-  });
-});
+  test('navigating from a CSP page to a no-CSP page clears the entry', async ({
+    backgroundPage,
+    sharedPage,
+    pageUrl
+  }) => {
+    await clearSession(backgroundPage)
+    await sharedPage.goto(pageUrl('/worker-spawn-csp'), {
+      waitUntil: 'domcontentloaded',
+      timeout: 15000
+    })
+    await readCspEntries(backgroundPage)
+    await sharedPage.goto(pageUrl('/worker-spawn-no-csp'), {
+      waitUntil: 'domcontentloaded',
+      timeout: 15000
+    })
+    await expect
+      .poll(
+        () =>
+          backgroundPage.evaluate(async () => {
+            const all = await browser.storage.session.get(null)
+            return Object.keys(all).filter((k) => k.startsWith('csp:')).length
+          }),
+        { timeout: 5000 }
+      )
+      .toBe(0)
+  })
+})
