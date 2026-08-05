@@ -89,14 +89,8 @@ jobs:
               libxrandr2
               libxrender1
           version: v1
-      - name: Kernel version
-        id: kernel
-        run: echo "modules=linux-modules-extra-$(uname -r)" >> "$GITHUB_OUTPUT"
-      - name: Cache kernel modules
-        uses: awalsh128/cache-apt-pkgs-action@b8f4936ae6bd604d21de6c1243d45b013396d81b
-        with:
-          packages: ${{ steps.kernel.outputs.modules }}
-          version: v1
+      - name: Install kernel modules
+        run: sudo apt-get update && sudo apt-get install -y linux-modules-extra-$(uname -r)
       - name: Cache npm
         uses: actions/cache@v6
         with:
@@ -115,6 +109,7 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: webhid-debug-binaries
+          path: crates/target/debug
       - name: Setup uhid + udev rules + webhid group
         run: |
           sudo groupadd --system webhid
@@ -163,14 +158,8 @@ jobs:
               libxrandr2
               libxrender1
           version: v1
-      - name: Kernel version
-        id: kernel
-        run: echo "modules=linux-modules-extra-$(uname -r)" >> "$GITHUB_OUTPUT"
-      - name: Cache kernel modules
-        uses: awalsh128/cache-apt-pkgs-action@b8f4936ae6bd604d21de6c1243d45b013396d81b
-        with:
-          packages: ${{ steps.kernel.outputs.modules }}
-          version: v1
+      - name: Install kernel modules
+        run: sudo apt-get update && sudo apt-get install -y linux-modules-extra-$(uname -r)
       - name: Cache npm
         uses: actions/cache@v6
         with:
@@ -189,6 +178,7 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: webhid-debug-binaries
+          path: crates/target/debug
       - name: Setup uhid + udev rules + webhid group
         run: |
           sudo groupadd --system webhid
