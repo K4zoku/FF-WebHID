@@ -462,8 +462,6 @@ pub fn probe_hid_permission() -> u8 {
 
 #[cfg(target_os = "macos")]
 fn macos_hid_permission_probe() -> u8 {
-    use std::ffi::c_void;
-
     const KIOHID_OPTIONS_NONE: i32 = 0;
     const KIORETURN_SUCCESS: i32 = 0;
 
@@ -498,10 +496,14 @@ fn unix_hid_permission_probe() -> u8 {
 /// any other error leaves the current status untouched.
 #[cfg(unix)]
 fn note_open_result<T>(res: &Result<T, hidapi::HidError>) {
+    // POSIX errno values, stable across Linux/macOS/BSD (libc is a
+    // Linux-only dependency of this crate).
+    const EACCES: i32 = 13;
+    const EPERM: i32 = 1;
     match res {
         Ok(_) => set_hid_permission(0),
         Err(hidapi::HidError::IoError { error })
-            if matches!(error.raw_os_error(), Some(libc::EACCES) | Some(libc::EPERM)) =>
+            if matches!(error.raw_os_error(), Some(EACCES) | Some(EPERM)) =>
         {
             set_hid_permission(1);
         }
@@ -512,7 +514,7 @@ fn note_open_result<T>(res: &Result<T, hidapi::HidError>) {
 #[cfg(target_os = "macos")]
 #[link(name = "IOKit", kind = "framework")]
 #[link(name = "CoreFoundation", kind = "framework")]
-extern "C" {
+unsafe extern "C" {
     fn IOHIDManagerCreate(allocator: *const std::ffi::c_void, options: i32) -> *mut std::ffi::c_void;
     fn IOHIDManagerSetDeviceMatching(manager: *mut std::ffi::c_void, matching: *const std::ffi::c_void);
     fn IOHIDManagerOpen(manager: *mut std::ffi::c_void, options: i32) -> i32;
