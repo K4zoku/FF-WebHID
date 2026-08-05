@@ -133,6 +133,7 @@ async fn connect_to_path(path: &str) -> std::io::Result<tokio::net::UnixStream> 
         }
         #[cfg(not(target_os = "linux"))]
         {
+            let _ = rest;
             Err(std::io::Error::new(
                 std::io::ErrorKind::Unsupported,
                 "abstract sockets not supported on this platform",

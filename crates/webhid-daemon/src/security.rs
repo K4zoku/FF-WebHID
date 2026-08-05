@@ -1,7 +1,7 @@
 #[cfg(target_os = "linux")]
 use std::sync::OnceLock;
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 use tokio::net::UnixStream;
 
 /// Syscall allow-list for the daemon process.

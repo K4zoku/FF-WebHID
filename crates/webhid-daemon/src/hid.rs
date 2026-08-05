@@ -462,7 +462,7 @@ pub fn probe_hid_permission() -> u8 {
 
 #[cfg(target_os = "macos")]
 fn macos_hid_permission_probe() -> u8 {
-    const KIOHID_OPTIONS_NONE: i32 = 0;
+    const KIOHID_OPTIONS_NONE: u32 = 0;
     const KIORETURN_SUCCESS: i32 = 0;
 
     unsafe {
@@ -515,10 +515,18 @@ fn note_open_result<T>(res: &Result<T, hidapi::HidError>) {
 #[link(name = "IOKit", kind = "framework")]
 #[link(name = "CoreFoundation", kind = "framework")]
 unsafe extern "C" {
-    fn IOHIDManagerCreate(allocator: *const std::ffi::c_void, options: i32) -> *mut std::ffi::c_void;
-    fn IOHIDManagerSetDeviceMatching(manager: *mut std::ffi::c_void, matching: *const std::ffi::c_void);
-    fn IOHIDManagerOpen(manager: *mut std::ffi::c_void, options: i32) -> i32;
-    fn IOHIDManagerClose(manager: *mut std::ffi::c_void, options: i32) -> i32;
+    // Signatures must match the declarations in hotplug.rs (IOOptionBits is
+    // u32); clashing extern declarations are a compile warning.
+    fn IOHIDManagerCreate(
+        allocator: *const std::ffi::c_void,
+        options: u32,
+    ) -> *mut std::ffi::c_void;
+    fn IOHIDManagerSetDeviceMatching(
+        manager: *mut std::ffi::c_void,
+        matching: *const std::ffi::c_void,
+    );
+    fn IOHIDManagerOpen(manager: *mut std::ffi::c_void, options: u32) -> i32;
+    fn IOHIDManagerClose(manager: *mut std::ffi::c_void, options: u32) -> i32;
     fn CFRelease(cf: *const std::ffi::c_void);
 }
 
