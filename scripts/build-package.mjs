@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 
 import { readFileSync, writeFileSync, mkdirSync, cpSync, rmSync, existsSync, chmodSync } from 'fs';
 import { resolve, join, dirname, basename } from 'path';
@@ -14,7 +13,6 @@ const PACKAGING = join(ROOT, 'packaging');
 
 const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf-8'));
 
-// ── helpers ──────────────────────────────────────────────────────────────────
 
 function die(msg) {
   console.error(`ERROR: ${msg}`);
@@ -46,7 +44,6 @@ function copyBins(srcDir, destDir, ...names) {
   for (const n of names) cpSync(join(srcDir, n), join(destDir, n));
 }
 
-// ── NM manifests (post-template) ─────────────────────────────────────────────
 
 function installNmManifests(base, nmBin, daemonBin) {
   for (const b of ['mozilla', 'librewolf', 'waterfox']) {
@@ -72,7 +69,6 @@ function installLicense(base) {
   cpSync(join(ROOT, 'LICENSE'), join(d, 'LICENSE'));
 }
 
-// ── deb ──────────────────────────────────────────────────────────────────────
 
 function buildDeb(ver, arch) {
   log(`Packaging deb ${ver} [${arch}]`);
@@ -82,7 +78,6 @@ function buildDeb(ver, arch) {
   const stage = join(DIST, 'stage-deb');
   wipe(stage);
 
-  // DEBIAN metadata
   const DEBIAN = join(stage, 'DEBIAN');
   mkdirSync(DEBIAN, { recursive: true });
   writeFileSync(join(DEBIAN, 'control'), [
@@ -113,7 +108,6 @@ function buildDeb(ver, arch) {
   chmodSync(join(DEBIAN, 'postinst'), 0o755);
   chmodSync(join(DEBIAN, 'prerm'), 0o755);
 
-  // Files
   const usr = join(stage, 'usr');
   mkdirSync(join(usr, 'bin'), { recursive: true });
   copyBins(binDir, join(usr, 'bin'), 'webhid-daemon', 'webhid-native-messaging');
@@ -122,32 +116,24 @@ function buildDeb(ver, arch) {
   installNmManifests(stage, '/usr/bin/webhid-native-messaging', '/usr/bin/webhid-daemon');
   installLicense(stage);
 
-  // Build
   const out = join(DIST, `webhid-${ver}-${arch}.deb`);
   execFileSync('dpkg-deb', ['--build', '--root-owner-group', stage, out], { stdio: 'inherit' });
   log(`Done: ${out}`);
 }
 
-// ── rpm ──────────────────────────────────────────────────────────────────────
 
-function buildRpm(ver, arch) {
-  log(`Packaging rpm ${ver} [${arch}]`);
-  const binDir = join(CRATES, 'target/release');
-  checkBins(binDir, 'webhid-daemon', 'webhid-native-messaging');
-
-  const rpmRoot = join(DIST, 'stage-rpm');
-  wipe(rpmRoot);
-
+function prepareRpmTree(rpmRoot) {
   for (const d of ['BUILD', 'RPMS', 'SOURCES', 'SPECS', 'SRPMS']) {
     mkdirSync(join(rpmRoot, d), { recursive: true });
   }
+}
 
+function writeRpmSpec(rpmRoot, ver, binDir) {
   const nmFileList = ['mozilla', 'librewolf', 'waterfox'].flatMap(b => [
     `/usr/lib/${b}/native-messaging-hosts/webhid.forwarder_nm_host.json`,
     `/usr/lib/${b}/native-messaging-hosts/webhid.daemon_nm_host.json`,
   ]).join('\n');
 
-  // Generate .spec with paths resolved at spec-creation time
   writeFileSync(join(rpmRoot, 'SPECS/webhid.spec'), [
     `Name:           webhid`,
     `Version:        ${ver}`,
@@ -198,8 +184,9 @@ function buildRpm(ver, arch) {
     nmFileList,
     '',
   ].join('\n'));
+}
 
-  // Build
+function runRpmbuild(rpmRoot, arch) {
   execFileSync('rpmbuild', [
     '-bb',
     `--define=_topdir ${rpmRoot}`,
@@ -208,8 +195,9 @@ function buildRpm(ver, arch) {
     `--target=${arch}`,
     join(rpmRoot, 'SPECS/webhid.spec'),
   ], { stdio: 'inherit' });
+}
 
-  // Collect result
+function collectRpmArtifacts(rpmRoot) {
   mkdirSync(DIST, { recursive: true });
   const rpms = execFileSync('find', [join(rpmRoot, 'RPMS'), '-name', '*.rpm'], { encoding: 'utf-8' })
     .trim().split('\n').filter(Boolean);
@@ -218,14 +206,24 @@ function buildRpm(ver, arch) {
     cpSync(rpm, join(DIST, basename(rpm)));
     last = rpm;
   }
+  return last;
+}
+
+function buildRpm(ver, arch) {
+  log(`Packaging rpm ${ver} [${arch}]`);
+  const binDir = join(CRATES, 'target/release');
+  checkBins(binDir, 'webhid-daemon', 'webhid-native-messaging');
+
+  const rpmRoot = join(DIST, 'stage-rpm');
+  wipe(rpmRoot);
+  prepareRpmTree(rpmRoot);
+  writeRpmSpec(rpmRoot, ver, binDir);
+  runRpmbuild(rpmRoot, arch);
+  const last = collectRpmArtifacts(rpmRoot);
   log(`Done: ${last || '(no rpm produced)'}`);
 }
 
-// ── msi ──────────────────────────────────────────────────────────────────────
 
-// WiX/MSI versions must be numeric major.minor.build[.revision] (max 4 parts),
-// while package versions may be git-derived (e.g. 2.2.0.r148.g62b6c84).
-// Strip each dot-separated part to digits and keep at most 4 parts.
 function toMsiVersion(ver) {
   const parts = ver.split('.').map((p) => p.replace(/\D/g, '')).filter((p) => p !== '');
   while (parts.length < 3) parts.push('0');
@@ -250,7 +248,6 @@ function buildMsi(ver, arch) {
     { '{{DAEMON_BIN}}': 'C:\\Program Files\\WebHID\\webhid-daemon.exe' });
   cpSync(join(PACKAGING, 'windows/License.rtf'), join(stage, 'License.rtf'));
 
-  // Build
   mkdirSync(DIST, { recursive: true });
   const out = join(DIST, `webhid-windows-${arch}-v${ver}.msi`);
   const wixArch = arch === 'aarch64' ? 'arm64' : 'x64';
@@ -266,7 +263,6 @@ function buildMsi(ver, arch) {
   log(`Done: ${out}`);
 }
 
-// ── main ─────────────────────────────────────────────────────────────────────
 
 function usage() {
   die(`Usage: node build-package.mjs <deb|rpm|msi> [--version=<ver>] [--arch=<arch>]`);

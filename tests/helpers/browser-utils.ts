@@ -1,9 +1,5 @@
 import type { Page } from '@playwright/test';
 
-// Page-published test results live on `window.tests.results.<key>` (never in
-// the DOM). Shared reader helpers for the subset of keys more than one spec
-// consumes. Page-side writers bootstrap the namespace in each page template
-// (`window.tests = window.tests || { helper: {}, results: {} }`).
 
 export interface PermResult {
   isTop?: boolean;

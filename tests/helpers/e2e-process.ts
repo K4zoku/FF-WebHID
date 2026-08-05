@@ -18,14 +18,9 @@ function findProjectRoot(dir: string): string {
 
 const projectRoot = findProjectRoot(__dirname)
 
-// User-mode daemon default socket, matching the forwarder's candidate list
-// ($XDG_RUNTIME_DIR/webhid/webhid.sock). The e2e daemon must listen here so the
-// NM forwarder spawned by the test Firefox can find it without env overrides.
 const xdgRuntime = process.env.XDG_RUNTIME_DIR || `/run/user/${process.getuid?.() ?? 1000}`
 export const DEFAULT_SOCKET = join(xdgRuntime, 'webhid', 'webhid.sock')
 
-// Per-worker socket path so parallel Playwright workers each run their own
-// daemon without bind collisions. Count-based (workerIndex), deterministic.
 export function workerSocketPath(workerIndex: number): string {
   return join(xdgRuntime, 'webhid', `webhid-w${workerIndex}.sock`)
 }
@@ -46,8 +41,6 @@ export async function startDaemon(socketPath: string = DEFAULT_SOCKET): Promise<
       stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, WEBHID_SOCKET: socketPath }
     })
-    // Capture daemon logs per socket name for post-mortem debugging of
-    // parallel runs (reports silently not arriving, WS bind issues, etc).
     const logPath = socketPath.replace(/\.sock$/, '.log')
     mkdirSync(dirname(logPath), { recursive: true })
     const logStream = createWriteStream(logPath)
@@ -121,9 +114,6 @@ export function stopWebhidMock(mock: WebhidMockProcess): void {
 }
 
 export function sendInput(mock: WebhidMockProcess, reportId: number, data: number[]): void {
-  // reportId 0 means an unnumbered report; omitting the field tells the mock
-  // to send `data` verbatim with no prepended ID byte. Numbered reports
-  // (id >= 1) have the ID prepended by the mock.
   const cmd = JSON.stringify({
     cmd: 'input',
     ...(reportId > 0 ? { reportId } : {}),
@@ -149,7 +139,6 @@ export async function waitForOutputReport(
           })
         }
       } catch {
-        // Ignore non-JSON output
       }
     })
   })

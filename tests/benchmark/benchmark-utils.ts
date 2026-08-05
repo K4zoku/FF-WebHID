@@ -238,25 +238,22 @@ export function median(vals: number[]): number {
   return s[Math.floor(s.length / 2)]
 }
 
-export async function benchmarkMode(
-  fixtures: BenchmarkFixtures,
+async function configureDaemonMode(
+  backgroundPage: { evaluate: Page['evaluate'] },
+  daemonMode: string
+): Promise<void> {
+  if (daemonMode !== 'daemon-nm') return
+  await backgroundPage
+    .evaluate(() => browser.storage.local.set({ 'settings :: daemonAsNmHost': true }))
+    .catch(() => {})
+}
+
+async function configurePageSettings(
+  backgroundPage: { evaluate: Page['evaluate'] },
+  origin: string,
   mode: 'ws' | 'wt' | 'nm',
   opts?: { inPage?: boolean }
-): Promise<BenchmarkResult> {
-  const { harnessCtx, backgroundPage, vendorDevice, httpPort, daemonMode, rdpPort } = fixtures
-  // Fresh page per spec. Reusing one tab across specs (c2ed4b8) let later
-  // modes measure on a page with accumulated JIT/GC/canvas state from earlier
-  // ones, inflating the apparent ws-vs-wt gap (ws runs 2nd, wt runs last).
-  // Close it when done so the harness's default about:blank tab stays open.
-  const page = await harnessCtx.newPage()
-  const origin = `http://localhost:${httpPort}`
-
-  if (daemonMode === 'daemon-nm') {
-    await backgroundPage
-      .evaluate(() => browser.storage.local.set({ 'settings :: daemonAsNmHost': true }))
-      .catch(() => {})
-  }
-
+): Promise<void> {
   await setDataPlane(backgroundPage, origin, mode)
   const spawnMode = process.env.BENCHMARK_WORKER_SPAWN
   if (spawnMode === 'blob' || spawnMode === 'shadow') {
@@ -268,7 +265,9 @@ export async function benchmarkMode(
   } else if (process.env.BENCHMARK_DEBUG_LOG) {
     await setLogLevel(backgroundPage, origin, 3)
   }
+}
 
+async function prepareBenchmarkPage(page: Page, origin: string): Promise<void> {
   await page.goto(`${origin}/tests/test-page.html`, {
     waitUntil: 'domcontentloaded',
     timeout: 15000
@@ -285,54 +284,88 @@ export async function benchmarkMode(
   await page.waitForFunction(() => (window.webhidBenchmark?.chunkCount() ?? 0) > 0, {
     timeout: 15000
   })
+}
 
+async function verifyChunkCount(page: Page): Promise<void> {
   const img = await readFile(IMAGE_PATH)
   const chunks = chunkImage(img)
   if ((await page.evaluate(() => window.webhidBenchmark!.chunkCount())) !== chunks.length) {
     throw new Error('page chunk count does not match file-based chunking')
   }
+}
 
-  const resetSettings = () =>
-    backgroundPage
-      .evaluate(
-        ({ origin }: { origin: string }) =>
-          browser.storage.local.remove([
-            'settings :: dataPlane',
-            'settings :: useWorker',
-            'settings :: logLevel',
-            'settings :: workerSpawnMode',
-            `settings :: ${origin} :: dataPlane`,
-            `settings :: ${origin} :: useWorker`,
-            `settings :: ${origin} :: logLevel`,
-            `settings :: ${origin} :: workerSpawnMode`
-          ]),
-        { origin }
-      )
-      .catch(() => {})
-  const profileDir = process.env.BENCHMARK_PROFILE_DIR
-  let profiler: ProfilerCapture | null = null
-  if (profileDir && rdpPort) {
-    profiler = await ProfilerCapture.connect(rdpPort)
-    await profiler.startProfiler({
-      features: splitEnv('BENCHMARK_PROFILE_FEATURES') ?? ['js', 'stackwalk', 'ipcmessages', 'cpu', 'cpuallthreads'],
-      threads: splitEnv('BENCHMARK_PROFILE_THREADS') ?? ['GeckoMain', 'Worker'],
-      entries: numEnv('BENCHMARK_PROFILE_ENTRIES') ?? 1 << 28,
-      interval: numEnv('BENCHMARK_PROFILE_INTERVAL') ?? 1
-    })
+async function resetBenchmarkSettings(
+  backgroundPage: { evaluate: Page['evaluate'] },
+  origin: string
+): Promise<void> {
+  await backgroundPage
+    .evaluate(
+      ({ origin }: { origin: string }) =>
+        browser.storage.local.remove([
+          'settings :: dataPlane',
+          'settings :: useWorker',
+          'settings :: logLevel',
+          'settings :: workerSpawnMode',
+          `settings :: ${origin} :: dataPlane`,
+          `settings :: ${origin} :: useWorker`,
+          `settings :: ${origin} :: logLevel`,
+          `settings :: ${origin} :: workerSpawnMode`
+        ]),
+      { origin }
+    )
+    .catch(() => {})
+}
+
+async function startProfiler(rdpPort: number): Promise<ProfilerCapture> {
+  const profiler = await ProfilerCapture.connect(rdpPort)
+  await profiler.startProfiler({
+    features: splitEnv('BENCHMARK_PROFILE_FEATURES') ?? ['js', 'stackwalk', 'ipcmessages', 'cpu', 'cpuallthreads'],
+    threads: splitEnv('BENCHMARK_PROFILE_THREADS') ?? ['GeckoMain', 'Worker'],
+    entries: numEnv('BENCHMARK_PROFILE_ENTRIES') ?? 1 << 28,
+    interval: numEnv('BENCHMARK_PROFILE_INTERVAL') ?? 1
+  })
+  return profiler
+}
+
+async function saveProfile(
+  profiler: ProfilerCapture,
+  profileDir: string,
+  mode: string,
+  inPage: boolean
+): Promise<void> {
+  const t0 = Date.now()
+  try {
+    const file = join(profileDir, `profile-${mode}${inPage ? '-inpage' : ''}.json`)
+    const threads = await profiler.stopAndSave(file)
+    console.log(`[profiler] saved ${file} (${((Date.now() - t0) / 1000).toFixed(1)}s): ${threads.join(' | ')}`)
+  } catch (e) {
+    console.warn(`[profiler] capture failed after ${((Date.now() - t0) / 1000).toFixed(1)}s: ${e instanceof Error ? e.message : String(e)}`)
   }
+  profiler.disconnect()
+}
+
+export async function benchmarkMode(
+  fixtures: BenchmarkFixtures,
+  mode: 'ws' | 'wt' | 'nm',
+  opts?: { inPage?: boolean }
+): Promise<BenchmarkResult> {
+  const { harnessCtx, backgroundPage, vendorDevice, httpPort, daemonMode, rdpPort } = fixtures
+  const page = await harnessCtx.newPage()
+  const origin = `http://localhost:${httpPort}`
+
+  await configureDaemonMode(backgroundPage, daemonMode)
+  await configurePageSettings(backgroundPage, origin, mode, opts)
+  await prepareBenchmarkPage(page, origin)
+  await verifyChunkCount(page)
+
+  const profileDir = process.env.BENCHMARK_PROFILE_DIR
+  const profiler = profileDir && rdpPort ? await startProfiler(rdpPort) : null
+
   return await runBenchmark(page, vendorDevice, { inPage: !!opts?.inPage })
-    .finally(resetSettings)
+    .finally(() => resetBenchmarkSettings(backgroundPage, origin))
     .finally(async () => {
       if (profiler) {
-        const t0 = Date.now()
-        try {
-          const file = join(profileDir!, `profile-${mode}${opts?.inPage ? '-inpage' : ''}.json`)
-          const threads = await profiler.stopAndSave(file)
-          console.log(`[profiler] saved ${file} (${((Date.now() - t0) / 1000).toFixed(1)}s): ${threads.join(' | ')}`)
-        } catch (e) {
-          console.warn(`[profiler] capture failed after ${((Date.now() - t0) / 1000).toFixed(1)}s: ${e instanceof Error ? e.message : String(e)}`)
-        }
-        profiler.disconnect()
+        await saveProfile(profiler, profileDir!, mode, !!opts?.inPage)
       }
       if (!page.isClosed()) page.close().catch(() => {})
     })

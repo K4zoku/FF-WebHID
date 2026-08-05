@@ -30,7 +30,6 @@ declare global {
   }
 }
 
-// The mock prepends report ID 1 to make the 64-byte vendor input report.
 const PAYLOAD_LEN = 63
 
 const RUN_TIMEOUT_MS = 30000
@@ -121,8 +120,6 @@ async function runLossOnce(
     await sleep(tickMs)
   }
 
-  // Drain: the page may take seconds to catch up (NM is rate-limited by the
-  // browser messaging pipeline), so wait until the phase counter is stable.
   const deadline = Date.now() + RUN_TIMEOUT_MS
   let stable = -1
   let stableRounds = 0
@@ -221,10 +218,6 @@ export async function benchmarkLoss(
     await setDataPlane(backgroundPage, origin, mode)
     if (opts.inPage) {
       await setUseWorker(backgroundPage, origin, false)
-      // The in-page stream-attach detection watches the page console for the
-      // debug-level 'WT persistent stream attached' log; without debug
-      // logging a working in-page run is indistinguishable from a degraded
-      // one.
       await setLogLevel(backgroundPage, origin, 3)
     }
     await page.goto(`${origin}/tests/test-page.html`, {
@@ -280,11 +273,6 @@ export async function benchmarkLoss(
     } catch {}
 
     if (opts.inPage && !wtStreamAttached) {
-      // Grace period for the stream-attach log to land after warmup, then
-      // fail fast instead of running the whole benchmark on the NM fallback
-      // path. The in-page WT data plane attaches within ~10ms of open() on
-      // the harness (verified); a missed attach here means the spawn
-      // degraded to NM.
       const deadline = Date.now() + 2000
       while (!wtStreamAttached && Date.now() < deadline) {
         await sleep(200)
@@ -327,11 +315,6 @@ export async function benchmarkLoss(
     return { runs: runsOut, failures, fallbacks, wtStreamAttached }
   } finally {
     page.off('console', onConsole)
-    // Reset the settings this benchmark wrote so the next spec in the same
-    // profile starts from defaults. Without this, an in-page run (useWorker
-    // false + logLevel 3) leaks into the following wt spec and makes its
-    // spawn take the in-page path. Runs even when benchmarkLoss throws (the
-    // in-page attach check).
     await resetSettings()
     if (profiler) {
       try {

@@ -10,10 +10,6 @@ type PlaywrightUseOptions = Exclude<Parameters<typeof defineConfig>[0], undefine
 
 export default defineConfig({
   ...base,
-  // Forwarder-mode chain (root daemon + thin NM forwarder over the Unix
-  // socket, the no-udev deployment): run explicitly via `npm run test:e2e`,
-  // not part of the default suite. One worker: two heavy Firefox+daemon
-  // stacks in parallel drop WS input reports (see AGENTS.md).
   workers: 1,
   projects: [
     {

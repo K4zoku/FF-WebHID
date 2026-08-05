@@ -11,14 +11,6 @@ interface ProbeResult {
   expiredActive: boolean;
 }
 
-// Transient activation is time-based (~5s in Firefox), not task-based: any
-// task within the window sees isActive=true, regardless of evaluate's
-// synthetic gesture. The only reliable way to get a no-gesture call is to run
-// requestDevice() after the window expires. The call itself must originate
-// from served page source (tests/pages/activation.html): code created inside
-// page.evaluate carries "debugger eval code" in its stack, which the
-// polyfill's isCalledFromConsole() exemption treats as a console call and
-// skips the activation check for.
 test.describe('requestDevice user-activation gate', () => {
   let origin: string;
   const settingKey = () => `settings :: ${origin} :: allowActivationlessRequestDevice`;
@@ -39,8 +31,8 @@ test.describe('requestDevice user-activation gate', () => {
       }, 6000);
       return promise;
     });
-    expect(result.syncActive).toBe(true); // evaluate carries a synthetic gesture
-    expect(result.expiredActive).toBe(false); // expired once the window passes
+    expect(result.syncActive).toBe(true);
+    expect(result.expiredActive).toBe(false);
   });
 
   test('default: requestDevice() without a user gesture rejects with SecurityError', async ({
@@ -71,11 +63,7 @@ test.describe('requestDevice user-activation gate', () => {
       await new Promise((r) => setTimeout(r, 6800));
       return { settled };
     });
-    // The chooser opens and waits for user selection; the call must NOT be
-    // rejected with SecurityError merely because there is no gesture.
     expect(result.settled ?? '').not.toContain('SecurityError');
-    // Dismiss the open modal chooser (Escape closes the <dialog>) so the test
-    // leaves no dangling picker behind.
     await sharedPage.keyboard.press('Escape');
   });
 

@@ -223,6 +223,143 @@ function waitForDaemonListening(proc: ChildProcess): Promise<void> {
   })
 }
 
+async function waitForGenGrowth(daemon: DaemonProcess, before: number): Promise<boolean> {
+  const logPath = daemon.socketPath.replace(/\.sock$/, '.log')
+  const start = Date.now()
+  while (Date.now() - start < 10000) {
+    const count = readFileSync(logPath, 'utf8').split('WT connect gen=').length - 1
+    if (count > before) return true
+    await sleep(200)
+  }
+  return false
+}
+
+async function openVendorDevice(nm: NmClient): Promise<string> {
+  const enumerate = await nm.request<NmEnumerateResponse>({ a: 1 })
+  const vendor = enumerate.D.find(
+    (d) => d.vendorId === VENDOR.vendorId && d.productId === VENDOR.productId
+  )
+  expect(vendor).toBeTruthy()
+  const open = await nm.request<NmOpenResponse>({ a: 2, i: vendor!.deviceId })
+  expect(open.s).toBe(201)
+  return open.t as string
+}
+
+async function runRotationWorker(
+  page: Page,
+  port: number,
+  cert: string,
+  auth: string
+): Promise<void> {
+  const source = `
+    const port = ${port}
+    const cert = '${cert}'
+    const auth = '${auth}'
+    const hexToBytes = (s) => {
+      const b = new Uint8Array(s.length / 2)
+      for (let i = 0; i < b.length; i++) b[i] = parseInt(s.substr(i * 2, 2), 16)
+      return b
+    }
+    const concat = (a, b) => {
+      const out = new Uint8Array(a.length + b.length)
+      out.set(a, 0)
+      out.set(b, a.length)
+      return out
+    }
+    const report = (m) => self.postMessage(m)
+    const connect = (path) =>
+      new Promise((resolve, reject) => {
+        const wt = new WebTransport('https://127.0.0.1:' + port + '/' + path, {
+          serverCertificateHashes: [{ algorithm: 'sha-256', value: hexToBytes(cert) }]
+        })
+        wt.ready.then(() => resolve(wt)).catch((e) => reject(new Error(e.message || e)))
+      })
+    ;(async () => {
+      try {
+        const wt1 = await connect(auth)
+        const stream = await wt1.createBidirectionalStream()
+        const writer = stream.writable.getWriter()
+        const reader = stream.readable.getReader()
+        report('connected')
+        const acks = []
+        const ackLoop = (async () => {
+          let buf = new Uint8Array(0)
+          while (true) {
+            const { value, done } = await reader.read()
+            if (done) break
+            if (!value) continue
+            buf = concat(buf, new Uint8Array(value))
+            while (buf.length >= 4) {
+              const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength)
+              const len = dv.getUint32(0, true)
+              if (buf.length < 4 + len) break
+              const frame = buf.subarray(4, 4 + len)
+              buf = buf.subarray(4 + len)
+              acks.push(Array.from(frame))
+            }
+          }
+        })()
+        const sendFrame = async (marker) => {
+          const before = acks.length
+          const frame = new Uint8Array([0xff, marker, 0, 0, 0, 9])
+          const header = new Uint8Array(4)
+          new DataView(header.buffer).setUint32(0, frame.length, true)
+          await writer.write(header)
+          await writer.write(frame)
+          for (let i = 0; i < 100; i++) {
+            if (acks.length > before) return JSON.stringify(acks[acks.length - 1])
+            await new Promise((r) => setTimeout(r, 100))
+          }
+          return 'no-ack'
+        }
+        report('ack1:' + (await sendFrame(1)))
+        await new Promise((r) => setTimeout(r, 7000))
+        report('waited')
+        report('ack2:' + (await sendFrame(2)))
+        let newState = 'accepted'
+        try {
+          const wt2 = await connect(auth)
+          wt2.close()
+        } catch (e) {
+          newState = 'rejected'
+        }
+        report('new:' + newState)
+        wt1.close()
+        report('closed')
+      } catch (e) {
+        report('error:' + (e.message || e))
+      }
+    })()
+  `
+  await page.evaluate((src: string) => {
+    const blob = new Blob([src], { type: 'application/javascript' })
+    const log: string[] = (window.__wtLog = [])
+    const worker = new Worker(URL.createObjectURL(blob))
+    worker.onmessage = (e) => log.push(String(e.data))
+  }, source)
+}
+
+async function waitForWorkerLogValue(page: Page, prefix: string): Promise<string> {
+  await page.waitForFunction(
+    (p: string) => (window.__wtLog || []).some((m) => m.startsWith(p)),
+    prefix,
+    { timeout: 20000 }
+  )
+  return page.evaluate(
+    (p: string) =>
+      ((window.__wtLog || []).find((m) => m.startsWith(p)) || p + '[]').slice(p.length),
+    prefix
+  )
+}
+
+async function waitForWorkerLogEntry(page: Page, entry: string): Promise<void> {
+  await page.waitForFunction(
+    (e: string) => (window.__wtLog || []).includes(e),
+    entry,
+    { timeout: 20000 }
+  )
+}
+
 test.describe.serial('WebHID E2E (WebTransport data plane)', () => {
   test('set dataPlane to wt before any device opens', async ({ sharedPage, backgroundPage }) => {
     const origin = new URL(sharedPage.url()).origin
@@ -395,10 +532,6 @@ test.describe.serial('WebHID E2E (WebTransport data plane)', () => {
     })
     expect(event.data[1]).toBe(0x2b)
 
-    // The in-page plane must carry the whole hot path, not just input
-    // reports: sendReport/sendFeatureReport/receiveFeatureReport ride the
-    // same QUIC stream. Instrument the background to count NM send actions
-    // and prove the sends below never touch NM.
     await backgroundPage.evaluate(() => {
       window.__nmSendActions = 0
       browser.runtime.onMessage.addListener((msg: { action?: string }) => {
@@ -427,18 +560,7 @@ test.describe.serial('WebHID E2E (WebTransport data plane)', () => {
     expect(await backgroundPage.evaluate(() => window.__nmSendActions)).toBe(0)
 
     if (daemon) {
-      const logPath = daemon.socketPath.replace(/\.sock$/, '.log')
-      const start = Date.now()
-      let grew = false
-      while (Date.now() - start < 10000) {
-        const count = readFileSync(logPath, 'utf8').split('WT connect gen=').length - 1
-        if (count > genCountBefore) {
-          grew = true
-          break
-        }
-        await sleep(200)
-      }
-      expect(grew).toBe(true)
+      expect(await waitForGenGrowth(daemon, genCountBefore)).toBe(true)
     }
     await backgroundPage.evaluate((key) => browser.storage.local.remove(key), siteKey)
   })
@@ -467,119 +589,13 @@ test.describe.serial('WebHID E2E (WebTransport data plane)', () => {
       const wtPort1 = hs1.W as number
       const wtHash1 = hs1.H as string
 
-      const enumerate = await nm.request<NmEnumerateResponse>({ a: 1 })
-      const vendor = enumerate.D.find(
-        (d) => d.vendorId === VENDOR.vendorId && d.productId === VENDOR.productId
-      )
-      expect(vendor).toBeTruthy()
-      const open = await nm.request<NmOpenResponse>({ a: 2, i: vendor!.deviceId })
-      expect(open.s).toBe(201)
-      const token = open.t as string
+      const token = await openVendorDevice(nm)
       const authHash = createHash('sha256').update(token + nonce).digest('hex')
 
-      const workerSource = `
-        const port = ${wtPort1}
-        const cert = '${wtHash1}'
-        const auth = '${authHash}'
-        const hexToBytes = (s) => {
-          const b = new Uint8Array(s.length / 2)
-          for (let i = 0; i < b.length; i++) b[i] = parseInt(s.substr(i * 2, 2), 16)
-          return b
-        }
-        const concat = (a, b) => {
-          const out = new Uint8Array(a.length + b.length)
-          out.set(a, 0)
-          out.set(b, a.length)
-          return out
-        }
-        const report = (m) => self.postMessage(m)
-        const connect = (path) =>
-          new Promise((resolve, reject) => {
-            const wt = new WebTransport('https://127.0.0.1:' + port + '/' + path, {
-              serverCertificateHashes: [{ algorithm: 'sha-256', value: hexToBytes(cert) }]
-            })
-            wt.ready.then(() => resolve(wt)).catch((e) => reject(new Error(e.message || e)))
-          })
-        ;(async () => {
-          try {
-            const wt1 = await connect(auth)
-            const stream = await wt1.createBidirectionalStream()
-            const writer = stream.writable.getWriter()
-            const reader = stream.readable.getReader()
-            report('connected')
-            const acks = []
-            const ackLoop = (async () => {
-              let buf = new Uint8Array(0)
-              while (true) {
-                const { value, done } = await reader.read()
-                if (done) break
-                if (!value) continue
-                buf = concat(buf, new Uint8Array(value))
-                while (buf.length >= 4) {
-                  const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength)
-                  const len = dv.getUint32(0, true)
-                  if (buf.length < 4 + len) break
-                  const frame = buf.subarray(4, 4 + len)
-                  buf = buf.subarray(4 + len)
-                  acks.push(Array.from(frame))
-                }
-              }
-            })()
-            const sendFrame = async (marker) => {
-              const before = acks.length
-              const frame = new Uint8Array([0xff, marker, 0, 0, 0, 9])
-              const header = new Uint8Array(4)
-              new DataView(header.buffer).setUint32(0, frame.length, true)
-              await writer.write(header)
-              await writer.write(frame)
-              for (let i = 0; i < 100; i++) {
-                if (acks.length > before) return JSON.stringify(acks[acks.length - 1])
-                await new Promise((r) => setTimeout(r, 100))
-              }
-              return 'no-ack'
-            }
-            report('ack1:' + (await sendFrame(1)))
-            await new Promise((r) => setTimeout(r, 7000))
-            report('waited')
-            report('ack2:' + (await sendFrame(2)))
-            let newState = 'accepted'
-            try {
-              const wt2 = await connect(auth)
-              wt2.close()
-            } catch (e) {
-              newState = 'rejected'
-            }
-            report('new:' + newState)
-            wt1.close()
-            report('closed')
-          } catch (e) {
-            report('error:' + (e.message || e))
-          }
-        })()
-      `
-      await sharedPage.evaluate((src) => {
-        const blob = new Blob([src], { type: 'application/javascript' })
-        const log: string[] = (window.__wtLog = [])
-        const worker = new Worker(URL.createObjectURL(blob))
-        worker.onmessage = (e) => log.push(String(e.data))
-      }, workerSource)
-      try {
-        await sharedPage.waitForFunction(
-          () => (window.__wtLog || []).some((m) => m.startsWith('ack1:')),
-          undefined,
-          { timeout: 20000 }
-        )
-      } catch (e) {
-        throw e
-      }
-      const ack1 = await sharedPage.evaluate(() =>
-        ((window.__wtLog || []).find((m) => m.startsWith('ack1:')) || 'ack1:[]').slice(5)
-      )
-      expect(ack1).toBe('[255,1,0,0,0,1]')
+      await runRotationWorker(sharedPage, wtPort1, wtHash1, authHash)
+      expect(await waitForWorkerLogValue(sharedPage, 'ack1:')).toBe('[255,1,0,0,0,1]')
 
-      await sharedPage.waitForFunction(() => (window.__wtLog || []).includes('waited'), undefined, {
-        timeout: 20000
-      })
+      await waitForWorkerLogEntry(sharedPage, 'waited')
       await sleep(1500)
 
       const hs2 = await nm.request<NmHandshakeResponse>({ a: 8 })
@@ -587,22 +603,10 @@ test.describe.serial('WebHID E2E (WebTransport data plane)', () => {
       expect(hs2.W).not.toBe(wtPort1)
       expect(hs2.H).not.toBe(wtHash1)
 
-      await sharedPage.waitForFunction(
-        () => (window.__wtLog || []).some((m) => m.startsWith('ack2:')),
-        undefined,
-        { timeout: 20000 }
-      )
-      const ack2 = await sharedPage.evaluate(() =>
-        ((window.__wtLog || []).find((m) => m.startsWith('ack2:')) || 'ack2:[]').slice(5)
-      )
-      expect(ack2).toBe('[255,2,0,0,0,1]')
+      expect(await waitForWorkerLogValue(sharedPage, 'ack2:')).toBe('[255,2,0,0,0,1]')
 
-      await sharedPage.waitForFunction(() => (window.__wtLog || []).includes('new:rejected'), undefined, {
-        timeout: 20000
-      })
-      await sharedPage.waitForFunction(() => (window.__wtLog || []).includes('closed'), undefined, {
-        timeout: 20000
-      })
+      await waitForWorkerLogEntry(sharedPage, 'new:rejected')
+      await waitForWorkerLogEntry(sharedPage, 'closed')
       await sleep(1500)
 
       const portFree = await new Promise<boolean>((resolve) => {

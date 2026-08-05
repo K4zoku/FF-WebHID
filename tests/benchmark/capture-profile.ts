@@ -166,8 +166,6 @@ export class ProfilerCapture {
     this.buf = this.buf.length ? Buffer.concat([this.buf, data]) : data
     if (!this.pending) return
     if (this.pending.bulk) {
-      // Bulk framing: `bulk <actor> <type> <length>:` then `length` raw bytes.
-      // Events (JSON frames) can interleave before the header, so skip them.
       if (this.bulkRemaining === null) {
         for (;;) {
           if (this.buf.length >= 5 && this.buf.subarray(0, 5).toString('latin1') === 'bulk ') {
@@ -180,16 +178,15 @@ export class ProfilerCapture {
                 break
               }
             }
-            return // partial bulk header; wait for more bytes
+            return
           }
           const sep = this.buf.indexOf(0x3a)
           if (sep < 0) return
           const len = parseInt(this.buf.subarray(0, sep).toString('latin1'), 10)
           if (Number.isNaN(len) || this.buf.length < sep + 1 + len) return
-          this.buf = this.buf.subarray(sep + 1 + len) // drop the interleaved event
+          this.buf = this.buf.subarray(sep + 1 + len)
         }
       }
-      // Payload phase: raw bytes only, never re-parse as framing.
       if (this.buf.length >= this.bulkRemaining!) {
         const payload = this.buf.subarray(0, this.bulkRemaining!)
         this.buf = this.buf.subarray(this.bulkRemaining!)
@@ -213,8 +210,6 @@ export class ProfilerCapture {
       } catch {
         continue
       }
-      // Frames with a `type` field are unsolicited events (e.g.
-      // profiler-started), never request responses; skip them.
       if (msg && typeof msg === 'object' && 'type' in msg) continue
       const p = this.pending
       this.pending = null

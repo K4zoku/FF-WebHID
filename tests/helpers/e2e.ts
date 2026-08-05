@@ -129,9 +129,6 @@ interface E2eWorkerFixtures {
   sharedPage: Page
 }
 
-// The surface a test sees for one generated mock device. `process`/`ready`
-// are mutable so a test can hot-plug (destroy + respawn) and hand the new
-// process back; the fixture teardown stops whatever is current.
 interface MockDeviceFixture {
   process: WebhidMockProcess['process']
   ready: Promise<void>
@@ -141,12 +138,6 @@ interface MockDeviceFixture {
   key: DeviceKey
 }
 
-// Builds the worker fixtures `vendorDevice`, `gamepadDevice`, `mouseDevice`,
-// `keyboardDevice` from the DEVICES table. Lazy: the mock is spawned the
-// first time a test resolves the fixture and stays alive until the worker
-// ends, so the paired device is reused across the serial chain. Teardown
-// stops the current process, surviving a hot-plug swap from the disconnect
-// test (stopWebhidMock tolerates an already-dead process).
 function deviceFixture(
   key: DeviceKey
 ): Record<string, [WorkerFixture<MockDeviceFixture, object>, { scope: 'worker' }]> {
@@ -186,8 +177,6 @@ export const test = base.extend<
 >({
   daemonMode: [
     async ({}, use) => {
-      // Custom worker option injected via the project's `use` block in
-      // playwright.config.ts; Playwright's Project type doesn't declare it.
       const projectUse = test.info().project?.use as { daemonMode?: string } | undefined
       const mode = projectUse?.daemonMode || 'forwarder'
       await use(mode)
@@ -201,9 +190,6 @@ export const test = base.extend<
         await use(null)
         return
       }
-      // Unique socket per worker so parallel daemons don't fight over one bind.
-      // The NM forwarder discovers it via WEBHID_SOCKET, which the test Firefox
-      // (and thus the forwarder it spawns) inherits from this worker process.
       const socketPath = workerSocketPath(workerInfo.workerIndex)
       process.env.WEBHID_SOCKET = socketPath
       const d = await startDaemon(socketPath)
@@ -214,10 +200,6 @@ export const test = base.extend<
     { scope: 'worker', auto: true }
   ],
 
-  // Lazy per-device mock registry. Each generated descriptor spawns its own
-  // mock device (own PID from DEVICES) on first use and is torn down when the
-  // worker ends. Devices are spawned on demand, not up front: a worker that
-  // only touches the vendor device never pays for a gamepad mock.
   ...deviceFixtures,
 
   httpPort: [
@@ -256,18 +238,8 @@ export const test = base.extend<
     { scope: 'worker' }
   ],
 
-  // One Firefox instance + profile per worker (same pattern as
-  // tests/helpers/browser.ts). The WebHID grant lives in the profile, so
-  // pairing once at the start of the serial chain persists for every test in
-  // the worker. applyFirefoxHarness is deliberately not used here: its
-  // context/page fixtures are test-scoped (fresh profile per test), which is
-  // exactly the per-test re-pairing this avoids.
   harnessCtx: [
     async ({ rdpPort, headless }, use) => {
-      // Forward the project's Playwright launch options (e.g. the benchmark
-      // project disables privacy.reduceTimerPrecision for float performance
-      // timestamps) so consumer firefoxUserPrefs apply on top of the
-      // harness's required ones.
       const projectUse = test.info().project?.use as { launchOptions?: object } | undefined
       const { context } = await createFirefoxContext(rdpPort, EXTENSION_PATH, {
         routeHandler: defaultRouteHandler,
@@ -279,16 +251,6 @@ export const test = base.extend<
       let onUnroute: ((pattern: string, handler: RouteHandler) => void) | undefined
       let onUnrouteAll: (() => void) | undefined
       try {
-        // No catch-all `context.route('**/*', ...)` here: Juggler implements
-        // route interception with the service-worker intercept API, which
-        // internally redirects the intercepted channel and cancels the
-        // original with NS_ERROR_NOT_AVAILABLE. That breaks page-context
-        // WebTransport (the in-page WT data plane): the replacement channel
-        // cannot carry the WebTransport session, so `wt.ready` never settles
-        // and the bridge falls back to NM after 10s. Worker-context
-        // WebTransport is unaffected (Juggler only routes page requests).
-        // No spec uses page.route()/context.route() for mocking, so nothing
-        // needs interception enabled globally.
 
         bridge = new NetworkEventBridge(context._firefoxWebServer)
         context._firefoxBridge = bridge
@@ -330,13 +292,9 @@ export const test = base.extend<
     { scope: 'worker' }
   ],
 
-  // Worker-scoped page shared by every test in the worker, so the device stays
-  // paired (and opened) across the whole serial chain.
   sharedPage: [
     async ({ harnessCtx, httpPort, daemonMode, backgroundPage }, use) => {
       if (daemonMode === 'daemon-nm') {
-        // Must run in the extension background context: `browser` is not
-        // available in page context, so a page.evaluate here silently no-ops.
         await backgroundPage
           .evaluate(() => {
             return browser.storage.local.set({
@@ -355,9 +313,6 @@ export const test = base.extend<
     { scope: 'worker' }
   ],
 
-  // Test-scoped escape hatch for tests that need a clean page. Defined from
-  // the harness context so it always has the extension, unlike Playwright's
-  // default page fixture.
   page: [
     async ({ harnessCtx }, use) => {
       const page = await harnessCtx.newPage()

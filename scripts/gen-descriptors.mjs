@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 
 import { writeFile, mkdir } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
@@ -81,8 +80,6 @@ function mouseDescriptor() {
     usage(2),
     usage(3),
     inputData(),
-    // Padding bits must be Constant: hidreport rejects a Data/Variable item
-    // whose reportCount exceeds its declared usages.
     reportSize(1),
     reportCount(5),
     inputData(0x01),
@@ -114,10 +111,6 @@ function keyboardDescriptor() {
     usage(0xe6),
     usage(0xe7),
     inputData(),
-    // Reserved byte is Constant, and the 6-key list is an Array: both dodge
-    // hidreport's "Missing Usages for main item" check (Data/Variable items
-    // need a usage per report count). Matches the standard boot keyboard
-    // descriptor shape.
     reportSize(8),
     reportCount(1),
     inputData(0x01),
@@ -145,11 +138,6 @@ function vendorDescriptor() {
     inputData(),
     endCollection(),
     endCollection(),
-    // The report ID lives inside the collection: Chromium's HID parser does
-    // not carry the Report ID global across a top-level collection boundary
-    // (it parsed this report as unnumbered when the ID sat between the two
-    // collections), which made native WebHID sendReport(1, ...) fail with
-    // "Failed to write the report".
     usagePage(0xff1c),
     usage(0x92),
     collection(),

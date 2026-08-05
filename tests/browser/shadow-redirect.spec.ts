@@ -25,7 +25,6 @@ interface GatedHeaders {
 }
 
 async function readGatedHeaders(page: Page): Promise<GatedHeaders> {
-  // Shape is the test server's own /last-dest contract (see tests/serve.ts).
   const payload = await page.evaluate(async (): Promise<GatedHeaders> => {
     const res = await fetch('/last-dest');
     const data: unknown = await res.json();
@@ -45,8 +44,6 @@ test.describe('shadow-URL redirect following', () => {
     });
     await waitForWorkerState(sharedPage);
     const observed = await readGatedHeaders(sharedPage);
-    // 4 redirects, all treated as shadow: the final hop is served the worker
-    // bundle, so the server sees faked navigation headers on it.
     expect(observed.dest).toBe('document');
     expect(observed.mode).toBe('navigate');
     expect(observed.status).toBe(200);
@@ -62,9 +59,6 @@ test.describe('shadow-URL redirect following', () => {
     });
     await waitForWorkerState(sharedPage);
     const observed = await readGatedHeaders(sharedPage);
-    // 8 redirects, every hop treated as shadow: the addon follows the chain to
-    // the end, so the final hop is served the worker bundle with faked
-    // navigation headers.
     expect(observed.dest).toBe('document');
     expect(observed.mode).toBe('navigate');
     expect(observed.status).toBe(200);

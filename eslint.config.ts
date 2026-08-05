@@ -87,13 +87,11 @@ export default tseslint.config(
         Text: "readonly",
         Comment: "readonly",
         performance: "readonly",
-        // Worker globals for content-script workers
         importScripts: "readonly",
         postMessage: "readonly",
         close: "readonly",
         onmessage: "readonly",
         onerror: "readonly",
-        // Background page global
         global: "readonly",
       },
     },

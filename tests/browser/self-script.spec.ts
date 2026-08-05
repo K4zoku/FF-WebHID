@@ -18,10 +18,6 @@ test.describe('shadow-URL gating', () => {
     sharedPage,
     pageUrl,
   }) => {
-    // sri-check.html loads sri-test.js with an SRI integrity attribute. If the
-    // addon modified the response body in any way (prefix injection, header
-    // rewrite changing bytes), Firefox blocks the script and sriTestRan stays
-    // false. Passing proves the gating never touches page subresources.
     await sharedPage.goto(pageUrl('/sri-check'), { waitUntil: 'domcontentloaded', timeout: 15000 });
     const ran = await sharedPage.evaluate(
       () => (window as unknown as { sriTestRan?: boolean }).sriTestRan === true,
