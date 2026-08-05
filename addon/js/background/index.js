@@ -523,7 +523,7 @@
       })
 
       if (metaInfos.length) {
-        const key = `csp:${details.tabId}:${details.frameId}`
+        const key = `csp:${frameKey(details.tabId, details.frameId, origin)}`
         browser.storage.session.get(key).then((r) => {
           const existing = r[key]
           const merged = {
@@ -605,7 +605,7 @@
           .trim()
         if (f !== 'hid') continue
         const parsed = v === '()' ? 'none' : v === '*' ? 'all' : v === 'self' ? 'self' : v
-        const key = `${details.tabId}:${details.frameId}`
+        const key = frameKey(details.tabId, details.frameId, urlOrigin(details.url))
         permissionsPolicy.set(key, parsed)
         logger.debug('Permissions-Policy stored: ' + key + ' hid=' + parsed)
         break
@@ -624,9 +624,9 @@
       const cspValues = (details.responseHeaders || [])
         .filter((h) => h.name.toLowerCase() === 'content-security-policy')
         .map((h) => h.value || '')
-      const key = `csp:${details.tabId}:${details.frameId}`
 
       const origin = urlOrigin(details.url)
+      const key = `csp:${frameKey(details.tabId, details.frameId, origin)}`
 
       let siteSpawnMode = settings.workerSpawnMode
       if (origin) {
@@ -660,6 +660,29 @@
     ['blocking', 'responseHeaders']
   )
 
+  // A frame navigating to another origin in the same tab must not read the
+  // previous document's cached CSP / Permissions-Policy. Purge both caches
+  // when the navigation request starts (webRequest, no extra permission);
+  // fresh values are stored again when the new response headers arrive. The
+  // origin-scoped keys make any missed purge fail safe (lookup mismatch).
+  browser.webRequest.onBeforeRequest.addListener(
+    (details) => {
+      if (details.tabId === undefined || details.frameId === undefined) return
+      const prefix = `${details.tabId}:${details.frameId}:`
+      for (const k of permissionsPolicy.keys()) {
+        if (k.startsWith(prefix)) permissionsPolicy.delete(k)
+      }
+      browser.storage.session
+        .get(null)
+        .then((all) => {
+          const keys = Object.keys(all).filter((k) => k.startsWith(`csp:${prefix}`))
+          if (keys.length) browser.storage.session.remove(keys).catch(() => {})
+        })
+        .catch(() => {})
+    },
+    { urls: ['<all_urls>'], types: ['main_frame', 'sub_frame'] }
+  )
+
   browser.tabs.onRemoved.addListener((tabId) => {
     browser.storage.session.get(null).then((all) => {
       const keys = Object.keys(all).filter((k) => k.startsWith(`csp:${tabId}:`))
@@ -677,6 +700,20 @@
     } catch {
       return ''
     }
+  }
+
+  /**
+   * Builds an origin-scoped cache key for a frame. The origin component makes
+   * a stale entry from a previous document on the same (tab, frame) naturally
+   * miss when the frame navigates to a different origin, instead of serving
+   * the old origin's policy to the new document.
+   * @param {number} tabId
+   * @param {number} frameId
+   * @param {string} origin
+   * @returns {string}
+   */
+  function frameKey(tabId, frameId, origin) {
+    return `${tabId}:${frameId}:${origin || ''}`
   }
 
   /**
@@ -1317,7 +1354,11 @@
           sendResponse(null)
           return false
         }
-        const key = `csp:${tabId}:${sender.frameId ?? 0}`
+        // Prefer the frame's own origin (the bridge passes it explicitly);
+        // sender.tab.url is the top-level document, wrong for cross-origin
+        // frames.
+        const origin = urlOrigin(request.origin || (sender.tab && sender.tab.url) || '')
+        const key = `csp:${frameKey(tabId, sender.frameId ?? 0, origin)}`
         browser.storage.session.get(key)
           .then((r) => sendResponse(r[key] ?? null))
           .catch(() => sendResponse(null))
@@ -1397,9 +1438,13 @@
       case 'getPolicy': {
         const sid = sender.frameId
         const tid = sender.tab?.id
+        // The frame's own origin: the bridge relays the frame's URL as
+        // `url` (sender.tab.url is the top page, wrong for cross-origin
+        // iframes).
+        const origin = urlOrigin(request.url || (sender.tab && sender.tab.url) || '')
         let hid = null
-        if (tid != null) hid = permissionsPolicy.get(`${tid}:${sid}`)
-        if (hid == null && tid != null) hid = permissionsPolicy.get(`${tid}:0`)
+        if (tid != null) hid = permissionsPolicy.get(frameKey(tid, sid, origin))
+        if (hid == null && tid != null) hid = permissionsPolicy.get(frameKey(tid, 0, origin))
         if (hid === 'none') {
           sendResponse({ policy: { hid: 'none' } })
           return true
@@ -1409,12 +1454,12 @@
             sendResponse({ policy: { hid: 'allowed' } })
             return true
           }
-          let allowKey = tid != null ? `${tid}:${sid}` : null
+          let allowKey = tid != null ? frameKey(tid, sid, origin) : null
           if (allowKey && allowedCrossOrigin.has(allowKey)) {
             sendResponse({ policy: { hid: 'allowed' } })
             return true
           }
-          const urlKey = `url:${request.url}`
+          const urlKey = `url:${urlOrigin(sender.tab && sender.tab.url)}:${request.url}`
           if (allowedCrossOrigin.has(urlKey)) {
             sendResponse({ policy: { hid: 'allowed' } })
             return true
@@ -1428,15 +1473,21 @@
 
       case 'setFrameAllow': {
         let key
+        // The embedder (top frame) grants the embedded URL; scope by the
+        // embedder's origin so the allow does not leak across tabs or after
+        // the tab navigates to another origin.
+        const embedderOrigin = urlOrigin(sender.tab && sender.tab.url)
         if (request.frameId === -1 && request.url) {
-          key = `url:${request.url}`
+          key = `url:${embedderOrigin}:${request.url}`
         } else {
           const tid = sender.tab?.id
           if (tid == null) {
             sendResponse({ ok: false })
             return false
           }
-          key = `${tid}:${request.frameId}`
+          // Origin-scoped like the read side (getPolicy): an iframe that
+          // navigates to another origin must not keep the allow.
+          key = frameKey(tid, request.frameId, urlOrigin(request.url || (sender.tab && sender.tab.url) || ''))
         }
         allowedCrossOrigin.set(key, true)
         sendResponse({ ok: true })

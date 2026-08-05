@@ -236,7 +236,10 @@
       return 'blob'
     }
     try {
-      const info = await browser.runtime.sendMessage({ action: 'getCspInfo' })
+      const info = await browser.runtime.sendMessage({
+        action: 'getCspInfo',
+        origin: window.location.origin
+      })
       if (info && info.needsBlobFallback) {
         const mv2 = browser.runtime.getManifest().manifest_version === 2
         if (!mv2 && info.headerShadowBlocked) {
