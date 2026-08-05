@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -12,16 +12,13 @@ use tokio::task::JoinHandle;
 use anyhow::anyhow;
 use webhid::{DeviceInfo, IpcResponse};
 
-use crate::hid;
-use crate::report_blocking::{prune_device_info, DeviceReportBlocking};
 use crate::blocklist::ReportType;
+use crate::hid;
+use crate::report_blocking::{DeviceReportBlocking, prune_device_info};
 const MODE_NM: &str = "nm";
 const MODE_WS: &str = "ws";
 const MODE_WT: &str = "wt";
 
-// On Linux with the local hidapi patch (see vendor/hidapi), `HidDevice` is `Sync`
-// and safe to share between threads without a Mutex. On other platforms the
-// upstream `HidDevice` is `!Sync` so we still wrap it in a Mutex.
 #[cfg(target_os = "linux")]
 pub(crate) type DeviceHandle = Arc<HidDevice>;
 #[cfg(not(target_os = "linux"))]
@@ -75,6 +72,19 @@ pub struct DeviceManager {
     ws_nonce: String,
     event_tx: broadcast::Sender<IpcResponse>,
 }
+
+/// Parameters for a freshly opened device's background input reader.
+struct ReaderConfig {
+    dev_id: u32,
+    dev_for_task: DeviceHandle,
+    stop_flag: Arc<AtomicBool>,
+    uses_numbered_reports: bool,
+    read_buf_size: usize,
+    blocked_input_ids: Arc<HashSet<u8>>,
+    declared_input_ids: Arc<HashSet<u8>>,
+    always_protected_input: bool,
+    interface_protected_input: bool,
+}
 impl DeviceManager {
     pub fn new(event_tx: broadcast::Sender<IpcResponse>) -> Self {
         let ws_nonce = random_hex_token(16).expect("getrandom should not fail on modern kernels");
@@ -91,9 +101,6 @@ impl DeviceManager {
     }
 
     pub fn enumerate(&self) -> anyhow::Result<Vec<DeviceInfo>> {
-        // Prune blocked reports from the page-visible collections and hide
-        // devices whose collections all became empty, mirroring Chromium's
-        // RemoveProtectedReports + OnDeviceAdded.
         Ok(hid::enumerate()?
             .into_iter()
             .filter_map(prune_device_info)
@@ -104,60 +111,27 @@ impl DeviceManager {
         let session_token = random_hex_token(16)?;
         let ws_auth_hash = compute_ws_auth_hash(&session_token, &self.ws_nonce);
 
-        {
-            let mut map = self.devices.lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(entry) = map.get_mut(&device_id) {
-                entry.refcount += 1;
-                let rc = entry.refcount;
-                entry
-                    .dataplane_modes
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .insert(session_token.clone(), MODE_NM.to_string());
-                drop(map);
-                self.ws_auth_hashes
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .insert(ws_auth_hash.clone(), (device_id, session_token.clone()));
-                log::info!("[device_mgr] {device_id:#x} refcount → {rc} (existing session)");
-                return Ok((device_id, Some(session_token)));
-            }
+        if let Some(id) = self.register_session_if_open(device_id, &session_token, &ws_auth_hash) {
+            return Ok((id, Some(session_token)));
         }
 
         let (info, uses_numbered_reports, device) = hid::open_by_device_id(device_id)?;
         let id = info.device_id;
 
         let blocking = Arc::new(DeviceReportBlocking::new(&info, uses_numbered_reports));
-        let blocked_input_ids = Arc::new(blocking.blocked_input_ids(info.vendor_id, info.product_id));
+        let blocked_input_ids =
+            Arc::new(blocking.blocked_input_ids(info.vendor_id, info.product_id));
         let declared_input_ids = Arc::new(blocking.declared_input_ids());
 
         let stop_flag = Arc::new(AtomicBool::new(false));
 
-        // Open 1 hidapi fd; on Linux (with the local patch) `HidDevice` is
-        // `Sync` so reader and writer share the same fd via `Arc<HidDevice>` —
-        // the kernel multiplexes read+write concurrently. On other platforms
-        // the Mutex serialises them.
         #[cfg(target_os = "linux")]
         let device_arc: DeviceHandle = Arc::new(device);
         #[cfg(not(target_os = "linux"))]
         let device_arc: DeviceHandle = Arc::new(Mutex::new(device));
         let dev_for_task = Arc::clone(&device_arc);
 
-        let mut map = self.devices.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(entry) = map.get_mut(&id) {
-            entry.refcount += 1;
-            let rc = entry.refcount;
-            entry
-                .dataplane_modes
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .insert(session_token.clone(), MODE_NM.to_string());
-            drop(map);
-            self.ws_auth_hashes
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .insert(ws_auth_hash.clone(), (id, session_token.clone()));
-            log::info!("[device_mgr] {id:#x} refcount → {rc} (existing session)");
+        if let Some(id) = self.register_session_if_open(id, &session_token, &ws_auth_hash) {
             return Ok((id, Some(session_token)));
         }
 
@@ -177,25 +151,88 @@ impl DeviceManager {
             blocking: Arc::clone(&blocking),
         };
 
+        let mut map = self.devices.lock().unwrap_or_else(|e| e.into_inner());
         map.insert(id, entry);
         self.ws_auth_hashes
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .insert(ws_auth_hash.clone(), (id, session_token.clone()));
 
-        let dev_id = id;
+        let handle = self.spawn_reader(ReaderConfig {
+            dev_id: id,
+            dev_for_task,
+            stop_flag,
+            uses_numbered_reports,
+            read_buf_size: info.max_input_report_size as usize + 1,
+            blocked_input_ids,
+            declared_input_ids,
+            always_protected_input: blocking.always_protected[0],
+            interface_protected_input: blocking.interface_protected[0],
+        });
+        if let Some(e) = map.get_mut(&id) {
+            e.handle = Some(handle);
+        }
+        drop(map);
+
+        Ok((id, Some(session_token)))
+    }
+
+    /// If `device_id` is already open, register a new NM-mode session for it
+    /// (refcount +1, dataplane mode entry, WS auth hash) and return the
+    /// device id. Returns `None` when the device is not currently open.
+    fn register_session_if_open(
+        &self,
+        device_id: u32,
+        session_token: &str,
+        ws_auth_hash: &str,
+    ) -> Option<u32> {
+        let rc = {
+            let mut map = self.devices.lock().unwrap_or_else(|e| e.into_inner());
+            let entry = map.get_mut(&device_id)?;
+            entry.refcount += 1;
+            let rc = entry.refcount;
+            entry
+                .dataplane_modes
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(session_token.to_string(), MODE_NM.to_string());
+            rc
+        };
+        self.ws_auth_hashes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(
+                ws_auth_hash.to_string(),
+                (device_id, session_token.to_string()),
+            );
+        log::info!("[device_mgr] {device_id:#x} refcount → {rc} (existing session)");
+        Some(device_id)
+    }
+
+    /// Spawn the background input reader for a freshly opened device. The
+    /// reader stops when `stop_flag` is set and forwards unblocked input
+    /// reports to the event bus.
+    fn spawn_reader(&self, cfg: ReaderConfig) -> JoinHandle<()> {
+        let ReaderConfig {
+            dev_id,
+            dev_for_task,
+            stop_flag,
+            uses_numbered_reports,
+            read_buf_size,
+            blocked_input_ids,
+            declared_input_ids,
+            always_protected_input,
+            interface_protected_input,
+        } = cfg;
         let stop_for_task = Arc::clone(&stop_flag);
         let blocked_for_task = Arc::clone(&blocked_input_ids);
         let declared_for_task = Arc::clone(&declared_input_ids);
-        let always_protected_input = blocking.always_protected[0];
-        let interface_protected_input = blocking.interface_protected[0];
         let tx = self.event_tx.clone();
-        let read_buf_size = info.max_input_report_size as usize + 1;
 
         log::info!(
             "[reader] starting for {dev_id:#x} (numbered_reports={uses_numbered_reports}, buf_size={read_buf_size})"
         );
-        let handle = tokio::spawn(async move {
+        tokio::spawn(async move {
             loop {
                 if stop_for_task.load(Ordering::SeqCst) {
                     break;
@@ -221,15 +258,9 @@ impl DeviceManager {
                         } else {
                             (0u8, Bytes::from(buf))
                         };
-                        // Chromium's HidConnection::ProcessInputReport: drop
-                        // protected report IDs, and drop IDs not declared in
-                        // the descriptor when the device carries an
-                        // always-protected input collection (fallback for
-                        // undocumented reports).
                         if blocked_for_task.contains(&report_id)
                             || interface_protected_input
-                            || (!declared_for_task.contains(&report_id)
-                                && always_protected_input)
+                            || (!declared_for_task.contains(&report_id) && always_protected_input)
                         {
                             log::debug!(
                                 "[reader {dev_id:#x}] dropping blocked input report_id={report_id}"
@@ -257,18 +288,11 @@ impl DeviceManager {
                 }
             }
             log::info!("[reader {dev_id:#x}] stopped");
-        });
-
-        if let Some(e) = map.get_mut(&id) {
-            e.handle = Some(handle);
-        }
-
-        Ok((id, Some(session_token)))
+        })
     }
 
     pub fn close(&self, device_id: u32, session_token: Option<&str>) -> anyhow::Result<()> {
-        let token = session_token
-            .ok_or_else(|| anyhow!("close requires session_token"))?;
+        let token = session_token.ok_or_else(|| anyhow!("close requires session_token"))?;
         let mut map = self.devices.lock().unwrap_or_else(|e| e.into_inner());
         let entry = map
             .get_mut(&device_id)

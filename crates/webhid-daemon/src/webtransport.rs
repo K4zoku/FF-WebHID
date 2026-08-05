@@ -9,7 +9,7 @@ use tokio::task::JoinHandle;
 use wtransport::endpoint::IncomingSession;
 use wtransport::endpoint::endpoint_side::Server;
 use wtransport::tls::self_signed::time::Duration as TimeDuration;
-use wtransport::{Connection, Endpoint, Identity, ServerConfig};
+use wtransport::{Connection, Endpoint, Identity, RecvStream, SendStream, ServerConfig};
 
 use crate::batching;
 use crate::device_mgr::DeviceManager;
@@ -218,21 +218,14 @@ async fn handle_session(
     result
 }
 
-async fn run_session(
-    conn: Connection,
-    event_tx: broadcast::Sender<webhid::IpcResponse>,
-    device_mgr: Arc<DeviceManager>,
-    device_id: u32,
-    _session_token: String,
-    _wt_gen: u64,
-) -> anyhow::Result<()> {
-    let (mut send, mut recv) = conn.accept_bi().await?;
-
-    let (frame_tx, frame_rx) = mpsc::unbounded_channel::<Bytes>();
-
-    let writer_task = tokio::spawn(async move {
-        let mut rx = frame_rx;
-        while let Some(frame) = rx.recv().await {
+/// Drain the outbound frame channel and write each frame to the session's
+/// send stream, length-prefixed (u32 LE). Stops on the first write error.
+fn spawn_writer_task(
+    mut send: SendStream,
+    mut frame_rx: mpsc::UnboundedReceiver<Bytes>,
+) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        while let Some(frame) = frame_rx.recv().await {
             let mut header = [0u8; 4];
             header.copy_from_slice(&(frame.len() as u32).to_le_bytes());
             if send.write_all(&header).await.is_err() {
@@ -242,16 +235,18 @@ async fn run_session(
                 break;
             }
         }
-    });
+    })
+}
 
-    let event_rx = event_tx.subscribe();
-    let flush_tx = frame_tx.clone();
-    let sender_task = tokio::spawn(batching::run_sender(
-        event_rx,
-        device_id,
-        move |frame: Vec<u8>| flush_tx.send(Bytes::from(frame)).is_ok(),
-    ));
-
+/// Read length-prefixed client frames off the bidirectional stream until
+/// EOF or an oversized frame, dispatching each non-empty frame to the
+/// batching message handler.
+async fn read_inbound_frames(
+    recv: &mut RecvStream,
+    frame_tx: &mpsc::UnboundedSender<Bytes>,
+    device_mgr: &Arc<DeviceManager>,
+    device_id: u32,
+) {
     let mut len_buf = [0u8; 4];
     loop {
         if recv.read_exact(&mut len_buf).await.is_err() {
@@ -267,7 +262,7 @@ async fn run_session(
             break;
         }
         let frame_tx2 = frame_tx.clone();
-        let mgr = Arc::clone(&device_mgr);
+        let mgr = Arc::clone(device_mgr);
         tokio::spawn(async move {
             if frame.is_empty() {
                 return;
@@ -278,6 +273,30 @@ async fn run_session(
             .await;
         });
     }
+}
+
+async fn run_session(
+    conn: Connection,
+    event_tx: broadcast::Sender<webhid::IpcResponse>,
+    device_mgr: Arc<DeviceManager>,
+    device_id: u32,
+    _session_token: String,
+    _wt_gen: u64,
+) -> anyhow::Result<()> {
+    let (send, mut recv) = conn.accept_bi().await?;
+
+    let (frame_tx, frame_rx) = mpsc::unbounded_channel::<Bytes>();
+    let writer_task = spawn_writer_task(send, frame_rx);
+
+    let event_rx = event_tx.subscribe();
+    let flush_tx = frame_tx.clone();
+    let sender_task = tokio::spawn(batching::run_sender(
+        event_rx,
+        device_id,
+        move |frame: Vec<u8>| flush_tx.send(Bytes::from(frame)).is_ok(),
+    ));
+
+    read_inbound_frames(&mut recv, &frame_tx, &device_mgr, device_id).await;
 
     drop(frame_tx);
     sender_task.abort();

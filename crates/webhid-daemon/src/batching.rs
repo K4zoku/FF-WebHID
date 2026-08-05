@@ -1,7 +1,12 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
 use tokio::sync::broadcast;
+
+use crate::blocklist::ReportType;
+use crate::device_mgr::{DeviceManager, with_device};
+use crate::hid;
 
 pub const MSG_SEND_REPORT: u8 = 0x01;
 pub const MSG_SEND_FEATURE_REPORT: u8 = 0x02;
@@ -33,10 +38,72 @@ pub fn write_batch_frame(out: &mut Vec<u8>, reports: &[(u8, Bytes)]) {
     }
 }
 
+/// Reads a `WEBHID_WS_*` integer knob, falling back to `default` when the
+/// variable is unset or unparseable.
+fn env_int<T>(name: &str, default: T) -> T
+where
+    T: std::str::FromStr,
+{
+    std::env::var(name)
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(default)
+}
+
+/// Flushes `batch` as a single input-report frame. Returns false when the
+/// flush callback reports failure and the sender must stop.
+fn flush_batch<F>(batch: &mut Vec<(u8, Bytes)>, frame_buf: &mut Vec<u8>, flush: &mut F) -> bool
+where
+    F: FnMut(Vec<u8>) -> bool,
+{
+    if batch.is_empty() {
+        return true;
+    }
+    write_batch_frame(frame_buf, batch);
+    if !flush(std::mem::take(frame_buf)) {
+        return false;
+    }
+    batch.clear();
+    true
+}
+
+/// Like [`flush_batch`], then advances the rate-gate counters used to pick
+/// the coalesce window for the next batch.
+fn flush_batch_ratelimited<F>(
+    batch: &mut Vec<(u8, Bytes)>,
+    frame_buf: &mut Vec<u8>,
+    flush: &mut F,
+    rate_count: &mut u32,
+    rate_start: &mut tokio::time::Instant,
+    rate_window: Duration,
+) -> bool
+where
+    F: FnMut(Vec<u8>) -> bool,
+{
+    if batch.is_empty() {
+        return true;
+    }
+    write_batch_frame(frame_buf, batch);
+    let flushed = batch.len() as u32;
+    if !flush(std::mem::take(frame_buf)) {
+        return false;
+    }
+    batch.clear();
+    let now = tokio::time::Instant::now();
+    if now.duration_since(*rate_start) >= rate_window {
+        *rate_count = flushed;
+        *rate_start = now;
+    } else {
+        *rate_count = rate_count.saturating_add(flushed);
+    }
+    true
+}
+
 fn handle_event<F>(
     event_result: Result<webhid::IpcResponse, broadcast::error::RecvError>,
     device_id: u32,
     batch: &mut Vec<(u8, Bytes)>,
+    frame_buf: &mut Vec<u8>,
     flush: &mut F,
 ) -> bool
 where
@@ -62,13 +129,8 @@ where
         Ok(_) => {}
         Err(broadcast::error::RecvError::Lagged(n)) => {
             log::warn!("[sender] broadcast lagged by {n} events, flushing batch");
-            if !batch.is_empty() {
-                let mut tmp = Vec::with_capacity(256);
-                write_batch_frame(&mut tmp, batch);
-                if !flush(tmp) {
-                    return false;
-                }
-                batch.clear();
+            if !flush_batch(batch, frame_buf, flush) {
+                return false;
             }
         }
         Err(broadcast::error::RecvError::Closed) => return false,
@@ -80,6 +142,7 @@ fn drain_available<F>(
     rx: &mut broadcast::Receiver<webhid::IpcResponse>,
     device_id: u32,
     batch: &mut Vec<(u8, Bytes)>,
+    frame_buf: &mut Vec<u8>,
     flush: &mut F,
 ) where
     F: FnMut(Vec<u8>) -> bool,
@@ -87,7 +150,7 @@ fn drain_available<F>(
     loop {
         match rx.try_recv() {
             Ok(ev) => {
-                if !handle_event(Ok(ev), device_id, batch, flush) {
+                if !handle_event(Ok(ev), device_id, batch, frame_buf, flush) {
                     break;
                 }
             }
@@ -95,14 +158,56 @@ fn drain_available<F>(
             Err(broadcast::error::TryRecvError::Closed) => break,
             Err(broadcast::error::TryRecvError::Lagged(n)) => {
                 log::warn!("[sender] drain lagged by {n} events");
-                if !batch.is_empty() {
-                    let mut tmp = Vec::with_capacity(256);
-                    write_batch_frame(&mut tmp, batch);
-                    if !flush(tmp) {
-                        break;
-                    }
-                    batch.clear();
+                if !flush_batch(batch, frame_buf, flush) {
+                    break;
                 }
+            }
+        }
+    }
+}
+
+/// Selects the coalesce window: short while the rate gate is open, long once
+/// the high-rate threshold has been crossed.
+fn coalesce_window_duration(
+    rate_count: u32,
+    high_rate_count: u32,
+    high_rate_coalesce: Duration,
+    coalesce: Duration,
+) -> Duration {
+    if rate_count >= high_rate_count {
+        high_rate_coalesce
+    } else {
+        coalesce
+    }
+}
+
+/// Waits out the coalesce window, folding further input reports into the
+/// batch. Returns false when the flush callback failed or the broadcast
+/// closed and the sender must stop.
+async fn coalesce_window<F>(
+    event_rx: &mut broadcast::Receiver<webhid::IpcResponse>,
+    device_id: u32,
+    batch: &mut Vec<(u8, Bytes)>,
+    frame_buf: &mut Vec<u8>,
+    flush: &mut F,
+    window: Duration,
+) -> bool
+where
+    F: FnMut(Vec<u8>) -> bool,
+{
+    let deadline = tokio::time::Instant::now() + window;
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return true;
+        }
+        tokio::select! {
+            _ = tokio::time::sleep(remaining) => return true,
+            event_result = event_rx.recv() => {
+                if !handle_event(event_result, device_id, batch, frame_buf, flush) {
+                    return false;
+                }
+                drain_available(event_rx, device_id, batch, frame_buf, flush);
             }
         }
     }
@@ -115,10 +220,7 @@ pub async fn run_sender<F>(
 ) where
     F: FnMut(Vec<u8>) -> bool + Send + 'static,
 {
-    let batch_ms = std::env::var("WEBHID_WS_BATCH_MS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(DEFAULT_BATCH_FLUSH_MS);
+    let batch_ms = env_int::<u64>("WEBHID_WS_BATCH_MS", DEFAULT_BATCH_FLUSH_MS);
 
     let mut batch: Vec<(u8, Bytes)> = Vec::with_capacity(8);
     let mut frame_buf: Vec<u8> = Vec::with_capacity(256);
@@ -128,16 +230,12 @@ pub async fn run_sender<F>(
         loop {
             tokio::select! {
                 _ = flush_interval.tick() => {
-                    if !batch.is_empty() {
-                        write_batch_frame(&mut frame_buf, &batch);
-                        if !flush(std::mem::take(&mut frame_buf)) {
-                            break;
-                        }
-                        batch.clear();
+                    if !flush_batch(&mut batch, &mut frame_buf, &mut flush) {
+                        break;
                     }
                 }
                 event_result = event_rx.recv() => {
-                    if !handle_event(event_result, device_id, &mut batch, &mut flush) {
+                    if !handle_event(event_result, device_id, &mut batch, &mut frame_buf, &mut flush) {
                         break;
                     }
                 }
@@ -147,68 +245,57 @@ pub async fn run_sender<F>(
     }
 
     let coalesce = Duration::from_micros(ADAPTIVE_COALESCE_US);
-    let high_rate_coalesce = std::env::var("WEBHID_WS_HIGH_RATE_MS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .map(Duration::from_millis)
-        .unwrap_or(Duration::from_millis(HIGH_RATE_COALESCE_MS));
-    let rate_window = std::env::var("WEBHID_WS_RATE_WINDOW_MS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .map(Duration::from_millis)
-        .unwrap_or(Duration::from_millis(RATE_WINDOW_MS));
-    let high_rate_count = std::env::var("WEBHID_WS_HIGH_RATE_COUNT")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(HIGH_RATE_COUNT);
+    let high_rate_coalesce = Duration::from_millis(env_int::<u64>(
+        "WEBHID_WS_HIGH_RATE_MS",
+        HIGH_RATE_COALESCE_MS,
+    ));
+    let rate_window =
+        Duration::from_millis(env_int::<u64>("WEBHID_WS_RATE_WINDOW_MS", RATE_WINDOW_MS));
+    let high_rate_count = env_int::<u32>("WEBHID_WS_HIGH_RATE_COUNT", HIGH_RATE_COUNT);
     let mut rate_count: u32 = 0;
     let mut rate_start = tokio::time::Instant::now();
-    'outer: loop {
+    loop {
         let event_result = event_rx.recv().await;
-        if !handle_event(event_result, device_id, &mut batch, &mut flush) {
+        if !handle_event(
+            event_result,
+            device_id,
+            &mut batch,
+            &mut frame_buf,
+            &mut flush,
+        ) {
+            break;
+        }
+        drain_available(
+            &mut event_rx,
+            device_id,
+            &mut batch,
+            &mut frame_buf,
+            &mut flush,
+        );
+
+        if batch.len() > 1
+            && !coalesce_window(
+                &mut event_rx,
+                device_id,
+                &mut batch,
+                &mut frame_buf,
+                &mut flush,
+                coalesce_window_duration(rate_count, high_rate_count, high_rate_coalesce, coalesce),
+            )
+            .await
+        {
             break;
         }
 
-        drain_available(&mut event_rx, device_id, &mut batch, &mut flush);
-
-        if batch.len() > 1 {
-            let window = if rate_count >= high_rate_count {
-                high_rate_coalesce
-            } else {
-                coalesce
-            };
-            let deadline = tokio::time::Instant::now() + window;
-            loop {
-                let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-                if remaining.is_zero() {
-                    break;
-                }
-                tokio::select! {
-                    _ = tokio::time::sleep(remaining) => break,
-                    event_result = event_rx.recv() => {
-                        if !handle_event(event_result, device_id, &mut batch, &mut flush) {
-                            break 'outer;
-                        }
-                        drain_available(&mut event_rx, device_id, &mut batch, &mut flush);
-                    }
-                }
-            }
-        }
-
-        if !batch.is_empty() {
-            write_batch_frame(&mut frame_buf, &batch);
-            let flushed = batch.len() as u32;
-            if !flush(std::mem::take(&mut frame_buf)) {
-                break;
-            }
-            batch.clear();
-            let now = tokio::time::Instant::now();
-            if now.duration_since(rate_start) >= rate_window {
-                rate_count = flushed;
-                rate_start = now;
-            } else {
-                rate_count = rate_count.saturating_add(flushed);
-            }
+        if !flush_batch_ratelimited(
+            &mut batch,
+            &mut frame_buf,
+            &mut flush,
+            &mut rate_count,
+            &mut rate_start,
+            rate_window,
+        ) {
+            break;
         }
     }
 }
@@ -232,19 +319,138 @@ pub fn make_feature_read_resp(req_id: u32, status: u8, data: &[u8]) -> Vec<u8> {
     buf
 }
 
+/// Resolves the open device file for `device_id`, logging on failure.
+fn get_device_file(
+    device_mgr: &Arc<DeviceManager>,
+    device_id: u32,
+) -> Option<crate::device_mgr::DeviceHandle> {
+    match device_mgr.get_file(device_id) {
+        Ok(f) => Some(f),
+        Err(e) => {
+            log::warn!("[sender] get_file '{device_id}': {e}");
+            None
+        }
+    }
+}
+
+fn send_resp_type(msg_type: u8) -> u8 {
+    if msg_type == MSG_SEND_REPORT {
+        RESP_SEND_REPORT
+    } else {
+        RESP_SEND_FEATURE_REPORT
+    }
+}
+
+fn send_report_type(msg_type: u8) -> ReportType {
+    if msg_type == MSG_SEND_REPORT {
+        ReportType::Output
+    } else {
+        ReportType::Feature
+    }
+}
+
+async fn handle_send_report_msg<F>(
+    msg_type: u8,
+    payload: &[u8],
+    req_id: u32,
+    device_mgr: &Arc<DeviceManager>,
+    device_id: u32,
+    emit: &mut F,
+) where
+    F: FnMut(Vec<u8>),
+{
+    let resp_type = send_resp_type(msg_type);
+    if payload.is_empty() {
+        emit(make_status_resp(resp_type, req_id, 1));
+        return;
+    }
+    let report_id = payload[0];
+    let report_type = send_report_type(msg_type);
+    if device_mgr.is_report_blocked(device_id, report_id, report_type) {
+        emit(make_status_resp(resp_type, req_id, 2));
+        return;
+    }
+    if !device_mgr.validate_report_send(device_id, report_id, report_type, Some(payload.len() - 1))
+    {
+        emit(make_status_resp(resp_type, req_id, 1));
+        return;
+    }
+    let report_data: Arc<[u8]> = Arc::from(&payload[1..]);
+
+    let Some(dev_arc) = get_device_file(device_mgr, device_id) else {
+        emit(make_status_resp(resp_type, req_id, 1));
+        return;
+    };
+
+    let result = tokio::task::spawn_blocking(move || {
+        with_device(&dev_arc, |dev| {
+            if msg_type == MSG_SEND_REPORT {
+                hid::write_report(dev, report_id, &report_data)
+            } else {
+                hid::write_feature_report(dev, report_id, &report_data)
+            }
+        })
+    })
+    .await;
+
+    let status = match result {
+        Ok(Ok(())) => 0u8,
+        _ => 1u8,
+    };
+    emit(make_status_resp(resp_type, req_id, status));
+}
+
+async fn handle_receive_feature_report_msg<F>(
+    payload: &[u8],
+    req_id: u32,
+    device_mgr: &Arc<DeviceManager>,
+    device_id: u32,
+    emit: &mut F,
+) where
+    F: FnMut(Vec<u8>),
+{
+    if payload.is_empty() {
+        emit(make_feature_read_resp(req_id, 1, &[]));
+        return;
+    }
+    let report_id = payload[0];
+    if device_mgr.is_report_blocked(device_id, report_id, ReportType::Feature) {
+        emit(make_feature_read_resp(req_id, 2, &[]));
+        return;
+    }
+    if !device_mgr.validate_report_send(device_id, report_id, ReportType::Feature, None) {
+        emit(make_feature_read_resp(req_id, 1, &[]));
+        return;
+    }
+
+    let Some(dev_arc) = get_device_file(device_mgr, device_id) else {
+        emit(make_feature_read_resp(req_id, 1, &[]));
+        return;
+    };
+
+    let result = tokio::task::spawn_blocking(move || {
+        with_device(&dev_arc, |d| hid::read_feature_report(d, report_id))
+    })
+    .await;
+
+    match result {
+        Ok(Ok(data)) => {
+            emit(make_feature_read_resp(req_id, 0, &data));
+        }
+        _ => {
+            emit(make_feature_read_resp(req_id, 1, &[]));
+        }
+    }
+}
+
 pub async fn handle_client_message<F>(
     frame: &[u8],
-    device_mgr: &std::sync::Arc<crate::device_mgr::DeviceManager>,
+    device_mgr: &Arc<DeviceManager>,
     device_id: u32,
     mut emit: F,
 ) where
     F: FnMut(Vec<u8>),
 {
-    use crate::blocklist::ReportType;
-    use crate::device_mgr::with_device;
-    use crate::hid;
-    use std::sync::Arc;
-
     if frame.is_empty() {
         log::warn!("[sender] empty binary frame from client");
         return;
@@ -262,124 +468,20 @@ pub async fn handle_client_message<F>(
 
     match msg_type {
         MSG_SEND_REPORT | MSG_SEND_FEATURE_REPORT => {
-            if frame.len() < 6 {
-                let resp_type = if msg_type == MSG_SEND_REPORT {
-                    RESP_SEND_REPORT
-                } else {
-                    RESP_SEND_FEATURE_REPORT
-                };
-                emit(make_status_resp(resp_type, req_id, 1));
-                return;
-            }
-            let report_id = frame[5];
-            let report_type = if msg_type == MSG_SEND_REPORT {
-                ReportType::Output
-            } else {
-                ReportType::Feature
-            };
-            if device_mgr.is_report_blocked(device_id, report_id, report_type) {
-                let resp_type = if msg_type == MSG_SEND_REPORT {
-                    RESP_SEND_REPORT
-                } else {
-                    RESP_SEND_FEATURE_REPORT
-                };
-                emit(make_status_resp(resp_type, req_id, 2));
-                return;
-            }
-            // Chromium pre-checks (invalid report ID mode, oversized payload)
-            // fail the write like an OS error, not like a blocked report.
-            if !device_mgr.validate_report_send(
+            handle_send_report_msg(
+                msg_type,
+                &frame[5..],
+                req_id,
+                device_mgr,
                 device_id,
-                report_id,
-                report_type,
-                Some(frame.len() - 6),
-            ) {
-                let resp_type = if msg_type == MSG_SEND_REPORT {
-                    RESP_SEND_REPORT
-                } else {
-                    RESP_SEND_FEATURE_REPORT
-                };
-                emit(make_status_resp(resp_type, req_id, 1));
-                return;
-            }
-            let payload: Arc<[u8]> = Arc::from(&frame[6..]);
-
-            let dev_arc = match device_mgr.get_file(device_id) {
-                Ok(f) => f,
-                Err(e) => {
-                    log::warn!("[sender] get_file '{device_id}': {e}");
-                    let resp_type = if msg_type == MSG_SEND_REPORT {
-                        RESP_SEND_REPORT
-                    } else {
-                        RESP_SEND_FEATURE_REPORT
-                    };
-                    emit(make_status_resp(resp_type, req_id, 1));
-                    return;
-                }
-            };
-
-            let result = tokio::task::spawn_blocking(move || {
-                with_device(&dev_arc, |dev| {
-                    if msg_type == MSG_SEND_REPORT {
-                        hid::write_report(dev, report_id, &payload)
-                    } else {
-                        hid::write_feature_report(dev, report_id, &payload)
-                    }
-                })
-            })
-            .await;
-
-            let status = match result {
-                Ok(Ok(())) => 0u8,
-                _ => 1u8,
-            };
-            let resp_type = if msg_type == MSG_SEND_REPORT {
-                RESP_SEND_REPORT
-            } else {
-                RESP_SEND_FEATURE_REPORT
-            };
-            emit(make_status_resp(resp_type, req_id, status));
+                &mut emit,
+            )
+            .await
         }
-
         MSG_RECEIVE_FEATURE_REPORT => {
-            if frame.len() < 6 {
-                emit(make_feature_read_resp(req_id, 1, &[]));
-                return;
-            }
-            let report_id = frame[5];
-            if device_mgr.is_report_blocked(device_id, report_id, ReportType::Feature) {
-                emit(make_feature_read_resp(req_id, 2, &[]));
-                return;
-            }
-            if !device_mgr.validate_report_send(device_id, report_id, ReportType::Feature, None) {
-                emit(make_feature_read_resp(req_id, 1, &[]));
-                return;
-            }
-
-            let dev_arc = match device_mgr.get_file(device_id) {
-                Ok(f) => f,
-                Err(e) => {
-                    log::warn!("[sender] get_file '{device_id}': {e}");
-                    emit(make_feature_read_resp(req_id, 1, &[]));
-                    return;
-                }
-            };
-
-            let result = tokio::task::spawn_blocking(move || {
-                with_device(&dev_arc, |d| hid::read_feature_report(d, report_id))
-            })
-            .await;
-
-            match result {
-                Ok(Ok(data)) => {
-                    emit(make_feature_read_resp(req_id, 0, &data));
-                }
-                _ => {
-                    emit(make_feature_read_resp(req_id, 1, &[]));
-                }
-            }
+            handle_receive_feature_report_msg(&frame[5..], req_id, device_mgr, device_id, &mut emit)
+                .await
         }
-
         other => {
             log::warn!("[sender] rejecting unknown binary msg_type=0x{other:02x}");
             emit(make_status_resp(0xFF, req_id, 1));

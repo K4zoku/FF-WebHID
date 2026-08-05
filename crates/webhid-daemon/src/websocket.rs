@@ -12,6 +12,8 @@ use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 const WS_CLOSE_UNKNOWN_TOKEN: u16 = 4401;
 const WS_CLOSE_BAD_TOKEN: u16 = 4402;
 
+type WsStream = tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>;
+
 use crate::batching;
 use crate::device_mgr::DeviceManager;
 
@@ -69,58 +71,11 @@ async fn handle_websocket(
     device_mgr: Arc<DeviceManager>,
     _ws_port: u16,
 ) -> anyhow::Result<()> {
-    let hash_holder: Arc<std::sync::Mutex<Option<String>>> = Arc::new(std::sync::Mutex::new(None));
-    let hash_ref = Arc::clone(&hash_holder);
-
-    let ws_stream =
-        tokio_tungstenite::accept_hdr_async(stream, move |req: &Request, res: Response| {
-            let host = req.uri().host().unwrap_or("");
-            let is_loopback =
-                host.is_empty() || host == "127.0.0.1" || host == "localhost" || host == "::1";
-            if !is_loopback {
-                log::warn!("[ws] rejected connection from host: {host}");
-                let resp = Response::builder()
-                    .status(StatusCode::FORBIDDEN)
-                    .body(Some("Access denied".into()))
-                    .expect("static 403 response should build");
-                return Err(resp);
-            }
-            let hash = req
-                .headers()
-                .get("sec-websocket-protocol")
-                .and_then(|v| v.to_str().ok())
-                .and_then(|s| s.strip_prefix("webhid."))
-                .map(String::from);
-            let mut holder = hash_ref.lock().unwrap_or_else(|e| e.into_inner());
-            *holder = hash;
-            let mut res = res;
-            if let Some(proto) = req.headers().get("sec-websocket-protocol") {
-                res.headers_mut()
-                    .insert("sec-websocket-protocol", proto.clone());
-            }
-            Ok(res)
-        })
-        .await;
-
-    let ws_stream = match ws_stream {
-        Ok(s) => s,
-        Err(e) => {
-            log::warn!("[ws] handshake failed: {e}");
-            return Ok(());
-        }
-    };
-
-    let hash = hash_holder.lock().unwrap_or_else(|e| e.into_inner()).take();
-    let (hash, ws_stream) = match hash {
-        Some(h) if h.len() == 64 && h.chars().all(|c| c.is_ascii_hexdigit()) => (h, ws_stream),
-        Some(_) => {
-            log::warn!("[ws] invalid auth hash format; closing");
-            let _ = send_close(ws_stream, WS_CLOSE_BAD_TOKEN, "bad token").await;
-            return Ok(());
-        }
-        None => {
-            log::warn!("[ws] no auth hash provided; closing");
-            let _ = send_close(ws_stream, WS_CLOSE_BAD_TOKEN, "no token").await;
+    let (hash, ws_stream) = match ws_authenticate(stream).await {
+        Ok(Some(v)) => v,
+        Ok(None) => return Ok(()),
+        Err((ws_stream, code, reason)) => {
+            let _ = send_close(ws_stream, code, reason).await;
             return Ok(());
         }
     };
@@ -157,29 +112,13 @@ async fn handle_websocket(
     let device_id_for_receiver = device_id;
     let mut receiver_task = tokio::spawn(async move {
         while let Some(msg) = ws_receiver.next().await {
-            match msg {
-                Ok(Message::Ping(data)) => {
-                    if tx_for_receiver.send(Message::Pong(data)).is_err() {
-                        break;
-                    }
-                }
-                Ok(Message::Close(_)) => break,
-                Ok(Message::Binary(frame)) => {
-                    let tx_clone = tx_for_receiver.clone();
-                    let mgr = Arc::clone(&device_mgr_for_receiver);
-                    let dev_id = device_id_for_receiver;
-                    tokio::spawn(async move {
-                        batching::handle_client_message(&frame, &mgr, dev_id, |resp| {
-                            let _ = tx_clone.send(Message::Binary(resp.into()));
-                        })
-                        .await;
-                    });
-                }
-                Err(e) => {
-                    log::warn!("[ws] read error: {e}");
-                    break;
-                }
-                _ => {}
+            if !handle_ws_message(
+                msg,
+                tx_for_receiver.clone(),
+                &device_mgr_for_receiver,
+                device_id_for_receiver,
+            ) {
+                break;
             }
         }
     });
@@ -207,8 +146,115 @@ async fn handle_websocket(
     Ok(())
 }
 
+/// tungstenite's accept-hdr callback signature requires the response type in
+/// the error position; the large Err variant is inherent to the API.
+#[allow(clippy::result_large_err)]
+fn ws_accept_callback(
+    req: &Request,
+    res: Response,
+    hash_ref: &Arc<std::sync::Mutex<Option<String>>>,
+) -> Result<Response, tokio_tungstenite::tungstenite::http::Response<Option<String>>> {
+    let host = req.uri().host().unwrap_or("");
+    let is_loopback =
+        host.is_empty() || host == "127.0.0.1" || host == "localhost" || host == "::1";
+    if !is_loopback {
+        log::warn!("[ws] rejected connection from host: {host}");
+        let resp = Response::builder()
+            .status(StatusCode::FORBIDDEN)
+            .body(Some("Access denied".into()))
+            .expect("static 403 response should build");
+        return Err(resp);
+    }
+    let hash = req
+        .headers()
+        .get("sec-websocket-protocol")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.strip_prefix("webhid."))
+        .map(String::from);
+    let mut holder = hash_ref.lock().unwrap_or_else(|e| e.into_inner());
+    *holder = hash;
+    let mut res = res;
+    if let Some(proto) = req.headers().get("sec-websocket-protocol") {
+        res.headers_mut()
+            .insert("sec-websocket-protocol", proto.clone());
+    }
+    Ok(res)
+}
+
+/// Perform the loopback-only WebSocket handshake and extract the
+/// `webhid.<hash>` auth hash from the subprotocol header. `Ok(None)` means
+/// the handshake itself failed (already logged); `Err((stream, code,
+/// reason))` means the connection must be closed with the given close frame.
+async fn ws_authenticate(
+    stream: tokio::net::TcpStream,
+) -> Result<Option<(String, WsStream)>, (WsStream, u16, &'static str)> {
+    let hash_holder: Arc<std::sync::Mutex<Option<String>>> = Arc::new(std::sync::Mutex::new(None));
+    let hash_ref = Arc::clone(&hash_holder);
+
+    let ws_stream = tokio_tungstenite::accept_hdr_async(
+        stream,
+        #[allow(clippy::result_large_err)]
+        move |req: &Request, res: Response| ws_accept_callback(req, res, &hash_ref),
+    )
+    .await;
+
+    let ws_stream = match ws_stream {
+        Ok(s) => s,
+        Err(e) => {
+            log::warn!("[ws] handshake failed: {e}");
+            return Ok(None);
+        }
+    };
+
+    let hash = hash_holder.lock().unwrap_or_else(|e| e.into_inner()).take();
+    match hash {
+        Some(h) if h.len() == 64 && h.chars().all(|c| c.is_ascii_hexdigit()) => {
+            Ok(Some((h, ws_stream)))
+        }
+        Some(_) => {
+            log::warn!("[ws] invalid auth hash format; closing");
+            Err((ws_stream, WS_CLOSE_BAD_TOKEN, "bad token"))
+        }
+        None => {
+            log::warn!("[ws] no auth hash provided; closing");
+            Err((ws_stream, WS_CLOSE_BAD_TOKEN, "no token"))
+        }
+    }
+}
+
+/// Handle a single received WebSocket message. Returns `false` when the
+/// connection should be torn down (close frame, read error, or a Pong send
+/// that failed).
+fn handle_ws_message(
+    msg: Result<Message, tokio_tungstenite::tungstenite::Error>,
+    tx: mpsc::UnboundedSender<Message>,
+    device_mgr: &Arc<DeviceManager>,
+    device_id: u32,
+) -> bool {
+    match msg {
+        Ok(Message::Ping(data)) => tx.send(Message::Pong(data)).is_ok(),
+        Ok(Message::Close(_)) => false,
+        Ok(Message::Binary(frame)) => {
+            let tx_clone = tx.clone();
+            let mgr = Arc::clone(device_mgr);
+            tokio::spawn(async move {
+                batching::handle_client_message(&frame, &mgr, device_id, |resp| {
+                    let _ = tx_clone.send(Message::Binary(resp.into()));
+                })
+                .await;
+            });
+            true
+        }
+        Err(e) => {
+            log::warn!("[ws] read error: {e}");
+            false
+        }
+        _ => true,
+    }
+}
+
 async fn send_close(
-    ws_stream: tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
+    ws_stream: WsStream,
     code: u16,
     reason: &'static str,
 ) -> Result<(), tokio_tungstenite::tungstenite::Error> {

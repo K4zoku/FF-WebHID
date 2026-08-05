@@ -5,7 +5,7 @@ use tokio::io::{AsyncRead, BufReader};
 use tokio::sync::{broadcast, mpsc};
 use webhid::{IpcResponse, NmMessage, NmRequest, NmResponse, parse_packed_send, protocol};
 
-use crate::device_mgr::{with_device, DeviceManager};
+use crate::device_mgr::{DeviceManager, with_device};
 use crate::{hid, webtransport::WtState};
 
 pub async fn handle(
@@ -35,17 +35,7 @@ pub async fn handle(
         loop {
             match event_rx.recv().await {
                 Ok(ev) => {
-                    if let webhid::IpcResponse::DeviceDisconnected { ref device, .. } = ev {
-                        device_mgr_for_events.force_close(device.device_id);
-                    }
-                    if let webhid::IpcResponse::InputReport { ref device_id, .. } = ev
-                        && !device_mgr_for_events.has_nm_session(*device_id)
-                    {
-                        continue;
-                    }
-                    if let Some(nm_ev) = ipc_event_to_nm(ev)
-                        && tx_events.send(nm_ev).await.is_err()
-                    {
+                    if !relay_client_event(ev, &device_mgr_for_events, &tx_events).await {
                         break;
                     }
                 }
@@ -58,22 +48,8 @@ pub async fn handle(
     });
 
     loop {
-        let request: NmRequest = match protocol::read_nm_request(&mut reader).await {
-            Ok(r) => r,
-            Err(e) => {
-                if e.kind() == std::io::ErrorKind::InvalidData {
-                    log::warn!("[client] malformed NM frame dropped: {e}");
-                    let err_resp = NmMessage::Control(NmResponse::err(400));
-                    if tx.send(err_resp).await.is_err() {
-                        break;
-                    }
-                    continue;
-                }
-                if e.kind() != std::io::ErrorKind::UnexpectedEof {
-                    log::warn!("[client] read error: {e}");
-                }
-                break;
-            }
+        let Some(request) = read_next_request(&mut reader, &tx).await else {
+            break;
         };
         let response = dispatch(&device_mgr, request, ws_port, &wt_state).await;
         if tx.send(response).await.is_err() {
@@ -87,6 +63,58 @@ pub async fn handle(
     Ok(())
 }
 
+/// Forwards one broadcast event to the client stream, force-closing
+/// disconnected devices and skipping input reports for sessions that are not
+/// exposed over NM. Returns false when the client is gone and the event task
+/// should stop.
+async fn relay_client_event(
+    ev: IpcResponse,
+    device_mgr: &DeviceManager,
+    tx: &mpsc::Sender<NmMessage>,
+) -> bool {
+    if let webhid::IpcResponse::DeviceDisconnected { device, .. } = &ev {
+        device_mgr.force_close(device.device_id);
+    }
+    if let webhid::IpcResponse::InputReport { device_id, .. } = &ev
+        && !device_mgr.has_nm_session(*device_id)
+    {
+        return true;
+    }
+    if let Some(nm_ev) = ipc_event_to_nm(ev)
+        && tx.send(nm_ev).await.is_err()
+    {
+        return false;
+    }
+    true
+}
+
+/// Reads the next NM request frame. Malformed frames are answered with 400
+/// and skipped. Returns None once the stream ends or a fatal error occurs.
+async fn read_next_request<R: AsyncRead + Unpin>(
+    reader: &mut BufReader<R>,
+    tx: &mpsc::Sender<NmMessage>,
+) -> Option<NmRequest> {
+    loop {
+        match protocol::read_nm_request(reader).await {
+            Ok(r) => return Some(r),
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::InvalidData {
+                    log::warn!("[client] malformed NM frame dropped: {e}");
+                    let err_resp = NmMessage::Control(NmResponse::err(400));
+                    if tx.send(err_resp).await.is_err() {
+                        return None;
+                    }
+                    continue;
+                }
+                if e.kind() != std::io::ErrorKind::UnexpectedEof {
+                    log::warn!("[client] read error: {e}");
+                }
+                return None;
+            }
+        }
+    }
+}
+
 async fn dispatch(
     device_mgr: &DeviceManager,
     req: NmRequest,
@@ -95,181 +123,251 @@ async fn dispatch(
 ) -> NmMessage {
     let req_id = req.id();
     let resp: NmResponse = match req {
-        NmRequest::Enumerate { .. } => match device_mgr.enumerate() {
-            Ok(devices) => NmResponse::ok_with_devices(devices),
-            Err(_) => NmResponse::err(500),
-        },
-
-        NmRequest::Open { device_id, .. } => {
-            let mut resp = match device_mgr.open(device_id) {
-                Ok((dev_id, session_token)) => {
-                    NmResponse::ok_opened(dev_id, session_token, Some(ws_port))
-                }
-                Err(e) => {
-                    let msg = e.to_string();
-                    let code = if msg.contains("not found") || msg.contains("No such") {
-                        404
-                    } else {
-                        500
-                    };
-                    NmResponse::err(code)
-                }
-            };
-            // The open itself may have just refined the permission status
-            // (Linux: EACCES on the real open); report it right here so the
-            // addon does not need a follow-up handshake.
-            resp.hid_permission = Some(crate::hid::hid_permission());
-            resp
-        }
-
+        NmRequest::Enumerate { .. } => handle_enumerate(device_mgr),
+        NmRequest::Open { device_id, .. } => handle_open(device_mgr, device_id, ws_port),
         NmRequest::Close {
             device_id,
             session_token,
             ..
-        } => match device_mgr.close(device_id, session_token.as_deref()) {
-            Ok(()) => NmResponse::ok(),
-            Err(e) => {
-                let code = if e.to_string().contains("not open") {
-                    404
-                } else {
-                    500
-                };
-                NmResponse::err(code)
-            }
-        },
-
-        NmRequest::SendReport { packed, .. } => match parse_packed_send(&packed) {
-            Ok((req_id, device_id, report_id, data)) => {
-                let mut r =
-                    if device_mgr.is_report_blocked(device_id, report_id, ReportType::Output) {
-                        NmResponse::err(403)
-                    } else if !device_mgr.validate_report_send(
-                        device_id,
-                        report_id,
-                        ReportType::Output,
-                        Some(data.len()),
-                    ) {
-                        // Chromium pre-check failure: fail like an OS write error.
-                        NmResponse::err(500)
-                    } else {
-                        match device_mgr.get_file(device_id) {
-                            Err(_) => NmResponse::err(404),
-                            Ok(dev_arc) => {
-                                let data_owned = data.to_vec();
-                                let result = tokio::task::spawn_blocking(move || {
-                                    with_device(&dev_arc, |d| hid::write_report(d, report_id, &data_owned))
-                                })
-                                .await;
-                                match result {
-                                    Ok(Ok(())) => NmResponse::ok(),
-                                    Ok(Err(_)) => NmResponse::err(500),
-                                    Err(_) => NmResponse::err(500),
-                                }
-                            }
-                        }
-                    };
-                r.id = Some(req_id);
-                r
-            }
-            Err(_) => NmResponse::err(422),
-        },
-
+        } => handle_close(device_mgr, device_id, session_token),
+        NmRequest::SendReport { packed, .. } => handle_send_report(device_mgr, packed).await,
         NmRequest::ReceiveFeatureReport {
             device_id,
             report_id,
             ..
-        } => {
-            if device_mgr.is_report_blocked(device_id, report_id, ReportType::Feature) {
-                NmResponse::err(403)
-            } else if !device_mgr.validate_report_send(device_id, report_id, ReportType::Feature, None)
-            {
-                // Chromium pre-check failure: fail like an OS read error.
-                NmResponse::err(500)
-            } else {
-                match device_mgr.get_file(device_id) {
-                    Err(_) => NmResponse::err(404),
-                    Ok(dev_arc) => {
-                        let result = tokio::task::spawn_blocking(move || {
-                            with_device(&dev_arc, |d| hid::read_feature_report(d, report_id))
-                        })
-                        .await;
-                        match result {
-                            Ok(Ok(data)) => NmResponse::ok_with_data(data),
-                            Ok(Err(_)) => NmResponse::err(500),
-                            Err(_) => NmResponse::err(500),
-                        }
-                    }
-                }
-            }
-        }
-
+        } => handle_receive_feature_report(device_mgr, device_id, report_id).await,
         NmRequest::SendFeatureReport {
             device_id,
             report_id,
             data,
             ..
-        } => {
-            if device_mgr.is_report_blocked(device_id, report_id, ReportType::Feature) {
-                NmResponse::err(403)
-            } else if !device_mgr.validate_report_send(
-                device_id,
-                report_id,
-                ReportType::Feature,
-                Some(data.len()),
-            ) {
-                // Chromium pre-check failure: fail like an OS write error.
-                NmResponse::err(500)
-            } else {
-                match device_mgr.get_file(device_id) {
-                    Err(_) => NmResponse::err(404),
-                    Ok(dev_arc) => {
-                        let result = tokio::task::spawn_blocking(move || {
-                            with_device(&dev_arc, |d| hid::write_feature_report(d, report_id, &data))
-                        })
-                        .await;
-                        match result {
-                            Ok(Ok(())) => NmResponse::ok(),
-                            Ok(Err(_)) => NmResponse::err(500),
-                            Err(_) => NmResponse::err(500),
-                        }
-                    }
-                }
-            }
-        }
-
+        } => handle_send_feature_report(device_mgr, device_id, report_id, data).await,
         NmRequest::SetDataPlane {
             device_id,
             mode,
             session_token,
             ..
-        } => {
-            if let Some(ref token) = session_token {
-                device_mgr.set_dataplane_mode(device_id, token, &mode);
-            }
-            NmResponse::ok()
-        }
-
-        NmRequest::Handshake { .. } => {
-            let (wt_port, wt_cert_hash) = match wt_state.ensure_current() {
-                Some((port, hash)) => (Some(port), Some(hash)),
-                None => (None, None),
-            };
-            NmResponse {
-                status: Some(200),
-                ws_port: Some(ws_port),
-                ws_nonce: Some(device_mgr.ws_nonce().to_string()),
-                wt_port,
-                wt_cert_hash,
-                hid_permission: Some(crate::hid::hid_permission()),
-                ..Default::default()
-            }
-        }
+        } => handle_set_data_plane(device_mgr, device_id, mode, session_token),
+        NmRequest::Handshake { .. } => handle_handshake(device_mgr, ws_port, wt_state),
     };
     let mut resp = resp;
     if resp.id.is_none() {
         resp.id = req_id;
     }
     NmMessage::Control(resp)
+}
+
+fn handle_enumerate(device_mgr: &DeviceManager) -> NmResponse {
+    match device_mgr.enumerate() {
+        Ok(devices) => NmResponse::ok_with_devices(devices),
+        Err(_) => NmResponse::err(500),
+    }
+}
+
+fn handle_open(device_mgr: &DeviceManager, device_id: u32, ws_port: u16) -> NmResponse {
+    let mut resp = match device_mgr.open(device_id) {
+        Ok((dev_id, session_token)) => NmResponse::ok_opened(dev_id, session_token, Some(ws_port)),
+        Err(e) => {
+            let msg = e.to_string();
+            let code = if msg.contains("not found") || msg.contains("No such") {
+                404
+            } else {
+                500
+            };
+            NmResponse::err(code)
+        }
+    };
+    resp.hid_permission = Some(crate::hid::hid_permission());
+    resp
+}
+
+fn handle_close(
+    device_mgr: &DeviceManager,
+    device_id: u32,
+    session_token: Option<String>,
+) -> NmResponse {
+    match device_mgr.close(device_id, session_token.as_deref()) {
+        Ok(()) => NmResponse::ok(),
+        Err(e) => {
+            let code = if e.to_string().contains("not open") {
+                404
+            } else {
+                500
+            };
+            NmResponse::err(code)
+        }
+    }
+}
+
+async fn handle_send_report(device_mgr: &DeviceManager, packed: Vec<u8>) -> NmResponse {
+    let Ok((req_id, device_id, report_id, data)) = parse_packed_send(&packed) else {
+        return NmResponse::err(422);
+    };
+    let mut resp = match report_precheck(
+        device_mgr,
+        device_id,
+        report_id,
+        ReportType::Output,
+        Some(data.len()),
+    ) {
+        Ok(()) => match write_report_blocking(device_mgr, device_id, report_id, data).await {
+            Ok(()) => NmResponse::ok(),
+            Err(e) => e,
+        },
+        Err(e) => e,
+    };
+    resp.id = Some(req_id);
+    resp
+}
+
+async fn handle_receive_feature_report(
+    device_mgr: &DeviceManager,
+    device_id: u32,
+    report_id: u8,
+) -> NmResponse {
+    match report_precheck(device_mgr, device_id, report_id, ReportType::Feature, None) {
+        Ok(()) => match read_feature_report_blocking(device_mgr, device_id, report_id).await {
+            Ok(data) => NmResponse::ok_with_data(data),
+            Err(e) => e,
+        },
+        Err(e) => e,
+    }
+}
+
+async fn handle_send_feature_report(
+    device_mgr: &DeviceManager,
+    device_id: u32,
+    report_id: u8,
+    data: Vec<u8>,
+) -> NmResponse {
+    match report_precheck(
+        device_mgr,
+        device_id,
+        report_id,
+        ReportType::Feature,
+        Some(data.len()),
+    ) {
+        Ok(()) => {
+            match write_feature_report_blocking(device_mgr, device_id, report_id, &data).await {
+                Ok(()) => NmResponse::ok(),
+                Err(e) => e,
+            }
+        }
+        Err(e) => e,
+    }
+}
+
+fn handle_set_data_plane(
+    device_mgr: &DeviceManager,
+    device_id: u32,
+    mode: String,
+    session_token: Option<String>,
+) -> NmResponse {
+    if let Some(token) = &session_token {
+        device_mgr.set_dataplane_mode(device_id, token, &mode);
+    }
+    NmResponse::ok()
+}
+
+fn handle_handshake(device_mgr: &DeviceManager, ws_port: u16, wt_state: &WtState) -> NmResponse {
+    let (wt_port, wt_cert_hash) = match wt_state.ensure_current() {
+        Some((port, hash)) => (Some(port), Some(hash)),
+        None => (None, None),
+    };
+    NmResponse {
+        status: Some(200),
+        ws_port: Some(ws_port),
+        ws_nonce: Some(device_mgr.ws_nonce().to_string()),
+        wt_port,
+        wt_cert_hash,
+        hid_permission: Some(crate::hid::hid_permission()),
+        ..Default::default()
+    }
+}
+
+/// Shared report pre-checks: blocklist first, then Chromium-style
+/// validation. Ok(()) means the report may proceed; Err carries the
+/// response to return instead.
+#[allow(clippy::result_large_err)]
+fn report_precheck(
+    device_mgr: &DeviceManager,
+    device_id: u32,
+    report_id: u8,
+    report_type: ReportType,
+    payload_len: Option<usize>,
+) -> Result<(), NmResponse> {
+    if device_mgr.is_report_blocked(device_id, report_id, report_type) {
+        return Err(NmResponse::err(403));
+    }
+    if !device_mgr.validate_report_send(device_id, report_id, report_type, payload_len) {
+        return Err(NmResponse::err(500));
+    }
+    Ok(())
+}
+
+/// Resolves the open device handle, mapping a missing device to a 404.
+#[allow(clippy::result_large_err)]
+fn open_device(
+    device_mgr: &DeviceManager,
+    device_id: u32,
+) -> Result<crate::device_mgr::DeviceHandle, NmResponse> {
+    device_mgr
+        .get_file(device_id)
+        .map_err(|_| NmResponse::err(404))
+}
+
+async fn write_report_blocking(
+    device_mgr: &DeviceManager,
+    device_id: u32,
+    report_id: u8,
+    data: &[u8],
+) -> Result<(), NmResponse> {
+    let dev_arc = open_device(device_mgr, device_id)?;
+    let data_owned = data.to_vec();
+    let result = tokio::task::spawn_blocking(move || {
+        with_device(&dev_arc, |d| hid::write_report(d, report_id, &data_owned))
+    })
+    .await;
+    match result {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(_)) | Err(_) => Err(NmResponse::err(500)),
+    }
+}
+
+async fn write_feature_report_blocking(
+    device_mgr: &DeviceManager,
+    device_id: u32,
+    report_id: u8,
+    data: &[u8],
+) -> Result<(), NmResponse> {
+    let dev_arc = open_device(device_mgr, device_id)?;
+    let data_owned = data.to_vec();
+    let result = tokio::task::spawn_blocking(move || {
+        with_device(&dev_arc, |d| {
+            hid::write_feature_report(d, report_id, &data_owned)
+        })
+    })
+    .await;
+    match result {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(_)) | Err(_) => Err(NmResponse::err(500)),
+    }
+}
+
+async fn read_feature_report_blocking(
+    device_mgr: &DeviceManager,
+    device_id: u32,
+    report_id: u8,
+) -> Result<Vec<u8>, NmResponse> {
+    let dev_arc = open_device(device_mgr, device_id)?;
+    let result = tokio::task::spawn_blocking(move || {
+        with_device(&dev_arc, |d| hid::read_feature_report(d, report_id))
+    })
+    .await;
+    match result {
+        Ok(Ok(data)) => Ok(data),
+        Ok(Err(_)) | Err(_) => Err(NmResponse::err(500)),
+    }
 }
 
 fn ipc_event_to_nm(ev: IpcResponse) -> Option<NmMessage> {
@@ -370,7 +468,7 @@ mod tests {
             NmMessage::PackedData(buf) => {
                 assert_eq!(buf[0], PKG_INPUT_REPORT);
                 assert_eq!(&buf[1..5], &7u32.to_le_bytes());
-                assert_eq!(buf[5], 1); // report_id
+                assert_eq!(buf[5], 1);
                 let payload_len = u16::from_le_bytes([buf[6], buf[7]]) as usize;
                 assert_eq!(payload_len, 2);
                 assert_eq!(&buf[8..10], &[0xAA, 0xBB]);

@@ -88,19 +88,105 @@ pub fn start(event_tx: broadcast::Sender<IpcResponse>) {
     }
 }
 
-// =====================================================================
-// Linux: udev
-// =====================================================================
+#[cfg(target_os = "linux")]
+use std::collections::HashMap;
+#[cfg(target_os = "linux")]
+use std::os::unix::io::AsRawFd;
+#[cfg(target_os = "linux")]
+use std::sync::Mutex;
+
+#[cfg(target_os = "linux")]
+static DEVICE_CACHE: Mutex<Option<HashMap<u32, webhid::DeviceInfo>>> = Mutex::new(None);
+#[cfg(target_os = "linux")]
+static DEVNODE_TO_ID: Mutex<Option<HashMap<String, u32>>> = Mutex::new(None);
+
+/// Seed the device cache and devnode-to-id map from the current hidapi
+/// device list so that Remove events can be matched later.
+#[cfg(target_os = "linux")]
+fn seed_udev_cache() {
+    let Ok(api) = hidapi::HidApi::new() else {
+        return;
+    };
+    let mut cache = DEVICE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    let cache = cache.get_or_insert_with(HashMap::new);
+    let mut dnmap = DEVNODE_TO_ID.lock().unwrap_or_else(|e| e.into_inner());
+    let dnmap = dnmap.get_or_insert_with(HashMap::new);
+    for info in api.device_list() {
+        if crate::hid::is_blocked_pub(info) {
+            continue;
+        }
+        if let Some(d) = crate::hid::info_from_hidapi_pub(info) {
+            if crate::hid::is_blocked_by_vendor_product(&d) {
+                continue;
+            }
+            let Some(d) = crate::report_blocking::prune_device_info(d) else {
+                continue;
+            };
+            let devnode = info.path().to_string_lossy().into_owned();
+            cache.insert(d.device_id, d.clone());
+            dnmap.insert(devnode, d.device_id);
+        }
+    }
+}
+
+/// Translate one udev event into the corresponding device event. Returns
+/// `None` for events that should be skipped (no devnode, hidden devices,
+/// removals of unknown devices, or non-add/remove events).
+#[cfg(target_os = "linux")]
+fn handle_udev_event(event: udev::Event) -> Option<IpcResponse> {
+    let devnode = match event.device().devnode().and_then(|p| p.to_str()) {
+        Some(p) => p.to_string(),
+        None => return None,
+    };
+    match event.event_type() {
+        udev::EventType::Add => {
+            let info = crate::hid::info_by_raw_path(&devnode)?;
+            let info = crate::report_blocking::prune_device_info(info)?;
+            log::info!(
+                "device connected: {:04x}:{:04x} ({})",
+                info.vendor_id,
+                info.product_id,
+                info.device_id
+            );
+            let mut cache = DEVICE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+            let cache = cache.get_or_insert_with(HashMap::new);
+            cache.insert(info.device_id, info.clone());
+            let mut dnmap = DEVNODE_TO_ID.lock().unwrap_or_else(|e| e.into_inner());
+            let dnmap = dnmap.get_or_insert_with(HashMap::new);
+            dnmap.insert(devnode, info.device_id);
+            Some(IpcResponse::DeviceConnected {
+                id: 0,
+                device: info,
+            })
+        }
+        udev::EventType::Remove => {
+            let device_id = {
+                let mut dnmap = DEVNODE_TO_ID.lock().unwrap_or_else(|e| e.into_inner());
+                dnmap.get_or_insert_with(HashMap::new).remove(&devnode)
+            };
+            let info = device_id.and_then(|id| {
+                let mut cache = DEVICE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+                cache.as_mut().and_then(|c| c.remove(&id))
+            });
+            match info {
+                Some(i) => {
+                    log::info!(
+                        "device disconnected: {:04x}:{:04x} ({})",
+                        i.vendor_id,
+                        i.product_id,
+                        i.device_id
+                    );
+                    Some(IpcResponse::DeviceDisconnected { id: 0, device: i })
+                }
+                None => None,
+            }
+        }
+        _ => None,
+    }
+}
 
 #[cfg(target_os = "linux")]
 fn start_udev(event_tx: broadcast::Sender<IpcResponse>) -> anyhow::Result<()> {
-    use std::collections::HashMap;
-    use std::os::unix::io::AsRawFd;
-    use std::sync::Mutex;
-
-    static DEVICE_CACHE: Mutex<Option<HashMap<u32, webhid::DeviceInfo>>> = Mutex::new(None);
-    static DEVNODE_TO_ID: Mutex<Option<HashMap<String, u32>>> = Mutex::new(None);
-
     std::thread::Builder::new()
         .name("udev-monitor".into())
         .spawn(move || {
@@ -115,28 +201,7 @@ fn start_udev(event_tx: broadcast::Sender<IpcResponse>) -> anyhow::Result<()> {
                 }
             };
 
-            if let Ok(api) = hidapi::HidApi::new() {
-                let mut cache = DEVICE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
-                let cache = cache.get_or_insert_with(HashMap::new);
-                let mut dnmap = DEVNODE_TO_ID.lock().unwrap_or_else(|e| e.into_inner());
-                let dnmap = dnmap.get_or_insert_with(HashMap::new);
-                for info in api.device_list() {
-                    if crate::hid::is_blocked_pub(info) {
-                        continue;
-                    }
-                    if let Some(d) = crate::hid::info_from_hidapi_pub(info) {
-                        if crate::hid::is_blocked_by_vendor_product(&d) {
-                            continue;
-                        }
-                        let Some(d) = crate::report_blocking::prune_device_info(d) else {
-                            continue;
-                        };
-                        let devnode = info.path().to_string_lossy().into_owned();
-                        cache.insert(d.device_id, d.clone());
-                        dnmap.insert(devnode, d.device_id);
-                    }
-                }
-            }
+            seed_udev_cache();
 
             let fd = socket.as_raw_fd();
             loop {
@@ -151,62 +216,8 @@ fn start_udev(event_tx: broadcast::Sender<IpcResponse>) -> anyhow::Result<()> {
                 }
 
                 for event in socket.iter() {
-                    let devnode = match event.device().devnode().and_then(|p| p.to_str()) {
-                        Some(p) => p.to_string(),
-                        None => continue,
-                    };
-                    let response = match event.event_type() {
-                        udev::EventType::Add => {
-                            let Some(info) = crate::hid::info_by_raw_path(&devnode) else {
-                                continue;
-                            };
-                            // Hidden after pruning (all collections protected):
-                            // do not report the device, like Chromium.
-                            let Some(info) = crate::report_blocking::prune_device_info(info) else {
-                                continue;
-                            };
-                            log::info!(
-                                "device connected: {:04x}:{:04x} ({})",
-                                info.vendor_id,
-                                info.product_id,
-                                info.device_id
-                            );
-                            let mut cache = DEVICE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
-                            let cache = cache.get_or_insert_with(HashMap::new);
-                            cache.insert(info.device_id, info.clone());
-                            let mut dnmap = DEVNODE_TO_ID.lock().unwrap_or_else(|e| e.into_inner());
-                            let dnmap = dnmap.get_or_insert_with(HashMap::new);
-                            dnmap.insert(devnode, info.device_id);
-                            IpcResponse::DeviceConnected {
-                                id: 0,
-                                device: info,
-                            }
-                        }
-                        udev::EventType::Remove => {
-                            let device_id = {
-                                let mut dnmap = DEVNODE_TO_ID.lock().unwrap_or_else(|e| e.into_inner());
-                                dnmap.get_or_insert_with(HashMap::new).remove(&devnode)
-                            };
-                            let info = device_id.and_then(|id| {
-                                let mut cache = DEVICE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
-                                cache.as_mut().and_then(|c| c.remove(&id))
-                            });
-                            match info {
-                                Some(i) => {
-                                    log::info!(
-                                        "device disconnected: {:04x}:{:04x} ({})",
-                                        i.vendor_id,
-                                        i.product_id,
-                                        i.device_id
-                                    );
-                                    IpcResponse::DeviceDisconnected { id: 0, device: i }
-                                }
-                                None => {
-                                    continue;
-                                }
-                            }
-                        }
-                        _ => continue,
+                    let Some(response) = handle_udev_event(event) else {
+                        continue;
                     };
                     if event_tx.send(response).is_err() {
                         log::debug!("no receivers for udev event");
@@ -217,18 +228,16 @@ fn start_udev(event_tx: broadcast::Sender<IpcResponse>) -> anyhow::Result<()> {
     Ok(())
 }
 
-// =====================================================================
-// Windows: RegisterDeviceNotification + WM_DEVICECHANGE
-// =====================================================================
-
 #[cfg(target_os = "windows")]
 #[allow(non_snake_case, non_upper_case_globals)]
 fn run_windows(event_tx: broadcast::Sender<IpcResponse>) {
-    // Seed cache
     if let Ok(devices) = crate::hid::enumerate() {
         let mut cache = DEVICE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
         let cache = cache.get_or_insert_with(HashMap::new);
-        for d in devices.into_iter().filter_map(crate::report_blocking::prune_device_info) {
+        for d in devices
+            .into_iter()
+            .filter_map(crate::report_blocking::prune_device_info)
+        {
             cache.insert(d.device_id, d);
         }
     }
@@ -279,11 +288,10 @@ fn run_windows(event_tx: broadcast::Sender<IpcResponse>) {
         dbcc_size: DWORD,
         dbcc_devicetype: DWORD,
         dbcc_reserved: DWORD,
-        dbcc_classguid: [u8; 16], // GUID
-        dbcc_name: [u16; 1],      // variable-length, we don't use it
+        dbcc_classguid: [u8; 16],
+        dbcc_name: [u16; 1],
     }
 
-    // GUID_DEVINTERFACE_HID: {4D1E55B2-F16F-11CF-88CB-001111000030}
     const GUID_DEVINTERFACE_HID: [u8; 16] = [
         0xB2, 0x55, 0x1E, 0x4D, 0x6F, 0xF1, 0xCF, 0x11, 0x88, 0xCB, 0x00, 0x11, 0x11, 0x00, 0x00,
         0x30,
@@ -393,10 +401,6 @@ fn run_windows(event_tx: broadcast::Sender<IpcResponse>) {
     }
 }
 
-// =====================================================================
-// macOS: IOHIDManager matching + run loop callbacks
-// =====================================================================
-
 #[cfg(target_os = "macos")]
 fn run_macos(event_tx: broadcast::Sender<IpcResponse>) {
     use core_foundation_sys::base::*;
@@ -445,11 +449,13 @@ fn run_macos(event_tx: broadcast::Sender<IpcResponse>) {
     type IOOptionBits = u32;
     const KIO_HID_OPTIONS_TYPE_NONE: IOOptionBits = 0;
 
-    // Seed cache
     if let Ok(devices) = crate::hid::enumerate() {
         let mut cache = DEVICE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
         let cache = cache.get_or_insert_with(HashMap::new);
-        for d in devices.into_iter().filter_map(crate::report_blocking::prune_device_info) {
+        for d in devices
+            .into_iter()
+            .filter_map(crate::report_blocking::prune_device_info)
+        {
             cache.insert(d.device_id, d);
         }
     }
