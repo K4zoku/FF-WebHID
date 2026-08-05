@@ -137,7 +137,10 @@ impl DeviceManager {
         // `Sync` so reader and writer share the same fd via `Arc<HidDevice>` —
         // the kernel multiplexes read+write concurrently. On other platforms
         // the Mutex serialises them.
+        #[cfg(target_os = "linux")]
         let device_arc: DeviceHandle = Arc::new(device);
+        #[cfg(not(target_os = "linux"))]
+        let device_arc: DeviceHandle = Arc::new(Mutex::new(device));
         let dev_for_task = Arc::clone(&device_arc);
 
         let mut map = self.devices.lock().unwrap_or_else(|e| e.into_inner());
