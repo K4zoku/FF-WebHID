@@ -52,23 +52,29 @@ jobs:
             artifact_name: webhid-linux-x86_64
             apt_deps: libudev-dev zip
             rust_target: ""
+            cargo_wrapper: "./.cargo/rustc-wrapper.sh"
           - os: ubuntu-24.04-arm
             arch: aarch64
             artifact_name: webhid-linux-aarch64
             apt_deps: libudev-dev zip
             rust_target: ""
+            cargo_wrapper: "./.cargo/rustc-wrapper.sh"
           - os: windows-2022
             arch: universal
             artifact_name: webhid-windows
             apt_deps: ""
             rust_target: ""
+            cargo_wrapper: ""
           - os: macos-15
             arch: universal
             artifact_name: webhid-macos
             apt_deps: ""
             rust_target: ""
+            cargo_wrapper: ""
 
     runs-on: ${{ matrix.os }}
+    env:
+      CARGO_BUILD_RUSTC_WRAPPER: ${{ matrix.cargo_wrapper }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -137,13 +143,11 @@ jobs:
       - name: Prepare Artifacts (macOS)
         if: runner.os == 'macOS'
         run: |
-          # Build all 3 variants on one macOS runner via cross-compile + lipo
           rustup target add x86_64-apple-darwin aarch64-apple-darwin
           cargo build --release --manifest-path crates/Cargo.toml \
           -p webhid-daemon -p webhid-native-messaging \
           --target x86_64-apple-darwin --target aarch64-apple-darwin
 
-          # Create universal binaries with lipo
           mkdir -p crates/target/universal-apple-darwin/release
           lipo -create \
             crates/target/x86_64-apple-darwin/release/webhid-daemon \

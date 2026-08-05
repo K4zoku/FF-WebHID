@@ -45,8 +45,6 @@ jobs:
             artifact_name: webhid-windows
             apt_deps: ""
             rust_target: ""
-            # The rustc-wrapper is a POSIX script (cargo-fixup, linux-native
-            # patches only); Windows cannot execute it, so disable it there.
             cargo_wrapper: ""
           - os: macos-15
             arch: universal
@@ -56,6 +54,8 @@ jobs:
             cargo_wrapper: ""
 
     runs-on: ${{ matrix.os }}
+    env:
+      CARGO_BUILD_RUSTC_WRAPPER: ${{ matrix.cargo_wrapper }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -88,23 +88,17 @@ jobs:
 
       - name: Build binaries (Linux)
         if: runner.os == 'Linux'
-        env:
-          CARGO_BUILD_RUSTC_WRAPPER: ${{ matrix.cargo_wrapper }}
         run: cargo build --release --manifest-path crates/Cargo.toml -p webhid-daemon -p webhid-native-messaging
         shell: bash
 
       - name: Build binaries (macOS)
         if: runner.os == 'macOS'
-        env:
-          CARGO_BUILD_RUSTC_WRAPPER: ${{ matrix.cargo_wrapper }}
         run: |
-          # Build all 3 variants on one macOS runner via cross-compile + lipo
           rustup target add x86_64-apple-darwin aarch64-apple-darwin
           cargo build --release --manifest-path crates/Cargo.toml \
             -p webhid-daemon -p webhid-native-messaging \
             --target x86_64-apple-darwin --target aarch64-apple-darwin
 
-          # Create universal binaries with lipo
           mkdir -p crates/target/universal-apple-darwin/release
           lipo -create \
             crates/target/x86_64-apple-darwin/release/webhid-daemon \
@@ -117,8 +111,6 @@ jobs:
 
       - name: Build binaries (Windows)
         if: runner.os == 'Windows'
-        env:
-          CARGO_BUILD_RUSTC_WRAPPER: ${{ matrix.cargo_wrapper }}
         shell: pwsh
         run: |
           rustup target add x86_64-pc-windows-msvc aarch64-pc-windows-msvc
