@@ -1,0 +1,41 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Restricted Trusted Types Policy</title>
+  </head>
+  <body>
+    <script>
+      window.tests = window.tests || { helper: {}, results: {} }
+      var R = window.tests.results
+      R.hasTrustedTypes = typeof trustedTypes !== 'undefined'
+      if (!R.hasTrustedTypes) {
+        R.skipped = true
+      } else {
+        try {
+          var pagePolicy = trustedTypes.createPolicy('uRGq7', {
+            createScriptURL: function (s) {
+              return s + '#page'
+            }
+          })
+          R.swallowedType = typeof pagePolicy.createScriptURL
+          R.swallowedChain = String(pagePolicy.createScriptURL('https://x/worker.js'))
+          R.wrappedInstanceof = pagePolicy instanceof TrustedTypePolicy
+          R.wrappedName = pagePolicy.name
+        } catch (e) {
+          R.swallowedType = e.name
+        }
+        try {
+          trustedTypes.createPolicy('default', {
+            createScriptURL: function (s) {
+              return s
+            }
+          })
+          R.defaultCreated = 'ok'
+        } catch (e) {
+          R.defaultCreated = e.name
+        }
+      }
+    </script>
+  </body>
+</html>

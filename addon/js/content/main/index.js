@@ -1,4 +1,4 @@
-(function () {
+;(function () {
   const isWorker = typeof window === 'undefined' || !(window instanceof Window)
   if (!isWorker && !window.isSecureContext) {
     console.debug('NO POLYFILL')
@@ -56,14 +56,14 @@
         bridgePort.postMessage({
           type: 'dataPlaneEvent',
           deviceId,
-          event: { type: 'auth-failed', code },
+          event: { type: 'auth-failed', code }
         })
       },
       onBinary: (batch) => {
         if (batch.length > 0 && batch[0] >= 0x81) return handleInPageControlResponse(batch)
         const offset = batch.length > 0 && batch[0] === 0x00 ? 1 : 0
         pushInPageBatch(deviceId, batch, offset)
-      },
+      }
     })
     inPagePlanes.set(deviceId, { wt, deviceId })
     wt.connect(req.payload || {})
@@ -180,7 +180,7 @@
           } else {
             reject(new DOMException((e && e.message) || e || 'request failed', 'NetworkError'))
           }
-        },
+        }
       })
       if (!plane.wt.send(frame)) {
         inPagePending.delete(reqId)
@@ -237,7 +237,7 @@
         bridgePort.postMessage({
           type: 'workerError',
           deviceId: payload.deviceId,
-          message: (event && event.message) || 'unknown',
+          message: (event && event.message) || 'unknown'
         })
       }
     }
@@ -272,15 +272,13 @@
         { type: 'setPorts', controlPort: controlChannel.port2, dataPort: dataChannel.port2 },
         [controlChannel.port2, dataChannel.port2]
       )
-      bridgePort.postMessage(
-        { id: 0, action: 'dataPort', payload: { deviceId: state.deviceId } },
-        [controlChannel.port1]
-      )
+      bridgePort.postMessage({ id: 0, action: 'dataPort', payload: { deviceId: state.deviceId } }, [
+        controlChannel.port1
+      ])
     } else {
-      bridgePort.postMessage(
-        { id: 0, action: 'dataPort', payload: { deviceId: state.deviceId } },
-        [dataChannel.port2]
-      )
+      bridgePort.postMessage({ id: 0, action: 'dataPort', payload: { deviceId: state.deviceId } }, [
+        dataChannel.port2
+      ])
     }
   }
 
@@ -295,15 +293,11 @@
     wireDevicePort(state)
   }
 
-
-  if (!isWorker) {
-    setupTrustedTypesSharing()
-  }
-
   /** @returns {void} */
   function setupTrustedTypesSharing() {
     if (typeof trustedTypes === 'undefined' || trustedTypes === null) return
     const nativeCreatePolicy = trustedTypes.createPolicy.bind(trustedTypes)
+    let captured = false
     const claim = (name) => {
       try {
         return nativeCreatePolicy(name, { createScriptURL: (s) => s })
@@ -311,19 +305,28 @@
         return null
       }
     }
-    let policy = claim('webhid-worker')
-    if (policy) {
-      installTtSharing('webhid-worker', policy, nativeCreatePolicy)
-      return
+
+    trustedTypes.createPolicy = function (claimedName, pageRules) {
+      if (captured) return nativeCreatePolicy(claimedName, pageRules)
+      const policy = nativeCreatePolicy(claimedName, { createScriptURL: (s) => s })
+      captured = true
+      ttFactory = (url) => policy.createScriptURL(url)
+      return makeWrappedPolicy(policy, claimedName, pageRules)
     }
+
     sendRequest('getCspInfo')
       .then((info) => {
-        const names = (info && info.trustedTypesNames) || []
-        for (const name of ['default', ...names]) {
-          if (name === 'webhid-worker') continue
-          const p = claim(name)
-          if (p) {
-            installTtSharing(name, p, nativeCreatePolicy)
+        if (captured) return
+        const names = Array.isArray(info && info.trustedTypesNames) ? info.trustedTypesNames : []
+        const candidates = names.length ? names : ['webhid-worker']
+        for (const name of candidates) {
+          if (typeof name !== 'string' || name === "'none'" || name === "'allow-duplicates'")
+            continue
+          const policy = claim(name)
+          if (policy) {
+            captured = true
+            ttFactory = (url) => policy.createScriptURL(url)
+            installTtSharing(name, policy, nativeCreatePolicy)
             return
           }
         }
@@ -338,7 +341,8 @@
    * @returns {object}
    */
   function makeWrappedPolicy(policy, name, pageRules) {
-    const proto = typeof TrustedTypePolicy !== 'undefined' ? TrustedTypePolicy.prototype : Object.prototype
+    const proto =
+      typeof TrustedTypePolicy !== 'undefined' ? TrustedTypePolicy.prototype : Object.prototype
     const wrapper = Object.create(proto)
     const rules = pageRules || {}
     const define = (prop, value) => {
@@ -346,7 +350,7 @@
         value,
         writable: false,
         enumerable: false,
-        configurable: false,
+        configurable: false
       })
     }
     define('name', name)
@@ -456,6 +460,7 @@
         setupBridgePort()
         resolve()
       })
+  if (!isWorker) setupTrustedTypesSharing()
 
   /** @returns {void} */
   function setupBridgePort() {
@@ -506,7 +511,7 @@
     },
     event: (data) => {
       dispatchDeviceEvent(data.event)
-    },
+    }
   }
 
   /**
@@ -1249,7 +1254,7 @@
     featureResult: handleReportResult,
     inputReportBatch: handleInputReportBatch,
     inputReport: handleInputReport,
-    disconnect: handleDataPortDisconnectEvent,
+    disconnect: handleDataPortDisconnectEvent
   }
 
   /**
@@ -1499,9 +1504,7 @@
       const id = frameNonce + ':' + ++nextReqId
       pending[id] = (result) => {
         grantRequestedDevices(result).then(resolve, (e) =>
-          reject(
-            new DOMException(e != null ? e.message : 'requestDevice failed', 'NetworkError')
-          )
+          reject(new DOMException(e != null ? e.message : 'requestDevice failed', 'NetworkError'))
         )
       }
       bridgePort.postMessage({
