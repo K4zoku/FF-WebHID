@@ -11,7 +11,7 @@
     "shell": "system",
     "show_summary": true,
     "show_command": true,
-    "tags": ["build"],
+    "tags": ["build"]
   },
   {
     "label": "Run",
