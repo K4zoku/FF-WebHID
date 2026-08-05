@@ -41,6 +41,67 @@
     nmHostName: 'webhid.forwarder_nm_host',
     lastError: null,
 
+    /** @returns {boolean} */
+    tryHostError(message) {
+      if (message.E === undefined || message.s === undefined || message.n !== undefined) {
+        return false
+      }
+      logger.error('host error: ' + message.E)
+      this.lastError = String(message.E)
+      for (const [, p] of this.pending) p.resolve(message)
+      this.pending.clear()
+      return true
+    },
+
+    /** @returns {boolean} */
+    tryPackedData(message) {
+      if (message.d === undefined || message.n !== undefined || message.e !== undefined) {
+        return false
+      }
+      this.onPackedData(message.d)
+      return true
+    },
+
+    /** @returns {boolean} */
+    tryControlEvent(message) {
+      if (message.e === undefined) return false
+      this.onControlEvent(message)
+      return true
+    },
+
+    /** @returns {boolean} */
+    tryPendingResponse(message) {
+      if (message.n === undefined) return false
+      const p = this.pending.get(message.n)
+      if (!p) return false
+      this.pending.delete(message.n)
+      p.resolve(message)
+      return true
+    },
+
+    /** @returns {boolean} */
+    tryUnmatchedDaemonError(message) {
+      if (message.s === undefined || message.n !== undefined || message.E !== undefined) {
+        return false
+      }
+      logger.warn('daemon error (no req id): status=' + message.s)
+      return true
+    },
+
+    /**
+     * Routes one native message to its handler.
+     * @param {object} message
+     * @returns {void}
+     */
+    handleNativeMessage(message) {
+      if (this.tryHostError(message)) return
+      if (this.tryPackedData(message)) return
+      if (this.tryControlEvent(message)) return
+      if (this.tryPendingResponse(message)) return
+      if (this.tryUnmatchedDaemonError(message)) return
+      logger.warn('unmatched:', message)
+    },
+
     connect() {
       if (this.port) return Promise.resolve()
       logger.debug('connecting to ' + this.nmHostName + '...')
@@ -51,34 +112,7 @@
         logger.debug('connected')
 
         this.port.onMessage.addListener((message) => {
-          if (message.E !== undefined && message.s !== undefined && message.n === undefined) {
-            logger.error('host error: ' + message.E)
-            this.lastError = String(message.E)
-            for (const [, p] of this.pending) p.resolve(message)
-            this.pending.clear()
-            return
-          }
-          if (message.d !== undefined && message.n === undefined && message.e === undefined) {
-            this.onPackedData(message.d)
-            return
-          }
-          if (message.e !== undefined) {
-            this.onControlEvent(message)
-            return
-          }
-          if (message.n !== undefined) {
-            const p = this.pending.get(message.n)
-            if (p) {
-              this.pending.delete(message.n)
-              p.resolve(message)
-              return
-            }
-          }
-          if (message.s !== undefined && message.n === undefined && message.E === undefined) {
-            logger.warn('daemon error (no req id): status=' + message.s)
-            return
-          }
-          logger.warn('unmatched:', message)
+          this.handleNativeMessage(message)
         })
 
         this.port.onDisconnect.addListener(() => {
@@ -243,62 +277,66 @@
       }
     },
 
+    handleDeviceConnectionEvent(message) {
+      if (message.v) {
+        if (message.e === EVT_CONNECT) {
+          if (!deviceCache.some((d) => d.deviceId === message.v.deviceId)) {
+            const dev = message.v
+            if (dev && typeof dev.collections === 'string') {
+              try {
+                dev.collections = decodeCollectionsTlv(dev.collections)
+              } catch {
+                dev.collections = []
+              }
+            }
+            deviceCache.push(dev)
+          }
+          saveDeviceInfo(message.v)
+        } else {
+          const idx = deviceCache.findIndex((d) => d.deviceId === message.i)
+          if (idx >= 0) deviceCache.splice(idx, 1)
+        }
+      } else {
+        this.enumerateDevices()
+          .then((resp) => {
+            if (http.isOk(resp.s) && resp.D)
+              ((deviceCache.length = 0), deviceCache.push(...resp.D))
+          })
+          .catch((e) => logger.debug('enumerateDevices failed', e))
+      }
+      const normalized = {
+        eventType: message.e === EVT_CONNECT ? 'connect' : 'disconnect',
+        deviceId: message.i,
+        device: message.v || null
+      }
+      browser.runtime
+        .sendMessage({ action: 'webhidDeviceEvent', event: normalized })
+        .catch((e) => logger.debug('event forward to runtime failed', e))
+      browser.tabs
+        .query({})
+        .then((tabs) => {
+          for (const tab of tabs) {
+            if (!tab.url) continue
+            try {
+              new URL(tab.url)
+            } catch {
+              continue
+            }
+            browser.tabs
+              .sendMessage(tab.id, {
+                action: 'webhidDeviceEvent',
+                event: normalized
+              })
+              .catch((e) => logger.debug('event forward to all tabs failed', e))
+          }
+        })
+        .catch((e) => logger.debug('tabs.query failed', e))
+    },
+
     onControlEvent(message) {
       if (message.e === undefined) return
       if (message.e === EVT_CONNECT || message.e === EVT_DISCONNECT) {
-        if (message.v) {
-          if (message.e === EVT_CONNECT) {
-            if (!deviceCache.some((d) => d.deviceId === message.v.deviceId)) {
-              const dev = message.v
-              if (dev && typeof dev.collections === 'string') {
-                try {
-                  dev.collections = decodeCollectionsTlv(dev.collections)
-                } catch {
-                  dev.collections = []
-                }
-              }
-              deviceCache.push(dev)
-            }
-            saveDeviceInfo(message.v)
-          } else {
-            const idx = deviceCache.findIndex((d) => d.deviceId === message.i)
-            if (idx >= 0) deviceCache.splice(idx, 1)
-          }
-        } else {
-          this.enumerateDevices()
-            .then((resp) => {
-              if (http.isOk(resp.s) && resp.D)
-                ((deviceCache.length = 0), deviceCache.push(...resp.D))
-            })
-            .catch((e) => logger.debug('enumerateDevices failed', e))
-        }
-        const normalized = {
-          eventType: message.e === EVT_CONNECT ? 'connect' : 'disconnect',
-          deviceId: message.i,
-          device: message.v || null
-        }
-        browser.runtime
-          .sendMessage({ action: 'webhidDeviceEvent', event: normalized })
-          .catch((e) => logger.debug('event forward to runtime failed', e))
-        browser.tabs
-          .query({})
-          .then((tabs) => {
-            for (const tab of tabs) {
-              if (!tab.url) continue
-              try {
-                new URL(tab.url)
-              } catch {
-                continue
-              }
-              browser.tabs
-                .sendMessage(tab.id, {
-                  action: 'webhidDeviceEvent',
-                  event: normalized
-                })
-                .catch((e) => logger.debug('event forward to all tabs failed', e))
-            }
-          })
-          .catch((e) => logger.debug('tabs.query failed', e))
+        this.handleDeviceConnectionEvent(message)
         return
       }
       const targets = tabsForEventLocal(message)

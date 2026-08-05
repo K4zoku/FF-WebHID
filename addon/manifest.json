@@ -35,6 +35,9 @@
       "js/utils/bundle-files.js",
       "js/background/bundle.js",
       "js/background/nm.js",
+      "js/background/csp.js",
+      "js/background/messages.js",
+      "js/background/webrequest.js",
       "js/background/index.js"
     ]
   },
