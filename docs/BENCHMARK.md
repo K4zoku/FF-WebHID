@@ -113,26 +113,25 @@ it is retried. Chromium native numbers are from the 2026-08-02 dataset: the
 addon code does not affect the native benchmark, so that baseline is
 unchanged.
 
-Init time per mode (open = device open through data-plane ready; warmup =
-wall time of the warm-up; total = page load through run #1's send-start):
+Init time per mode, stacked (open = device open through data-plane ready;
+warmup = wall time of the warm-up; other = total minus the two, i.e. page
+load through run #1's send-start):
 
 ```mermaid
 ---
 config:
   themeVariables:
     xyChart:
-      plotColorPalette: '#55b4d4, #fa8532, #86b300'
+      plotColorPalette: '#ADAEB1, #fa8532, #55b4d4'
 ---
 xychart
     title "Init time per mode (ms)"
     x-axis [nm, ws, wt-inpage, wt, native]
     y-axis "ms" 0 --> 350
-    bar "open" [15.9, 25.6, 13.2, 34.5, 5.2]
-    bar "warmup" [248.0, 132.0, 106.0, 134.0, 21.0]
     bar "total" [330.7, 208.1, 184.6, 211.5, 62.4]
+    bar "warmup" [263.9, 157.6, 119.2, 168.5, 26.2]
+    bar "open" [15.9, 25.6, 13.2, 34.5, 5.2]
 ```
-
-Bar order in each group: open, warmup, total.
 
 Per-run round-trip latency (p50) and whole-run walltime, for all 10 runs of
 each mode, are charted below. Per-run percentiles, whole-run aggregates, and
