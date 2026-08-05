@@ -150,10 +150,11 @@ Spec files: `dest-rewrite`, `hid-class`, `hid-device-class`, `hid-event-classes`
 
 End-to-end tests spawn the debug daemon + `webhid-mock` (a virtual HID device creator: `/dev/uhid` on Linux, `IOHIDUserDevice` on macOS) as subprocesses and drive `navigator.hid` through a test page. They run as serial chains (`test.describe.serial`) against a worker-scoped page and Firefox profile, so pairing and opening happen once and every later test reuses the same device. No per-test reset.
 
-Two spec files share the same fixtures:
+Three spec files share the same fixtures:
 
 - `tests/e2e/e2e.spec.ts` (19 tests): the core chain (polyfill surface, grant, open/close, input/send/feature reports, disconnect, forget)
 - `tests/e2e/wt.spec.ts` (10 tests): WebTransport data plane (WT spawn on open, input/send/feature over WT, no NM double-delivery while in WT mode, live ws→wt switch on an open device, in-page WT with `useWorker` off, cert-generation rotation + drain)
+- `tests/e2e/picker-bypass.spec.ts` (3 tests): consent-bypass regression (page prototype patching cannot capture the bridge port, page enumerate is paired-only, and the chooser flow still grants, opens and drives reports)
 
 Two projects run them, one per daemon deployment mode (both force `workers: 1`, see the concurrency note below):
 

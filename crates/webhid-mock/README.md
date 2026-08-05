@@ -14,8 +14,7 @@ Platform backends:
 
 ## Why
 
-Testing WebHID behavior end-to-end used to require plugging in real devices.
-`webhid-mock` lets us:
+Real devices are not needed to test WebHID behavior end-to-end. `webhid-mock` lets us:
 
 - Spawn a virtual mouse / keyboard / gamepad / vendor-specific device with a
   known report descriptor.
@@ -23,8 +22,8 @@ Testing WebHID behavior end-to-end used to require plugging in real devices.
 - Assert that the picker dialog, the daemon, and the polyfill all behave per
   spec — without hardware.
 - Test hot-plug (device add/remove) by spawning / killing the mock process.
-- Reproduce issue #2 (filter against vendor-specific collection on a
-  multi-collection device) without the actual hardware.
+- Test a filter against a vendor-specific collection on a multi-collection
+  device without the actual hardware.
 
 ## Build
 

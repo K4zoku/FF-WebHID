@@ -65,7 +65,7 @@ native-messaging host and cannot be overridden per site.
 - [Architecture](docs/ARCHITECTURE.md): system design, data plane, security, reconnect
 - [Spec Compliance](docs/SPECIFICATION.md): WebHID spec compliance report with item-level evidence
 - [Data Path Analysis](docs/DATA_PATH.md): per-path copy/hop/latency breakdown, cost model, optimization inventory
-- [Benchmark Report](docs/BENCHMARK.md): cold-start benchmark results (5 runs per mode), GCMajor analysis, cross-mode comparison
+- [Benchmark Report](docs/BENCHMARK.md): automated image-pipeline and 8000Hz loss benchmarks (ws/nm/wt/wt-inpage, Chromium native), per-report latency + walltime results, RDP profiling
 - [Development Guide](docs/DEVELOPMENT.md): building, testing, debugging, packaging
 - [Installation Guide](docs/INSTALLATION.md): platform-specific install instructions and recommended settings
 

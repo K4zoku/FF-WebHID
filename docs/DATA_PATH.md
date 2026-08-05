@@ -55,8 +55,8 @@ Control ops (enumerate/open/close/handshake) are NM-only, handled by bridge→ba
 | L    | `enumerate`                  | NM                  | P→B→G→NM→D→hidapi→NM→G→B→P                                                             |
 | M    | `open`                       | NM                  | P→B→G→NM→D→hidapi→NM→G→B→P + data worker setup + MessagePort transfer                  |
 | N    | `close`                      | NM                  | P→B→G→NM→D→NM→G→B→P + data worker terminate + port return                              |
-| O    | `requestDevice`              | NM                  | P→B (picker UI) → enumerate → user select → B→P                                        |
-| P    | `getDevices`                 | NM                  | P→B→G→storage + enumerate (or cache hit)                                               |
+| O    | `requestDevice`              | NM                  | P→B (picker UI) → enumerate → user select → B pairs (bridge-side) → B→P                                  |
+| P    | `getDevices`                 | NM                  | P→B→G→storage + enumeratePaired (or cache hit)                                                         |
 | Q    | `handshake` (NM)             | NM                  | B→G→NM→D→NM→G→B (returns wsPort + wsNonce)                                             |
 | R    | `connect`/`disconnect` event | NM                  | D→NM→G→B→P (tab-targeted)                                                              |
 | S    | `getPolicy`                  | NM                  | P→B→G (Permissions-Policy header cache + iframe `allow` attr check)                    |
@@ -146,8 +146,7 @@ path remains only as the fallback while the plane is not open.
 | 8         | `content/main/index.js` | `handleInPageControlResponse` → resolve                         | 0                                    | 0     |
 | **Total** |                         |                                                                 | **8**                                | **4** |
 
-Copy count matches the worker send path (Path A: the two removed MessagePort
-hops were zero-copy transfers); the hop count drops 6 → 4. Latency **3 to 8 ms**
+Copy count matches the worker send path (Path A: the two MessagePort hops are zero-copy transfers); the hop count is 4. Latency **3 to 8 ms**
 (ack-wait over WT; benchmark per-report round-trip p50 ≈ 0.85ms vs ws 0.78ms).
 
 ---
@@ -283,7 +282,7 @@ On `open()`, polyfill creates a `MessageChannel`, keeps port1 (`dataPort`), and 
 | D→NM→G→B                                       | 4      | 3     | 2 to 5 ms      |
 | **Total**                                      | **7**  | **6** | **5 to 10 ms** |
 
-Bridge sends `handshake` on init. The response contains `wsPort` (the daemon's WS port) and `wsNonce` (per-daemon-instance nonce used to compute WS auth hashes). If wsNonce is absent (old daemon version), the WS data plane falls back to NM.
+Bridge sends `handshake` on init. The response contains `wsPort` (the daemon's WS port) and `wsNonce` (per-daemon-instance nonce used to compute WS auth hashes). If wsNonce is absent, the WS data plane falls back to NM.
 
 ---
 
@@ -343,7 +342,7 @@ Bridge sends `handshake` on init. The response contains `wsPort` (the daemon's W
 
 8. **Control ops are NM-only.** enumerate/open/close/handshake always go via NM.
 
-9. **WT is a full data plane in both shapes.** The WT worker path (W) is Path I with the TCP/WS leg replaced by the QUIC/TLS stream (benchmark-measured ~+0.07ms per report on loopback). The WT in-page path (X, `useWorker` off) drops the worker + MessagePort hop (3 vs 4) but parses batches on the page's main thread, the exact CPU contention the worker exists to avoid. Sends are in-page too: `sendReport`/`sendFeatureReport`/`receiveFeatureReport` write the same frames over the same in-page stream (Path V, 4 hops vs 6), so in-page WT is a complete data plane, not an input-only hybrid.
+9. **WT is a full data plane in both shapes.** The WT worker path (W) is Path I with the QUIC/TLS stream in place of the TCP/WS leg (benchmark-measured ~+0.07ms per report on loopback). The WT in-page path (X, `useWorker` off) drops the worker + MessagePort hop (3 vs 4) but parses batches on the page's main thread, the exact CPU contention the worker exists to avoid. Sends are in-page too: `sendReport`/`sendFeatureReport`/`receiveFeatureReport` write the same frames over the same in-page stream (Path V, 4 hops vs 6), so in-page WT is a complete data plane, not an input-only hybrid.
 
 ---
 
@@ -598,10 +597,10 @@ sequenceDiagram
     Picker->>Picker: applyFilters + render
     Note over Picker: user selects, clicks Connect
     Picker-->>B: webhid-device-selected
+    B->>G: runtime.sendMessage(pairDevice, per device)
+    B->>G: runtime.sendMessage(recordGrantGroup, when more than one)
+    G->>G: IndexedDB origins store + grantGroups
     B-->>P: port.postMessage(devices)
-    P->>B: pairDevice (async)
-    B->>G: runtime.sendMessage(pairDevice)
-    G->>G: storage.local.set
 ```
 
 ### Path Q: `handshake` (NM, one-time)
