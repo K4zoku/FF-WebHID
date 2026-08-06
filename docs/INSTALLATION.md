@@ -62,6 +62,8 @@ sudo systemctl disable --now webhid-daemon
 # 3. Enable "Daemon as NM host" in the addon settings
 ```
 
+> Note: Rule using the `uaccess` tag needs a name lexically precede `/usr/lib/udev/rules.d/73-seat-late.rules` to be effective on Arch Linux. If your daemon cannot detect hid devices, try renaming `/etc/udev/rules.d/99-webhid.rules` to something like `71-webhid.rules` where the number is less than 73.
+
 **Prefer a persistent root daemon?** Keep the service enabled instead:
 
 ```sh
