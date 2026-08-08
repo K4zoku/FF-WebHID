@@ -2,12 +2,70 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
-## Unreleased
+## [3.0.1](https://github.com/K4zoku/FF-WebHID/compare/v3.0.0...v3.0.1) (2026-08-08)
 
-### Changed
+### Features
 
-- default data plane is now WebTransport (worker) instead of WebSocket, with ws as the fallback on Firefox < 114. Profiler-verified (2026-08): WS delivery crosses the content main thread (PWebSocket IPC + ChannelEventQueue into the worker), costing ~18pp main-thread CPU and 3.8x the main-thread IPC of WT under render-heavy load; WT reads reports from a DataPipe shared-memory buffer on the worker with zero WebSocket IPC. `dataPlane` still selects ws/wt/nm explicitly.
+* add allowActivationlessRequestDevice per-site setting ([ca70c1f](https://github.com/K4zoku/FF-WebHID/commit/ca70c1f92d4998e3b118fdfc84ba2c283016244a))
+* add WebTransport (in-page) as a fourth data plane mode ([2325969](https://github.com/K4zoku/FF-WebHID/commit/2325969c4b4b91c70bc0fb93597f4665f7459098))
+* default data plane is WebTransport (worker), ws on Firefox < 114 ([4609149](https://github.com/K4zoku/FF-WebHID/commit/4609149397e083a5c5ad778bfdb903643d60fbc0))
+* one fd per HID device via linux-native backend + cargo-fixup patch ([d5e67f3](https://github.com/K4zoku/FF-WebHID/commit/d5e67f377460a19361507a2f1958ac68de97744f))
+* strict origin check ([7488ccc](https://github.com/K4zoku/FF-WebHID/commit/7488ccc76d7d0a2d281518dc1bc7c562d083e02b))
+* ui/ux rework ([ede34ae](https://github.com/K4zoku/FF-WebHID/commit/ede34ae0eab281c927cbd218f2f2dcdf5f4fdeae))
 
+### Bug Fixes
+
+* cfg-gate DeviceHandle construction for non-Linux ([e0135bf](https://github.com/K4zoku/FF-WebHID/commit/e0135bf1e1ae05774e9df2c1880a0867f5b5263b))
+* consent bypass ([2725994](https://github.com/K4zoku/FF-WebHID/commit/27259946542a064c4de526560ed43b6382260d64))
+* float info popovers, point arrow at info button ([4e2e8fe](https://github.com/K4zoku/FF-WebHID/commit/4e2e8fe78b6fe47d2404ae13ffad15a0d4c20568))
+* hoist block-scoped functions, move CI interpolations to env ([628f104](https://github.com/K4zoku/FF-WebHID/commit/628f1041955ec4bd02c60edd1bc1589cf9c72b11))
+* macOS build ([7037e09](https://github.com/K4zoku/FF-WebHID/commit/7037e091359d67cd018e51e86aff5edc47ccc279))
+* macOS build warnings ([e5966b4](https://github.com/K4zoku/FF-WebHID/commit/e5966b431b3ed3f1fbaf60782ac0f35d23939cb9))
+* malformed csp ([7bf7e3f](https://github.com/K4zoku/FF-WebHID/commit/7bf7e3fb57d86728d145cc197b848564894d83e9))
+* trusted type edge cases ([49b4dbd](https://github.com/K4zoku/FF-WebHID/commit/49b4dbd8199147a97bac14e6ecda16ce53730c9b))
+* trusted type lazy claim ([c976d0f](https://github.com/K4zoku/FF-WebHID/commit/c976d0f8266af9c9d98d33d037b09f098dc283b8))
+* trusted type readiness ([1057cb9](https://github.com/K4zoku/FF-WebHID/commit/1057cb9e5e645aed5fbf2454c57c6c293fde5928))
+
+### Code Refactoring
+
+* decompose daemon client and data-plane handlers ([9ff037c](https://github.com/K4zoku/FF-WebHID/commit/9ff037cab4693ce24a7cf4b63296ba381bd15e37))
+* extract helpers in addon utils and UI pages ([5962156](https://github.com/K4zoku/FF-WebHID/commit/5962156d453dc8a0b4d72e1c30b5a09b023f4b85))
+* simplify content polyfill and bridge dispatch ([d663095](https://github.com/K4zoku/FF-WebHID/commit/d6630958ecf8b1bb05a1e0b9600d62ec51e72648))
+* simplify webhid wire-format codecs and mock binaries ([46e9039](https://github.com/K4zoku/FF-WebHID/commit/46e903955f9663304cef6c147dee65518aa713d2))
+* slim build scripts and test harness helpers ([e345b9c](https://github.com/K4zoku/FF-WebHID/commit/e345b9c994cb62544a84086c59d9f5274946e8a5))
+* split background page into csp/messages/webrequest modules ([ce10f35](https://github.com/K4zoku/FF-WebHID/commit/ce10f35d41b279a823a89d4c7c6e8e84f681e254))
+* split blocklist rules and descriptor into modules ([e5c0c80](https://github.com/K4zoku/FF-WebHID/commit/e5c0c809cfcdab6edd661295a81eeda55b0f5d4c))
+
+### Documentation
+
+* add a note for Arch Linux that the name of udev rules may needs lexically precede /usr/lib/udev/rules.d/73-seat-late.rules ([0b4f5d8](https://github.com/K4zoku/FF-WebHID/commit/0b4f5d844432fbe56b71f31e901d483c9b940828))
+* fix legends wont show on xychart ([5de7727](https://github.com/K4zoku/FF-WebHID/commit/5de772758b2232d41dc7733fe316a53ee3670546))
+* fix markdownlint table/heading issues, add markdownlint config ([8d139cd](https://github.com/K4zoku/FF-WebHID/commit/8d139cd16b214f2eadc8460b37b3f9a43eee7aa3))
+* fix mermaid syntax ([b081266](https://github.com/K4zoku/FF-WebHID/commit/b081266f7038de036b6fc2bdfeaf312a5c556eff))
+* fix stacked bar chart ([422fda5](https://github.com/K4zoku/FF-WebHID/commit/422fda5ff771156299eec7bacab9f667e8ebd393))
+* rewrite README for end users ([ffada9c](https://github.com/K4zoku/FF-WebHID/commit/ffada9c4e002ba3e7bfc2460701854cf231fb122))
+* sync color scheme ([6fde8cc](https://github.com/K4zoku/FF-WebHID/commit/6fde8cc555c002aa112f5eac13dba5a4203ad5cd))
+* update automated benchmark results (2026-08-05, 10 runs per mode) ([45c15cb](https://github.com/K4zoku/FF-WebHID/commit/45c15cb7664f616140575ef1f64163e4a3c3d23b))
+* update docs ([5088c61](https://github.com/K4zoku/FF-WebHID/commit/5088c6178f53944612110798793e8d2d9b90ca35))
+* update README ([e7f13bb](https://github.com/K4zoku/FF-WebHID/commit/e7f13bbce9769b7bdaddb1381039216af296870a))
+* update README ([f3eea5f](https://github.com/K4zoku/FF-WebHID/commit/f3eea5f680c784f9655fc44df4a53898b788e32b))
+* whitelist markdownlint rules, fix BENCHMARK reference link ([46dd82c](https://github.com/K4zoku/FF-WebHID/commit/46dd82cc1d79f4bfa52f44bddb40970ede1d0658))
+
+### CI/CD
+
+* fix cargo dirty, cache wix ([bf274cd](https://github.com/K4zoku/FF-WebHID/commit/bf274cd38c22a41f857762c44b18b32b5d8bca9b))
+* fix test split artifact path and kernel modules install ([dcf6ecb](https://github.com/K4zoku/FF-WebHID/commit/dcf6ecbf5674306e4781e6338120d66defac5d1a))
+* fix windows cache ([aeee681](https://github.com/K4zoku/FF-WebHID/commit/aeee681d78c5844dd4cedf57e394bdbbbc071abf))
+* isolate test rust cache from build workflow ([86d5609](https://github.com/K4zoku/FF-WebHID/commit/86d56097b4c8c823a800af2e2835125b76a66502))
+* optimizing workflow ([c03c468](https://github.com/K4zoku/FF-WebHID/commit/c03c468cc468954b66de78c844888810f9446be1))
+* restore exec bit on downloaded binaries ([1464241](https://github.com/K4zoku/FF-WebHID/commit/14642416414a5314c3310743ecdf3e7ea7b61843))
+
+### Chores
+
+* add MIT license header to vendored base64 ([ef024a9](https://github.com/K4zoku/FF-WebHID/commit/ef024a9b28d5131d14989f8f22e765ea21ad4264))
+* drop dead code, use MAX_SAFE_INTEGER literal ([8bb1e51](https://github.com/K4zoku/FF-WebHID/commit/8bb1e512d76b7e90d5335f0e1440849bcac69e5a))
+* remove obsolete agent-perf-analysis skill ([cd7b00f](https://github.com/K4zoku/FF-WebHID/commit/cd7b00fcbef3a2e65c10307786a7632fd9dde974))
+* remove redundant , ([04908ad](https://github.com/K4zoku/FF-WebHID/commit/04908adaf2b430070c5634c3f7ae4275a7878397))
 ## [3.0.0](https://github.com/K4zoku/FF-WebHID/compare/v2.2.0...v3.0.0) (2026-08-03)
 
 ### Features
