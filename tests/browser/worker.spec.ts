@@ -126,4 +126,31 @@ test.describe('Worker polyfill gating', () => {
     expect(raw.data!.hello).toBe(true);
   });
 
+  test('live workerPolyfill toggle updates the worker init decision', async ({ page, crossUrl, backgroundPage }) => {
+    await page.goto(crossUrl('/policy-check'), { waitUntil: 'domcontentloaded', timeout: 15000 });
+    await backgroundPage.evaluate((origin) => browser.storage.local.set({
+      [`settings :: ${origin} :: workerPolyfillEnabled`]: true,
+    }), crossUrl(''));
+    let ok = false;
+    for (let i = 0; i < 20 && !ok; i++) {
+      const r = await page.evaluate(async () => {
+        const w = new Worker('/worker-polyfilled.js?_=' + Date.now());
+        const resultPromise = new Promise((resolve) => {
+          w.onmessage = (e) => resolve(e.data);
+          w.onerror = () => resolve({ ok: false });
+          setTimeout(() => resolve({ ok: false }), 2000);
+        });
+        const result = await resultPromise;
+        w.terminate();
+        return result as { ok: boolean };
+      });
+      if (r.ok) {
+        ok = true;
+      } else {
+        await new Promise((r) => setTimeout(r, 250));
+      }
+    }
+    expect(ok).toBe(true);
+  });
+
 });

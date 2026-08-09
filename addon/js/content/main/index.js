@@ -554,6 +554,9 @@
     settings: (data) => {
       settings.set(data.settings || {})
     },
+    workerPolyfillState: (data) => {
+      applyWorkerPolyfillState(data.state)
+    },
     event: (data) => {
       dispatchDeviceEvent(data.event)
     }
@@ -635,6 +638,17 @@
   const defs = GLOBAL_DEFAULTS
   const settings = createSettingsStore(defs)
 
+  /** @type {{global: boolean, origins: Set<string>}} */
+  let workerPolyfillState = { global: false, origins: new Set() }
+  /** @param {object} state @returns {void} */
+  function applyWorkerPolyfillState(state) {
+    if (!state || typeof state !== 'object') return
+    workerPolyfillState = {
+      global: !!state.global,
+      origins: new Set(Array.isArray(state.origins) ? state.origins : [])
+    }
+  }
+
   settings.on('dataPlane', (v) => logger.info('data plane changed: ' + v))
   logger.bindSettings(settings)
 
@@ -644,6 +658,7 @@
       settings.set(result)
       logger.info('data plane: ' + settings.dataPlane)
     })
+    sendRequest('workerPolyfillState', {}).then(applyWorkerPolyfillState)
   })
 
   /** @returns {{isCrossOrigin: boolean}} */
@@ -1702,33 +1717,35 @@
    * @returns {Worker}
    */
   function PatchedWorker(url, opts) {
+    let origin = ''
+    let protocol = ''
+    try {
+      const u = new URL(String(url), location.href)
+      origin = u.origin
+      protocol = u.protocol
+    } catch (e) {
+      logger.debug('worker url resolve failed', e)
+    }
+    const polyfillActive =
+      (protocol === 'http:' || protocol === 'https:') &&
+      (workerPolyfillState.global || workerPolyfillState.origins.has(origin))
     const instance = new NativeWorker(url, opts)
-    bridgeReady.then(async () => {
-      let origin = ''
-      let protocol = ''
-      try {
-        const u = new URL(String(url), location.href)
-        origin = u.origin
-        protocol = u.protocol
-      } catch (e) {
-        logger.debug('worker url resolve failed', e)
-      }
-      if (protocol !== 'http:' && protocol !== 'https:') return
-      const check = await sendRequest('workerPolyfillCheck', { origin })
-      if (!check || !check.enabled) return
+    if (polyfillActive) {
       const ch = new NativeMessageChannel()
       nativeWorkerPostMessage.call(instance, null, [ch.port1])
-      if (!bridgePort) return
-      nativeMessagePortPostMessage.call(
-        bridgePort,
-        {
-          id: frameNonce + ':' + ++nextReqId,
-          action: 'workerPort',
-          payload: {}
-        },
-        [ch.port2]
-      )
-    })
+      bridgeReady.then(() => {
+        if (!bridgePort) return
+        nativeMessagePortPostMessage.call(
+          bridgePort,
+          {
+            id: frameNonce + ':' + ++nextReqId,
+            action: 'workerPort',
+            payload: {}
+          },
+          [ch.port2]
+        )
+      })
+    }
     return instance
   }
   if (NativeWorker) {
