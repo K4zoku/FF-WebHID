@@ -23,7 +23,8 @@
   const nativeMessagePortClose = MessagePort.prototype.close
   const nativeMessagePortStart = MessagePort.prototype.start
   const NativeMessageChannel = MessageChannel
-  const nativeWorkerPostMessage = typeof Worker !== 'undefined' ? Worker.prototype.postMessage : null
+  const nativeWorkerPostMessage =
+    typeof Worker !== 'undefined' ? Worker.prototype.postMessage : null
   const nativeWindowPostMessage = typeof window !== 'undefined' ? window.postMessage : null
 
   logger.initLogger('polyfill')
@@ -473,25 +474,6 @@
     }
   }
 
-  /** @returns {string} */
-  function getCallerFrameUrl() {
-    if (isWorker) return ''
-    try {
-      const stack = new Error().stack
-      if (!stack) return location.href
-      const lines = stack.split('\n')
-      for (let i = lines.length - 1; i >= 0; i--) {
-        const m = lines[i].match(/@(.*?):\d+:\d+/)
-        if (m && m[1].startsWith('http')) {
-          return m[1]
-        }
-      }
-    } catch (e) {
-      console.debug('stack trace extraction failed', e)
-    }
-    return location.href
-  }
-
   /** @type {number} */
   let nextReqId = 0
   /** @type {{[key: string]: Function}} */
@@ -612,11 +594,7 @@
       if (payload && payload.data instanceof Uint8Array) {
         transfers.push(payload.data.buffer)
       }
-      nativeMessagePortPostMessage.call(
-        bridgePort,
-        msg,
-        transfers.length ? transfers : undefined
-      )
+      nativeMessagePortPostMessage.call(bridgePort, msg, transfers.length ? transfers : undefined)
     })
   }
 
@@ -667,10 +645,9 @@
     })
   })
 
-  /** @returns {{isCrossOrigin: boolean, frameUrl: string}} */
+  /** @returns {{isCrossOrigin: boolean}} */
   function getPolicyContext() {
-    if (isWorker) return { isCrossOrigin: false, frameUrl: '' }
-    const url = getCallerFrameUrl()
+    if (isWorker) return { isCrossOrigin: false }
     let isCrossOrigin = false
     if (window !== window.top) {
       try {
@@ -679,7 +656,7 @@
         isCrossOrigin = true
       }
     }
-    return { isCrossOrigin, frameUrl: url }
+    return { isCrossOrigin }
   }
 
   /** @returns {Promise<object>} */

@@ -116,4 +116,18 @@ interface PermResult {
     expect(raw!.queryHid).toBe('granted');
     expect(raw!.hidUndefined).toBe(false);
   });
+
+  test('cross-origin iframe cannot forge a sibling allow="hid" src', async ({ sharedPage, crossUrl }) => {
+    await sharedPage.evaluate((crossUrl) => {
+      const forge = document.createElement('iframe');
+      forge.id = 'forge';
+      forge.src = crossUrl + '/iframe-child-forge';
+      document.body.appendChild(forge);
+    }, crossUrl(''));
+    const raw = await readIframeResult(sharedPage, '/iframe-child-forge');
+    expect(raw).not.toBeNull();
+    expect(raw!.isCrossOrigin).toBe(true);
+    expect(raw!.queryHid).toBe('denied');
+    expect(raw!.hidUndefined).toBe(false);
+  });
 });

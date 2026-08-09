@@ -790,27 +790,34 @@
   async function handleGetPolicyRequest(data) {
     try {
       const payload = data.payload || {}
-      const requestFrameUrl = payload.frameUrl || ''
+      const isCrossOrigin = payload.isCrossOrigin ? true : false
+      const url = getRequestOrigin(data) || location.href
       let hasAllowAttr = false
-      if (window === window.top && requestFrameUrl) {
-        for (const iframe of document.querySelectorAll('iframe[allow*="hid" i]')) {
-          const s = iframe.src || iframe.getAttribute('src') || ''
-          if (s === requestFrameUrl) {
-            hasAllowAttr = true
+      if (window === window.top) {
+        const port = requestPortMap.get(data.id)
+        const source = port ? pageSourceByPort.get(port) : null
+        if (source) {
+          for (const iframe of document.querySelectorAll('iframe[allow*="hid" i]')) {
+            if (iframe.contentWindow !== source) continue
+            try {
+              hasAllowAttr = new URL(iframe.src).origin === new URL(url).origin
+            } catch {
+              hasAllowAttr = false
+            }
             break
           }
         }
       }
-      const policyUrl = requestFrameUrl || getRequestOrigin(data) || location.href
       const resp = await browser.runtime.sendMessage({
         action: 'getPolicy',
-        isCrossOrigin: payload.isCrossOrigin ? true : false,
-        url: policyUrl,
+        isCrossOrigin,
+        url,
         hasAllowAttr
       })
       const result = resp ? resp.policy || { hid: 'allowed' } : { hid: 'allowed' }
       result._dbg = {
-        requestFrameUrl,
+        isCrossOrigin,
+        url,
         hasAllowAttr,
         top: window === window.top
       }
