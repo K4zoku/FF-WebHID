@@ -83,3 +83,47 @@ test.describe('Worker WebHID API', () => {
   });
 
 });
+
+test.describe('Worker polyfill gating', () => {
+
+  interface PlainWorkerResult {
+    gotNull: boolean;
+    data: { hello?: boolean } | null;
+  }
+
+  test('worker without workerPolyfill receives no init message', async ({ page, crossUrl }) => {
+    await page.goto(crossUrl('/policy-check'), { waitUntil: 'domcontentloaded', timeout: 15000 });
+    const raw = await page.evaluate<PlainWorkerResult>(async () => {
+      const w = new Worker('/worker-plain.js');
+      const resultPromise = new Promise((resolve, reject) => {
+        w.onmessage = (e) => resolve(e.data);
+        w.onerror = (e) => reject(new Error(e.message));
+        setTimeout(() => reject(new Error('timeout')), 10000);
+      });
+      w.postMessage({ hello: true });
+      return resultPromise as Promise<PlainWorkerResult>;
+    });
+    expect(raw.gotNull).toBe(false);
+    expect(raw.data!.hello).toBe(true);
+  });
+
+  test('blob worker gets no init message even with workerPolyfill on', async ({ page, pageUrl }) => {
+    await page.goto(pageUrl('/policy-check'), { waitUntil: 'domcontentloaded', timeout: 15000 });
+    const raw = await page.evaluate<PlainWorkerResult>(async () => {
+      const url = URL.createObjectURL(
+        new Blob(['self.onmessage = (e) => self.postMessage({ gotNull: e.data === null, data: e.data })'])
+      );
+      const w = new Worker(url);
+      const resultPromise = new Promise((resolve, reject) => {
+        w.onmessage = (e) => resolve(e.data);
+        w.onerror = (e) => reject(new Error(e.message));
+        setTimeout(() => reject(new Error('timeout')), 10000);
+      });
+      w.postMessage({ hello: true });
+      return resultPromise as Promise<PlainWorkerResult>;
+    });
+    expect(raw.gotNull).toBe(false);
+    expect(raw.data!.hello).toBe(true);
+  });
+
+});

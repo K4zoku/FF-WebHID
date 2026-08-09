@@ -9,6 +9,11 @@ try {
   const w = new Worker(location.href);
   w.onmessage = () => { window.tests.results.workerState = 'message'; };
   w.onerror = () => { window.tests.results.workerState = 'error'; };
+  setTimeout(() => {
+    if (window.tests.results.workerState === 'pending') {
+      window.tests.results.workerState = 'settled';
+    }
+  }, 2000);
 } catch (e) {
   window.tests.results.workerState = 'thrown';
 }

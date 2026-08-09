@@ -46,6 +46,7 @@ const PAGES: Record<string, string> = {
   '/tt-policy-no-url': loadPage('tt-policy-no-url.html'),
   '/tt-policy-restricted': loadPage('tt-policy-restricted.html'),
   '/worker.js': loadPage('worker.js'),
+  '/worker-plain.js': loadPage('worker-plain.js'),
   '/sri-check': loadPage('sri-check.html'),
   '/sri-test.js': loadPage('sri-test.js'),
   '/activation': loadPage('activation.html'),

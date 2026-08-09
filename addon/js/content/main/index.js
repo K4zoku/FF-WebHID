@@ -488,6 +488,7 @@
     ? new Promise((resolve) => {
         self.addEventListener('message', function onInit(e) {
           if (e.data === null && e.ports[0]) {
+            e.stopImmediatePropagation()
             self.removeEventListener('message', onInit)
             bridgePort = e.ports[0]
             setupBridgePort()
@@ -1702,9 +1703,21 @@
    */
   function PatchedWorker(url, opts) {
     const instance = new NativeWorker(url, opts)
-    const ch = new NativeMessageChannel()
-    nativeWorkerPostMessage.call(instance, null, [ch.port1])
-    bridgeReady.then(() => {
+    bridgeReady.then(async () => {
+      let origin = ''
+      let protocol = ''
+      try {
+        const u = new URL(String(url), location.href)
+        origin = u.origin
+        protocol = u.protocol
+      } catch (e) {
+        logger.debug('worker url resolve failed', e)
+      }
+      if (protocol !== 'http:' && protocol !== 'https:') return
+      const check = await sendRequest('workerPolyfillCheck', { origin })
+      if (!check || !check.enabled) return
+      const ch = new NativeMessageChannel()
+      nativeWorkerPostMessage.call(instance, null, [ch.port1])
       if (!bridgePort) return
       nativeMessagePortPostMessage.call(
         bridgePort,

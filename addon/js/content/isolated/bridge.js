@@ -854,6 +854,25 @@
    * @param {object} data
    * @returns {Promise<void>}
    */
+  async function handleWorkerPolyfillCheckRequest(data) {
+    try {
+      const origin =
+        data.payload && typeof data.payload.origin === 'string' ? data.payload.origin : ''
+      let enabled = false
+      if (origin) {
+        const [global, site] = await Promise.all([loadGlobalSettings(), loadSiteSettings(origin)])
+        enabled = !!(global.workerPolyfillEnabled || site.workerPolyfillEnabled)
+      }
+      replyToPage({ type: 'response', id: data.id, result: { enabled } })
+    } catch {
+      replyToPage({ type: 'response', id: data.id, result: { enabled: false } })
+    }
+  }
+
+  /**
+   * @param {object} data
+   * @returns {Promise<void>}
+   */
   async function handleReportRequest(data) {
     const payload = data.payload || {}
     if (!payload.deviceId) return
@@ -1062,6 +1081,7 @@
     getCspInfo: handleGetCspInfoRequest,
     getPolicy: handleGetPolicyRequest,
     getSettings: handleGetSettingsRequest,
+    workerPolyfillCheck: handleWorkerPolyfillCheckRequest,
     sendReport: handleReportRequest,
     sendFeatureReport: handleReportRequest,
     receiveFeatureReport: handleReportRequest,

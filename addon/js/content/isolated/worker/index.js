@@ -27,11 +27,7 @@ let dataPort = null
 /** @type {Array<object>} */
 let preOpen = []
 
-self.onmessage = ({ data: msg, ports }) => {
-  if (msg === null && ports && ports[0]) {
-    self.postMessage({ type: 'ready' })
-    return
-  }
+self.onmessage = ({ data: msg }) => {
   if (msg && msg.type === 'setPorts') {
     controlPort = msg.controlPort || null
     dataPort = msg.dataPort || null
@@ -47,10 +43,7 @@ self.onmessage = ({ data: msg, ports }) => {
 function handleControlMessage(msg) {
   if (!msg) return
   if (msg.type === 'connect') {
-    const factory =
-      msg.transport === 'wt'
-        ? createWtTransport
-        : createWsTransport
+    const factory = msg.transport === 'wt' ? createWtTransport : createWsTransport
     transport = factory({
       tag: 'worker',
       onReady: () => {
