@@ -85,20 +85,6 @@ input:checked + .slider {
   background: var(--accent);
 }
 
-select {
-  background: var(--surface-hover);
-  color: var(--text);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  padding: 6px 10px;
-  font-size: 0.9em;
-  cursor: pointer;
-}
-
-select:hover {
-  border-color: var(--accent);
-}
-
 .seg-group {
   display: flex;
   flex-wrap: wrap;

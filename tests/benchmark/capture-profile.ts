@@ -132,12 +132,6 @@ export class ProfilerCapture {
     }
   }
 
-  async isActive(): Promise<boolean> {
-    if (!this.perfActor) throw new Error('ProfilerCapture: not connected')
-    const reply = (await this.request(this.perfActor, 'isActive')) as Reply | null
-    return reply !== null && typeof reply === 'object' && reply.value === true
-  }
-
   /**
    * Stop the profiler, download the capture (a gzipped profile JSON over the
    * bulk transport), decompress and write it to `filePath`. Resolves with the

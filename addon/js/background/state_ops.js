@@ -1,15 +1,6 @@
 ;(function () {
   const logger = webhid.import('logger')
-  const {
-    ACT: _ACT,
-    PKG_INPUT_REPORT: _PKG_INPUT_REPORT,
-    EVT_CONNECT: _EVT_CONNECT,
-    EVT_DISCONNECT: _EVT_DISCONNECT
-  } = webhid.import('bgPacked')
-  const { deviceTabMap, deviceCache: _deviceCache } = webhid.import('bgState')
-  const { saveDeviceInfo: _saveDeviceInfo, saveDeviceInfoBatch: _saveDeviceInfoBatch } =
-    webhid.import('bgStorage')
-  const _http = webhid.import('http')
+  const { deviceTabMap } = webhid.import('bgState')
 
   /**
    * Returns the list of tab IDs authorized for the device in the given event, or null.

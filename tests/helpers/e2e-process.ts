@@ -1,6 +1,5 @@
 import { spawn, type ChildProcess } from 'child_process'
 import { existsSync, mkdirSync, writeFileSync, unlinkSync, createWriteStream } from 'fs'
-import { rm } from 'fs/promises'
 import { join, resolve, dirname } from 'path'
 import { homedir } from 'os'
 import { fileURLToPath } from 'url'
@@ -125,7 +124,7 @@ export function sendInput(mock: WebhidMockProcess, reportId: number, data: numbe
 export async function waitForOutputReport(
   mock: WebhidMockProcess,
   timeout = 5000
-): Promise<{ reportId: number; data: number[] }> {
+): Promise<{ data: number[] }> {
   return new Promise((resolvePromise, reject) => {
     const timer = setTimeout(() => reject(new Error('Timeout waiting for output report')), timeout)
     mock.process.stdout!.on('data', (data: Buffer) => {
@@ -134,7 +133,6 @@ export async function waitForOutputReport(
         if (parsed.event === 'output_report') {
           clearTimeout(timer)
           resolvePromise({
-            reportId: 0,
             data: parsed.data || []
           })
         }
@@ -187,16 +185,4 @@ export function uninstallDaemonNmManifest(): void {
     'webhid.daemon_nm_host.json'
   )
   if (existsSync(manifestPath)) unlinkSync(manifestPath)
-}
-
-export function createProfile(profileDir: string): void {
-  mkdirSync(profileDir, { recursive: true })
-}
-
-export async function cleanupAll(): Promise<void> {
-  for (const p of [DEFAULT_SOCKET, '/tmp/webhid-daemon.sock', '/tmp/webhid-daemon.pid']) {
-    const resolved = resolve(p)
-    if (!resolved.startsWith('/tmp/') && !resolved.startsWith('/run/user/')) continue
-    if (existsSync(resolved)) await rm(resolved, { force: true })
-  }
 }

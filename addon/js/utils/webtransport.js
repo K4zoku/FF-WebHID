@@ -30,7 +30,6 @@
    * @returns {import("../types.js").WtTransport}
    */
   function createWtTransport(opts) {
-    const _tag = opts.tag || 'wt'
     const log = (level, msg) => logger[level](msg)
     /** @type {WebTransport|null} */
     let wt = null

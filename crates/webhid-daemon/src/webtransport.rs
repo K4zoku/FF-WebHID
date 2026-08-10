@@ -205,15 +205,7 @@ async fn handle_session(
     log::info!("[wt] authenticated for device_id={device_id:#x}");
     let conn = req.accept().await?;
     let wt_gen = device_mgr.wt_connect(device_id, &session_token);
-    let result = run_session(
-        conn,
-        event_tx,
-        Arc::clone(&device_mgr),
-        device_id,
-        session_token.clone(),
-        wt_gen,
-    )
-    .await;
+    let result = run_session(conn, event_tx, Arc::clone(&device_mgr), device_id).await;
     device_mgr.wt_disconnect(device_id, &session_token, wt_gen);
     result
 }
@@ -273,8 +265,6 @@ async fn run_session(
     event_tx: broadcast::Sender<webhid::IpcResponse>,
     device_mgr: Arc<DeviceManager>,
     device_id: u32,
-    _session_token: String,
-    _wt_gen: u64,
 ) -> anyhow::Result<()> {
     let (send, mut recv) = conn.accept_bi().await?;
 

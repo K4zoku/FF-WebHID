@@ -30,7 +30,6 @@ fn refresh_and_diff(event_tx: &broadcast::Sender<IpcResponse>) {
                 info.device_id
             );
             let _ = event_tx.send(IpcResponse::DeviceConnected {
-                id: 0,
                 device: info.clone(),
             });
         }
@@ -49,7 +48,6 @@ fn refresh_and_diff(event_tx: &broadcast::Sender<IpcResponse>) {
                 info.device_id
             );
             let _ = event_tx.send(IpcResponse::DeviceDisconnected {
-                id: 0,
                 device: info.clone(),
             });
         }
@@ -155,7 +153,6 @@ fn handle_udev_event(event: udev::Event) -> Option<IpcResponse> {
             let dnmap = dnmap.get_or_insert_with(HashMap::new);
             dnmap.insert(devnode, info.device_id);
             Some(IpcResponse::DeviceConnected {
-                id: 0,
                 device: info,
             })
         }
@@ -176,7 +173,7 @@ fn handle_udev_event(event: udev::Event) -> Option<IpcResponse> {
                         i.product_id,
                         i.device_id
                     );
-                    Some(IpcResponse::DeviceDisconnected { id: 0, device: i })
+                    Some(IpcResponse::DeviceDisconnected { device: i })
                 }
                 None => None,
             }
@@ -408,8 +405,6 @@ fn run_macos(event_tx: broadcast::Sender<IpcResponse>) {
     use core_foundation_sys::string::*;
 
     type CFDictionaryRef = *const std::ffi::c_void;
-
-    static DEVICE_CACHE: Mutex<Option<HashMap<u32, webhid::DeviceInfo>>> = Mutex::new(None);
 
     unsafe extern "C" {
         fn IOHIDManagerCreate(

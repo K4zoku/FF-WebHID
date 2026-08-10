@@ -241,11 +241,6 @@ async function runWarmupWithRetry(page: Page, mock: WebhidMockProcess): Promise<
   throw lastErr instanceof Error ? lastErr : new Error(String(lastErr))
 }
 
-export function median(vals: number[]): number {
-  const s = [...vals].sort((a, b) => a - b)
-  return s[Math.floor(s.length / 2)]
-}
-
 async function configureDaemonMode(
   backgroundPage: { evaluate: Page['evaluate'] },
   daemonMode: string

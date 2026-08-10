@@ -10,14 +10,9 @@
     EVT_DISCONNECT,
     buildPackedSend
   } = webhid.import('bgPacked')
-  const {
-    deviceTabMap: _deviceTabMap,
-    deviceCache,
-    pendingPicker: _pendingPicker
-  } = webhid.import('bgState')
+  const { deviceCache } = webhid.import('bgState')
   const { saveDeviceInfo } = webhid.import('bgStorage')
-  const { tabsForEvent, _registerDeviceTab, _unregisterDeviceTab, broadcastGlobalReset } =
-    webhid.import('bgStateOps')
+  const { tabsForEvent, broadcastGlobalReset } = webhid.import('bgStateOps')
   const http = webhid.import('http')
 
   const NM_HOST_FORWARDER = 'webhid.forwarder_nm_host'

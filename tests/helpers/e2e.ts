@@ -118,8 +118,6 @@ interface E2eWorkerFixtures {
   daemon: DaemonProcess | null
   vendorDevice: MockDeviceFixture
   gamepadDevice: MockDeviceFixture
-  mouseDevice: MockDeviceFixture
-  keyboardDevice: MockDeviceFixture
   httpPort: number
   nmManifest: void
   daemonMode: string
@@ -166,9 +164,7 @@ function deviceFixture(
 
 const deviceFixtures = {
   ...deviceFixture('vendor'),
-  ...deviceFixture('gamepad'),
-  ...deviceFixture('mouse'),
-  ...deviceFixture('keyboard')
+  ...deviceFixture('gamepad')
 }
 
 export const test = base.extend<

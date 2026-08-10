@@ -79,7 +79,6 @@ struct ReaderConfig {
     dev_for_task: DeviceHandle,
     stop_flag: Arc<AtomicBool>,
     uses_numbered_reports: bool,
-    read_buf_size: usize,
     blocked_input_ids: Arc<HashSet<u8>>,
     declared_input_ids: Arc<HashSet<u8>>,
     always_protected_input: bool,
@@ -166,7 +165,6 @@ impl DeviceManager {
             dev_for_task,
             stop_flag,
             uses_numbered_reports,
-            read_buf_size: info.max_input_report_size as usize + 1,
             blocked_input_ids,
             declared_input_ids,
             always_protected_input: blocking.always_protected[0],
@@ -224,7 +222,6 @@ impl DeviceManager {
             dev_for_task,
             stop_flag,
             uses_numbered_reports,
-            read_buf_size,
             blocked_input_ids,
             declared_input_ids,
             always_protected_input,
@@ -239,7 +236,7 @@ impl DeviceManager {
         let tx = self.event_tx.clone();
 
         log::info!(
-            "[reader] starting for {dev_id:#x} (numbered_reports={uses_numbered_reports}, buf_size={read_buf_size})"
+            "[reader] starting for {dev_id:#x} (numbered_reports={uses_numbered_reports})"
         );
         tokio::spawn(async move {
             // A non-timeout read error leaves the device stuck open with no
@@ -257,7 +254,6 @@ impl DeviceManager {
                         .unwrap_or_else(|e| e.into_inner())
                         .retain(|_, (d, _)| *d != dev_id);
                     let _ = tx.send(IpcResponse::DeviceDisconnected {
-                        id: 0,
                         device: info_for_task.clone(),
                     });
                 }
@@ -269,7 +265,7 @@ impl DeviceManager {
 
                 let read_result = tokio::task::spawn_blocking({
                     let dev = Arc::clone(&dev_for_task);
-                    move || with_device(&dev, |d| hid::read_with_timeout(d, 500, read_buf_size))
+                    move || with_device(&dev, |d| hid::read_with_timeout(d, 500))
                 })
                 .await;
 
@@ -297,7 +293,6 @@ impl DeviceManager {
                             continue;
                         }
                         let _ = tx.send(IpcResponse::InputReport {
-                            id: 0,
                             device_id: dev_id,
                             report_id,
                             data,

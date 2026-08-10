@@ -53,8 +53,7 @@ pub async fn start_server(
                 let event_tx_clone = event_tx.clone();
                 let device_mgr_clone = Arc::clone(&device_mgr);
                 tokio::spawn(async move {
-                    if let Err(e) =
-                        handle_websocket(stream, event_tx_clone, device_mgr_clone, port).await
+                    if let Err(e) = handle_websocket(stream, event_tx_clone, device_mgr_clone).await
                     {
                         log::warn!("[ws] {addr} error: {e:#}");
                     }
@@ -70,7 +69,6 @@ async fn handle_websocket(
     stream: tokio::net::TcpStream,
     event_tx: broadcast::Sender<webhid::IpcResponse>,
     device_mgr: Arc<DeviceManager>,
-    _ws_port: u16,
 ) -> anyhow::Result<()> {
     let (hash, ws_stream) = match ws_authenticate(stream).await {
         Ok(Some(v)) => v,

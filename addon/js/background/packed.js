@@ -1,5 +1,4 @@
 ;(function () {
-  const EVT_HANDSHAKE = 1
   const EVT_CONNECT = 2
   const EVT_DISCONNECT = 3
 
@@ -7,9 +6,7 @@
     enum: 1,
     open: 2,
     close: 3,
-    sr: 4,
     rfr: 5,
-    sfr: 6,
     sdp: 7,
     hs: 8
   }
@@ -40,7 +37,6 @@
   }
 
   webhid.export('bgPacked', {
-    EVT_HANDSHAKE,
     EVT_CONNECT,
     EVT_DISCONNECT,
     ACT,

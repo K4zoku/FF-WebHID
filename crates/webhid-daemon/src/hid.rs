@@ -306,15 +306,10 @@ pub fn uses_numbered_reports(buf: &[u8]) -> bool {
 }
 
 /// Block until a HID input report is available (or `timeout_ms` expires).
-pub fn read_with_timeout(
-    dev: &HidDevice,
-    timeout_ms: i32,
-    buf_size: usize,
-) -> std::io::Result<Vec<u8>> {
+pub fn read_with_timeout(dev: &HidDevice, timeout_ms: i32) -> std::io::Result<Vec<u8>> {
     READ_BUF.with(|buf| {
         let mut buf = buf.borrow_mut();
-        let size = buf_size.max(DEFAULT_READ_SIZE);
-        buf.resize(size, 0);
+        buf.resize(DEFAULT_READ_SIZE, 0);
         let n = dev
             .read_timeout(&mut buf, timeout_ms)
             .map_err(|e| std::io::Error::other(e.to_string()))?;

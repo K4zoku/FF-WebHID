@@ -1,7 +1,8 @@
 import { test, expect } from '../helpers/e2e.js'
 import { sleep, withTimeout } from '../helpers/test-utils.js'
 import { type Page } from '@playwright/test'
-import { grantDevicePermission, mockIdFor, type DeviceFilter } from '../helpers/e2e-devices.js'
+import { grantDevicePermission, mockIdFor } from '../helpers/e2e-devices.js'
+import type { DeviceFilter } from '../helpers/e2e-types.js'
 import {
   sendInput,
   waitForOutputReport,

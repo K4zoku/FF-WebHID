@@ -114,7 +114,7 @@ async fn main() -> anyhow::Result<()> {
 
     webhid::logging::init_logger();
 
-    #[cfg(feature = "hardening")]
+    #[cfg(all(feature = "hardening", target_os = "linux", not(debug_assertions)))]
     {
         webhid::security::apply_prctl_hardening();
         webhid::security::apply_seccomp_filter(crate::security::DAEMON_SYSCALLS);

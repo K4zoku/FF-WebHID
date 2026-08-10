@@ -255,11 +255,6 @@
     const previous = mainWorldWorkers.get(payload.deviceId)
     if (previous && previous !== worker) previous.terminate()
     mainWorldWorkers.set(payload.deviceId, worker)
-    worker.onclose = () => {
-      if (mainWorldWorkers.get(payload.deviceId) === worker) {
-        mainWorldWorkers.delete(payload.deviceId)
-      }
-    }
     worker.onerror = (event) => {
       logger.debug('worker error:', event && event.message)
       if (mainWorldWorkers.get(payload.deviceId) === worker) {

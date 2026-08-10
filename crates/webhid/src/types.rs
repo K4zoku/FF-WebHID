@@ -117,131 +117,28 @@ pub struct Field {
     pub strings: Vec<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
-pub enum IpcRequest {
-    Enumerate {
-        id: u32,
-    },
-    Open {
-        id: u32,
-        device_id: u32,
-    },
-    Close {
-        id: u32,
-        device_id: u32,
-        session_token: Option<String>,
-    },
-    SendReport {
-        id: u32,
-        device_id: u32,
-        report_id: u8,
-        data: Vec<u8>,
-    },
-    ReceiveFeatureReport {
-        id: u32,
-        device_id: u32,
-        report_id: u8,
-    },
-    SendFeatureReport {
-        id: u32,
-        device_id: u32,
-        report_id: u8,
-        data: Vec<u8>,
-    },
-    SetDataPlane {
-        id: u32,
-        device_id: u32,
-        mode: String,
-        session_token: Option<String>,
-    },
-}
-
-impl IpcRequest {
-    pub fn id(&self) -> u32 {
-        match self {
-            Self::Enumerate { id }
-            | Self::Open { id, .. }
-            | Self::Close { id, .. }
-            | Self::SendReport { id, .. }
-            | Self::ReceiveFeatureReport { id, .. }
-            | Self::SendFeatureReport { id, .. }
-            | Self::SetDataPlane { id, .. } => *id,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[derive(Debug, Clone)]
 pub enum IpcResponse {
-    Devices {
-        id: u32,
-        devices: Vec<DeviceInfo>,
-    },
-    Opened {
-        id: u32,
-        device_id: u32,
-        session_token: Option<String>,
-        ws_port: Option<u16>,
-    },
-    Ok {
-        id: u32,
-    },
-    Data {
-        id: u32,
-        data: Vec<u8>,
-    },
-    Error {
-        id: u32,
-        message: String,
-    },
     DeviceConnected {
-        id: u32,
         device: DeviceInfo,
     },
     DeviceDisconnected {
-        id: u32,
         device: DeviceInfo,
     },
     InputReport {
-        id: u32,
         device_id: u32,
         report_id: u8,
-        #[serde(with = "bytes_serde")]
         data: Bytes,
     },
-    Handshake {
-        id: u32,
-        ws_port: u16,
-    },
-}
-
-impl IpcResponse {
-    pub fn id(&self) -> u32 {
-        match self {
-            Self::Devices { id, .. }
-            | Self::Opened { id, .. }
-            | Self::Ok { id }
-            | Self::Data { id, .. }
-            | Self::Error { id, .. }
-            | Self::DeviceConnected { id, .. }
-            | Self::DeviceDisconnected { id, .. }
-            | Self::InputReport { id, .. }
-            | Self::Handshake { id, .. } => *id,
-        }
-    }
 }
 
 pub const ACT_ENUM: u8 = 1;
 pub const ACT_OPEN: u8 = 2;
 pub const ACT_CLOSE: u8 = 3;
-pub const ACT_SEND_REPORT: u8 = 4;
 pub const ACT_RECV_FEATURE: u8 = 5;
-pub const ACT_SEND_FEATURE: u8 = 6;
 pub const ACT_SET_DATA_PLANE: u8 = 7;
 pub const ACT_HANDSHAKE: u8 = 8;
 
-pub const EVT_HANDSHAKE: u8 = 1;
 pub const EVT_CONNECT: u8 = 2;
 pub const EVT_DISCONNECT: u8 = 3;
 
@@ -482,19 +379,9 @@ impl NmMessage {
     }
 }
 
-#[allow(dead_code)]
 pub(crate) mod base64_serde {
     use base64::Engine;
-    use serde::{Deserialize, Deserializer, Serialize as _, Serializer, de};
-
-    pub fn serialize<S: Serializer>(bytes: &Vec<u8>, s: S) -> Result<S::Ok, S::Error> {
-        if s.is_human_readable() {
-            let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
-            encoded.serialize(s)
-        } else {
-            bytes.as_slice().serialize(s)
-        }
-    }
+    use serde::{Deserialize, Deserializer, de};
 
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
         let encoded = String::deserialize(d)?;
@@ -504,10 +391,9 @@ pub(crate) mod base64_serde {
     }
 }
 
-#[allow(dead_code)]
 pub(crate) mod base64_opt_serde {
     use base64::Engine;
-    use serde::{Deserialize, Deserializer, Serialize as _, Serializer, de};
+    use serde::{Serialize as _, Serializer};
 
     pub fn serialize<S: Serializer>(bytes: &Option<Vec<u8>>, s: S) -> Result<S::Ok, S::Error> {
         match bytes {
@@ -518,32 +404,6 @@ pub(crate) mod base64_opt_serde {
             Some(b) => b.as_slice().serialize(s),
             None => s.serialize_none(),
         }
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Vec<u8>>, D::Error> {
-        let opt: Option<String> = Option::deserialize(d)?;
-        match opt {
-            Some(encoded) => base64::engine::general_purpose::STANDARD
-                .decode(&encoded)
-                .map(Some)
-                .map_err(de::Error::custom),
-            None => Ok(None),
-        }
-    }
-}
-
-/// Serde helper for `bytes::Bytes`.
-mod bytes_serde {
-    use bytes::Bytes;
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-    pub fn serialize<S: Serializer>(bytes: &Bytes, s: S) -> Result<S::Ok, S::Error> {
-        bytes.as_ref().serialize(s)
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Bytes, D::Error> {
-        let v = Vec::<u8>::deserialize(d)?;
-        Ok(Bytes::from(v))
     }
 }
 
@@ -766,91 +626,6 @@ mod tests {
         assert_eq!(dev_id, device_id);
         assert_eq!(report_id, 42);
         assert_eq!(data, &payload);
-    }
-
-    #[test]
-    fn test_ipc_request_json_roundtrip() {
-        let cases: Vec<IpcRequest> = vec![
-            IpcRequest::Enumerate { id: 1 },
-            IpcRequest::Open {
-                id: 2,
-                device_id: 0xfeedface,
-            },
-            IpcRequest::Close {
-                id: 3,
-                device_id: 0xfeedface,
-                session_token: None,
-            },
-            IpcRequest::SendReport {
-                id: 5,
-                device_id: 0xfeedface,
-                report_id: 1,
-                data: vec![0x00, 0xFF],
-            },
-            IpcRequest::ReceiveFeatureReport {
-                id: 6,
-                device_id: 0xfeedface,
-                report_id: 0,
-            },
-            IpcRequest::SendFeatureReport {
-                id: 7,
-                device_id: 0xfeedface,
-                report_id: 0,
-                data: vec![0xAA],
-            },
-        ];
-        for req in cases {
-            let json = serde_json::to_string(&req).unwrap();
-            let de: IpcRequest = serde_json::from_str(&json).unwrap();
-            assert_eq!(de.id(), req.id());
-        }
-    }
-
-    #[test]
-    fn test_ipc_response_json_roundtrip() {
-        let dev = DeviceInfo {
-            vendor_id: 0x1234,
-            product_id: 0x5678,
-            product_name: String::new(),
-            manufacturer: None,
-            serial_number: None,
-            usage_page: None,
-            usage: None,
-            device_id: 0xd,
-            descriptor_parse_failed: false,
-            collections: vec![],
-            max_input_report_size: 0,
-        };
-        let cases: Vec<IpcResponse> = vec![
-            IpcResponse::Devices {
-                id: 1,
-                devices: vec![dev.clone()],
-            },
-            IpcResponse::Opened {
-                id: 2,
-                device_id: 0xd,
-                session_token: Some("tok".into()),
-                ws_port: Some(31337),
-            },
-            IpcResponse::Ok { id: 3 },
-            IpcResponse::Data {
-                id: 4,
-                data: vec![0x01, 0x02],
-            },
-            IpcResponse::Error {
-                id: 5,
-                message: "fail".into(),
-            },
-            IpcResponse::Handshake {
-                id: 0,
-                ws_port: 31337,
-            },
-        ];
-        for resp in cases {
-            let json = serde_json::to_string(&resp).unwrap();
-            let de: IpcResponse = serde_json::from_str(&json).unwrap();
-            assert_eq!(de.id(), resp.id());
-        }
     }
 }
 

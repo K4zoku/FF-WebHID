@@ -97,20 +97,10 @@ fn read_json_request(v: &serde_json::Value) -> io::Result<NmRequest> {
             device_id: get_u32(v, "i")?,
             session_token: v.get("T").and_then(|x| x.as_str()).map(String::from),
         },
-        crate::ACT_SEND_REPORT => NmRequest::SendReport {
-            id,
-            packed: get_b64(v, "d")?,
-        },
         crate::ACT_RECV_FEATURE => NmRequest::ReceiveFeatureReport {
             id,
             device_id: get_u32(v, "i")?,
             report_id: get_u8(v, "r")?,
-        },
-        crate::ACT_SEND_FEATURE => NmRequest::SendFeatureReport {
-            id,
-            device_id: get_u32(v, "i")?,
-            report_id: get_u8(v, "r")?,
-            data: get_b64(v, "d")?,
         },
         crate::ACT_SET_DATA_PLANE => NmRequest::SetDataPlane {
             id,
@@ -147,21 +137,6 @@ fn get_u32(v: &serde_json::Value, key: &str) -> io::Result<u32> {
         .and_then(|x| x.as_u64())
         .map(|n| n as u32)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, format!("missing '{key}'")))
-}
-
-fn get_b64(v: &serde_json::Value, key: &str) -> io::Result<Vec<u8>> {
-    let s = v
-        .get(key)
-        .and_then(|x| x.as_str())
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, format!("missing '{key}'")))?;
-    base64::engine::general_purpose::STANDARD
-        .decode(s)
-        .map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("bad b64 in '{key}': {e}"),
-            )
-        })
 }
 
 /// Serialise `value` as JSON, prefix with its length, and write to `writer`.

@@ -106,12 +106,6 @@ pub const DAEMON_SYSCALLS: &[libc::c_long] = &[
     libc::SYS_fdatasync,
 ];
 
-/// Fallback: empty list for debug / non-Linux (seccomp is a no-op).
-/// Only referenced when the `hardening` feature is enabled; unused in default builds.
-#[cfg(not(all(feature = "hardening", target_os = "linux", not(debug_assertions))))]
-#[allow(dead_code)]
-pub const DAEMON_SYSCALLS: &[()] = &[];
-
 #[cfg(target_os = "linux")]
 fn resolve_webhid_gid() -> Option<libc::gid_t> {
     static GID: OnceLock<Option<libc::gid_t>> = OnceLock::new();

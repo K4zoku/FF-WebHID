@@ -42,7 +42,6 @@
     info: nop,
     debug: nop,
     level: LEVEL_WARN,
-    loaded: false,
     applyLevel: applyLevel,
     initLogger: initLogger,
     bindSettings: bindSettings
@@ -97,27 +96,7 @@
     }
   }
 
-  /** @returns {Promise<void>} */
-  async function load() {
-    if (logger.loaded) return
-    logger.loaded = true
-    try {
-      if (typeof browser !== 'undefined' && browser.storage && browser.storage.local) {
-        const result = await browser.storage.local.get({ logLevel: LEVEL_WARN })
-        applyLevel(parseLevel(result.logLevel))
-        browser.storage.onChanged.addListener((changes, area) => {
-          if (area === 'local' && changes.logLevel) {
-            applyLevel(parseLevel(changes.logLevel.newValue))
-          }
-        })
-      }
-    } catch (e) {
-      console.debug('logger load failed', e)
-    }
-  }
-
   applyLevel(LEVEL_WARN)
-  load()
 
   webhid.export('logger', logger)
 })()

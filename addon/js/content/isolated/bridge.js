@@ -861,12 +861,6 @@
         hasAllowAttr
       })
       const result = resp ? resp.policy || { hid: 'allowed' } : { hid: 'allowed' }
-      result._dbg = {
-        isCrossOrigin,
-        url,
-        hasAllowAttr,
-        top: window === window.top
-      }
       replyToPage({ type: 'response', id: data.id, result })
     } catch (e) {
       replyToPage({

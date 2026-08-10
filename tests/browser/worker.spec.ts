@@ -13,20 +13,16 @@ interface WorkerResult {
 }
 
 test.describe('Worker WebHID API', () => {
-  let storageSet = false
   let raw: WorkerResult
   test.beforeAll(async ({ backgroundPage, sharedPage, pageUrl, servers }) => {
-    if (!storageSet) {
-      const origin = `http://localhost:${servers.main.port}`
-      await backgroundPage.evaluate(
-        (origin) =>
-          browser.storage.local.set({
-            [`settings :: ${origin} :: workerPolyfillEnabled`]: true
-          }),
-        origin
-      )
-      storageSet = true
-    }
+    const origin = `http://localhost:${servers.main.port}`
+    await backgroundPage.evaluate(
+      (origin) =>
+        browser.storage.local.set({
+          [`settings :: ${origin} :: workerPolyfillEnabled`]: true
+        }),
+      origin
+    )
 
     await sharedPage.goto(pageUrl('/policy-check'), {
       waitUntil: 'domcontentloaded',

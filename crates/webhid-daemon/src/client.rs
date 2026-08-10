@@ -80,9 +80,7 @@ async fn relay_client_event(
     {
         return true;
     }
-    if let Some(nm_ev) = ipc_event_to_nm(ev)
-        && tx.send(nm_ev).await.is_err()
-    {
+    if tx.send(ipc_event_to_nm(ev)).await.is_err() {
         return false;
     }
     true
@@ -355,27 +353,19 @@ async fn read_feature_report_blocking(
     }
 }
 
-fn ipc_event_to_nm(ev: IpcResponse) -> Option<NmMessage> {
+fn ipc_event_to_nm(ev: IpcResponse) -> NmMessage {
     match ev {
-        IpcResponse::DeviceConnected { device, .. } => {
-            Some(NmMessage::Control(NmResponse::event_connect(device)))
+        IpcResponse::DeviceConnected { device } => {
+            NmMessage::Control(NmResponse::event_connect(device))
         }
-        IpcResponse::DeviceDisconnected { device, .. } => {
-            Some(NmMessage::Control(NmResponse::event_disconnect(device)))
+        IpcResponse::DeviceDisconnected { device } => {
+            NmMessage::Control(NmResponse::event_disconnect(device))
         }
         IpcResponse::InputReport {
             device_id,
             report_id,
             data,
-            ..
-        } => Some(NmMessage::packed_input_report(
-            device_id,
-            [(report_id, &data[..])],
-        )),
-        _ => {
-            log::warn!("unexpected event: {ev:?}");
-            None
-        }
+        } => NmMessage::packed_input_report(device_id, [(report_id, &data[..])]),
     }
 }
 
@@ -407,12 +397,10 @@ mod tests {
     fn test_ipc_event_to_nm_connect() {
         let dev = dummy_device(42);
         let ev = IpcResponse::DeviceConnected {
-            id: 0,
             device: dev.clone(),
         };
         let result = ipc_event_to_nm(ev);
-        assert!(result.is_some());
-        match result.unwrap() {
+        match result {
             NmMessage::Control(r) => {
                 assert_eq!(r.event_type, Some(EVT_CONNECT));
                 assert_eq!(r.device_id, Some(42));
@@ -426,12 +414,10 @@ mod tests {
     fn test_ipc_event_to_nm_disconnect() {
         let dev = dummy_device(99);
         let ev = IpcResponse::DeviceDisconnected {
-            id: 0,
             device: dev.clone(),
         };
         let result = ipc_event_to_nm(ev);
-        assert!(result.is_some());
-        match result.unwrap() {
+        match result {
             NmMessage::Control(r) => {
                 assert_eq!(r.event_type, Some(EVT_DISCONNECT));
                 assert_eq!(r.device_id, Some(99));
@@ -443,14 +429,12 @@ mod tests {
     #[test]
     fn test_ipc_event_to_nm_input_report() {
         let ev = IpcResponse::InputReport {
-            id: 0,
             device_id: 7,
             report_id: 1,
             data: bytes::Bytes::from_static(&[0xAA, 0xBB]),
         };
         let result = ipc_event_to_nm(ev);
-        assert!(result.is_some());
-        match result.unwrap() {
+        match result {
             NmMessage::PackedData(buf) => {
                 assert_eq!(buf[0], PKG_INPUT_REPORT);
                 assert_eq!(&buf[1..5], &7u32.to_le_bytes());
@@ -461,20 +445,5 @@ mod tests {
             }
             _ => panic!("expected PackedData"),
         }
-    }
-
-    #[test]
-    fn test_ipc_event_to_nm_ignores_non_event() {
-        let ev = IpcResponse::Ok { id: 42 };
-        assert!(ipc_event_to_nm(ev).is_none());
-    }
-
-    #[test]
-    fn test_ipc_event_to_nm_ignores_error() {
-        let ev = IpcResponse::Error {
-            id: 1,
-            message: "test".into(),
-        };
-        assert!(ipc_event_to_nm(ev).is_none());
     }
 }

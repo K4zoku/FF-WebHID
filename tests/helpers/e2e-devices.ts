@@ -1,8 +1,6 @@
 import { type Page } from '@playwright/test'
 import type { DeviceFilter } from './e2e-types.js'
 
-export type { DeviceFilter }
-
 export const DEVICES = {
   vendor: { vid: 0x16c0, pid: 0x0001, descriptor: 'vendor.bin' },
   gamepad: { vid: 0x16c0, pid: 0x0002, descriptor: 'gamepad.bin' },
