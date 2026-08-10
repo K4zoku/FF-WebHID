@@ -2,7 +2,7 @@
 
 use hidapi::{DeviceInfo as HidDeviceInfo, HidApi, HidDevice};
 use std::cell::RefCell;
-use webhid::DeviceInfo;
+use webhid::{Collection, DeviceInfo};
 
 thread_local! {
     static WRITE_BUF: RefCell<Vec<u8>> = RefCell::new(Vec::with_capacity(256));
@@ -100,14 +100,31 @@ pub fn info_from_hidapi_pub(info: &HidDeviceInfo) -> Option<DeviceInfo> {
 }
 
 fn info_from_hidapi_pub_with_desc(info: &HidDeviceInfo, desc: Vec<u8>) -> Option<DeviceInfo> {
-    let device_id = make_device_id(info);
     let collections = if !desc.is_empty() {
-        crate::descriptor::parse_report_descriptor(&desc)
+        match crate::descriptor::parse_report_descriptor(&desc) {
+            Ok(c) => c,
+            Err(e) => {
+                log::warn!(
+                    "device {:04x}:{:04x} report descriptor parse failed ({} bytes): {e}",
+                    info.vendor_id(),
+                    info.product_id(),
+                    desc.len()
+                );
+                vec![]
+            }
+        }
     } else {
         vec![]
     };
+    Some(build_device_info(info, collections))
+}
+
+/// Assemble a `DeviceInfo` from a hidapi entry and its parsed collections.
+/// Shared by the enumerate path and the `dump` subcommand so both report
+/// exactly the same shape the daemon sees.
+pub(crate) fn build_device_info(info: &HidDeviceInfo, collections: Vec<Collection>) -> DeviceInfo {
     let max_input_report_size = crate::descriptor::max_input_report_size(&collections);
-    Some(DeviceInfo {
+    DeviceInfo {
         vendor_id: info.vendor_id(),
         product_id: info.product_id(),
         product_name: info.product_string().map(String::from).unwrap_or_default(),
@@ -115,11 +132,11 @@ fn info_from_hidapi_pub_with_desc(info: &HidDeviceInfo, desc: Vec<u8>) -> Option
         serial_number: info.serial_number().map(String::from),
         usage_page: Some(info.usage_page()),
         usage: Some(info.usage()),
-        device_id,
+        device_id: make_device_id(info),
         descriptor_parse_failed: collections.is_empty(),
         collections,
         max_input_report_size,
-    })
+    }
 }
 
 /// Fetch a device's raw HID report descriptor by opening a fresh `HidApi`
@@ -133,7 +150,7 @@ fn read_raw_report_descriptor(info: &HidDeviceInfo) -> Vec<u8> {
     read_raw_report_descriptor_with_api(&api, info)
 }
 
-fn read_raw_report_descriptor_with_api(api: &HidApi, info: &HidDeviceInfo) -> Vec<u8> {
+pub(crate) fn read_raw_report_descriptor_with_api(api: &HidApi, info: &HidDeviceInfo) -> Vec<u8> {
     let opened = api.open_path(info.path());
     #[cfg(unix)]
     note_open_result(&opened);
@@ -206,15 +223,22 @@ const FIDO_USAGE_PAGE: u16 = 0xF1D0;
 
 /// Returns true if a device should be blocked from WebHID access.
 pub fn is_blocked_pub(info: &HidDeviceInfo) -> bool {
+    device_level_block_reason(info).is_some()
+}
+
+/// Human-readable reason a device is blocked at the device level, if any.
+/// The `dump` subcommand surfaces this so support reports say *why* a
+/// device is missing, not just that it is.
+pub(crate) fn device_level_block_reason(info: &HidDeviceInfo) -> Option<String> {
+    if info.usage_page() == FIDO_USAGE_PAGE {
+        return Some(format!("FIDO usage page 0x{FIDO_USAGE_PAGE:04x}"));
+    }
     let vid = info.vendor_id();
     let pid = info.product_id();
-    if BLOCKED_DEVICES.contains(&(vid, pid)) {
-        return true;
-    }
-    if info.usage_page() == FIDO_USAGE_PAGE {
-        return true;
-    }
-    false
+    BLOCKED_DEVICES
+        .iter()
+        .find(|&&(v, p)| v == vid && p == pid)
+        .map(|&(v, p)| format!("per-product security-key blocklist entry {v:04x}:{p:04x}"))
 }
 
 /// Vendor/product rules from the blocklist (e.g. OnlyKey). Collection usage

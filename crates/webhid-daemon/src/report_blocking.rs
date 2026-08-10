@@ -596,7 +596,8 @@ mod tests {
             usage: None,
             device_id: 1,
             descriptor_parse_failed: false,
-            collections: crate::descriptor::parse_report_descriptor(&bytes),
+            collections: crate::descriptor::parse_report_descriptor(&bytes)
+                .unwrap_or_else(|e| panic!("{file}: descriptor parse failed: {e}")),
             max_input_report_size: 0,
         };
         assert!(

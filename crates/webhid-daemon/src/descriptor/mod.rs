@@ -9,14 +9,10 @@ use webhid::types::{Collection, Report};
 use tree::CollectionTreeBuilder;
 
 /// Parse a raw HID report descriptor into a Chromium-shaped collections tree.
-pub fn parse_report_descriptor(bytes: &[u8]) -> Vec<Collection> {
-    let rdesc = match ReportDescriptor::try_from(bytes) {
-        Ok(d) => d,
-        Err(_) => {
-            log::warn!("failed to parse report descriptor ({} bytes)", bytes.len());
-            return vec![];
-        }
-    };
+/// The error is surfaced so callers (daemon log, `dump` subcommand) can tell
+/// users *why* a device's descriptor was rejected.
+pub fn parse_report_descriptor(bytes: &[u8]) -> Result<Vec<Collection>, hidreport::ParserError> {
+    let rdesc = ReportDescriptor::try_from(bytes)?;
 
     let mut tree = CollectionTreeBuilder::new();
     for report in rdesc.input_reports() {
@@ -29,7 +25,7 @@ pub fn parse_report_descriptor(bytes: &[u8]) -> Vec<Collection> {
         tree.add_report(report, "feature");
     }
 
-    tree.build()
+    Ok(tree.build())
 }
 
 /// Maximum report payload size in bytes across all collections of one
@@ -217,21 +213,20 @@ mod tests {
 
     #[test]
     fn test_parse_empty_descriptor() {
-        let collections = parse_report_descriptor(&[]);
-        assert!(collections.is_empty());
+        assert!(parse_report_descriptor(&[]).is_err());
     }
 
     #[test]
     fn test_parse_invalid_descriptor() {
-        let collections = parse_report_descriptor(&[0xFF]);
-        assert!(collections.is_empty());
+        assert!(parse_report_descriptor(&[0xFF]).is_err());
     }
 
     #[test]
     fn test_parse_valid_descriptor_with_no_reports() {
         let desc = vec![0x05, 0x01, 0x09, 0x02, 0xA1, 0x01, 0xC0];
-        let collections = parse_report_descriptor(&desc);
-        assert!(!collections.is_empty() || desc.is_empty());
+        let collections =
+            parse_report_descriptor(&desc).expect("collection-only descriptor parses");
+        assert!(!collections.is_empty());
     }
 
     #[test]
@@ -240,7 +235,7 @@ mod tests {
             0x05, 0x01, 0x09, 0x02, 0xA1, 0x01, 0x09, 0x01, 0x75, 0x08, 0x95, 0x03, 0x81, 0x02,
             0xC0,
         ];
-        let collections = parse_report_descriptor(&desc);
+        let collections = parse_report_descriptor(&desc).expect("mouse descriptor parses");
         assert!(
             !collections.is_empty(),
             "should produce at least one collection"
@@ -260,7 +255,7 @@ mod tests {
             0x05, 0x01, 0x09, 0x04, 0xA1, 0x01, 0x09, 0x01, 0x15, 0x00, 0x25, 0x01, 0x75, 0x01,
             0x95, 0x08, 0x81, 0x02, 0x09, 0x01, 0x75, 0x08, 0x95, 0x04, 0x81, 0x02, 0xC0,
         ];
-        let collections = parse_report_descriptor(&desc);
+        let collections = parse_report_descriptor(&desc).expect("joystick descriptor parses");
         let max = max_input_report_size(&collections);
         assert!(max >= 5, "expected at least 5 bytes, got {max}");
     }
@@ -279,118 +274,116 @@ mod tests {
         std::fs::read(&path).unwrap_or_else(|e| panic!("failed to read {path:?}: {e}"))
     }
 
-    fn parse_edge(name: &str) -> Vec<Collection> {
+    fn parse_edge(name: &str) -> Result<Vec<Collection>, hidreport::ParserError> {
         parse_report_descriptor(&read_edge_fixture(name))
     }
 
     #[test]
     fn test_edge_empty() {
-        let c = parse_edge("empty.bin");
-        assert!(c.is_empty());
-        assert_eq!(max_input_report_size(&c), 0);
+        assert!(parse_edge("empty.bin").is_err());
     }
 
     #[test]
     fn test_edge_single_byte() {
-        let c = parse_edge("single-byte.bin");
+        let c = parse_edge("single-byte.bin").unwrap_or_default();
         let _ = max_input_report_size(&c);
     }
 
     #[test]
     fn test_edge_truncated_input() {
-        let c = parse_edge("truncated-input.bin");
+        let c = parse_edge("truncated-input.bin").unwrap_or_default();
         let _ = max_input_report_size(&c);
     }
 
     #[test]
     fn test_edge_truncated_long_item() {
-        let c = parse_edge("truncated-long-item.bin");
+        let c = parse_edge("truncated-long-item.bin").unwrap_or_default();
         let _ = max_input_report_size(&c);
     }
 
     #[test]
     fn test_edge_unclosed_collection() {
-        let c = parse_edge("unclosed-collection.bin");
+        let c = parse_edge("unclosed-collection.bin").unwrap_or_default();
         let _ = max_input_report_size(&c);
     }
 
     #[test]
     fn test_edge_extra_end_collection() {
-        let c = parse_edge("extra-end-collection.bin");
+        let c = parse_edge("extra-end-collection.bin").unwrap_or_default();
         let _ = max_input_report_size(&c);
     }
 
     #[test]
     fn test_edge_deep_nesting() {
-        let c = parse_edge("deep-nesting.bin");
+        let c = parse_edge("deep-nesting.bin").unwrap_or_default();
         let m = max_input_report_size(&c);
         assert_eq!(m, 1);
     }
 
     #[test]
     fn test_edge_report_size_zero() {
-        let c = parse_edge("report-size-zero.bin");
+        let c = parse_edge("report-size-zero.bin").unwrap_or_default();
         let _ = max_input_report_size(&c);
     }
 
     #[test]
     fn test_edge_report_count_zero() {
-        let c = parse_edge("report-count-zero.bin");
+        let c = parse_edge("report-count-zero.bin").unwrap_or_default();
         let _ = max_input_report_size(&c);
     }
 
     #[test]
     fn test_edge_logical_max_ffffffff() {
-        let c = parse_edge("logical-max-ffffffff.bin");
+        let c = parse_edge("logical-max-ffffffff.bin").unwrap_or_default();
         let _ = max_input_report_size(&c);
     }
 
     #[test]
     fn test_edge_multiple_report_ids() {
-        let c = parse_edge("multiple-report-ids.bin");
+        let c = parse_edge("multiple-report-ids.bin").unwrap_or_default();
         let m = max_input_report_size(&c);
         assert!(m > 0);
     }
 
     #[test]
     fn test_edge_usage_page_ffff() {
-        let c = parse_edge("usage-page-ffff.bin");
+        let c = parse_edge("usage-page-ffff.bin").unwrap_or_default();
         let _ = max_input_report_size(&c);
     }
 
     #[test]
     fn test_edge_report_size_max() {
-        let c = parse_edge("report-size-max.bin");
+        let c = parse_edge("report-size-max.bin").unwrap_or_default();
         let _ = max_input_report_size(&c);
     }
 
     #[test]
     fn test_edge_collection_only() {
-        let c = parse_edge("collection-only.bin");
+        let c = parse_edge("collection-only.bin").unwrap_or_default();
         let _ = max_input_report_size(&c);
     }
 
     #[test]
     fn test_edge_unit_exponent_overflow() {
-        let c = parse_edge("unit-exponent-overflow.bin");
+        let c = parse_edge("unit-exponent-overflow.bin").unwrap_or_default();
         let _ = max_input_report_size(&c);
     }
 
     #[test]
     fn test_edge_vendor_extended_usage() {
-        let c = parse_edge("vendor-extended-usage.bin");
+        let c = parse_edge("vendor-extended-usage.bin").unwrap_or_default();
         let _ = max_input_report_size(&c);
     }
 
     #[test]
     fn test_edge_valid_no_input_reports() {
-        let c = parse_edge("valid-no-input-reports.bin");
+        let c = parse_edge("valid-no-input-reports.bin").unwrap_or_default();
         assert_eq!(max_input_report_size(&c), 0);
     }
 
     #[test]
     fn test_edge_variable_after_array() {
-        let c = parse_edge("variable-after-array.bin");
+        let c = parse_edge("variable-after-array.bin").unwrap_or_default();
         let _ = max_input_report_size(&c);
     }
 
@@ -398,7 +391,7 @@ mod tests {
     fn test_vendor_descriptor() {
         let path = fixture_path("vendor.bin");
         let bytes = std::fs::read(&path).unwrap();
-        let collections = parse_report_descriptor(&bytes);
+        let collections = parse_report_descriptor(&bytes).expect("vendor.bin parses");
         assert_eq!(collections.len(), 2, "expected two application collections");
 
         let app = &collections[0];
@@ -418,7 +411,7 @@ mod tests {
     fn test_gamepad_descriptor() {
         let path = fixture_path("gamepad.bin");
         let bytes = std::fs::read(&path).unwrap();
-        let collections = parse_report_descriptor(&bytes);
+        let collections = parse_report_descriptor(&bytes).expect("gamepad.bin parses");
         assert_eq!(
             collections.len(),
             1,

@@ -3,6 +3,7 @@ mod blocklist;
 mod client;
 mod descriptor;
 mod device_mgr;
+mod dump;
 mod hid;
 mod hotplug;
 mod report_blocking;
@@ -103,6 +104,12 @@ async fn main() -> anyhow::Result<()> {
     if std::env::args().any(|a| a == "--version" || a == "-V") {
         println!("webhid-daemon {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
+    }
+    // `webhid-daemon dump [--descriptor] [--json]`: one-shot diagnostics,
+    // no daemon startup, no log file. Runs before init_logger on purpose.
+    let mut args = std::env::args().skip(1);
+    if args.next().as_deref() == Some("dump") {
+        return dump::run(args);
     }
 
     webhid::logging::init_logger();
