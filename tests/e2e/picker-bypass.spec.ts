@@ -1,15 +1,10 @@
 import { test, expect } from '../helpers/e2e.js'
+import { sleep } from '../helpers/test-utils.js'
 import { grantDevicePermission, mockIdFor } from '../helpers/e2e-devices.js'
 import { sendInput, waitForOutputReport } from '../helpers/e2e-process.js'
 
 const VENDOR = mockIdFor('vendor')
 const VENDOR_INPUT_SIZE = 64
-
-function sleep(ms: number): Promise<void> {
-  const { promise, resolve } = Promise.withResolvers<void>()
-  setTimeout(resolve, ms)
-  return promise
-}
 
 test.describe.serial('picker consent bypass', () => {
   test('baseline: vendor device is not granted before the bypass', async ({ sharedPage }) => {

@@ -1,4 +1,5 @@
 import { test } from '../helpers/e2e.js'
+import { withTimeout } from '../helpers/test-utils.js'
 import { type Page } from '@playwright/test'
 import { readFile } from 'node:fs/promises'
 
@@ -163,12 +164,6 @@ function numEnv(name: string): number | null {
   if (!raw) return null
   const n = Number(raw)
   return Number.isFinite(n) ? n : null
-}
-
-export function withTimeout<T>(p: Promise<T>, ms: number, msg: string): Promise<T> {
-  const { promise, reject } = Promise.withResolvers<never>()
-  const timer = setTimeout(() => reject(new Error(msg)), ms)
-  return Promise.race([p, promise]).finally(() => clearTimeout(timer))
 }
 
 async function runOnce(

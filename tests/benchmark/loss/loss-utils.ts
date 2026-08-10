@@ -1,4 +1,5 @@
 import { test } from '../../helpers/e2e.js'
+import { sleep } from '../../helpers/test-utils.js'
 import type { Page } from '@playwright/test'
 import { sendInput, type WebhidMockProcess } from '../../helpers/e2e-process.js'
 import { grantDevicePermission, mockIdFor, type DeviceFilter } from '../../helpers/e2e-devices.js'
@@ -74,10 +75,6 @@ export interface LossResult {
   fallbacks: string[]
   /** True when the in-page WT transport logged a successful stream attach. */
   wtStreamAttached: boolean
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 /** Injects `count` reports paced at `rate`/s, waits for the page counter to

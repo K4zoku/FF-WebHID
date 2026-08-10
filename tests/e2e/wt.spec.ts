@@ -1,5 +1,6 @@
 import { test, expect } from '../helpers/e2e.js'
 import type { Page } from '@playwright/test'
+import { sleep, withTimeout } from '../helpers/test-utils.js'
 import { spawn, type ChildProcess } from 'child_process'
 import { createConnection } from 'net'
 import { createSocket } from 'dgram'
@@ -67,18 +68,6 @@ interface NmEnumerateResponse {
 interface NmOpenResponse {
   s: number
   t?: string
-}
-
-function sleep(ms: number): Promise<void> {
-  const { promise, resolve } = Promise.withResolvers<void>()
-  setTimeout(resolve, ms)
-  return promise
-}
-
-function withTimeout<T>(p: Promise<T>, ms: number, msg: string): Promise<T> {
-  const { promise, reject } = Promise.withResolvers<never>()
-  const t = setTimeout(() => reject(new Error(msg)), ms)
-  return Promise.race([p, promise]).finally(() => clearTimeout(t))
 }
 
 function nextInputReport(
