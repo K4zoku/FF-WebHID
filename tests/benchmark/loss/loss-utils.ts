@@ -24,12 +24,6 @@ interface LossPageState {
   phaseFirstGap: number
 }
 
-declare global {
-  interface Window {
-    __lossState?: LossPageState
-  }
-}
-
 const PAYLOAD_LEN = 63
 
 const RUN_TIMEOUT_MS = 30000
@@ -97,7 +91,7 @@ async function runLossOnce(
   startSeq: number
 ): Promise<LossRun> {
   await page.evaluate((s: number) => {
-    const st = window.__lossState!
+    const st = window.tests!.results!.lossState as LossPageState
     st.phaseStart = s
     st.last = s - 1
     st.phaseCount = 0
@@ -125,14 +119,16 @@ async function runLossOnce(
   let stableRounds = 0
   while (Date.now() < deadline) {
     await sleep(500)
-    const c = await page.evaluate(() => window.__lossState!.phaseCount)
+    const c = await page.evaluate(
+      () => (window.tests!.results!.lossState as LossPageState).phaseCount
+    )
     if (c === stable) stableRounds++
     else stableRounds = 0
     stable = c
     if (stableRounds >= 2) break
   }
   const st = await page.evaluate(() => {
-    const s = window.__lossState!
+    const s = window.tests!.results!.lossState as LossPageState
     return {
       received: s.phaseCount,
       gaps: s.phaseGaps,
@@ -260,7 +256,8 @@ export async function benchmarkLoss(
         }
         state.last = seq
       }
-      window.__lossState = state
+      window.tests = window.tests || { helper: {}, results: {} }
+      window.tests.results.lossState = state
     }, VENDOR)
 
     const mock = { process: fixtures.vendorDevice.process, ready: fixtures.vendorDevice.ready }

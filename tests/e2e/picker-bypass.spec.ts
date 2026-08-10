@@ -38,7 +38,6 @@ test.describe.serial('picker consent bypass', () => {
       }
       const origPost = desc.value as (this: MessagePort, msg: unknown, ...rest: unknown[]) => void
       const state: { port: MessagePort | null; msgs: unknown[] } = { port: null, msgs: [] }
-      ;(globalThis as Record<string, unknown>).__probe = state
 
       MessagePort.prototype.postMessage = function (this: MessagePort, msg, ...rest) {
         if (!state.port && this instanceof MessagePort) {

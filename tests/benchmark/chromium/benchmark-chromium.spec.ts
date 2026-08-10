@@ -25,9 +25,15 @@ test('image pipeline benchmark chromium native (headless auto)', async () => {
       waitUntil: 'domcontentloaded',
       timeout: 15000
     })
-    await page.waitForFunction(() => (window.webhidBenchmark?.chunkCount() ?? 0) > 0, {
-      timeout: 15000
-    })
+    await page.waitForFunction(
+      () =>
+        ((
+          window.tests!.helper as unknown as { webhidBenchmark?: { chunkCount(): number } }
+        ).webhidBenchmark?.chunkCount() ?? 0) > 0,
+      {
+        timeout: 15000
+      }
+    )
 
     const result = await runBenchmark(page, mock)
     expect(result.runs.length).toBeGreaterThan(0)

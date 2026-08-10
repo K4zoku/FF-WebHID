@@ -19,8 +19,6 @@ import type { DeviceFilter } from '../helpers/e2e-types.js'
 
 declare global {
   interface Window {
-    wtOldClose?: () => void
-    wtLog?: string[]
     nmSendActions?: number
   }
 }
@@ -169,12 +167,12 @@ function makeNmClient(socketPath: string): Promise<NmClient> {
         request<T>(msg: Record<string, unknown>): Promise<T> {
           const id = nextId++
           const body = Buffer.from(JSON.stringify({ n: id, ...msg }))
-          return new Promise<T>((res) => {
-            pending.set(id, (v) => res(v as T))
-            const len = Buffer.alloc(4)
-            len.writeUInt32LE(body.length, 0)
-            sock.write(Buffer.concat([len, body]))
-          })
+          const { promise, resolve } = Promise.withResolvers<T>()
+          pending.set(id, (v) => resolve(v as T))
+          const len = Buffer.alloc(4)
+          len.writeUInt32LE(body.length, 0)
+          sock.write(Buffer.concat([len, body]))
+          return promise
         },
         close() {
           sock.destroy()
@@ -337,7 +335,7 @@ async function runRotationWorker(
   `
   await page.evaluate((src: string) => {
     const blob = new Blob([src], { type: 'application/javascript' })
-    const log: string[] = (window.wtLog = [])
+    const log: string[] = (window.tests!.results!.wtLog = [])
     const worker = new Worker(URL.createObjectURL(blob))
     worker.onmessage = (e) => log.push(String(e.data))
   }, source)
@@ -345,20 +343,30 @@ async function runRotationWorker(
 
 async function waitForWorkerLogValue(page: Page, prefix: string): Promise<string> {
   await page.waitForFunction(
-    (p: string) => (window.wtLog || []).some((m) => m.startsWith(p)),
+    (p: string) =>
+      ((window.tests!.results!.wtLog as string[] | undefined) || []).some((m) => m.startsWith(p)),
     prefix,
     { timeout: 20000 }
   )
   return page.evaluate(
-    (p: string) => ((window.wtLog || []).find((m) => m.startsWith(p)) || p + '[]').slice(p.length),
+    (p: string) =>
+      (
+        ((window.tests!.results!.wtLog as string[] | undefined) || []).find((m) =>
+          m.startsWith(p)
+        ) || p + '[]'
+      ).slice(p.length),
     prefix
   )
 }
 
 async function waitForWorkerLogEntry(page: Page, entry: string): Promise<void> {
-  await page.waitForFunction((e: string) => (window.wtLog || []).includes(e), entry, {
-    timeout: 20000
-  })
+  await page.waitForFunction(
+    (e: string) => ((window.tests!.results!.wtLog as string[] | undefined) || []).includes(e),
+    entry,
+    {
+      timeout: 20000
+    }
+  )
 }
 
 test.describe.serial('WebHID E2E (WebTransport data plane)', () => {

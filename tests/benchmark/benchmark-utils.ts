@@ -23,24 +23,20 @@ export const DEFAULT_RUNS = 5
 export const RUN_TIMEOUT_MS = 25000
 export const RUN_RETRIES = 3
 
-declare global {
-  interface Window {
-    webhidBenchmark?: {
-      open(): Promise<void>
-      run(
-        warmup?: boolean,
-        runNumber?: number,
-        attempt?: number,
-        maxAttempts?: number
-      ): Promise<boolean>
-      warmup(): Promise<boolean>
-      chunkCount(): number
-      paints(): number
-      getMeasure(): number | null
-      getLatencies(): number[]
-      getMarks(): Record<string, number | null>
-    }
-  }
+type BenchApi = {
+  open(): Promise<void>
+  run(
+    warmup?: boolean,
+    runNumber?: number,
+    attempt?: number,
+    maxAttempts?: number
+  ): Promise<boolean>
+  warmup(): Promise<boolean>
+  chunkCount(): number
+  paints(): number
+  getMeasure(): number | null
+  getLatencies(): number[]
+  getMarks(): Record<string, number | null>
 }
 
 interface BenchmarkFixtures {
@@ -187,13 +183,26 @@ async function runOnce(
   try {
     const runPromise = page.evaluate(
       (a: { warmup: boolean; runNumber: number; attempt: number; maxAttempts: number }) =>
-        window.webhidBenchmark!.run(a.warmup, a.runNumber, a.attempt, a.maxAttempts),
+        (window.tests!.helper as unknown as { webhidBenchmark?: BenchApi }).webhidBenchmark!.run(
+          a.warmup,
+          a.runNumber,
+          a.attempt,
+          a.maxAttempts
+        ),
       { warmup, runNumber, attempt, maxAttempts }
     )
     await withTimeout(runPromise, RUN_TIMEOUT_MS, 'image-painted not reached')
-    const duration = await page.evaluate(() => window.webhidBenchmark!.getMeasure())
+    const duration = await page.evaluate(() =>
+      (
+        window.tests!.helper as unknown as { webhidBenchmark?: BenchApi }
+      ).webhidBenchmark!.getMeasure()
+    )
     if (duration == null) throw new Error('roundtrip measure missing after painted')
-    const latencies = await page.evaluate(() => window.webhidBenchmark!.getLatencies())
+    const latencies = await page.evaluate(() =>
+      (
+        window.tests!.helper as unknown as { webhidBenchmark?: BenchApi }
+      ).webhidBenchmark!.getLatencies()
+    )
     return { duration, latencies }
   } finally {
     relay.stop()
@@ -222,7 +231,11 @@ async function runWarmupWithRetry(page: Page, mock: WebhidMockProcess): Promise<
   for (let attempt = 0; attempt < RUN_RETRIES; attempt++) {
     const relay = startStreamingRelay(mock)
     try {
-      await page.evaluate(() => window.webhidBenchmark!.warmup())
+      await page.evaluate(() =>
+        (
+          window.tests!.helper as unknown as { webhidBenchmark?: BenchApi }
+        ).webhidBenchmark!.warmup()
+      )
       return
     } catch (err) {
       lastErr = err
@@ -281,15 +294,27 @@ async function prepareBenchmarkPage(page: Page, origin: string): Promise<void> {
     waitUntil: 'domcontentloaded',
     timeout: 15000
   })
-  await page.waitForFunction(() => (window.webhidBenchmark?.chunkCount() ?? 0) > 0, {
-    timeout: 15000
-  })
+  await page.waitForFunction(
+    () =>
+      ((
+        window.tests!.helper as unknown as { webhidBenchmark?: BenchApi }
+      ).webhidBenchmark?.chunkCount() ?? 0) > 0,
+    {
+      timeout: 15000
+    }
+  )
 }
 
 async function verifyChunkCount(page: Page): Promise<void> {
   const img = await readFile(IMAGE_PATH)
   const chunks = chunkImage(img)
-  if ((await page.evaluate(() => window.webhidBenchmark!.chunkCount())) !== chunks.length) {
+  if (
+    (await page.evaluate(() =>
+      (
+        window.tests!.helper as unknown as { webhidBenchmark?: BenchApi }
+      ).webhidBenchmark!.chunkCount()
+    )) !== chunks.length
+  ) {
     throw new Error('page chunk count does not match file-based chunking')
   }
 }
@@ -399,7 +424,9 @@ export async function runBenchmark(
   }
   page.on('console', onConsole)
   try {
-    await page.evaluate(() => window.webhidBenchmark!.open())
+    await page.evaluate(() =>
+      (window.tests!.helper as unknown as { webhidBenchmark?: BenchApi }).webhidBenchmark!.open()
+    )
 
     let warmup: number | null = null
     try {
@@ -438,14 +465,22 @@ export async function runBenchmark(
     for (let run = 0; run < runs; run++) {
       try {
         const { duration, latencies } = await runOnceWithRetry(page, mock, false, run + 1)
-        const marks = await page.evaluate(() => window.webhidBenchmark!.getMarks())
+        const marks = await page.evaluate(() =>
+          (
+            window.tests!.helper as unknown as { webhidBenchmark?: BenchApi }
+          ).webhidBenchmark!.getMarks()
+        )
         runsOut.push({ duration, latencies, marks })
       } catch {
         failures++
       }
     }
 
-    const setup = await page.evaluate(() => window.webhidBenchmark!.getMarks())
+    const setup = await page.evaluate(() =>
+      (
+        window.tests!.helper as unknown as { webhidBenchmark?: BenchApi }
+      ).webhidBenchmark!.getMarks()
+    )
     const openMs =
       setup.dataReady != null && setup.openStart != null ? setup.dataReady - setup.openStart : null
     await page.evaluate(() => {

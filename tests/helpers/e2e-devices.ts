@@ -21,6 +21,12 @@ declare global {
     tests?: {
       helper?: {
         requestDevice?: (filters: DeviceFilter[]) => Promise<number>
+        requestDeviceWithoutGesture?: (delayMs: number) => Promise<{
+          ok: boolean
+          count?: number
+          name?: string
+          message?: string
+        }>
       }
       results?: Record<string, unknown>
     }
