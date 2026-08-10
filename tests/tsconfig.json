@@ -4,10 +4,5 @@
     "types": ["node", "firefox-webext-browser"],
     "allowJs": true
   },
-  "include": [
-    "**/*.ts",
-    "**/*.d.ts",
-    "../types/**/*.d.ts",
-    "playwright.config.ts"
-  ]
+  "include": ["**/*.ts", "**/*.d.ts", "../types/**/*.d.ts", "playwright.config.ts"]
 }

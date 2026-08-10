@@ -1,25 +1,46 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
-<head>
-<meta charset="utf-8">
-<title>Worker Spawn CSP Test</title>
-</head>
-<body>
-<script>
-window.tests = window.tests || { helper: {}, results: {} };
-window.tests.results.workerStatus = { 'same-origin-status': 'loading', 'blob-status': 'loading' };
-function probe(id, makeWorker) {
-  const key = id + '-status';
-  const set = (v) => { window.tests.results.workerStatus[key] = v; };
-  try {
-    const w = makeWorker();
-    w.onmessage = () => { set(id + '-ready'); };
-    w.onerror = () => { set(id + '-error'); };
-    setTimeout(() => { if (window.tests.results.workerStatus[key] === 'loading') set(id + '-timeout'); }, 5000);
-  } catch (e) { set(id + '-threw'); }
-}
-probe('same-origin', () => new Worker(location.href + '?worker=1'));
-probe('blob', () => new Worker(URL.createObjectURL(new Blob(["postMessage('ready')"], { type: 'application/javascript' }))));
-</script>
-</body>
+  <head>
+    <meta charset="utf-8" />
+    <title>Worker Spawn CSP Test</title>
+  </head>
+  <body>
+    <script>
+      window.tests = window.tests || { helper: {}, results: {} }
+      window.tests.results.workerStatus = {
+        'same-origin-status': 'loading',
+        'blob-status': 'loading'
+      }
+      function probe(id, makeWorker) {
+        const key = id + '-status'
+        const set = (v) => {
+          window.tests.results.workerStatus[key] = v
+        }
+        try {
+          const w = makeWorker()
+          w.onmessage = () => {
+            set(id + '-ready')
+          }
+          w.onerror = () => {
+            set(id + '-error')
+          }
+          setTimeout(() => {
+            if (window.tests.results.workerStatus[key] === 'loading') set(id + '-timeout')
+          }, 5000)
+        } catch (e) {
+          set(id + '-threw')
+        }
+      }
+      probe('same-origin', () => new Worker(location.href + '?worker=1'))
+      probe(
+        'blob',
+        () =>
+          new Worker(
+            URL.createObjectURL(
+              new Blob(["postMessage('ready')"], { type: 'application/javascript' })
+            )
+          )
+      )
+    </script>
+  </body>
 </html>

@@ -140,7 +140,11 @@ function logContains(daemon: DaemonProcess, needle: string): boolean {
   }
 }
 
-async function waitForLog(daemon: DaemonProcess, needle: string, timeoutMs = 10000): Promise<boolean> {
+async function waitForLog(
+  daemon: DaemonProcess,
+  needle: string,
+  timeoutMs = 10000
+): Promise<boolean> {
   const start = Date.now()
   for (;;) {
     if (logContains(daemon, needle)) return true
@@ -353,11 +357,9 @@ async function waitForWorkerLogValue(page: Page, prefix: string): Promise<string
 }
 
 async function waitForWorkerLogEntry(page: Page, entry: string): Promise<void> {
-  await page.waitForFunction(
-    (e: string) => (window.__wtLog || []).includes(e),
-    entry,
-    { timeout: 20000 }
-  )
+  await page.waitForFunction((e: string) => (window.__wtLog || []).includes(e), entry, {
+    timeout: 20000
+  })
 }
 
 test.describe.serial('WebHID E2E (WebTransport data plane)', () => {
@@ -379,15 +381,12 @@ test.describe.serial('WebHID E2E (WebTransport data plane)', () => {
   })
 
   test('open device spawns the WT data plane', async ({ sharedPage, daemon }) => {
-    const opened = await sharedPage.evaluate(
-      async (f: DeviceFilter) => {
-        const ds = await navigator.hid.getDevices()
-        const d = ds.find((x) => x.vendorId === f.vendorId && x.productId === f.productId)!
-        await d.open()
-        return d.opened
-      },
-      VENDOR
-    )
+    const opened = await sharedPage.evaluate(async (f: DeviceFilter) => {
+      const ds = await navigator.hid.getDevices()
+      const d = ds.find((x) => x.vendorId === f.vendorId && x.productId === f.productId)!
+      await d.open()
+      return d.opened
+    }, VENDOR)
     expect(opened).toBe(true)
     if (daemon) {
       expect(await waitForLog(daemon, 'WT connect gen=')).toBe(true)
@@ -518,9 +517,8 @@ test.describe.serial('WebHID E2E (WebTransport data plane)', () => {
     const origin = new URL(sharedPage.url()).origin
     const siteKey = `settings :: ${origin} :: useWorker`
     const genCountBefore = daemon
-      ? readFileSync(daemon.socketPath.replace(/\.sock$/, '.log'), 'utf8').split(
-          'WT connect gen='
-        ).length - 1
+      ? readFileSync(daemon.socketPath.replace(/\.sock$/, '.log'), 'utf8').split('WT connect gen=')
+          .length - 1
       : 0
     await backgroundPage.evaluate((key) => browser.storage.local.set({ [key]: false }), siteKey)
     await sleep(2500)
@@ -590,7 +588,9 @@ test.describe.serial('WebHID E2E (WebTransport data plane)', () => {
       const wtHash1 = hs1.H as string
 
       const token = await openVendorDevice(nm)
-      const authHash = createHash('sha256').update(token + nonce).digest('hex')
+      const authHash = createHash('sha256')
+        .update(token + nonce)
+        .digest('hex')
 
       await runRotationWorker(sharedPage, wtPort1, wtHash1, authHash)
       expect(await waitForWorkerLogValue(sharedPage, 'ack1:')).toBe('[255,1,0,0,0,1]')

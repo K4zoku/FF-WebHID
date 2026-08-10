@@ -102,84 +102,69 @@ test.describe.serial('WebHID E2E', () => {
   }) => {
     const count = await grantDevicePermission(sharedPage, [VENDOR])
     expect(count).toBe(1)
-    const info = await sharedPage.evaluate(
-      async (f: DeviceFilter) => {
-        const ds = await navigator.hid.getDevices()
-        const d = ds.find((x) => x.vendorId === f.vendorId && x.productId === f.productId)!
-        return {
-          vendorId: d.vendorId,
-          productId: d.productId,
-          collectionCount: d.collections.length
-        }
-      },
-      VENDOR
-    )
+    const info = await sharedPage.evaluate(async (f: DeviceFilter) => {
+      const ds = await navigator.hid.getDevices()
+      const d = ds.find((x) => x.vendorId === f.vendorId && x.productId === f.productId)!
+      return {
+        vendorId: d.vendorId,
+        productId: d.productId,
+        collectionCount: d.collections.length
+      }
+    }, VENDOR)
     expect(info.vendorId).toBe(vendorDevice.vid)
     expect(info.productId).toBe(vendorDevice.pid)
     expect(info.collectionCount).toBe(2)
   })
 
   test('sendReport fails before open', async ({ sharedPage }) => {
-    const errorName = await sharedPage.evaluate(
-      async (ctx: VendorCtx) => {
-        const ds = await navigator.hid.getDevices()
-        const d = ds.find((x) => x.vendorId === ctx.f.vendorId && x.productId === ctx.f.productId)!
-        try {
-          await d.sendReport(ctx.outputId, new Uint8Array(ctx.size))
-          return null
-        } catch (e) {
-          return e instanceof Error ? e.name : String(e)
-        }
-      },
-      VENDOR_CTX
-    )
+    const errorName = await sharedPage.evaluate(async (ctx: VendorCtx) => {
+      const ds = await navigator.hid.getDevices()
+      const d = ds.find((x) => x.vendorId === ctx.f.vendorId && x.productId === ctx.f.productId)!
+      try {
+        await d.sendReport(ctx.outputId, new Uint8Array(ctx.size))
+        return null
+      } catch (e) {
+        return e instanceof Error ? e.name : String(e)
+      }
+    }, VENDOR_CTX)
     expect(errorName).toBe('InvalidStateError')
   })
 
   test('sendFeatureReport fails before open', async ({ sharedPage }) => {
-    const errorName = await sharedPage.evaluate(
-      async (ctx: VendorCtx) => {
-        const ds = await navigator.hid.getDevices()
-        const d = ds.find((x) => x.vendorId === ctx.f.vendorId && x.productId === ctx.f.productId)!
-        try {
-          await d.sendFeatureReport(ctx.featureId, new Uint8Array(4))
-          return null
-        } catch (e) {
-          return e instanceof Error ? e.name : String(e)
-        }
-      },
-      VENDOR_CTX
-    )
+    const errorName = await sharedPage.evaluate(async (ctx: VendorCtx) => {
+      const ds = await navigator.hid.getDevices()
+      const d = ds.find((x) => x.vendorId === ctx.f.vendorId && x.productId === ctx.f.productId)!
+      try {
+        await d.sendFeatureReport(ctx.featureId, new Uint8Array(4))
+        return null
+      } catch (e) {
+        return e instanceof Error ? e.name : String(e)
+      }
+    }, VENDOR_CTX)
     expect(errorName).toBe('InvalidStateError')
   })
 
   test('receiveFeatureReport fails before open', async ({ sharedPage }) => {
-    const errorName = await sharedPage.evaluate(
-      async (ctx: VendorCtx) => {
-        const ds = await navigator.hid.getDevices()
-        const d = ds.find((x) => x.vendorId === ctx.f.vendorId && x.productId === ctx.f.productId)!
-        try {
-          await d.receiveFeatureReport(ctx.featureId)
-          return null
-        } catch (e) {
-          return e instanceof Error ? e.name : String(e)
-        }
-      },
-      VENDOR_CTX
-    )
+    const errorName = await sharedPage.evaluate(async (ctx: VendorCtx) => {
+      const ds = await navigator.hid.getDevices()
+      const d = ds.find((x) => x.vendorId === ctx.f.vendorId && x.productId === ctx.f.productId)!
+      try {
+        await d.receiveFeatureReport(ctx.featureId)
+        return null
+      } catch (e) {
+        return e instanceof Error ? e.name : String(e)
+      }
+    }, VENDOR_CTX)
     expect(errorName).toBe('InvalidStateError')
   })
 
   test('open device', async ({ sharedPage }) => {
-    const opened = await sharedPage.evaluate(
-      async (ctx: VendorCtx) => {
-        const ds = await navigator.hid.getDevices()
-        const d = ds.find((x) => x.vendorId === ctx.f.vendorId && x.productId === ctx.f.productId)!
-        await d.open()
-        return d.opened
-      },
-      VENDOR_CTX
-    )
+    const opened = await sharedPage.evaluate(async (ctx: VendorCtx) => {
+      const ds = await navigator.hid.getDevices()
+      const d = ds.find((x) => x.vendorId === ctx.f.vendorId && x.productId === ctx.f.productId)!
+      await d.open()
+      return d.opened
+    }, VENDOR_CTX)
     expect(opened).toBe(true)
   })
 
@@ -371,17 +356,14 @@ test.describe.serial('WebHID E2E', () => {
   })
 
   test('open and close device', async ({ sharedPage }) => {
-    const result = await sharedPage.evaluate(
-      async (ctx: VendorCtx) => {
-        const ds = await navigator.hid.getDevices()
-        const d = ds.find((x) => x.vendorId === ctx.f.vendorId && x.productId === ctx.f.productId)!
-        await d.open()
-        const wasOpen = d.opened
-        await d.close()
-        return { wasOpen, nowOpen: d.opened }
-      },
-      VENDOR_CTX
-    )
+    const result = await sharedPage.evaluate(async (ctx: VendorCtx) => {
+      const ds = await navigator.hid.getDevices()
+      const d = ds.find((x) => x.vendorId === ctx.f.vendorId && x.productId === ctx.f.productId)!
+      await d.open()
+      const wasOpen = d.opened
+      await d.close()
+      return { wasOpen, nowOpen: d.opened }
+    }, VENDOR_CTX)
     expect(result.wasOpen).toBe(true)
     expect(result.nowOpen).toBe(false)
   })
@@ -398,22 +380,19 @@ test.describe.serial('WebHID E2E', () => {
   })
 
   test('forget unpairs the device and sendReport fails after', async ({ sharedPage }) => {
-    const result = await sharedPage.evaluate(
-      async (ctx: VendorCtx) => {
-        const ds = await navigator.hid.getDevices()
-        const d = ds.find((x) => x.vendorId === ctx.f.vendorId && x.productId === ctx.f.productId)!
-        await d.open()
-        await d.forget()
-        let sendError: string | null = null
-        try {
-          await d.sendReport(ctx.outputId, new Uint8Array(ctx.size))
-        } catch (e) {
-          sendError = e instanceof Error ? e.name : String(e)
-        }
-        return { sendError, remaining: (await navigator.hid.getDevices()).length }
-      },
-      VENDOR_CTX
-    )
+    const result = await sharedPage.evaluate(async (ctx: VendorCtx) => {
+      const ds = await navigator.hid.getDevices()
+      const d = ds.find((x) => x.vendorId === ctx.f.vendorId && x.productId === ctx.f.productId)!
+      await d.open()
+      await d.forget()
+      let sendError: string | null = null
+      try {
+        await d.sendReport(ctx.outputId, new Uint8Array(ctx.size))
+      } catch (e) {
+        sendError = e instanceof Error ? e.name : String(e)
+      }
+      return { sendError, remaining: (await navigator.hid.getDevices()).length }
+    }, VENDOR_CTX)
     expect(result.sendError).toBe('InvalidStateError')
     expect(result.remaining).toBe(1)
   })

@@ -6,28 +6,28 @@
   </head>
   <body>
     <script>
-      (async function () {
-        let isCrossOrigin = false;
+      ;(async function () {
+        let isCrossOrigin = false
         if (window !== window.top) {
           try {
-            window.parent.location.origin;
+            window.parent.location.origin
           } catch {
-            isCrossOrigin = true;
+            isCrossOrigin = true
           }
         }
 
-        let qHid;
+        let qHid
         try {
-          qHid = (await navigator.permissions.query({ name: "hid" })).state;
+          qHid = (await navigator.permissions.query({ name: 'hid' })).state
         } catch (e) {
-          qHid = "ERROR: " + e.message;
+          qHid = 'ERROR: ' + e.message
         }
 
-        const hidUndefined = typeof navigator.hid === "undefined";
+        const hidUndefined = typeof navigator.hid === 'undefined'
 
-        window.tests = window.tests || { helper: {}, results: {} };
-        window.tests.results.perm = { isCrossOrigin, queryHid: qHid, hidUndefined };
-      })();
+        window.tests = window.tests || { helper: {}, results: {} }
+        window.tests.results.perm = { isCrossOrigin, queryHid: qHid, hidUndefined }
+      })()
     </script>
   </body>
 </html>

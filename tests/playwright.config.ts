@@ -38,6 +38,6 @@ export default defineConfig({
         firefoxHarnessConfig: { extensionPath: string }
         daemonMode: string
       }
-    },
+    }
   ]
 })

@@ -1,18 +1,21 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
-<head><meta charset="utf-8"><title>activation</title></head>
-<body>
-<script>
-  window.tests = window.tests || { helper: {}, results: {} };
-  window.tests.helper.requestDeviceWithoutGesture = (delayMs) =>
-    new Promise((resolve) => {
-      setTimeout(() => {
-        navigator.hid.requestDevice({ filters: [] }).then(
-          (devices) => resolve({ ok: true, count: devices.length }),
-          (e) => resolve({ ok: false, name: e.name, message: e.message })
-        );
-      }, delayMs);
-    });
-</script>
-</body>
+  <head>
+    <meta charset="utf-8" />
+    <title>activation</title>
+  </head>
+  <body>
+    <script>
+      window.tests = window.tests || { helper: {}, results: {} }
+      window.tests.helper.requestDeviceWithoutGesture = (delayMs) =>
+        new Promise((resolve) => {
+          setTimeout(() => {
+            navigator.hid.requestDevice({ filters: [] }).then(
+              (devices) => resolve({ ok: true, count: devices.length }),
+              (e) => resolve({ ok: false, name: e.name, message: e.message })
+            )
+          }, delayMs)
+        })
+    </script>
+  </body>
 </html>

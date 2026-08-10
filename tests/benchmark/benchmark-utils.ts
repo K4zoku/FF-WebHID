@@ -319,7 +319,13 @@ async function resetBenchmarkSettings(
 async function startProfiler(rdpPort: number): Promise<ProfilerCapture> {
   const profiler = await ProfilerCapture.connect(rdpPort)
   await profiler.startProfiler({
-    features: splitEnv('BENCHMARK_PROFILE_FEATURES') ?? ['js', 'stackwalk', 'ipcmessages', 'cpu', 'cpuallthreads'],
+    features: splitEnv('BENCHMARK_PROFILE_FEATURES') ?? [
+      'js',
+      'stackwalk',
+      'ipcmessages',
+      'cpu',
+      'cpuallthreads'
+    ],
     threads: splitEnv('BENCHMARK_PROFILE_THREADS') ?? ['GeckoMain', 'Worker'],
     entries: numEnv('BENCHMARK_PROFILE_ENTRIES') ?? 1 << 28,
     interval: numEnv('BENCHMARK_PROFILE_INTERVAL') ?? 1
@@ -337,9 +343,13 @@ async function saveProfile(
   try {
     const file = join(profileDir, `profile-${mode}${inPage ? '-inpage' : ''}.json`)
     const threads = await profiler.stopAndSave(file)
-    console.log(`[profiler] saved ${file} (${((Date.now() - t0) / 1000).toFixed(1)}s): ${threads.join(' | ')}`)
+    console.log(
+      `[profiler] saved ${file} (${((Date.now() - t0) / 1000).toFixed(1)}s): ${threads.join(' | ')}`
+    )
   } catch (e) {
-    console.warn(`[profiler] capture failed after ${((Date.now() - t0) / 1000).toFixed(1)}s: ${e instanceof Error ? e.message : String(e)}`)
+    console.warn(
+      `[profiler] capture failed after ${((Date.now() - t0) / 1000).toFixed(1)}s: ${e instanceof Error ? e.message : String(e)}`
+    )
   }
   profiler.disconnect()
 }
@@ -437,9 +447,7 @@ export async function runBenchmark(
 
     const setup = await page.evaluate(() => window.webhidBenchmark!.getMarks())
     const openMs =
-      setup.dataReady != null && setup.openStart != null
-        ? setup.dataReady - setup.openStart
-        : null
+      setup.dataReady != null && setup.openStart != null ? setup.dataReady - setup.openStart : null
     await page.evaluate(() => {
       document.getElementById('bench-status')!.textContent = ''
     })
@@ -463,7 +471,9 @@ export function skipOnFallback(result: BenchmarkResult, mode: string): void {
     test.skip(
       true,
       `${mode} benchmark degraded to NM fallback: ${result.fallbacks.join(' | ')}. ` +
-        'The numbers would measure NM, not ' + mode + '. Rerun to see if the spawn recovers.'
+        'The numbers would measure NM, not ' +
+        mode +
+        '. Rerun to see if the spawn recovers.'
     )
   }
 }

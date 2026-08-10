@@ -31,7 +31,11 @@ class Pending {
   readonly promise: Promise<unknown>
   readonly resolve: (v: unknown) => void
   readonly reject: (e: Error) => void
-  constructor(public bulk: boolean, timeoutMs: number, what: string) {
+  constructor(
+    public bulk: boolean,
+    timeoutMs: number,
+    what: string
+  ) {
     const { promise, resolve, reject } = Promise.withResolvers<unknown>()
     this.promise = promise
     this.resolve = resolve
@@ -72,7 +76,12 @@ export class ProfilerCapture {
         try {
           await client.recv(10000, 'RDP hello')
           const root = await client.request('root', 'getRoot')
-          if (!root || typeof root !== 'object' || !('perfActor' in root) || typeof root.perfActor !== 'string') {
+          if (
+            !root ||
+            typeof root !== 'object' ||
+            !('perfActor' in root) ||
+            typeof root.perfActor !== 'string'
+          ) {
             throw new Error(`no perfActor on root: ${JSON.stringify(root).slice(0, 200)}`)
           }
           client.perfActor = root.perfActor
@@ -101,12 +110,14 @@ export class ProfilerCapture {
     return this.recv(120000, `RDP ${type}`)
   }
 
-  async startProfiler(opts: {
-    entries?: number
-    interval?: number
-    features?: string[]
-    threads?: string[]
-  } = {}): Promise<void> {
+  async startProfiler(
+    opts: {
+      entries?: number
+      interval?: number
+      features?: string[]
+      threads?: string[]
+    } = {}
+  ): Promise<void> {
     if (!this.perfActor) throw new Error('ProfilerCapture: not connected')
     const reply = (await this.request(this.perfActor, 'startProfiler', {
       entries: opts.entries ?? 1 << 28,
@@ -171,7 +182,9 @@ export class ProfilerCapture {
           if (this.buf.length >= 5 && this.buf.subarray(0, 5).toString('latin1') === 'bulk ') {
             const sep = this.buf.indexOf(0x3a)
             if (sep >= 0) {
-              const m = /^bulk (\S+) (\S+) (\d+):$/.exec(this.buf.subarray(0, sep + 1).toString('latin1'))
+              const m = /^bulk (\S+) (\S+) (\d+):$/.exec(
+                this.buf.subarray(0, sep + 1).toString('latin1')
+              )
               if (m) {
                 this.bulkRemaining = Number(m[3])
                 this.buf = this.buf.subarray(sep + 1)

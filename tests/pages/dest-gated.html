@@ -1,22 +1,29 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
-<head><meta charset="utf-8"><title>dest-gated</title></head>
-<body>
-<script>
-window.tests = window.tests || { helper: {}, results: {} };
-window.tests.results.workerState = 'pending';
-try {
-  const w = new Worker(location.href);
-  w.onmessage = () => { window.tests.results.workerState = 'message'; };
-  w.onerror = () => { window.tests.results.workerState = 'error'; };
-  setTimeout(() => {
-    if (window.tests.results.workerState === 'pending') {
-      window.tests.results.workerState = 'settled';
-    }
-  }, 2000);
-} catch (e) {
-  window.tests.results.workerState = 'thrown';
-}
-</script>
-</body>
+  <head>
+    <meta charset="utf-8" />
+    <title>dest-gated</title>
+  </head>
+  <body>
+    <script>
+      window.tests = window.tests || { helper: {}, results: {} }
+      window.tests.results.workerState = 'pending'
+      try {
+        const w = new Worker(location.href)
+        w.onmessage = () => {
+          window.tests.results.workerState = 'message'
+        }
+        w.onerror = () => {
+          window.tests.results.workerState = 'error'
+        }
+        setTimeout(() => {
+          if (window.tests.results.workerState === 'pending') {
+            window.tests.results.workerState = 'settled'
+          }
+        }, 2000)
+      } catch (e) {
+        window.tests.results.workerState = 'thrown'
+      }
+    </script>
+  </body>
 </html>

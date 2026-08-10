@@ -1,37 +1,51 @@
-<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Policy Check</title></head>
-<body>
-<script>
-(async function() {
-  let isCrossOrigin = false;
-  if (window !== window.top) {
-    try { window.parent.location.origin; }
-    catch { isCrossOrigin = true; }
-  }
-  let qHid, qCamera;
-  try { qHid = (await navigator.permissions.query({ name: 'hid' })).state; }
-  catch (e) { qHid = 'ERROR: ' + e.message; }
-  try { qCamera = (await navigator.permissions.query({ name: 'camera' })).state; }
-  catch (e) { qCamera = 'ERROR: ' + e.message; }
-  const hidUndefined = typeof navigator.hid === 'undefined';
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Policy Check</title>
+  </head>
+  <body>
+    <script>
+      ;(async function () {
+        let isCrossOrigin = false
+        if (window !== window.top) {
+          try {
+            window.parent.location.origin
+          } catch {
+            isCrossOrigin = true
+          }
+        }
+        let qHid, qCamera
+        try {
+          qHid = (await navigator.permissions.query({ name: 'hid' })).state
+        } catch (e) {
+          qHid = 'ERROR: ' + e.message
+        }
+        try {
+          qCamera = (await navigator.permissions.query({ name: 'camera' })).state
+        } catch (e) {
+          qCamera = 'ERROR: ' + e.message
+        }
+        const hidUndefined = typeof navigator.hid === 'undefined'
 
-  let getDevicesResult;
-  try {
-    const devices = await navigator.hid.getDevices();
-    getDevicesResult = { ok: true, count: devices.length };
-  } catch (e) {
-    getDevicesResult = { ok: false, name: e.name, message: e.message };
-  }
-  window.tests = window.tests || { helper: {}, results: {} };
-  const result = {
-    isTop: window === window.top,
-    isCrossOrigin,
-    queryHid: qHid,
-    queryCamera: qCamera,
-    getDevices: getDevicesResult,
-    hidUndefined
-  };
-  window.tests.results.perm = result;
-})();
-</script>
-</body></html>
+        let getDevicesResult
+        try {
+          const devices = await navigator.hid.getDevices()
+          getDevicesResult = { ok: true, count: devices.length }
+        } catch (e) {
+          getDevicesResult = { ok: false, name: e.name, message: e.message }
+        }
+        window.tests = window.tests || { helper: {}, results: {} }
+        const result = {
+          isTop: window === window.top,
+          isCrossOrigin,
+          queryHid: qHid,
+          queryCamera: qCamera,
+          getDevices: getDevicesResult,
+          hidUndefined
+        }
+        window.tests.results.perm = result
+      })()
+    </script>
+  </body>
+</html>

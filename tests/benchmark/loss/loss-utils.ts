@@ -108,7 +108,7 @@ async function runLossOnce(
 
   const tickMs = 1
   const perTick = Math.max(1, Math.round(rate / 1000))
-  for (let i = 0; i < count; ) {
+  for (let i = 0; i < count;) {
     for (let j = 0; j < perTick && i < count; j++, i++) {
       const payload = new Array<number>(PAYLOAD_LEN).fill(0)
       const seq = startSeq + i
@@ -229,42 +229,39 @@ export async function benchmarkLoss(
     if (granted !== 1)
       throw new Error(`grantDevicePermission resolved ${granted} devices, expected 1`)
 
-    await page.evaluate(
-      async (f: DeviceFilter) => {
-        const ds = await navigator.hid.getDevices()
-        const d = ds.find((x) => x.vendorId === f.vendorId && x.productId === f.productId)
-        if (!d) throw new Error('vendor device not paired')
-        await d.open()
-        const state = {
-          count: 0,
-          last: -1,
-          phaseStart: 0,
-          phaseCount: 0,
-          phaseGaps: 0,
-          phaseMaxGap: 0,
-          phaseFirstGap: -1
-        }
-        d.oninputreport = (ev) => {
-          const data = new Uint8Array(ev.data.buffer)
-          const seq = data[0] | (data[1] << 8) | (data[2] << 16)
-          state.count++
-          if (seq >= state.phaseStart) {
-            state.phaseCount++
-            if (state.last >= state.phaseStart - 1) {
-              const gap = seq - state.last
-              if (gap > 1) {
-                state.phaseGaps++
-                if (gap > state.phaseMaxGap) state.phaseMaxGap = gap
-                if (state.phaseFirstGap < 0) state.phaseFirstGap = seq
-              }
+    await page.evaluate(async (f: DeviceFilter) => {
+      const ds = await navigator.hid.getDevices()
+      const d = ds.find((x) => x.vendorId === f.vendorId && x.productId === f.productId)
+      if (!d) throw new Error('vendor device not paired')
+      await d.open()
+      const state = {
+        count: 0,
+        last: -1,
+        phaseStart: 0,
+        phaseCount: 0,
+        phaseGaps: 0,
+        phaseMaxGap: 0,
+        phaseFirstGap: -1
+      }
+      d.oninputreport = (ev) => {
+        const data = new Uint8Array(ev.data.buffer)
+        const seq = data[0] | (data[1] << 8) | (data[2] << 16)
+        state.count++
+        if (seq >= state.phaseStart) {
+          state.phaseCount++
+          if (state.last >= state.phaseStart - 1) {
+            const gap = seq - state.last
+            if (gap > 1) {
+              state.phaseGaps++
+              if (gap > state.phaseMaxGap) state.phaseMaxGap = gap
+              if (state.phaseFirstGap < 0) state.phaseFirstGap = seq
             }
           }
-          state.last = seq
         }
-        window.__lossState = state
-      },
-      VENDOR
-    )
+        state.last = seq
+      }
+      window.__lossState = state
+    }, VENDOR)
 
     const mock = { process: fixtures.vendorDevice.process, ready: fixtures.vendorDevice.ready }
 

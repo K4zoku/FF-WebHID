@@ -251,7 +251,6 @@ export const test = base.extend<
       let onUnroute: ((pattern: string, handler: RouteHandler) => void) | undefined
       let onUnrouteAll: (() => void) | undefined
       try {
-
         bridge = new NetworkEventBridge(context._firefoxWebServer)
         context._firefoxBridge = bridge
 

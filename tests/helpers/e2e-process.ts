@@ -138,8 +138,7 @@ export async function waitForOutputReport(
             data: parsed.data || []
           })
         }
-      } catch {
-      }
+      } catch {}
     })
   })
 }
