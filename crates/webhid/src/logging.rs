@@ -85,9 +85,7 @@ fn prune_old_logs(dir: &Path) {
     for entry in entries.flatten() {
         let name = entry.file_name();
         let name = name.to_string_lossy();
-        if !name.starts_with("webhid-")
-            || (!name.ends_with(".log") && !name.ends_with(".log.1"))
-        {
+        if !name.starts_with("webhid-") || (!name.ends_with(".log") && !name.ends_with(".log.1")) {
             continue;
         }
         let Ok(meta) = entry.metadata() else {
@@ -103,7 +101,11 @@ fn prune_old_logs(dir: &Path) {
 }
 
 fn open_log_file(path: &str) -> Option<std::fs::File> {
-    match std::fs::OpenOptions::new().create(true).append(true).open(path) {
+    match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
         Ok(f) => Some(f),
         Err(e) => {
             eprintln!("[logger] cannot open log file '{path}': {e}; continuing without file log");
@@ -192,12 +194,18 @@ mod tests {
         prune_old_logs(&dir);
 
         assert!(fresh.exists(), "fresh log must survive");
-        assert!(!dir.join("webhid-1.log").exists(), "stale log must be removed");
+        assert!(
+            !dir.join("webhid-1.log").exists(),
+            "stale log must be removed"
+        );
         assert!(
             !dir.join("webhid-2.log.1").exists(),
             "stale rotated log must be removed"
         );
-        assert!(dir.join("other.log").exists(), "unrelated file must survive");
+        assert!(
+            dir.join("other.log").exists(),
+            "unrelated file must survive"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
