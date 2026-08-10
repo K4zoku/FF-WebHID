@@ -618,6 +618,27 @@
   }
 
   /**
+   * Relays the frame-origin list for a tab from its top-frame bridge. The
+   * popup passes its active tab's id; page messages carry it via sender.tab.
+   * @param {object} request
+   * @param {object} sender
+   * @param {Function} sendResponse
+   * @returns {boolean}
+   */
+  function handleGetFrameOrigins(request, sender, sendResponse) {
+    const tabId = request.tabId != null ? request.tabId : sender.tab ? sender.tab.id : undefined
+    if (tabId == null) {
+      sendResponse({ origins: [] })
+      return false
+    }
+    browser.tabs
+      .sendMessage(tabId, { action: 'getFrameOrigins' })
+      .then((r) => sendResponse({ origins: (r && r.origins) || [] }))
+      .catch(() => sendResponse({ origins: [] }))
+    return true
+  }
+
+  /**
    * @param {object} request
    * @param {object} sender
    * @returns {boolean}
@@ -880,6 +901,7 @@
     getDeviceInfo: handleGetDeviceInfo,
     fetchResource: handleFetchResource,
     getCspInfo: handleGetCspInfo,
+    getFrameOrigins: handleGetFrameOrigins,
     getWorkerBundle: handleGetWorkerBundle,
     showPicker: handleShowPicker,
     getPendingPicker: handleGetPendingPicker,

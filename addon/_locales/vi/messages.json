@@ -89,6 +89,12 @@
   "popupNoSite": {
     "message": "(không có trang)"
   },
+  "popupSiteOrigin": {
+    "message": "Origin của trang"
+  },
+  "popupOriginList": {
+    "message": "Các origin trong tab này"
+  },
   "popupUnknown": {
     "message": "Không rõ"
   },

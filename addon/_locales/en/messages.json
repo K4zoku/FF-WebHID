@@ -89,6 +89,12 @@
   "popupNoSite": {
     "message": "(no site)"
   },
+  "popupSiteOrigin": {
+    "message": "Site origin"
+  },
+  "popupOriginList": {
+    "message": "Origins in this tab"
+  },
   "popupUnknown": {
     "message": "Unknown"
   },

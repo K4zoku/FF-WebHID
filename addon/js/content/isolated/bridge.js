@@ -37,6 +37,10 @@
       sendResponse({ ids: Array.from(openDevices) })
       return true
     }
+    if (request.action === 'getFrameOrigins') {
+      sendResponse({ origins: collectFrameOrigins() })
+      return true
+    }
     if (request.action === 'getDataPlaneStatus') {
       const planes = []
       const seen = new Set()
@@ -676,6 +680,29 @@
   function getRequestOrigin(data) {
     const port = requestPortMap.get(data.id)
     return port ? portOrigin.get(port) : window.location.origin
+  }
+
+  /**
+   * Distinct http(s) origins of every frame running the polyfill in this tab,
+   * top-level first. Origins come from the engine-set `event.origin` of each
+   * page port, never from page-visible state.
+   * @returns {string[]}
+   */
+  function collectFrameOrigins() {
+    const seen = new Set()
+    const origins = []
+    const topOrigin = window.location.origin
+    if (topOrigin && (topOrigin.startsWith('http:') || topOrigin.startsWith('https:'))) {
+      seen.add(topOrigin)
+      origins.push(topOrigin)
+    }
+    for (const o of portOrigin.values()) {
+      if (!o || seen.has(o)) continue
+      if (!(o.startsWith('http:') || o.startsWith('https:'))) continue
+      seen.add(o)
+      origins.push(o)
+    }
+    return origins
   }
 
   /**

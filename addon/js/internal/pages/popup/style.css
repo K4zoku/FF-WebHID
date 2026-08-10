@@ -60,12 +60,96 @@ input:checked + .slider:before {
   color: var(--accent);
 }
 
-#site-name {
+.origin-picker {
+  position: relative;
   flex: 1;
+  min-width: 0;
+}
+
+.origin-picker-button {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  width: 100%;
+  padding: 2px 4px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  cursor: default;
+  overflow: hidden;
+}
+
+.origin-picker-button:hover,
+.origin-picker-button:focus-visible {
+  background: var(--accent-surface);
+  color: var(--accent);
+  outline: none;
+}
+
+.origin-picker-button.has-list {
+  cursor: pointer;
+}
+
+.origin-picker-value {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  text-align: right;
+}
+
+.origin-picker-caret {
+  display: none;
+  flex-shrink: 0;
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid currentColor;
+}
+
+.origin-picker-button.has-list .origin-picker-caret {
+  display: inline-block;
+}
+
+.origin-picker-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 10;
+  min-width: 220px;
+  max-width: 320px;
+  max-height: 240px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-drop);
+}
+
+.origin-picker-option {
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.origin-picker-option:hover,
+.origin-picker-option:focus {
+  background: var(--surface-hover);
+  outline: none;
+}
+
+.origin-picker-option.selected {
+  background: var(--accent-selected);
+  color: var(--accent);
 }
 
 

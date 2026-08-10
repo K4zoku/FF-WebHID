@@ -14,7 +14,26 @@
         <span class="status-dot" aria-hidden="true"></span>
         <span id="status-text"></span>
       </span>
-      <span id="site-name" class="muted" aria-live="polite"></span>
+      <div class="origin-picker">
+        <button
+          id="site-name"
+          class="origin-picker-button muted"
+          type="button"
+          aria-haspopup="listbox"
+          aria-expanded="false"
+          data-i18n-attr="aria-label:popupSiteOrigin"
+        >
+          <span id="site-name-text" class="origin-picker-value" aria-live="polite"></span>
+          <span class="origin-picker-caret" aria-hidden="true"></span>
+        </button>
+        <ul
+          id="origin-list"
+          class="origin-picker-list"
+          role="listbox"
+          data-i18n-attr="aria-label:popupOriginList"
+          hidden
+        ></ul>
+      </div>
       <button
         id="btn-settings"
         class="icon-btn"

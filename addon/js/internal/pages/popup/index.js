@@ -19,23 +19,197 @@
   localizeHTML(document)
   initInfoPopovers(document)
 
-  const [tab] = await browser.tabs.query({ active: true, currentWindow: true })
+  /** @type {object|undefined} */
+  let tab
   /** @type {string} */
   let origin = ''
-  if (tab && tab.url) {
-    try {
-      const url = new URL(tab.url)
-      if (url.protocol === 'http:' || url.protocol === 'https:') {
-        origin = url.origin
-      }
-    } catch (e) {
-      logger.debug('URL parse failed', e)
+
+  /**
+   * Resolves the active tab and its http(s) origin. When the popup itself is
+   * open as a tab in its own window (dev/testing), the active tab of its
+   * window is itself; fall back to the active page tab of any window. The
+   * real action popup is not a tab, so this branch never runs there.
+   * @returns {Promise<{tab: object|undefined, origin: string}>}
+   */
+  async function resolveActiveTab() {
+    let [t] = await browser.tabs.query({ active: true, currentWindow: true })
+    if (t && t.url && t.url.startsWith(browser.runtime.getURL(''))) {
+      const all = await browser.tabs.query({ active: true })
+      t = all.find((x) => x.url && x.url.startsWith('http')) || t
     }
+    let o = ''
+    if (t && t.url) {
+      try {
+        const url = new URL(t.url)
+        if (url.protocol === 'http:' || url.protocol === 'https:') {
+          o = url.origin
+        }
+      } catch (e) {
+        logger.debug('URL parse failed', e)
+      }
+    }
+    return { tab: t, origin: o }
   }
 
   /** @type {HTMLElement} */
-  const siteLabel = document.getElementById('site-name')
-  siteLabel.textContent = origin || t('popupNoSite')
+  const siteButton = document.getElementById('site-name')
+  /** @type {HTMLElement} */
+  const siteLabel = document.getElementById('site-name-text')
+  /** @type {HTMLElement} */
+  const originList = document.getElementById('origin-list')
+
+  /**
+   * Collects every distinct http(s) origin in the tab from the bridge's page
+   * ports, top-level first. Frames that never run the polyfill are absent.
+   * @returns {Promise<string[]>}
+   */
+  async function loadFrameOrigins() {
+    if (!tab || tab.id == null) return origin ? [origin] : []
+    try {
+      const resp = await browser.runtime.sendMessage({
+        action: 'getFrameOrigins',
+        tabId: tab.id
+      })
+      const origins = (resp && resp.origins) || []
+      return origins.length ? origins : origin ? [origin] : []
+    } catch (e) {
+      logger.debug('getFrameOrigins failed', e)
+      return origin ? [origin] : []
+    }
+  }
+
+  /** @type {string[]} */
+  let frameOrigins = []
+
+  /**
+   * Renders the selected origin on the dropdown button and closes the list.
+   * @returns {void}
+   */
+  function renderSiteLabel() {
+    siteLabel.textContent = origin || t('popupNoSite')
+    siteButton.classList.toggle('has-list', frameOrigins.length > 1)
+    siteButton.setAttribute('aria-expanded', 'false')
+    originList.hidden = true
+  }
+
+  /**
+   * @returns {void}
+   */
+  function openOriginList() {
+    if (frameOrigins.length < 2) return
+    for (const li of originList.children) {
+      const selected = li.dataset.origin === origin
+      li.classList.toggle('selected', selected)
+      li.setAttribute('aria-selected', String(selected))
+    }
+    originList.hidden = false
+    siteButton.setAttribute('aria-expanded', 'true')
+  }
+
+  /**
+   * @returns {void}
+   */
+  function closeOriginList() {
+    originList.hidden = true
+    siteButton.setAttribute('aria-expanded', 'false')
+  }
+
+  /**
+   * Switches the origin the popup operates on and re-renders for it.
+   * @param {string} o
+   * @returns {Promise<void>}
+   */
+  async function selectOrigin(o) {
+    if (o === origin || !frameOrigins.includes(o)) return
+    origin = o
+    renderSiteLabel()
+    settings = await loadSettings()
+    applySettingsToUI()
+    renderDevices()
+    refreshStatus()
+  }
+
+  /**
+   * Rebuilds the dropdown options for the current frameOrigins.
+   * @returns {void}
+   */
+  function buildOriginList() {
+    originList.textContent = ''
+    for (const o of frameOrigins) {
+      const li = document.createElement('li')
+      li.className = 'origin-picker-option'
+      li.setAttribute('role', 'option')
+      li.setAttribute('tabindex', '-1')
+      li.dataset.origin = o
+      li.textContent = o
+      li.addEventListener('click', () => selectOrigin(o))
+      originList.appendChild(li)
+    }
+    renderSiteLabel()
+  }
+
+  /**
+   * Wires dropdown interactions once; the option list is rebuilt per tab.
+   * @returns {void}
+   */
+  function wireOriginPicker() {
+    siteButton.addEventListener('click', (e) => {
+      e.stopPropagation()
+      if (originList.hidden) openOriginList()
+      else closeOriginList()
+    })
+    siteButton.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown') {
+        e.preventDefault()
+        openOriginList()
+      } else if (e.key === 'Escape') {
+        closeOriginList()
+      }
+    })
+    originList.addEventListener('keydown', (e) => {
+      const items = [...originList.children]
+      const idx = items.findIndex((li) => li.dataset.origin === origin)
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault()
+        const next = (idx + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length
+        items[next].focus()
+      } else if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault()
+        const li = e.target.closest('li')
+        if (li) selectOrigin(li.dataset.origin)
+      } else if (e.key === 'Escape') {
+        closeOriginList()
+        siteButton.focus()
+      }
+    })
+    document.addEventListener('click', (e) => {
+      if (!siteButton.contains(e.target) && !originList.contains(e.target)) closeOriginList()
+    })
+  }
+
+  /** @type {number} */
+  let refreshToken = 0
+  /**
+   * Re-targets the popup at the active tab: re-resolves the tab and origin,
+   * rebuilds the origin list, and re-applies settings, devices, and status.
+   * @returns {Promise<void>}
+   */
+  async function refreshForActiveTab() {
+    const token = ++refreshToken
+    const resolved = await resolveActiveTab()
+    if (token !== refreshToken) return
+    tab = resolved.tab
+    origin = resolved.origin
+    siteLabel.textContent = origin || t('popupNoSite')
+    frameOrigins = await loadFrameOrigins()
+    if (token !== refreshToken) return
+    buildOriginList()
+    settings = await loadSettings()
+    if (token !== refreshToken) return
+    applySettingsToUI()
+    renderDevices()
+    refreshStatus()
+  }
 
   /**
    * Loads global and site settings, merging site overrides on top of global defaults.
@@ -59,7 +233,7 @@
     await saveSiteSetting(origin, key, value)
   }
 
-  const settings = await loadSettings()
+  let settings
 
   const viewDevices = document.getElementById('view-devices')
   const viewSettings = document.getElementById('view-settings')
@@ -101,15 +275,22 @@
     return s.dataPlane === 'wt' && s.useWorker === false ? 'wt-inpage' : s.dataPlane
   }
 
-  setRadioValue('dataPlane', effectiveDataPlaneValue(settings))
-  setRadioValue('devicePickerMode', settings.devicePickerMode || GLOBAL_DEFAULTS.devicePickerMode)
-  setRadioValue('workerSpawnMode', settings.workerSpawnMode || GLOBAL_DEFAULTS.workerSpawnMode)
-  setRadioValue('logLevel', String(settings.logLevel))
-  /** @type {HTMLInputElement} */
-  document.getElementById('workerPolyfillEnabled').checked = settings.workerPolyfillEnabled || false
-  /** @type {HTMLInputElement} */
-  document.getElementById('allowActivationlessRequestDevice').checked =
-    settings.allowActivationlessRequestDevice || false
+  /**
+   * Applies the merged settings for the selected origin to the form controls.
+   * @returns {void}
+   */
+  function applySettingsToUI() {
+    setRadioValue('dataPlane', effectiveDataPlaneValue(settings))
+    setRadioValue('devicePickerMode', settings.devicePickerMode || GLOBAL_DEFAULTS.devicePickerMode)
+    setRadioValue('workerSpawnMode', settings.workerSpawnMode || GLOBAL_DEFAULTS.workerSpawnMode)
+    setRadioValue('logLevel', String(settings.logLevel))
+    /** @type {HTMLInputElement} */
+    document.getElementById('workerPolyfillEnabled').checked = settings.workerPolyfillEnabled || false
+    /** @type {HTMLInputElement} */
+    document.getElementById('allowActivationlessRequestDevice').checked =
+      settings.allowActivationlessRequestDevice || false
+    updatePlaneVisibility()
+  }
 
   /**
    * @param {string} o
@@ -148,7 +329,6 @@
       dp === 'wt' || dp === 'ws' ? '' : 'none'
     updateInPageWarning()
   }
-  updatePlaneVisibility()
 
   /**
    * Binds change handling for one radio group, saving on selection.
@@ -487,7 +667,11 @@
     ])
   }
 
-  await Promise.all([renderDevices(), refreshStatus()])
+  wireOriginPicker()
+  await refreshForActiveTab()
+  browser.tabs.onActivated.addListener(() => {
+    refreshForActiveTab()
+  })
 
   browser.runtime.onMessage.addListener((message) => {
     if (message.action === 'webhidDeviceEvent' && message.event) {
