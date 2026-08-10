@@ -278,22 +278,36 @@ test.describe.serial('WebHID E2E', () => {
     expect(output.data[0]).toBe(VENDOR_OUTPUT_ID)
   })
 
-  test('sendFeatureReport succeeds after open', async ({ sharedPage }) => {
-    await sharedPage.evaluate(async (ctx: VendorCtx) => {
+  test('sendFeatureReport fails when the descriptor declares no feature reports', async ({
+    sharedPage
+  }) => {
+    const errorName = await sharedPage.evaluate(async (ctx: VendorCtx) => {
       const ds = await navigator.hid.getDevices()
       const d = ds.find((x) => x.vendorId === ctx.f.vendorId && x.productId === ctx.f.productId)!
-      await d.sendFeatureReport(ctx.featureId, new Uint8Array([0xab, 0xab, 0xab, 0xab]))
+      try {
+        await d.sendFeatureReport(ctx.featureId, new Uint8Array([0xab, 0xab, 0xab, 0xab]))
+        return null
+      } catch (e) {
+        return e instanceof Error ? e.name : String(e)
+      }
     }, VENDOR_CTX)
+    expect(errorName).toBe('NetworkError')
   })
 
-  test('receiveFeatureReport from vendor returns data', async ({ sharedPage }) => {
-    const data = await sharedPage.evaluate(async (ctx: VendorCtx) => {
+  test('receiveFeatureReport fails when the descriptor declares no feature reports', async ({
+    sharedPage
+  }) => {
+    const errorName = await sharedPage.evaluate(async (ctx: VendorCtx) => {
       const ds = await navigator.hid.getDevices()
       const d = ds.find((x) => x.vendorId === ctx.f.vendorId && x.productId === ctx.f.productId)!
-      const view = await d.receiveFeatureReport(ctx.featureId)
-      return Array.from(new Uint8Array(view.buffer))
+      try {
+        await d.receiveFeatureReport(ctx.featureId)
+        return null
+      } catch (e) {
+        return e instanceof Error ? e.name : String(e)
+      }
     }, VENDOR_CTX)
-    expect(Array.isArray(data)).toBe(true)
+    expect(errorName).toBe('NetworkError')
   })
 
   test('WS data plane works with gamepad when the page URL has a fragment', async ({

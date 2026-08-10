@@ -243,10 +243,10 @@ fn report_write_valid(
     if numbered_reports != (report_id != 0) {
         return false;
     }
-    if let Some(len) = payload_len
-        && max_size > 0
-        && len > max_size as usize
-    {
+    if max_size == 0 {
+        return false;
+    }
+    if let Some(len) = payload_len && len > max_size as usize {
         return false;
     }
     true
@@ -369,11 +369,10 @@ impl DeviceReportBlocking {
     /// `SendFeatureReport` pre-checks: the report ID must be consistent with
     /// the device's numbered-report mode (`has_report_id != (report_id != 0)`
     /// in Chromium) and the payload must fit the declared max size for the
-    /// report type. A payload length of `None` means a read (no payload). The
-    /// max-size-zero case (report type not declared in the descriptor) is
-    /// deliberately allowed: the daemon issues raw SET/GET_REPORT ioctls
-    /// regardless of declaration, which the e2e feature-report coverage
-    /// relies on.
+    /// report type. A payload length of `None` means a read (no payload).
+    /// A max size of zero (the report type is not declared in the descriptor)
+    /// rejects the request, matching Chromium's `max_*_report_size() == 0`
+    /// gates in `Write` / `GetFeatureReport` / `SendFeatureReport`.
     pub fn validate_report_send(
         &self,
         report_id: u8,
@@ -739,11 +738,11 @@ mod tests {
         assert!(!report_write_valid(false, 64, 1, Some(64)));
         assert!(!report_write_valid(true, 64, 1, Some(65)));
         assert!(report_write_valid(true, 64, 1, Some(64)));
-        assert!(report_write_valid(true, 0, 1, Some(1024)));
+        assert!(!report_write_valid(true, 0, 1, Some(1024)));
         assert!(!report_write_valid(true, 0, 0, Some(1024)));
         assert!(report_write_valid(false, 64, 0, None));
         assert!(!report_write_valid(false, 64, 1, None));
-        assert!(report_write_valid(true, 0, 2, None));
+        assert!(!report_write_valid(true, 0, 2, None));
     }
 
     #[test]

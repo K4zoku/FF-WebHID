@@ -476,11 +476,10 @@ impl DeviceManager {
     /// `SendFeatureReport` pre-checks: the report ID must be consistent with
     /// the device's numbered-report mode (`has_report_id != (report_id != 0)`
     /// in Chromium) and the payload must fit the declared max size for the
-    /// report type. A payload length of `None` means a read (no payload). The
-    /// max-size-zero case (report type not declared in the descriptor) is
-    /// deliberately allowed: the daemon issues raw SET/GET_REPORT ioctls
-    /// regardless of declaration, which the e2e feature-report coverage
-    /// relies on.
+    /// report type. A payload length of `None` means a read (no payload).
+    /// A max size of zero (the report type is not declared in the descriptor)
+    /// rejects the request, matching Chromium's `max_*_report_size() == 0`
+    /// gates in `Write` / `GetFeatureReport` / `SendFeatureReport`.
     pub fn validate_report_send(
         &self,
         device_id: u32,

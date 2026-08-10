@@ -458,14 +458,20 @@ test.describe.serial('WebHID E2E (WebTransport data plane)', () => {
     expect(output.data[0]).toBe(VENDOR_OUTPUT_ID)
   })
 
-  test('receiveFeatureReport over WT', async ({ sharedPage }) => {
-    const data = await sharedPage.evaluate(async (ctx: VendorCtx) => {
+  test('receiveFeatureReport over WT fails when the descriptor declares no feature reports', async ({
+    sharedPage
+  }) => {
+    const errorName = await sharedPage.evaluate(async (ctx: VendorCtx) => {
       const ds = await navigator.hid.getDevices()
       const d = ds.find((x) => x.vendorId === ctx.f.vendorId && x.productId === ctx.f.productId)!
-      const view = await d.receiveFeatureReport(ctx.featureId)
-      return Array.from(new Uint8Array(view.buffer))
+      try {
+        await d.receiveFeatureReport(ctx.featureId)
+        return null
+      } catch (e) {
+        return e instanceof Error ? e.name : String(e)
+      }
     }, VENDOR_CTX)
-    expect(Array.isArray(data)).toBe(true)
+    expect(errorName).toBe('NetworkError')
   })
 
   test('switching data plane ws→wt on an open device', async ({
@@ -550,8 +556,15 @@ test.describe.serial('WebHID E2E (WebTransport data plane)', () => {
       const ds = await navigator.hid.getDevices()
       const d = ds.find((x) => x.vendorId === ctx.f.vendorId && x.productId === ctx.f.productId)!
       await d.sendReport(ctx.outputId, new Uint8Array(ctx.size).fill(0x43))
-      const feature = await d.receiveFeatureReport(ctx.featureId)
-      if (!(feature instanceof DataView)) throw new Error('feature read did not return DataView')
+      let featureError = null
+      try {
+        await d.receiveFeatureReport(ctx.featureId)
+      } catch (e) {
+        featureError = e instanceof Error ? e.name : String(e)
+      }
+      if (featureError !== 'NetworkError') {
+        throw new Error('feature read did not reject with NetworkError: ' + featureError)
+      }
     }, VENDOR_CTX)
     const output = await outputPromise
     expect(output.data[0]).toBe(VENDOR_OUTPUT_ID)

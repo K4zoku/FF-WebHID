@@ -60,7 +60,7 @@ Single `dataPlane` setting (`ws` / `wt` / `nm`). Control plane (handshake, open/
 
 ### Test harness traps
 
-- e2e devices (`tests/helpers/e2e-devices.ts`, VID 0x16c0): vendor=0x0001 (report ID 1, 64-byte in/out; primary chain + feature reports; daemon issues raw SET/GET_REPORT regardless of declaration), gamepad=0x0002 (no report ID, 5-byte input; WS-data-plane-with-URL-fragment + fresh-pairing gates), mouse=0x0003, keyboard=0x0004. Lazy spawn, reused across the serial chain.
+- e2e devices (`tests/helpers/e2e-devices.ts`, VID 0x16c0): vendor=0x0001 (report ID 1, 64-byte in/out; primary chain + feature reports; send-side rejects report types the descriptor does not declare, matching Chromium's `max_*_report_size() == 0` gates), gamepad=0x0002 (no report ID, 5-byte input; WS-data-plane-with-URL-fragment + fresh-pairing gates), mouse=0x0003, keyboard=0x0004. Lazy spawn, reused across the serial chain.
 - `hidreport` rejects "Missing Usages for main item" when reportCount exceeds declared usages on a Data/Variable item; const items sidestep the check.
 - Concurrent-run WS drop: two e2e projects running concurrently occasionally drop a vendor input report (WS CPU contention). 19/19 alone each; 38/38 with `--workers=1`. Use `--workers=1` for "both projects pass".
 - Firefox 150+ LNA (`network.lna.blocking`, default true) gates page-context WebTransport to loopback: a public origin hitting localhost gets a one-time "Allow" prompt; loopback-origin pages and worker-context WT are exempt. Page-context WT cannot survive Juggler interception (`context.route('**/*')` → `SetupReplacementChannel` → `NS_ERROR_NOT_AVAILABLE`, bridge falls back to NM after 10s): no catch-all route in `tests/helpers/e2e.ts`, ever.
