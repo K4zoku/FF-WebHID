@@ -112,8 +112,6 @@ The popup's site label is a custom dropdown (no `<select>`) listing the active t
 
 - **WT/QUIC data plane** (`dataPlane: "wt"`): daemon WT server at boot (self-signed ECDSA P-256, SAN 127.0.0.1, ≤14-day validity, pinned via `serverCertificateHashes`); auth via URL path; one persistent bidirectional stream with `[len_u32 LE]` frame prefix; data worker auto-reconnects post-ready (500ms→5s exponential backoff, same as WS); cert renewal rotates to a fresh port with drain. p50 0.85ms vs ws 0.78ms / nm 1.77ms (loopback): TLS/QUIC costs ~+0.07ms/report; ws remains the fastest Firefox path. Seccomp needed `SYS_fcntl` + `SYS_recvmmsg`. Covered by `tests/e2e/wt.spec.ts` + `tests/benchmark/benchmark-wt.spec.ts`.
 - **Chromium native-WebHID benchmark** (`chromium-benchmark`, headless): mock pre-granted via `WebHidAllowDevicesForUrls` policy; fixed port 8123 (policy matches origins including port); `channel: 'chromium'` required (chrome-headless-shell has no udev/HID layer); never `--no-sandbox` (breaks udev). Finding: `vendor.bin`'s report ID 1 sat between two top-level collections, which Chromium's HID parser does not carry across; the ID now lives inside the vendor collection. Chromium p50 ~0.3-0.4ms; its `performance.now()` is clamped to 100µs, benchmark page uses COOP/COEP for 5µs precision.
-- **Chromium testbed**: overriding `navigator.hid` on Chromium compares the polyfill against native WebHID on the same engine. Not yet benchmarked; do not claim the polyfill beats native Chromium until real numbers exist.
-
 ## Not every change needs a benchmark-driven justification
 
 Some changes were made because they were interesting to try (binary-packed collections, WebTransport exploration). Don't retroactively invent a performance rationale; note it as such.
