@@ -241,6 +241,7 @@
         )
         worker = new NativeWorker(makeUrl(blobUrl))
       } else {
+        await sendRequest('armShadowSpawn', { url: location.href }, { timeoutMs: 2000 })
         worker = new NativeWorker(makeUrl(location.href))
       }
     } catch (e) {

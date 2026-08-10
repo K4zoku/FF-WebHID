@@ -1,4 +1,5 @@
 import { test, expect } from '../helpers/browser.js';
+import { armShadowSpawn } from '../helpers/browser-utils.js';
 import type { Page } from '@playwright/test';
 
 /**
@@ -37,7 +38,9 @@ test.describe('shadow-URL redirect following', () => {
   test('worker self-request follows redirects with navigation headers faked on the final hop', async ({
     sharedPage,
     pageUrl,
+    backgroundPage,
   }) => {
+    await armShadowSpawn(backgroundPage, pageUrl('/shadow-redirect-chain/chain4/4'));
     await sharedPage.goto(pageUrl('/shadow-redirect-chain/chain4/4'), {
       waitUntil: 'domcontentloaded',
       timeout: 15000,
@@ -52,7 +55,9 @@ test.describe('shadow-URL redirect following', () => {
   test('redirect chain longer than 4 hops is still followed to the end', async ({
     sharedPage,
     pageUrl,
+    backgroundPage,
   }) => {
+    await armShadowSpawn(backgroundPage, pageUrl('/shadow-redirect-chain/chain8/8'));
     await sharedPage.goto(pageUrl('/shadow-redirect-chain/chain8/8'), {
       waitUntil: 'domcontentloaded',
       timeout: 15000,

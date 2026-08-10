@@ -1,7 +1,7 @@
 ;(function () {
   const webhid = globalThis.webhid
   const logger = webhid.import('logger')
-  const { workerPolyfillSites, permissionsPolicy } = webhid.import('bgState')
+  const { workerPolyfillSites, permissionsPolicy, shadowArms } = webhid.import('bgState')
   const { ensureWorkerBundle, ensureWorkerPolyfillBundle } = webhid.import('bgBundle')
   const { parseCspForWorkerSpawn, rewriteCspValue, rewriteCspForBlob, urlOrigin, frameKey } =
     webhid.import('bgCsp')
@@ -77,6 +77,26 @@
    */
   function sameUrlModuloFragment(a, b) {
     return stripFragment(a) === stripFragment(b)
+  }
+
+  /**
+   * Consumes one shadow arm (if any) for the request's tab+document, so the
+   * polyfill's own data-worker spawn is served the worker bundle while a page
+   * self-worker with the same URL passes through untouched.
+   * @param {object} details
+   * @returns {boolean}
+   */
+  function consumeShadowArm(details) {
+    if (details.tabId === undefined || details.documentUrl === undefined) return false
+    const key = `${details.tabId}:${stripFragment(details.documentUrl)}`
+    const arm = shadowArms.get(key)
+    if (!arm || Date.now() - arm.at > 5000) {
+      if (arm) shadowArms.delete(key)
+      return false
+    }
+    if (arm.count <= 1) shadowArms.delete(key)
+    else shadowArms.set(key, { count: arm.count - 1, at: arm.at })
+    return true
   }
 
   /**
@@ -452,7 +472,7 @@
         const isShadowUrl =
           details.documentUrl !== undefined &&
           sameUrlModuloFragment(details.url, details.documentUrl)
-        if (isShadowUrl) return handleShadowUrl(details)
+        if (isShadowUrl && consumeShadowArm(details)) return handleShadowUrl(details)
         return handleInjection(details, settings)
       },
       { urls: ['<all_urls>'], types: ['script'] },

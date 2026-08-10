@@ -1,4 +1,4 @@
-(function () {
+;(function () {
   const webhid = globalThis.webhid
   const logger = webhid.import('logger')
   const createSettingsStore = webhid.import('createSettingsStore')
@@ -11,7 +11,7 @@
   const saveGlobalSetting = webhid.import('saveGlobalSetting')
   logger.initLogger('bg')
 
-  const { workerPolyfillSites, pendingPicker } = webhid.import('bgState')
+  const { workerPolyfillSites, pendingPicker, shadowArms } = webhid.import('bgState')
   const { openDb } = webhid.import('bgStorage')
   const { purgeTab } = webhid.import('bgStateOps')
   const NativeMessaging = webhid.import('NativeMessaging')
@@ -248,6 +248,13 @@
       }
     })
   }
+
+  webhid.export('armShadowSpawn', (tabId, url) => {
+    if (tabId == null || typeof url !== 'string' || !url) return
+    const key = `${tabId}:${url.split('#')[0]}`
+    const existing = shadowArms.get(key)
+    shadowArms.set(key, { count: (existing ? existing.count : 0) + 1, at: Date.now() })
+  })
 
   browser.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return

@@ -1,10 +1,13 @@
 import { test, expect } from '../helpers/browser.js';
+import { armShadowSpawn } from '../helpers/browser-utils.js';
 
 test.describe('Sec-Fetch header faking for shadow-URL worker request', () => {
   test('server sees navigation headers (dest=document, mode=navigate, site=none, user=?1, HTML accept) for the worker self-request', async ({
     sharedPage,
     pageUrl,
+    backgroundPage,
   }) => {
+    await armShadowSpawn(backgroundPage, pageUrl('/dest-gated'));
     await sharedPage.goto(pageUrl('/dest-gated'), {
       waitUntil: 'domcontentloaded',
       timeout: 15000,

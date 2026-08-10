@@ -36,3 +36,24 @@ export async function waitForPermResult(page: Page, timeout = 10000): Promise<Pe
   );
   return getPermResult(page);
 }
+
+/**
+ * Arms the extension's shadow-URL interception from the background page for
+ * the given URL, so a page-created `new Worker(location.href)` exercises the
+ * shadow path (data-worker bundle + faked navigation headers) exactly like the
+ * polyfill's own spawn.
+ */
+export async function armShadowSpawn(
+  backgroundPage: {
+    evaluate: (fn: (url: string) => Promise<void>, url: string) => Promise<void>;
+  },
+  url: string,
+): Promise<void> {
+  await backgroundPage.evaluate(async (url) => {
+    const tabs = await browser.tabs.query({});
+    const tab = tabs.find((t) => t.id != null) ?? tabs[0];
+    const arm = (globalThis as unknown as { webhid?: { import: (n: string) => unknown } }).webhid
+      ?.import('armShadowSpawn') as ((tabId: number, url: string) => void) | undefined;
+    arm?.(tab.id as number, url);
+  }, url);
+}

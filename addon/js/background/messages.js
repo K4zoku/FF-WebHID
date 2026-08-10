@@ -1,4 +1,4 @@
-(function () {
+;(function () {
   const webhid = globalThis.webhid
   const http = webhid.import('http')
   const logger = webhid.import('logger')
@@ -321,9 +321,7 @@
             ? request.deviceIds.map((id) => Number(id))
             : [Number(request.deviceId)]
         const groups = await getGrantGroupsForOrigin(origin)
-        const memberGroups = groups.filter((g) =>
-          g.deviceIds.some((id) => targetIds.includes(id))
-        )
+        const memberGroups = groups.filter((g) => g.deviceIds.some((id) => targetIds.includes(id)))
         /** @type {Set<number>} */
         const toRevoke = new Set(targetIds)
         for (const g of memberGroups) {
@@ -345,10 +343,7 @@
    */
   function handleSetDataPlane(request, sender, sendResponse) {
     if (
-      !isTabAuthorizedForDevice(
-        sender.tab != null ? sender.tab.id : undefined,
-        request.deviceId
-      )
+      !isTabAuthorizedForDevice(sender.tab != null ? sender.tab.id : undefined, request.deviceId)
     ) {
       sendResponse({ s: 403 })
       return true
@@ -371,10 +366,7 @@
    */
   function handleSendReport(request, sender, sendResponse) {
     if (
-      !isTabAuthorizedForDevice(
-        sender.tab != null ? sender.tab.id : undefined,
-        request.deviceId
-      )
+      !isTabAuthorizedForDevice(sender.tab != null ? sender.tab.id : undefined, request.deviceId)
     ) {
       sendResponse({ s: 403 })
       return true
@@ -394,10 +386,7 @@
    */
   function handleReceiveFeatureReport(request, sender, sendResponse) {
     if (
-      !isTabAuthorizedForDevice(
-        sender.tab != null ? sender.tab.id : undefined,
-        request.deviceId
-      )
+      !isTabAuthorizedForDevice(sender.tab != null ? sender.tab.id : undefined, request.deviceId)
     ) {
       sendResponse({ s: 403 })
       return true
@@ -415,10 +404,7 @@
    */
   function handleSendFeatureReport(request, sender, sendResponse) {
     if (
-      !isTabAuthorizedForDevice(
-        sender.tab != null ? sender.tab.id : undefined,
-        request.deviceId
-      )
+      !isTabAuthorizedForDevice(sender.tab != null ? sender.tab.id : undefined, request.deviceId)
     ) {
       sendResponse({ s: 403 })
       return true
@@ -624,7 +610,8 @@
     }
     const origin = urlOrigin(request.origin || (sender.tab && sender.tab.url) || '')
     const key = `csp:${frameKey(tabId, sender.frameId ?? 0, origin)}`
-    browser.storage.session.get(key)
+    browser.storage.session
+      .get(key)
       .then((r) => sendResponse(r[key] ?? null))
       .catch(() => sendResponse(null))
     return true
@@ -772,6 +759,25 @@
   }
 
   /**
+   * Arms the shadow-URL interception for the next worker script request from
+   * the given tab+document, so the polyfill's own data-worker spawn is
+   * distinguishable from a page self-worker. The webRequest handler consumes
+   * one arm per matching request.
+   * @param {object} request
+   * @param {object} sender
+   * @param {Function} sendResponse
+   * @returns {boolean}
+   */
+  function handleArmShadowSpawn(request, sender, sendResponse) {
+    const tabId = request.tabId != null ? request.tabId : sender.tab ? sender.tab.id : null
+    const url = typeof request.url === 'string' ? request.url : ''
+    const arm = webhid.import('armShadowSpawn')
+    if (arm) arm(tabId, url)
+    sendResponse({ ok: true })
+    return false
+  }
+
+  /**
    * @param {object} request
    * @param {object} sender
    * @returns {boolean}
@@ -787,7 +793,11 @@
         sendResponse({ ok: false })
         return false
       }
-      key = frameKey(tid, request.frameId, urlOrigin(request.url || (sender.tab && sender.tab.url) || ''))
+      key = frameKey(
+        tid,
+        request.frameId,
+        urlOrigin(request.url || (sender.tab && sender.tab.url) || '')
+      )
     }
     allowedCrossOrigin.set(key, true)
     sendResponse({ ok: true })
@@ -865,8 +875,9 @@
     showPicker: handleShowPicker,
     getPendingPicker: handleGetPendingPicker,
     getPolicy: handleGetPolicy,
+    armShadowSpawn: handleArmShadowSpawn,
     setFrameAllow: handleSetFrameAllow,
-    pickerResult: handlePickerResult,
+    pickerResult: handlePickerResult
   }
 
   /**
