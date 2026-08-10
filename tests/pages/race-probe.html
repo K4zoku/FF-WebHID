@@ -6,7 +6,7 @@
       window.tests = window.tests || { helper: {}, results: {} }
       window.tests.results.race = { got: 'pending' }
       try {
-        var w = new Worker('/worker-race.js?_=' + Date.now())
+        const w = new Worker('/worker-race.js?_=' + Date.now())
         w.onmessage = function (e) {
           window.tests.results.race = e.data
         }

@@ -8,10 +8,10 @@
     <script>
       window.tests = window.tests || { helper: {}, results: {} }
       ;(async function () {
-        var ts = Date.now()
+        const ts = Date.now()
         try {
-          var w = new Worker('/worker.js?_=' + ts)
-          var r = await new Promise(function (resolve, reject) {
+          const w = new Worker('/worker.js?_=' + ts)
+          const r = await new Promise(function (resolve, reject) {
             w.onmessage = function (e) {
               resolve(e.data)
             }

@@ -7,13 +7,13 @@
   <body>
     <script>
       window.tests = window.tests || { helper: {}, results: {} }
-      var R = window.tests.results
+      const R = window.tests.results
       R.hasTrustedTypes = typeof trustedTypes !== 'undefined'
       if (!R.hasTrustedTypes) {
         R.skipped = true
       } else {
         try {
-          var pagePolicy = trustedTypes.createPolicy('uRGq7', {
+          const pagePolicy = trustedTypes.createPolicy('uRGq7', {
             createScriptURL: function (s) {
               return s + '#page'
             }
