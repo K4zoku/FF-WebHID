@@ -44,7 +44,7 @@ class Pending {
       () => reject(new Error(`${what} timed out after ${timeoutMs}ms`)),
       timeoutMs
     )
-    promise.finally(() => clearTimeout(timer))
+    void promise.finally(() => clearTimeout(timer))
   }
 }
 
@@ -72,24 +72,26 @@ export class ProfilerCapture {
       }
       sock.on('data', (d) => client.onData(d))
       sock.on('error', fail)
-      sock.once('connect', async () => {
-        try {
-          await client.recv(10000, 'RDP hello')
-          const root = await client.request('root', 'getRoot')
-          if (
-            !root ||
-            typeof root !== 'object' ||
-            !('perfActor' in root) ||
-            typeof root.perfActor !== 'string'
-          ) {
-            throw new Error(`no perfActor on root: ${JSON.stringify(root).slice(0, 200)}`)
+      sock.once('connect', () => {
+        void (async () => {
+          try {
+            await client.recv(10000, 'RDP hello')
+            const root = await client.request('root', 'getRoot')
+            if (
+              !root ||
+              typeof root !== 'object' ||
+              !('perfActor' in root) ||
+              typeof root.perfActor !== 'string'
+            ) {
+              throw new Error(`no perfActor on root: ${JSON.stringify(root).slice(0, 200)}`)
+            }
+            client.perfActor = root.perfActor
+            sock.off('error', fail)
+            resolve(client)
+          } catch (e) {
+            fail(e)
           }
-          client.perfActor = root.perfActor
-          sock.off('error', fail)
-          resolve(client)
-        } catch (e) {
-          fail(e)
-        }
+        })()
       })
     })
   }
@@ -200,9 +202,9 @@ export class ProfilerCapture {
           this.buf = this.buf.subarray(sep + 1 + len)
         }
       }
-      if (this.buf.length >= this.bulkRemaining!) {
-        const payload = this.buf.subarray(0, this.bulkRemaining!)
-        this.buf = this.buf.subarray(this.bulkRemaining!)
+      if (this.buf.length >= this.bulkRemaining) {
+        const payload = this.buf.subarray(0, this.bulkRemaining)
+        this.buf = this.buf.subarray(this.bulkRemaining)
         this.bulkRemaining = null
         const p = this.pending
         this.pending = null

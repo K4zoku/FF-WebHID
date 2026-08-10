@@ -44,7 +44,7 @@ test.describe('requestDevice user-activation gate', () => {
   }) => {
     await sharedPage.goto(pageUrl('/activation'), { waitUntil: 'domcontentloaded', timeout: 15000 })
     const result: ActivationResult = await sharedPage.evaluate(() =>
-      window.tests.helper.requestDeviceWithoutGesture(6000)
+      window.tests!.helper!.requestDeviceWithoutGesture!(6000)
     )
     expect(result.ok).toBe(false)
     expect(result.name).toBe('SecurityError')
@@ -60,7 +60,7 @@ test.describe('requestDevice user-activation gate', () => {
     await sharedPage.goto(pageUrl('/activation'), { waitUntil: 'domcontentloaded', timeout: 15000 })
     const result = await sharedPage.evaluate(async () => {
       let settled: string | null = null
-      window.tests.helper.requestDeviceWithoutGesture(6000).then((r: ActivationResult) => {
+      void window.tests!.helper!.requestDeviceWithoutGesture!(6000).then((r: ActivationResult) => {
         settled = r.ok ? 'resolved' : 'rejected:' + r.name
       })
       await new Promise((r) => setTimeout(r, 6800))
