@@ -115,6 +115,7 @@
   /**
    * @param {object} request
    * @param {object} sender
+   * @param {function(*): void} sendResponse
    * @returns {boolean}
    */
   function handleEnumerate(request, sender, sendResponse) {
@@ -132,6 +133,13 @@
     return true
   }
 
+  /**
+   *
+   * @param {object} request
+   * @param {object} sender
+   * @param {function(*): void} sendResponse
+   * @returns {boolean}
+   */
   function handleEnumeratePaired(request, sender, sendResponse) {
     const origin = request.origin || ''
     NativeMessaging.enumerateDevices()
@@ -152,6 +160,7 @@
   /**
    * @param {object} request
    * @param {object} sender
+   * @param {function(*): void} sendResponse
    * @returns {boolean}
    */
   function handleHandshake(request, sender, sendResponse) {
@@ -164,6 +173,7 @@
   /**
    * @param {object} request
    * @param {object} sender
+   * @param {function(*): void} sendResponse
    * @returns {boolean}
    */
   function handleGetBackendStatus(request, sender, sendResponse) {
@@ -192,6 +202,7 @@
   /**
    * @param {object} request
    * @param {object} sender
+   * @param {function(*): void} sendResponse
    * @returns {boolean}
    */
   function handleRecordGrantGroup(request, sender, sendResponse) {
@@ -213,6 +224,7 @@
   /**
    * @param {object} request
    * @param {object} sender
+   * @param {function(*): void} sendResponse
    * @returns {boolean}
    */
   function handleGetGrantGroups(request, sender, sendResponse) {
@@ -230,6 +242,7 @@
   /**
    * @param {object} request
    * @param {object} sender
+   * @param {function(*): void} sendResponse
    * @returns {boolean}
    */
   function handleGetAllPairedDevices(request, sender, sendResponse) {
@@ -263,6 +276,7 @@
   /**
    * @param {object} request
    * @param {object} sender
+   * @param {function(*): void} sendResponse
    * @returns {boolean}
    */
   function handleOpen(request, sender, sendResponse) {
@@ -286,6 +300,7 @@
   /**
    * @param {object} request
    * @param {object} sender
+   * @param {function(*): void} sendResponse
    * @returns {boolean}
    */
   function handleClose(request, sender, sendResponse) {
@@ -306,6 +321,7 @@
   /**
    * @param {object} request
    * @param {object} sender
+   * @param {function(*): void} sendResponse
    * @returns {boolean}
    */
   function handleRevokeDevice(request, sender, sendResponse) {
@@ -339,6 +355,7 @@
   /**
    * @param {object} request
    * @param {object} sender
+   * @param {function(*): void} sendResponse
    * @returns {boolean}
    */
   function handleSetDataPlane(request, sender, sendResponse) {
@@ -362,6 +379,7 @@
   /**
    * @param {object} request
    * @param {object} sender
+   * @param {function(*): void} sendResponse
    * @returns {boolean}
    */
   function handleSendReport(request, sender, sendResponse) {
@@ -382,6 +400,7 @@
   /**
    * @param {object} request
    * @param {object} sender
+   * @param {function(*): void} sendResponse
    * @returns {boolean}
    */
   function handleReceiveFeatureReport(request, sender, sendResponse) {
@@ -400,6 +419,7 @@
   /**
    * @param {object} request
    * @param {object} sender
+   * @param {function(*): void} sendResponse
    * @returns {boolean}
    */
   function handleSendFeatureReport(request, sender, sendResponse) {
@@ -418,6 +438,7 @@
   /**
    * @param {object} request
    * @param {object} sender
+   * @param {function(*): void} sendResponse
    * @returns {boolean}
    */
   function handleGetPairedDevices(request, sender, sendResponse) {
@@ -435,6 +456,7 @@
   /**
    * @param {object} request
    * @param {object} sender
+   * @param {function(*): void} sendResponse
    * @returns {boolean}
    */
   function handlePairDevice(request, sender, sendResponse) {
@@ -454,6 +476,7 @@
   /**
    * @param {object} request
    * @param {object} sender
+   * @param {function(*): void} sendResponse
    * @returns {boolean}
    */
   function handleUnpairDevice(request, sender, sendResponse) {
@@ -477,6 +500,7 @@
   /**
    * @param {object} request
    * @param {object} sender
+   * @param {function(*): void} sendResponse
    * @returns {boolean}
    */
   function handleGetAllowedDevices(request, sender, sendResponse) {
@@ -511,6 +535,7 @@
   /**
    * @param {object} request
    * @param {object} sender
+   * @param {function(*): void} sendResponse
    * @returns {boolean}
    */
   function handleGetDeviceCache(request, sender, sendResponse) {
@@ -536,6 +561,7 @@
   /**
    * @param {object} request
    * @param {object} sender
+   * @param {function(*): void} sendResponse
    * @returns {boolean}
    */
   function handleGetDeviceInfo(request, sender, sendResponse) {
@@ -558,6 +584,7 @@
   /**
    * @param {object} request
    * @param {object} sender
+   * @param {function(*): void} sendResponse
    * @returns {boolean}
    */
   function handleFetchResource(request, sender, sendResponse) {
@@ -576,6 +603,7 @@
   /**
    * @param {object} request
    * @param {object} sender
+   * @param {function(*): void} sendResponse
    * @returns {boolean}
    */
   function handleGetCspInfo(request, sender, sendResponse) {
@@ -617,6 +645,7 @@
   /**
    * @param {object} request
    * @param {object} sender
+   * @param {function(*): void} sendResponse
    * @returns {boolean}
    */
   function handleGetWorkerBundle(request, sender, sendResponse) {
@@ -684,6 +713,7 @@
   /**
    * @param {object} request
    * @param {object} sender
+   * @param {function(*): void} sendResponse
    * @returns {boolean}
    */
   function handleShowPicker(request, sender, sendResponse) {
@@ -713,6 +743,7 @@
   /**
    * @param {object} request
    * @param {object} sender
+   * @param {function(*): void} sendResponse
    * @returns {boolean}
    */
   function handleGetPendingPicker(request, sender, sendResponse) {
@@ -748,6 +779,7 @@
   /**
    * @param {object} request
    * @param {object} sender
+   * @param {function(*): void} sendResponse
    * @returns {boolean}
    */
   function handleGetPolicy(request, sender, sendResponse) {
@@ -774,6 +806,13 @@
     return false
   }
 
+  /**
+   *
+   * @param {object} request
+   * @param {object} sender
+   * @param {function(*): void} sendResponse
+   * @returns {boolean}
+   */
   function handleUnarmShadowSpawn(request, sender, sendResponse) {
     const tabId = request.tabId != null ? request.tabId : sender.tab ? sender.tab.id : null
     const url = typeof request.url === 'string' ? request.url : ''
@@ -786,6 +825,7 @@
   /**
    * @param {object} request
    * @param {object} sender
+   * @param {function(*): void} sendResponse
    * @returns {boolean}
    */
   function handleSetFrameAllow(request, sender, sendResponse) {
@@ -813,6 +853,7 @@
   /**
    * @param {object} request
    * @param {object} sender
+   * @param {function(*): void} sendResponse
    * @returns {boolean}
    */
   function handlePickerResult(request, sender, sendResponse) {
@@ -850,7 +891,7 @@
     return false
   }
 
-  /** @type {Object<string, function>} */
+  /** @type {object} */
   const HANDLERS = {
     enumerate: handleEnumerate,
     enumeratePaired: handleEnumeratePaired,

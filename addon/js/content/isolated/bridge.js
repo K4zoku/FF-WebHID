@@ -375,7 +375,7 @@
       logger.warn(
         'cannot derive WS auth hash for',
         deviceId,
-        '; wsNonce missing — falling back to NM'
+        '; wsNonce missing, falling back to NM'
       )
       return false
     }
@@ -635,7 +635,7 @@
     }
   }
 
-  /** @type {Object<string, function>} */
+  /** @type {object} */
   const PAGE_PORT_HANDLERS = {
     spawnWorkerResponse: handleSpawnWorkerResponse,
     dataPlaneResponse: handlePlaneResponse,
@@ -1010,6 +1010,11 @@
     despawnDataPlane(deviceId)
   }
 
+  /**
+   *
+   * @param {string} origin
+   * @param {Array<{deviceId: number}>} devices
+   */
   async function grantSelectedDevices(origin, devices) {
     await Promise.all(
       devices.map((device) =>
@@ -1082,7 +1087,7 @@
     }
   }
 
-  /** @type {Object<string, function>} */
+  /** @type {object} */
   const REQUEST_HANDLERS = {
     workerPort: handleWorkerPortRequest,
     dataPort: handleDataPortRequest,

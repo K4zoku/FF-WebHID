@@ -148,8 +148,8 @@
   const SETTING_NAMES = Object.keys(GLOBAL_DEFAULTS)
 
   /**
-   * Settings that can be overridden per site. `daemonAsNmHost` is intentionally
-   * excluded: it configures the native-messaging host and is global-only.
+   * Settings that can be overridden per site, except the global-only
+   * `daemonAsNmHost`.
    */
   const SITE_SETTING_NAMES = SETTING_NAMES.filter((n) => n !== 'daemonAsNmHost')
 

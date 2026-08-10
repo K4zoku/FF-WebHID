@@ -486,7 +486,7 @@
 
   /** @type {number} */
   let nextReqId = 0
-  /** @type {{[key: string]: Function}} */
+  /** @type {{object}} */
   const pending = {}
   /** @type {string} */
   const frameNonce = crypto.randomUUID()
@@ -550,7 +550,7 @@
     }
   }
 
-  /** @type {Object<string, function>} */
+  /** @type {object} */
   const BRIDGE_MESSAGE_HANDLERS = {
     dataPlaneConnect: handleDataPlaneConnect,
     dataPlaneDisconnect: handleDataPlaneDisconnect,
@@ -1288,7 +1288,7 @@
     if (device) device.dispatchEvent(new HIDConnectionEvent('disconnect', { device: device }))
   }
 
-  /** @type {Object<string, function>} */
+  /** @type {object} */
   const DATA_PORT_MESSAGE_HANDLERS = {
     sendResult: handleReportResult,
     featureResult: handleReportResult,
@@ -1486,6 +1486,10 @@
     return { filters, exclusionFilters }
   }
 
+  /**
+   * @param {{cancelled: boolean, devices?: Array<object>}} result
+   * @returns {Promise<Array<object>>}
+   */
   async function grantRequestedDevices(result) {
     if (result.cancelled) return []
     const devices = result.devices

@@ -39,7 +39,7 @@
   /**
    * Copies legacy `deviceInfo:*` entries into the IndexedDB deviceInfo store.
    * @param {object} all
-   * @param {IDBDatabase} db
+   * @param {object} db
    * @returns {Promise<string[]>}
    */
   async function migrateDeviceInfoEntries(all, db) {
@@ -62,7 +62,7 @@
    * Copies legacy origin->deviceId array entries into the IndexedDB origins
    * store.
    * @param {object} all
-   * @param {IDBDatabase} db
+   * @param {object} db
    * @returns {Promise<string[]>}
    */
   async function migrateOriginEntries(all, db) {

@@ -41,7 +41,10 @@
     nmHostName: 'webhid.forwarder_nm_host',
     lastError: null,
 
-    /** @returns {boolean} */
+    /**
+     * @param {object} message
+     * @returns {boolean}
+     */
     tryHostError(message) {
       if (message.E === undefined || message.s === undefined || message.n !== undefined) {
         return false
@@ -53,7 +56,10 @@
       return true
     },
 
-    /** @returns {boolean} */
+    /**
+     * @param {object} message
+     * @returns {boolean}
+     */
     tryPackedData(message) {
       if (message.d === undefined || message.n !== undefined || message.e !== undefined) {
         return false
@@ -62,14 +68,20 @@
       return true
     },
 
-    /** @returns {boolean} */
+    /**
+     * @param {object} message
+     * @returns {boolean}
+     */
     tryControlEvent(message) {
       if (message.e === undefined) return false
       this.onControlEvent(message)
       return true
     },
 
-    /** @returns {boolean} */
+    /**
+     * @param {object} message
+     * @returns {boolean}
+     */
     tryPendingResponse(message) {
       if (message.n === undefined) return false
       const p = this.pending.get(message.n)
@@ -79,7 +91,10 @@
       return true
     },
 
-    /** @returns {boolean} */
+    /**
+     * @param {object} message
+     * @returns {boolean}
+     */
     tryUnmatchedDaemonError(message) {
       if (message.s === undefined || message.n !== undefined || message.E !== undefined) {
         return false
