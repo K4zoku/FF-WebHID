@@ -312,10 +312,13 @@ pub fn make_feature_read_resp(req_id: u32, status: u8, data: &[u8]) -> Vec<u8> {
     let mut buf = Vec::with_capacity(8 + data.len());
     buf.push(RESP_RECEIVE_FEATURE_REPORT);
     buf.extend_from_slice(&req_id.to_le_bytes());
-    buf.push(status);
-    let len = data.len().min(0xFFFF) as u16;
+    let too_large = data.len() > 0xFFFF;
+    buf.push(if too_large { 1 } else { status });
+    let len = if too_large { 0 } else { data.len() } as u16;
     buf.extend_from_slice(&len.to_le_bytes());
-    buf.extend_from_slice(&data[..len as usize]);
+    if !too_large {
+        buf.extend_from_slice(data);
+    }
     buf
 }
 

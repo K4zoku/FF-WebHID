@@ -261,17 +261,10 @@ async fn read_inbound_frames(
         if recv.read_exact(&mut frame).await.is_err() {
             break;
         }
-        let frame_tx2 = frame_tx.clone();
-        let mgr = Arc::clone(device_mgr);
-        tokio::spawn(async move {
-            if frame.is_empty() {
-                return;
-            }
-            batching::handle_client_message(&frame, &mgr, device_id, move |resp| {
-                let _ = frame_tx2.send(Bytes::from(resp));
-            })
-            .await;
-        });
+        batching::handle_client_message(&frame, device_mgr, device_id, move |resp| {
+            let _ = frame_tx.send(Bytes::from(resp));
+        })
+        .await;
     }
 }
 

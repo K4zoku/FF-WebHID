@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::Context as _;
+use bytes::Bytes;
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::TcpListener;
 use tokio::sync::{broadcast, mpsc};
@@ -108,16 +109,22 @@ async fn handle_websocket(
     });
 
     let tx_for_receiver = tx.clone();
-    let device_mgr_for_receiver = Arc::clone(&device_mgr);
-    let device_id_for_receiver = device_id;
+    let tx_for_worker = tx.clone();
+    let (frame_tx, mut frame_rx) = mpsc::unbounded_channel::<Bytes>();
+    let mgr_for_worker = Arc::clone(&device_mgr);
+    let device_id_for_worker = device_id;
+    let mut frame_worker = tokio::spawn(async move {
+        while let Some(frame) = frame_rx.recv().await {
+            batching::handle_client_message(&frame, &mgr_for_worker, device_id_for_worker, |resp| {
+                let _ = tx_for_worker.send(Message::Binary(resp.into()));
+            })
+            .await;
+        }
+    });
+
     let mut receiver_task = tokio::spawn(async move {
         while let Some(msg) = ws_receiver.next().await {
-            if !handle_ws_message(
-                msg,
-                tx_for_receiver.clone(),
-                &device_mgr_for_receiver,
-                device_id_for_receiver,
-            ) {
+            if !handle_ws_message(msg, tx_for_receiver.clone(), &frame_tx) {
                 break;
             }
         }
@@ -136,10 +143,12 @@ async fn handle_websocket(
         _ = &mut outgoing_task => {},
         _ = &mut receiver_task => {},
         _ = &mut sender_task => {},
+        _ = &mut frame_worker => {},
     }
     outgoing_task.abort();
     receiver_task.abort();
     sender_task.abort();
+    frame_worker.abort();
 
     log::info!("[ws] connection for {device_id:#x} closed");
     device_mgr.ws_disconnect(device_id, &session_token, ws_gen);
@@ -228,23 +237,12 @@ async fn ws_authenticate(
 fn handle_ws_message(
     msg: Result<Message, tokio_tungstenite::tungstenite::Error>,
     tx: mpsc::UnboundedSender<Message>,
-    device_mgr: &Arc<DeviceManager>,
-    device_id: u32,
+    frame_tx: &mpsc::UnboundedSender<Bytes>,
 ) -> bool {
     match msg {
         Ok(Message::Ping(data)) => tx.send(Message::Pong(data)).is_ok(),
         Ok(Message::Close(_)) => false,
-        Ok(Message::Binary(frame)) => {
-            let tx_clone = tx.clone();
-            let mgr = Arc::clone(device_mgr);
-            tokio::spawn(async move {
-                batching::handle_client_message(&frame, &mgr, device_id, |resp| {
-                    let _ = tx_clone.send(Message::Binary(resp.into()));
-                })
-                .await;
-            });
-            true
-        }
+        Ok(Message::Binary(frame)) => frame_tx.send(frame).is_ok(),
         Err(e) => {
             log::warn!("[ws] read error: {e}");
             false
@@ -359,13 +357,13 @@ mod tests {
 
     #[test]
     fn test_feature_read_resp_large_data() {
-        let data = vec![0xFF; 300];
+        let data = vec![0xFF; 0x10000];
         let buf = batching::make_feature_read_resp(0, 0, &data);
         assert_eq!(buf[0], 0x83);
-        assert_eq!(buf[5], 0);
+        assert_eq!(buf[5], 1);
         let len = u16::from_le_bytes([buf[6], buf[7]]);
-        assert_eq!(len as usize, data.len().min(0xFFFF));
-        assert_eq!(&buf[8..], &data[..len as usize]);
+        assert_eq!(len, 0);
+        assert_eq!(buf.len(), 8);
     }
 
     #[test]

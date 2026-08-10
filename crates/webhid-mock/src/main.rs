@@ -1,4 +1,4 @@
-//! `webhid-mock` — virtual HID device mocker for FF-WebHID E2E tests.
+//! `webhid-mock`: virtual HID device mocker for FF-WebHID E2E tests.
 //!
 //! Creates a virtual HID device backed by the OS's userspace HID interface,
 //! then reads JSON commands from stdin to inject input reports / destroy the
@@ -221,7 +221,7 @@ fn parse_u8(s: &str) -> anyhow::Result<u8> {
 
 #[cfg(not(target_os = "windows"))]
 fn print_usage() {
-    eprintln!("webhid-mock — virtual HID device mocker (Linux + macOS)");
+    eprintln!("webhid-mock: virtual HID device mocker (Linux + macOS)");
     eprintln!();
     eprintln!("USAGE:");
     eprintln!("  webhid-mock spawn --vid <VID> --pid <PID> --descriptor <PATH> [OPTIONS]");
