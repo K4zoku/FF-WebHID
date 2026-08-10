@@ -238,7 +238,6 @@
   }
 
   webhid.export('SETTING_NAMES', SETTING_NAMES)
-  webhid.export('SITE_SETTING_NAMES', SITE_SETTING_NAMES)
   webhid.export('globalSettingKey', globalSettingKey)
   webhid.export('siteSettingKey', siteSettingKey)
   webhid.export('parseSettingsKey', parseSettingsKey)

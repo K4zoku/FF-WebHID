@@ -184,7 +184,6 @@
   webhid.export('guessDeviceType', guessDeviceType)
   webhid.export('applyFilters', applyFilters)
   webhid.export('groupDevices', groupDevices)
-  webhid.export('fetchDeviceIcon', fetchDeviceIcon)
   webhid.export('isValidFilter', isValidFilter)
   webhid.export('logExcludedDevices', logExcludedDevices)
   webhid.export('applyDeviceIcon', applyDeviceIcon)

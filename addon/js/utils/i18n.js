@@ -68,5 +68,4 @@
 
   webhid.export('t', t)
   webhid.export('localizeHTML', localizeHTML)
-  webhid.export('applyMarkdown', applyMarkdown)
 })()
