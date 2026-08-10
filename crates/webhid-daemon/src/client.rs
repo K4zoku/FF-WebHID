@@ -210,7 +210,7 @@ async fn handle_send_report(device_mgr: &DeviceManager, packed: Vec<u8>) -> NmRe
         ReportType::Output,
         Some(data.len()),
     ) {
-        Ok(()) => match write_report_blocking(device_mgr, device_id, report_id, data).await {
+        Ok(()) => match write_blocking(device_mgr, device_id, report_id, data, false).await {
             Ok(()) => NmResponse::ok(),
             Err(e) => e,
         },
@@ -247,12 +247,10 @@ async fn handle_send_feature_report(
         ReportType::Feature,
         Some(data.len()),
     ) {
-        Ok(()) => {
-            match write_feature_report_blocking(device_mgr, device_id, report_id, &data).await {
-                Ok(()) => NmResponse::ok(),
-                Err(e) => e,
-            }
-        }
+        Ok(()) => match write_blocking(device_mgr, device_id, report_id, &data, true).await {
+            Ok(()) => NmResponse::ok(),
+            Err(e) => e,
+        },
         Err(e) => e,
     }
 }
@@ -316,35 +314,22 @@ fn open_device(
         .map_err(|_| NmResponse::err(404))
 }
 
-async fn write_report_blocking(
+async fn write_blocking(
     device_mgr: &DeviceManager,
     device_id: u32,
     report_id: u8,
     data: &[u8],
-) -> Result<(), NmResponse> {
-    let dev_arc = open_device(device_mgr, device_id)?;
-    let data_owned = data.to_vec();
-    let result = tokio::task::spawn_blocking(move || {
-        with_device(&dev_arc, |d| hid::write_report(d, report_id, &data_owned))
-    })
-    .await;
-    match result {
-        Ok(Ok(())) => Ok(()),
-        Ok(Err(_)) | Err(_) => Err(NmResponse::err(500)),
-    }
-}
-
-async fn write_feature_report_blocking(
-    device_mgr: &DeviceManager,
-    device_id: u32,
-    report_id: u8,
-    data: &[u8],
+    feature: bool,
 ) -> Result<(), NmResponse> {
     let dev_arc = open_device(device_mgr, device_id)?;
     let data_owned = data.to_vec();
     let result = tokio::task::spawn_blocking(move || {
         with_device(&dev_arc, |d| {
-            hid::write_feature_report(d, report_id, &data_owned)
+            if feature {
+                hid::write_feature_report(d, report_id, &data_owned)
+            } else {
+                hid::write_report(d, report_id, &data_owned)
+            }
         })
     })
     .await;
