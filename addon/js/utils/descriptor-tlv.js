@@ -1,4 +1,4 @@
-(function () {
+;(function () {
   const webhid = globalThis.webhid
 
   const TAG_COLLECTION = 0x01
@@ -121,7 +121,14 @@
     }
 
     /** @type {string[]} */
-    const UNIT_FACTOR_NAMES = ['Length', 'Mass', 'Time', 'Temperature', 'Current', 'LuminousIntensity']
+    const UNIT_FACTOR_NAMES = [
+      'Length',
+      'Mass',
+      'Time',
+      'Temperature',
+      'Current',
+      'LuminousIntensity'
+    ]
 
     /**
      * Reads the six unit-factor exponents as a flat object keyed by

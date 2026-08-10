@@ -1,4 +1,4 @@
-(function () {
+;(function () {
   const EVT_HANDSHAKE = 1
   const EVT_CONNECT = 2
   const EVT_DISCONNECT = 3

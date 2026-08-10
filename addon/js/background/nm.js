@@ -1,4 +1,4 @@
-(function () {
+;(function () {
   const logger = webhid.import('logger')
   const decodeCollectionsTlv = webhid.import('decodeCollectionsTlv')
   const {
@@ -299,8 +299,7 @@
       } else {
         this.enumerateDevices()
           .then((resp) => {
-            if (http.isOk(resp.s) && resp.D)
-              ((deviceCache.length = 0), deviceCache.push(...resp.D))
+            if (http.isOk(resp.s) && resp.D) ((deviceCache.length = 0), deviceCache.push(...resp.D))
           })
           .catch((e) => logger.debug('enumerateDevices failed', e))
       }

@@ -285,7 +285,8 @@
     setRadioValue('workerSpawnMode', settings.workerSpawnMode || GLOBAL_DEFAULTS.workerSpawnMode)
     setRadioValue('logLevel', String(settings.logLevel))
     /** @type {HTMLInputElement} */
-    document.getElementById('workerPolyfillEnabled').checked = settings.workerPolyfillEnabled || false
+    document.getElementById('workerPolyfillEnabled').checked =
+      settings.workerPolyfillEnabled || false
     /** @type {HTMLInputElement} */
     document.getElementById('allowActivationlessRequestDevice').checked =
       settings.allowActivationlessRequestDevice || false

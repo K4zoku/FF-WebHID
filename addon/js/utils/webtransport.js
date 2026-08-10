@@ -1,4 +1,4 @@
-(function () {
+;(function () {
   const webhid = globalThis.webhid
   /** @type {import("../types.js").Logger} */
   const logger = webhid.import('logger')
@@ -167,7 +167,9 @@
           streamReader = null
           opts.onAuthFailed && opts.onAuthFailed(0)
         })
-      wt.closed.then((info) => handleClosed(info && info.reason)).catch((e) => handleClosed(e && e.message))
+      wt.closed
+        .then((info) => handleClosed(info && info.reason))
+        .catch((e) => handleClosed(e && e.message))
     }
 
     return {

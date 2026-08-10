@@ -1,4 +1,4 @@
-(function () {
+;(function () {
   /** @type {string[]} */
   var scripts = webhid.import('bundleFiles').mv2MainWorld
 

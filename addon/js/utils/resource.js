@@ -1,4 +1,4 @@
-(function () {
+;(function () {
   const webhid = globalThis.webhid
   /** @type {Map<string, string>} */
   const cache = new Map()

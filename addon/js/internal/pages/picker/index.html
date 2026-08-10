@@ -88,26 +88,14 @@
     </style>
   </head>
   <body>
-    <div
-      id="picker"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="picker-heading"
-    >
+    <div id="picker" role="dialog" aria-modal="true" aria-labelledby="picker-heading">
       <div class="picker-header">
         <h2 id="picker-heading" data-i18n="pickerTitle">Select a HID Device</h2>
       </div>
-      <div
-        id="picker-list"
-        class="webhid-device-list"
-        role="list"
-        aria-live="polite"
-      ></div>
+      <div id="picker-list" class="webhid-device-list" role="list" aria-live="polite"></div>
       <div class="picker-footer">
         <button id="picker-cancel" data-i18n="pickerCancel">Cancel</button>
-        <button id="picker-connect" disabled data-i18n="pickerConnect">
-          Connect
-        </button>
+        <button id="picker-connect" disabled data-i18n="pickerConnect">Connect</button>
       </div>
     </div>
     <script src="../../../../js/utils/bootstrap.js"></script>

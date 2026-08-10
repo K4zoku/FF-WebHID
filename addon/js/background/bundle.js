@@ -1,4 +1,4 @@
-(function () {
+;(function () {
   const _logger = webhid.import('logger')
 
   let workerBundle = null

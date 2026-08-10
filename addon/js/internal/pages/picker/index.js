@@ -1,4 +1,4 @@
-(async () => {
+;(async () => {
   /** @type {import("../types.js").Logger} */
   const logger = webhid.import('logger')
   const http = webhid.import('http')

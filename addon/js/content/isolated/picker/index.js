@@ -1,4 +1,4 @@
-(function () {
+;(function () {
   'use strict'
 
   /** @type {import("./types.js").Logger} */

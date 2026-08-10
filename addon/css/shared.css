@@ -130,7 +130,9 @@ select:hover {
   cursor: pointer;
   white-space: nowrap;
   user-select: none;
-  transition: border-color 0.15s, background 0.15s;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
 }
 
 .seg-option:hover .seg-label {

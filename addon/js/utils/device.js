@@ -1,4 +1,4 @@
-(function () {
+;(function () {
   const webhid = globalThis.webhid
   /** @type {import("../types.js").Logger} */
   const logger = webhid.import('logger')

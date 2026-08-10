@@ -1,4 +1,4 @@
-(function () {
+;(function () {
   /**
    * worker: data worker spawned per device (shadow URL or blob fallback).
    * workerPolyfill: WebHID polyfill injected into page-created workers.

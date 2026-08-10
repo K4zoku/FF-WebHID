@@ -1,4 +1,4 @@
-(function () {
+;(function () {
   const logger = webhid.import('logger')
   const {
     ACT: _ACT,
