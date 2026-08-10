@@ -298,6 +298,16 @@
   }
 
   /**
+   * @param {object} sender
+   * @param {number} deviceId
+   * @returns {boolean}
+   */
+  function tabAllowsDevice(sender, deviceId) {
+    const tabId = sender.tab != null ? sender.tab.id : undefined
+    return isTabAuthorizedForDevice(tabId, deviceId)
+  }
+
+  /**
    * @param {object} request
    * @param {object} sender
    * @param {function(*): void} sendResponse
@@ -359,9 +369,7 @@
    * @returns {boolean}
    */
   function handleSetDataPlane(request, sender, sendResponse) {
-    if (
-      !isTabAuthorizedForDevice(sender.tab != null ? sender.tab.id : undefined, request.deviceId)
-    ) {
+    if (!tabAllowsDevice(sender, request.deviceId)) {
       sendResponse({ s: 403 })
       return true
     }
@@ -383,9 +391,7 @@
    * @returns {boolean}
    */
   function handleSendReport(request, sender, sendResponse) {
-    if (
-      !isTabAuthorizedForDevice(sender.tab != null ? sender.tab.id : undefined, request.deviceId)
-    ) {
+    if (!tabAllowsDevice(sender, request.deviceId)) {
       sendResponse({ s: 403 })
       return true
     }
@@ -404,9 +410,7 @@
    * @returns {boolean}
    */
   function handleReceiveFeatureReport(request, sender, sendResponse) {
-    if (
-      !isTabAuthorizedForDevice(sender.tab != null ? sender.tab.id : undefined, request.deviceId)
-    ) {
+    if (!tabAllowsDevice(sender, request.deviceId)) {
       sendResponse({ s: 403 })
       return true
     }
@@ -423,9 +427,7 @@
    * @returns {boolean}
    */
   function handleSendFeatureReport(request, sender, sendResponse) {
-    if (
-      !isTabAuthorizedForDevice(sender.tab != null ? sender.tab.id : undefined, request.deviceId)
-    ) {
+    if (!tabAllowsDevice(sender, request.deviceId)) {
       sendResponse({ s: 403 })
       return true
     }
