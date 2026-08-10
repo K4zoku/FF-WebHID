@@ -19,9 +19,9 @@ import type { DeviceFilter } from '../helpers/e2e-types.js'
 
 declare global {
   interface Window {
-    __wtOldClose?: () => void
-    __wtLog?: string[]
-    __nmSendActions?: number
+    wtOldClose?: () => void
+    wtLog?: string[]
+    nmSendActions?: number
   }
 }
 
@@ -337,7 +337,7 @@ async function runRotationWorker(
   `
   await page.evaluate((src: string) => {
     const blob = new Blob([src], { type: 'application/javascript' })
-    const log: string[] = (window.__wtLog = [])
+    const log: string[] = (window.wtLog = [])
     const worker = new Worker(URL.createObjectURL(blob))
     worker.onmessage = (e) => log.push(String(e.data))
   }, source)
@@ -345,19 +345,18 @@ async function runRotationWorker(
 
 async function waitForWorkerLogValue(page: Page, prefix: string): Promise<string> {
   await page.waitForFunction(
-    (p: string) => (window.__wtLog || []).some((m) => m.startsWith(p)),
+    (p: string) => (window.wtLog || []).some((m) => m.startsWith(p)),
     prefix,
     { timeout: 20000 }
   )
   return page.evaluate(
-    (p: string) =>
-      ((window.__wtLog || []).find((m) => m.startsWith(p)) || p + '[]').slice(p.length),
+    (p: string) => ((window.wtLog || []).find((m) => m.startsWith(p)) || p + '[]').slice(p.length),
     prefix
   )
 }
 
 async function waitForWorkerLogEntry(page: Page, entry: string): Promise<void> {
-  await page.waitForFunction((e: string) => (window.__wtLog || []).includes(e), entry, {
+  await page.waitForFunction((e: string) => (window.wtLog || []).includes(e), entry, {
     timeout: 20000
   })
 }
@@ -537,7 +536,7 @@ test.describe.serial('WebHID E2E (WebTransport data plane)', () => {
     expect(event.data[1]).toBe(0x2b)
 
     await backgroundPage.evaluate(() => {
-      window.__nmSendActions = 0
+      window.nmSendActions = 0
       browser.runtime.onMessage.addListener((msg: { action?: string }) => {
         if (
           msg &&
@@ -545,7 +544,7 @@ test.describe.serial('WebHID E2E (WebTransport data plane)', () => {
             msg.action === 'sendFeatureReport' ||
             msg.action === 'receiveFeatureReport')
         ) {
-          window.__nmSendActions = (window.__nmSendActions || 0) + 1
+          window.nmSendActions = (window.nmSendActions || 0) + 1
         }
       })
     })
@@ -568,7 +567,7 @@ test.describe.serial('WebHID E2E (WebTransport data plane)', () => {
     }, VENDOR_CTX)
     const output = await outputPromise
     expect(output.data[0]).toBe(VENDOR_OUTPUT_ID)
-    expect(await backgroundPage.evaluate(() => window.__nmSendActions)).toBe(0)
+    expect(await backgroundPage.evaluate(() => window.nmSendActions)).toBe(0)
 
     if (daemon) {
       expect(await waitForGenGrowth(daemon, genCountBefore)).toBe(true)

@@ -52,8 +52,10 @@ function handleControlMessage(msg) {
         preOpen = []
         for (const item of queued) handleDataPortMessage(item)
       },
-      onClosed: () => {
-        if (controlPort) controlPort.postMessage({ type: 'closed' })
+      onClosed: (info) => {
+        if (!(info && info.willReconnect) && controlPort) {
+          controlPort.postMessage({ type: 'closed' })
+        }
         for (const [, entry] of pending) entry.reject(new Error('ws closed'))
         pending.clear()
         const queued = preOpen

@@ -55,18 +55,22 @@
    */
   function handleDataPlaneConnect(req) {
     const deviceId = req.deviceId
+    let readyNotified = false
     const wt = createWtTransport({
       tag: 'page',
       onReady: () => {
+        if (readyNotified) return
+        readyNotified = true
         nativeMessagePortPostMessage.call(bridgePort, {
           type: 'dataPlaneResponse',
           id: req.id,
           result: { ok: true }
         })
       },
-      onClosed: () => {
-        inPagePlanes.delete(deviceId)
+      onClosed: (info) => {
         rejectInPagePending(deviceId, new Error('data plane closed'))
+        if (info && info.willReconnect) return
+        inPagePlanes.delete(deviceId)
         nativeMessagePortPostMessage.call(bridgePort, {
           type: 'dataPlaneEvent',
           deviceId,

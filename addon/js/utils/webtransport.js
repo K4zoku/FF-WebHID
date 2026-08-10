@@ -42,6 +42,10 @@
     let streamReader = null
     /** @type {ReturnType<typeof setTimeout>|null} */
     let authTimer = null
+    /** @type {ReturnType<typeof setTimeout>|null} */
+    let reconnectTimer = null
+    /** @type {number} */
+    let reconnectDelay = 500
     /** @type {boolean} */
     let open = false
     /** @type {boolean} */
@@ -72,8 +76,20 @@
         opts.onAuthFailed && opts.onAuthFailed(0)
       } else {
         log('debug', 'WT closed (reason=' + (reason || 'unknown') + ')')
-        opts.onClosed && opts.onClosed()
+        opts.onClosed && opts.onClosed({ willReconnect: true })
+        scheduleReconnect()
       }
+    }
+
+    /** @returns {void} */
+    function scheduleReconnect() {
+      if (!connectMsg || reconnectTimer) return
+      log('debug', 'scheduling WT reconnect in ' + reconnectDelay + 'ms')
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null
+        doConnect()
+      }, reconnectDelay)
+      reconnectDelay = Math.min(reconnectDelay * 2, 5000)
     }
 
     /**
@@ -152,6 +168,7 @@
         .then(() => {
           if (!wt) return
           open = true
+          reconnectDelay = 500
           log('debug', 'WT connected')
           authTimer = setTimeout(() => {
             authTimer = null
@@ -201,6 +218,10 @@
       },
       /** @returns {void} */
       disconnect() {
+        if (reconnectTimer) {
+          clearTimeout(reconnectTimer)
+          reconnectTimer = null
+        }
         if (streamReader) {
           try {
             streamReader.cancel()

@@ -34,7 +34,7 @@
  * @typedef {object} WsTransportOpts
  * @property {string} [tag]
  * @property {() => void} [onReady]
- * @property {() => void} [onClosed]
+ * @property {(info?: {willReconnect: boolean}) => void} [onClosed]
  * @property {(code: number) => void} [onAuthFailed]
  * @property {(frame: Uint8Array) => void} [onBinary]
  * @property {(text: string) => void} [onText]

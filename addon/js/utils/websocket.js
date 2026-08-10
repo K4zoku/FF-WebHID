@@ -51,7 +51,7 @@
           opts.onAuthFailed && opts.onAuthFailed(event.code)
           return
         }
-        opts.onClosed && opts.onClosed()
+        opts.onClosed && opts.onClosed({ willReconnect: true })
         scheduleReconnect()
       }
       ws.onmessage = ({ data }) => {
