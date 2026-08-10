@@ -25,6 +25,9 @@
   const NativeMessageChannel = MessageChannel
   const nativeWorkerPostMessage =
     typeof Worker !== 'undefined' ? Worker.prototype.postMessage : null
+  const nativeWorkerAddEventListener =
+    typeof Worker !== 'undefined' ? Worker.prototype.addEventListener : null
+  const nativeSelfPostMessage = typeof self !== 'undefined' ? self.postMessage.bind(self) : null
   const nativeWindowPostMessage = typeof window !== 'undefined' ? window.postMessage : null
 
   logger.initLogger('polyfill')
@@ -495,6 +498,12 @@
             resolve()
           }
         })
+        const requestInit = () => {
+          if (bridgePort || !nativeSelfPostMessage) return
+          nativeSelfPostMessage({ type: 'webhid-init-request' })
+          setTimeout(requestInit, 300)
+        }
+        setTimeout(requestInit, 300)
       })
     : new Promise((resolve) => {
         const channel = new NativeMessageChannel()
@@ -680,22 +689,20 @@
     return sendRequest('getPolicy', getPolicyContext())
   }
 
-  if (!isWorker) {
-    const originalQuery = navigator.permissions?.query?.bind(navigator.permissions)
-    if (originalQuery) {
-      navigator.permissions.query = async (desc) => {
-        if (desc && desc.name === 'hid') {
-          const policy = await getPolicy()
-          return {
-            state: policy && policy.hid === 'none' ? 'denied' : 'granted',
-            onchange: null,
-            addEventListener: () => {},
-            removeEventListener: () => {},
-            dispatchEvent: () => false
-          }
+  const originalQuery = navigator.permissions?.query?.bind(navigator.permissions)
+  if (originalQuery) {
+    navigator.permissions.query = async (desc) => {
+      if (desc && desc.name === 'hid') {
+        const policy = await getPolicy()
+        return {
+          state: policy && policy.hid === 'none' ? 'denied' : 'granted',
+          onchange: null,
+          addEventListener: () => {},
+          removeEventListener: () => {},
+          dispatchEvent: () => false
         }
-        return originalQuery(desc)
       }
+      return originalQuery(desc)
     }
   }
 
@@ -1711,6 +1718,31 @@
   installNavigatorHid()
 
   const NativeWorker = globalThis.Worker
+  /** @type {WeakSet<Worker>} */
+  const workerPortInited = new WeakSet()
+  /**
+   * @param {Worker} instance
+   * @returns {void}
+   */
+  function initPageWorkerPort(instance) {
+    if (workerPortInited.has(instance)) return
+    workerPortInited.add(instance)
+    const ch = new NativeMessageChannel()
+    nativeWorkerPostMessage.call(instance, null, [ch.port1])
+    bridgeReady.then(() => {
+      if (!bridgePort) return
+      nativeMessagePortPostMessage.call(
+        bridgePort,
+        {
+          id: frameNonce + ':' + ++nextReqId,
+          action: 'workerPort',
+          payload: {}
+        },
+        [ch.port2]
+      )
+    })
+  }
+
   /**
    * @param {string|URL} url
    * @param {object} [opts]
@@ -1730,22 +1762,14 @@
       (protocol === 'http:' || protocol === 'https:') &&
       (workerPolyfillState.global || workerPolyfillState.origins.has(origin))
     const instance = new NativeWorker(url, opts)
-    if (polyfillActive) {
-      const ch = new NativeMessageChannel()
-      nativeWorkerPostMessage.call(instance, null, [ch.port1])
-      bridgeReady.then(() => {
-        if (!bridgePort) return
-        nativeMessagePortPostMessage.call(
-          bridgePort,
-          {
-            id: frameNonce + ':' + ++nextReqId,
-            action: 'workerPort',
-            payload: {}
-          },
-          [ch.port2]
-        )
+    if (nativeWorkerAddEventListener) {
+      nativeWorkerAddEventListener.call(instance, 'message', (e) => {
+        if (!e.data || e.data.type !== 'webhid-init-request') return
+        e.stopImmediatePropagation()
+        initPageWorkerPort(instance)
       })
     }
+    if (polyfillActive) initPageWorkerPort(instance)
     return instance
   }
   if (NativeWorker) {

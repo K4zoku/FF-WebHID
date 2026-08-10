@@ -153,4 +153,20 @@ test.describe('Worker polyfill gating', () => {
     expect(ok).toBe(true);
   });
 
+  test('early inline worker spawn pulls the init port after the settings race', async ({ page, pageUrl, backgroundPage, servers }) => {
+    const origin = `http://localhost:${servers.main.port}`;
+    await backgroundPage.evaluate((origin) => browser.storage.local.set({
+      [`settings :: ${origin} :: workerPolyfillEnabled`]: true,
+    }), origin);
+    await page.goto(pageUrl('/race-probe'), { waitUntil: 'domcontentloaded', timeout: 15000 });
+    await page.waitForFunction(() => {
+      const r = (window as unknown as { tests?: { results?: { race?: { got?: string } } } }).tests?.results?.race;
+      return r !== undefined && r !== null && r.got !== 'pending';
+    }, undefined, { timeout: 15000 });
+    const raw = await page.evaluate(() => (window as unknown as { tests?: { results?: { race?: { got: string; hasNavigatorHid?: boolean; state?: string } } } }).tests?.results?.race);
+    expect(raw.got).toBe('message');
+    expect(raw.hasNavigatorHid).toBe(true);
+    expect(raw.state).toBe('granted');
+  });
+
 });
