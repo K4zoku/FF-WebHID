@@ -217,7 +217,7 @@ const BLOCKED_DEVICES: &[(u16, u16)] = &[
     (0x2ccf, 0x0880),
 ];
 
-/// FIDO usage page (Alliance Auth) — catches any security key not in the
+/// FIDO usage page (Alliance Auth), catches any security key not in the
 /// per-product list above.
 const FIDO_USAGE_PAGE: u16 = 0xF1D0;
 

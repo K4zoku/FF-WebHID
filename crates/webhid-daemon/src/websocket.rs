@@ -115,9 +115,14 @@ async fn handle_websocket(
     let device_id_for_worker = device_id;
     let mut frame_worker = tokio::spawn(async move {
         while let Some(frame) = frame_rx.recv().await {
-            batching::handle_client_message(&frame, &mgr_for_worker, device_id_for_worker, |resp| {
-                let _ = tx_for_worker.send(Message::Binary(resp.into()));
-            })
+            batching::handle_client_message(
+                &frame,
+                &mgr_for_worker,
+                device_id_for_worker,
+                |resp| {
+                    let _ = tx_for_worker.send(Message::Binary(resp.into()));
+                },
+            )
             .await;
         }
     });

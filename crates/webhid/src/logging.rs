@@ -3,8 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 /// Cap for the default log file. On exceed the file is rotated to
-/// `<file>.1` at startup. Mid-run growth past the cap is accepted: this
-/// is a diagnostics log, not a production ring.
+/// `<file>.1` at startup.
 const MAX_LOG_FILE_BYTES: u64 = 1 << 20;
 
 /// Age past which per-instance log files from previous sessions are

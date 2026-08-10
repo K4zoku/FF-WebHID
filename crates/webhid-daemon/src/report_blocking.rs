@@ -130,15 +130,8 @@ fn interface_protected(info: &DeviceInfo, report_type: ReportType) -> bool {
 /// field is touched: the report map, reader and send path keep working off
 /// the full parse, and `max_input_report_size` is preserved.
 ///
-/// Exception: a device with *no* parsed collections (missing or unparseable
-/// report descriptor) is kept visible with empty collections. hidreport is
-/// strict where Chromium's parser is tolerant, so parse failure is a
-/// tooling gap, not evidence that the device has no reports; hiding it made
-/// whole classes of vendor devices (e.g. USB DAC control interfaces)
-/// invisible even though raw report I/O works. Protection for this case is
-/// not pruning but the `interface_protected` fallback in
-/// [`DeviceReportBlocking`]: read/send stay blocked when the hidapi
-/// interface usage is itself protected (FIDO page, GD mouse/keyboard, ...).
+/// A device with no parsed collections (missing or unparseable report
+/// descriptor) is kept visible with empty collections.
 pub fn prune_device_info(info: DeviceInfo) -> Option<DeviceInfo> {
     if info.collections.is_empty() {
         log::warn!(
@@ -246,7 +239,9 @@ fn report_write_valid(
     if max_size == 0 {
         return false;
     }
-    if let Some(len) = payload_len && len > max_size as usize {
+    if let Some(len) = payload_len
+        && len > max_size as usize
+    {
         return false;
     }
     true

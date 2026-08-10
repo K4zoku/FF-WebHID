@@ -10,16 +10,15 @@
 //! get-report callback.
 //!
 //! Deprecation status: the API is deprecated since macOS 11 in favor of
-//! CoreHID's `HIDVirtualDevice`, but CoreHID requires the
-//! `com.apple.developer.hid.virtual.device` entitlement, which needs Apple
-//! approval and a provisioning profile — a non-starter for a test tool.
-//! `IOHIDUserDevice` still ships in IOKit.framework and works without any
-//! entitlement (observed in the wild on macOS 26). Rust FFI is unaffected
-//! by the C-side deprecation attribute.
+//! CoreHID's `HIDVirtualDevice`, which requires the
+//! `com.apple.developer.hid.virtual.device` entitlement. `IOHIDUserDevice`
+//! still ships in IOKit.framework and works without any entitlement
+//! (observed in the wild on macOS 26). Rust FFI is unaffected by the
+//! C-side deprecation attribute.
 //!
 //! Threading model: the main thread owns the CFRunLoop (callbacks fire
 //! there); a second thread blocks on stdin and handles JSON commands.
-//! Command `destroy` and stdin EOF exit the process directly — process
+//! Command `destroy` and stdin EOF exit the process directly, process
 //! death closes the IOHIDUserClient connection and the kernel removes the
 //! virtual device, the same teardown path as Linux closing the uhid fd.
 //!
@@ -47,7 +46,7 @@ type IOHIDUserDeviceRef = *mut c_void;
 
 /// `IOHIDReportType` from IOKit/hid/IOHIDKeys.h.
 type IOHIDReportType = u32;
-/// `kIOHIDReportTypeOutput` — host → device output report.
+/// `kIOHIDReportTypeOutput`, host → device output report.
 const K_IO_HID_REPORT_TYPE_OUTPUT: IOHIDReportType = 1;
 
 /// `IOReturn` success.
@@ -183,11 +182,11 @@ impl MockDevice for MacOSDevice {
 /// string literals behind the `kIOHID*Key` macros in IOKit/hid/IOHIDKeys.h
 /// (macros, not exported symbols, so we construct them directly).
 ///
-/// Calls `CFDictionaryCreate` directly (via core-foundation-sys) because
-/// the typed `CFDictionary::from_CFType_pairs` wrapper requires a single
-/// concrete value type, while our values are a mix of CFData / CFNumber /
-/// CFString. Returns a create-rule (+1) reference; intentionally never
-/// released since the device lives until process exit.
+/// Calls `CFDictionaryCreate` directly (via core-foundation-sys): the typed
+/// `CFDictionary::from_CFType_pairs` wrapper takes a single concrete value
+/// type, while our values mix CFData / CFNumber / CFString. Returns a
+/// create-rule (+1) reference, never released while the device lives
+/// (process exit).
 fn build_properties(opts: &SpawnOpts, rd: &[u8]) -> CFDictionaryRef {
     let mut keys: Vec<CFString> = Vec::new();
     let mut values: Vec<CFType> = Vec::new();

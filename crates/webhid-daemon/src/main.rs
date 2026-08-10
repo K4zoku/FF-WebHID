@@ -106,7 +106,7 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
     // `webhid-daemon dump [--descriptor] [--json]`: one-shot diagnostics,
-    // no daemon startup, no log file. Runs before init_logger on purpose.
+    // no daemon startup, no log file; runs before init_logger.
     let mut args = std::env::args().skip(1);
     if args.next().as_deref() == Some("dump") {
         return dump::run(args);

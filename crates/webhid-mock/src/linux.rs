@@ -9,7 +9,7 @@
 //! / `UHID_GET_REPORT` / `UHID_SET_REPORT` events when the host writes or
 //! queries reports.
 //!
-//! Only the subset of the protocol we actually need is defined here — we
+//! Only the subset of the protocol we actually need is defined here, we
 //! skip output-ev, feature-report replies, etc. Structs match the kernel
 //! ABI in `<linux/uhid.h>` and must not be reordered or resized.
 //!
@@ -47,7 +47,7 @@ pub const UHID_CREATE2_NAME_MAX: usize = 128;
 /// `phys` / `uniq` size from <linux/uhid.h> struct `uhid_create2_req`.
 pub const UHID_DEVICE2_CLASS_MAX: usize = 64;
 
-/// `struct uhid_create2_req` — sent to create a virtual HID device.
+/// `struct uhid_create2_req`, sent to create a virtual HID device.
 #[derive(Copy, Clone)]
 #[repr(C, packed)]
 pub struct UhidCreate2Req {
@@ -74,7 +74,7 @@ pub struct UhidCreate2Req {
     pub rd_data: [u8; UHID_DATA_MAX],
 }
 
-/// `struct uhid_input2_req` — sent to inject an input report into the host.
+/// `struct uhid_input2_req`, sent to inject an input report into the host.
 #[derive(Copy, Clone)]
 #[repr(C, packed)]
 pub struct UhidInput2Req {
@@ -87,7 +87,7 @@ pub struct UhidInput2Req {
     pub data: [u8; UHID_DATA_MAX],
 }
 
-/// `struct uhid_output_req` — received when the host writes an output
+/// `struct uhid_output_req`, received when the host writes an output
 /// report to the device. We model it explicitly so we can read its `data`
 /// and `size` fields without unsafe pointer arithmetic on a raw buffer.
 #[derive(Copy, Clone)]
@@ -101,12 +101,12 @@ pub struct UhidOutputReq {
     pub rtype: u8,
 }
 
-/// `struct uhid_get_report_req` — received when the host requests a
+/// `struct uhid_get_report_req`, received when the host requests a
 /// feature report.  We need to read `id` so the reply can match it.
 #[derive(Copy, Clone)]
 #[repr(C, packed)]
 pub struct UhidGetReportReq {
-    /// Request id — must be echoed in the reply.
+    /// Request id, must be echoed in the reply.
     pub id: u32,
     /// Report number (HID report ID, or 0 for non-numbered).
     pub rnum: u8,
@@ -114,7 +114,7 @@ pub struct UhidGetReportReq {
     pub rtype: u8,
 }
 
-/// `struct uhid_get_report_reply_req` — sent in reply to a
+/// `struct uhid_get_report_reply_req`, sent in reply to a
 /// UHID_GET_REPORT.  We reply with err=0 and empty data since
 /// our virtual device has no meaningful feature reports to return.
 #[derive(Copy, Clone)]
@@ -130,12 +130,12 @@ pub struct UhidGetReportReplyReq {
     pub data: [u8; UHID_DATA_MAX],
 }
 
-/// `struct uhid_set_report_req` — received when the host sends a
+/// `struct uhid_set_report_req`, received when the host sends a
 /// feature report to the device.
 #[derive(Copy, Clone)]
 #[repr(C, packed)]
 pub struct UhidSetReportReq {
-    /// Request id — must be echoed in the reply.
+    /// Request id, must be echoed in the reply.
     pub id: u32,
     /// Report number (HID report ID, or 0 for non-numbered).
     pub rnum: u8,
@@ -147,7 +147,7 @@ pub struct UhidSetReportReq {
     pub data: [u8; UHID_DATA_MAX],
 }
 
-/// `struct uhid_set_report_reply_req` — sent in reply to a UHID_SET_REPORT.
+/// `struct uhid_set_report_reply_req`, sent in reply to a UHID_SET_REPORT.
 #[derive(Copy, Clone)]
 #[repr(C, packed)]
 pub struct UhidSetReportReplyReq {
@@ -157,7 +157,7 @@ pub struct UhidSetReportReplyReq {
     pub err: u16,
 }
 
-/// `union uhid_event.u` — the variable-size arm of `struct uhid_event`.
+/// `union uhid_event.u`, the variable-size arm of `struct uhid_event`.
 ///
 /// Modelled as a Rust union; only one arm is active at a time. The kernel
 /// picks which arm to read based on the `type` field in the parent struct.
@@ -173,7 +173,7 @@ pub union UhidEventUnion {
     pub set_report_reply: UhidSetReportReplyReq,
 }
 
-/// `struct uhid_event` — the top-level envelope written to / read from
+/// `struct uhid_event`, the top-level envelope written to / read from
 /// `/dev/uhid`. Layout: 4-byte type tag followed by the union.
 #[repr(C, packed)]
 pub struct UhidEvent {
@@ -184,7 +184,7 @@ pub struct UhidEvent {
 }
 
 /// Total size of a `uhid_event` as the kernel expects to read/write it.
-/// This matches `sizeof(struct uhid_event)` in C — the kernel reads this
+/// This matches `sizeof(struct uhid_event)` in C, the kernel reads this
 /// exact number of bytes per syscall.
 pub const UHID_EVENT_SIZE: usize = std::mem::size_of::<UhidEvent>();
 
@@ -193,7 +193,7 @@ const _: () = assert!(
     "UHID_EVENT_SIZE mismatch with kernel ABI"
 );
 
-/// Open `/dev/uhid` for read+write. Requires write permission — either
+/// Open `/dev/uhid` for read+write. Requires write permission, either
 /// root or a udev rule granting access to the calling user/group.
 ///
 /// Returns the raw fd on success. Caller is responsible for `close(2)`.
@@ -573,7 +573,7 @@ fn handle_uhid_error(revents: i16, count: &mut u32) -> anyhow::Result<LoopAction
         return Ok(LoopAction::Exit);
     }
     log::warn!(
-        "uhid fd error (revents={}) check {}/3 — will pause before retry",
+        "uhid fd error (revents={}) check {}/3, will pause before retry",
         revents,
         *count,
     );
