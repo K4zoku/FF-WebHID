@@ -21,7 +21,7 @@
           })
         )
       )
-      workerBundle = texts.join(';\n')
+      workerBundle = texts.join(';') + ';'
       return workerBundle
     })()
     return workerBundlePromise
@@ -48,7 +48,7 @@
           })
         )
       )
-      workerPolyfillBundle = texts.join(';\n')
+      workerPolyfillBundle = texts.join(';') + ';'
       return workerPolyfillBundle
     })()
     return workerPolyfillBundlePromise
