@@ -7,3 +7,5 @@ addon/manifest.v3.json
 crates/target/
 test-results/
 .zed/
+*.rs
+*.svg

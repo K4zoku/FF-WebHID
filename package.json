@@ -59,6 +59,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.62.0",
+    "@prettier/plugin-xml": "^3.4.2",
     "@types/firefox-webext-browser": "^143.0.0",
     "@types/node": "^26.1.2",
     "commit-and-tag-version": "^13.1.0",
