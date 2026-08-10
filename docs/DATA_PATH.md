@@ -76,7 +76,7 @@ All send/sendFeature paths are ack-wait (resolve on daemon response).
 | 2         | `content/main/index.js`            | `dataPort.postMessage({type:'send',...}, [buffer])` → P→W via MessagePort       | 0 (transfer)                   | 1     |
 | 3         | `content/isolated/worker/index.js` | `frame = new Uint8Array(6+len); frame.set(payload,6)`                           | 1 (alloc+copy)                 | 0     |
 | 4         | `content/isolated/worker/index.js` | `ws.send(frame)` → W→D                                                          | 1 (WS encode) + 1 (kernel TCP) | 1     |
-| 5         | `websocket.rs`                     | `Arc::from(&frame[6..])` → `spawn_blocking`                                     | 0 (Arc)                        | 1     |
+| 5         | `batching.rs`                      | `Arc::from(&frame[6..])` → `spawn_blocking`                                     | 0 (Arc)                        | 1     |
 | 6         | `hid.rs`                           | `WRITE_BUF.extend_from_slice(&payload)`                                         | 1 (copy)                       | 0     |
 | 7         | `hid.rs`                           | `dev.write(&buf)` → hidraw                                                      | 1 (kernel)                     | 1     |
 | 8         | `websocket.rs`                     | WS ack frame → D→W                                                              | 1 (WS encode) + 1 (kernel)     | 1     |
@@ -139,7 +139,7 @@ path remains only as the fallback while the plane is not open.
 | 1         | `content/main/index.js` | `view.slice()` own-buffer copy                                  | 1                                    | 0     |
 | 2         | `content/main/index.js` | `inPageRequest` builds `[0x01][reqId][reportId][payload]` frame | 1 (alloc+copy)                       | 0     |
 | 3         | `content/main/index.js` | `plane.wt.send(frame)` → P→D over WT stream                     | 1 (QUIC/TLS encode) + 1 (kernel UDP) | 1     |
-| 4         | `webtransport.rs`       | `Arc::from(&frame[6..])` → `spawn_blocking`                     | 0 (Arc)                              | 1     |
+| 4         | `batching.rs`           | `Arc::from(&frame[6..])` → `spawn_blocking`                     | 0 (Arc)                              | 1     |
 | 5         | `hid.rs`                | `WRITE_BUF.extend_from_slice(&payload)`                         | 1 (copy)                             | 0     |
 | 6         | `hid.rs`                | `dev.write(&buf)` → hidraw                                      | 1 (kernel)                           | 1     |
 | 7         | `webtransport.rs`       | ack frame → D→P over WT stream                                  | 1 (QUIC/TLS encode) + 1 (kernel UDP) | 1     |
@@ -157,8 +157,8 @@ Copy count matches the worker send path (Path A: the two MessagePort hops are ze
 | -------------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------ | --------------------- |
 | 1                    | `device_mgr.rs`                    | `dev.read_timeout` → `Arc::from(&buf[1..])`                                                               | 1 (kernel) + 0 (Arc)                       | 1                     |
 | 2                    | `device_mgr.rs`                    | `tx.send(IpcResponse::InputReport{data: Arc})` → broadcast                                                | 0 (Arc move)                               | 1                     |
-| 3                    | `websocket.rs`                     | `event_rx.recv()` → `batch.push((reportId, data))`                                                        | 0 (Arc clone)                              | 0                     |
-| 4                    | `websocket.rs`                     | `create_batch_frame` prepend reportId + extend data                                                       | 1 (alloc+N×copy)                           | 0                     |
+| 3                    | `batching.rs`                      | `event_rx.recv()` → `batch.push((reportId, data))`                                                        | 0 (Arc clone)                              | 0                     |
+| 4                    | `batching.rs`                      | `write_batch_frame` prepend reportId + extend data                                                        | 1 (alloc+N×copy)                           | 0                     |
 | 5                    | `websocket.rs`                     | `ws_sender.send` → D→W                                                                                    | 1 (WS encode) + 1 (kernel TCP)             | 1                     |
 | 6                    | `content/isolated/worker/index.js` | `new Uint8Array(frame)` → parse batch → per-report `new ArrayBuffer(payloadLen)` + copy                   | 1 (kernel→JS) + 1 (alloc+copy per report)  | 0                     |
 | 7                    | `content/isolated/worker/index.js` | `dataPort.postMessage({type:'inputReportBatch', reports}, transfers)` → W→P direct, one message per frame | 0 (transfers)                              | 1 (direct, no bridge) |
@@ -176,7 +176,7 @@ Copy count matches the worker send path (Path A: the two MessagePort hops are ze
 
 ### Path W - Input report WT worker (rate-gated batching)
 
-Same shape as Path I with the transport leg swapped: `webtransport.rs` runs the
+Same shape as Path I with the transport leg swapped: `batching.rs` runs the
 same `batching::run_sender` and `write_batch_frame`; the frame crosses as a
 length-prefixed message on the persistent WT stream (QUIC/TLS encode + kernel
 UDP instead of WS encode + TCP).
@@ -185,8 +185,8 @@ UDP instead of WS encode + TCP).
 | -------------------- | ---------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------ | --------------------- |
 | 1                    | `device_mgr.rs`                    | `dev.read_timeout` → `Arc::from(&buf[1..])`                                        | 1 (kernel) + 0 (Arc)                       | 1                     |
 | 2                    | `device_mgr.rs`                    | `tx.send(IpcResponse::InputReport{data: Arc})` → broadcast                         | 0 (Arc move)                               | 1                     |
-| 3                    | `webtransport.rs`                  | `event_rx.recv()` → `batch.push((reportId, data))`                                 | 0 (Arc clone)                              | 0                     |
-| 4                    | `webtransport.rs`                  | `write_batch_frame` prepend reportId + extend data                                 | 1 (alloc+N×copy)                           | 0                     |
+| 3                    | `batching.rs`                      | `event_rx.recv()` → `batch.push((reportId, data))`                                 | 0 (Arc clone)                              | 0                     |
+| 4                    | `batching.rs`                      | `write_batch_frame` prepend reportId + extend data                                 | 1 (alloc+N×copy)                           | 0                     |
 | 5                    | `webtransport.rs`                  | `frame_tx.send` → D→W over WT stream                                               | 1 (QUIC/TLS encode) + 1 (kernel UDP)       | 1                     |
 | 6                    | `content/isolated/worker/index.js` | parse batch → per-report `new ArrayBuffer(payloadLen)` + copy                      | 1 (kernel→JS) + 1 (alloc+copy per report)  | 0                     |
 | 7                    | `content/isolated/worker/index.js` | `dataPort.postMessage({type:'inputReportBatch', reports}, transfers)` → W→P direct | 0 (transfers)                              | 1 (direct, no bridge) |
@@ -211,8 +211,8 @@ profiler-confirmed loss numbers in AGENTS.md Section 3).
 | -------------------- | ----------------------- | --------------------------------------------------------------------------------------------- | ----------------------------------------- | ----- |
 | 1                    | `device_mgr.rs`         | `dev.read_timeout` → `Arc::from(&buf[1..])`                                                   | 1 (kernel) + 0 (Arc)                      | 1     |
 | 2                    | `device_mgr.rs`         | `tx.send(IpcResponse::InputReport{data: Arc})` → broadcast                                    | 0 (Arc move)                              | 1     |
-| 3                    | `webtransport.rs`       | `event_rx.recv()` → `batch.push((reportId, data))`                                            | 0 (Arc clone)                             | 0     |
-| 4                    | `webtransport.rs`       | `write_batch_frame` prepend reportId + extend data                                            | 1 (alloc+N×copy)                          | 0     |
+| 3                    | `batching.rs`           | `event_rx.recv()` → `batch.push((reportId, data))`                                            | 0 (Arc clone)                             | 0     |
+| 4                    | `batching.rs`           | `write_batch_frame` prepend reportId + extend data                                            | 1 (alloc+N×copy)                          | 0     |
 | 5                    | `webtransport.rs`       | `frame_tx.send` → D→P over WT stream                                                          | 1 (QUIC/TLS encode) + 1 (kernel UDP)      | 1     |
 | 6                    | `content/main/index.js` | `onBinary` → `pushInPageBatch`: parse batch → per-report `new ArrayBuffer(payloadLen)` + copy | 1 (kernel→JS) + 1 (alloc+copy per report) | 0     |
 | 7                    | `content/main/index.js` | `new DataView` + dispatch `HIDInputReportEvent`                                               | 0                                         | 0     |
