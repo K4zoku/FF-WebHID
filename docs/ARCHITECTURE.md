@@ -165,7 +165,7 @@ A page cannot grant itself a device, see the full inventory, or spoof the choose
 
 ### WebSocket security
 
-- Daemon binds WS server to `127.0.0.1` only; rejects non-localhost `Host`/`Origin` headers (403)
+- Daemon binds WS server to `127.0.0.1` only; rejects non-loopback `Host` headers (403)
 - Every WS connection is authenticated via a per-device auth hash: `SHA-256(sessionToken || wsNonce)` presented as WS subprotocol `webhid.<hash>`
 - No separate control token; the daemon has no text-frame or control-connection path
 
