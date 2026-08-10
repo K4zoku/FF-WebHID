@@ -55,8 +55,8 @@ Control ops (enumerate/open/close/handshake) are NM-only, handled by bridge→ba
 | L    | `enumerate`                  | NM                  | P→B→G→NM→D→hidapi→NM→G→B→P                                                             |
 | M    | `open`                       | NM                  | P→B→G→NM→D→hidapi→NM→G→B→P + data worker setup + MessagePort transfer                  |
 | N    | `close`                      | NM                  | P→B→G→NM→D→NM→G→B→P + data worker terminate + port return                              |
-| O    | `requestDevice`              | NM                  | P→B (picker UI) → enumerate → user select → B pairs (bridge-side) → B→P                                  |
-| P    | `getDevices`                 | NM                  | P→B→G→storage + enumeratePaired (or cache hit)                                                         |
+| O    | `requestDevice`              | NM                  | P→B (picker UI) → enumerate → user select → B pairs (bridge-side) → B→P                |
+| P    | `getDevices`                 | NM                  | P→B→G→storage + enumeratePaired (or cache hit)                                         |
 | Q    | `handshake` (NM)             | NM                  | B→G→NM→D→NM→G→B (returns wsPort + wsNonce)                                             |
 | R    | `connect`/`disconnect` event | NM                  | D→NM→G→B→P (tab-targeted)                                                              |
 | S    | `getPolicy`                  | NM                  | P→B→G (Permissions-Policy header cache + iframe `allow` attr check)                    |

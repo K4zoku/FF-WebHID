@@ -10,7 +10,6 @@
 
 WebHID is a web standard that lets websites communicate directly with supported USB devices. Sites use it for game controllers, drawing tablets, stream decks, MIDI devices, and specialized input gear. Firefox does not support WebHID out of the box[^1][^2], so this addon fills the gap. Install the addon plus a small background daemon, and WebHID websites work as if Firefox supported them natively.
 
-
 [^1]: [MDN: WebHID API](https://developer.mozilla.org/en-US/docs/Web/API/WebHID_API): browser compatibility shows no Firefox support.
 
 [^2]: [Mozilla standards position on WebHID](https://github.com/mozilla/standards-positions/issues/459): negative.
