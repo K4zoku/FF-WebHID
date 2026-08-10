@@ -10,8 +10,5 @@
     "skipLibCheck": true,
     "declaration": false
   },
-  "include": [
-    "eslint.config.ts",
-    "types/**/*.d.ts"
-  ]
+  "include": ["eslint.config.ts", "types/**/*.d.ts"]
 }

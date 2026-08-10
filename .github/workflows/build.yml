@@ -2,7 +2,7 @@ name: Build
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
     paths:
       - 'crates/**'
       - 'manifests/**'
@@ -10,7 +10,7 @@ on:
       - 'Makefile'
       - '.github/workflows/build.yml'
   pull_request:
-    branches: [ main ]
+    branches: [main]
     paths:
       - 'crates/**'
       - 'manifests/**'
@@ -32,26 +32,26 @@ jobs:
             arch: x86_64
             artifact_name: webhid-linux-x86_64
             apt_deps: libudev-dev zip
-            rust_target: ""
-            cargo_wrapper: "./.cargo/rustc-wrapper.sh"
+            rust_target: ''
+            cargo_wrapper: './.cargo/rustc-wrapper.sh'
           - os: ubuntu-24.04-arm
             arch: aarch64
             artifact_name: webhid-linux-aarch64
             apt_deps: libudev-dev zip
-            rust_target: ""
-            cargo_wrapper: "./.cargo/rustc-wrapper.sh"
+            rust_target: ''
+            cargo_wrapper: './.cargo/rustc-wrapper.sh'
           - os: windows-2022
             arch: universal
             artifact_name: webhid-windows
-            apt_deps: ""
-            rust_target: ""
-            cargo_wrapper: ""
+            apt_deps: ''
+            rust_target: ''
+            cargo_wrapper: ''
           - os: macos-15
             arch: universal
             artifact_name: webhid-macos
-            apt_deps: ""
-            rust_target: ""
-            cargo_wrapper: ""
+            apt_deps: ''
+            rust_target: ''
+            cargo_wrapper: ''
 
     runs-on: ${{ matrix.os }}
     env:

@@ -1,7 +1,5 @@
 {
-  "packageFiles": [
-    { "filename": ".version.json", "type": "json" }
-  ],
+  "packageFiles": [{ "filename": ".version.json", "type": "json" }],
   "bumpFiles": [
     { "filename": ".version.json", "type": "json" },
     { "filename": "package.json", "type": "json" },
@@ -9,7 +7,10 @@
     { "filename": "addon/manifest.v2.json", "type": "json" },
     { "filename": "crates/webhid/Cargo.toml", "updater": ".versionrc.cargo-updater.cjs" },
     { "filename": "crates/webhid-daemon/Cargo.toml", "updater": ".versionrc.cargo-updater.cjs" },
-    { "filename": "crates/webhid-native-messaging/Cargo.toml", "updater": ".versionrc.cargo-updater.cjs" },
+    {
+      "filename": "crates/webhid-native-messaging/Cargo.toml",
+      "updater": ".versionrc.cargo-updater.cjs"
+    },
     { "filename": "crates/Cargo.lock", "updater": ".versionrc.cargo-lock-updater.cjs" }
   ],
   "types": [

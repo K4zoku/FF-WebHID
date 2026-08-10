@@ -2,7 +2,7 @@ name: Check
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
     paths:
       - '**/Cargo.toml'
       - '**/Cargo.lock'
@@ -10,7 +10,7 @@ on:
       - 'package-lock.json'
       - '.github/workflows/check.yml'
   pull_request:
-    branches: [ main ]
+    branches: [main]
     paths:
       - '**/Cargo.toml'
       - '**/Cargo.lock'

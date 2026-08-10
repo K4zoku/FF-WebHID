@@ -2,12 +2,12 @@ name: Build Addon
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
     paths:
       - 'addon/**'
       - '.github/workflows/build-addon.yml'
   pull_request:
-    branches: [ main ]
+    branches: [main]
     paths:
       - 'addon/**'
       - '.github/workflows/build-addon.yml'
