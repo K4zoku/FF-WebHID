@@ -153,7 +153,7 @@ test.describe('Worker polyfill gating', () => {
     expect(ok).toBe(true);
   });
 
-  test('early inline worker spawn pulls the init port after the settings race', async ({ page, pageUrl, backgroundPage, servers }) => {
+  test('early inline worker spawn initializes without waiting for settings', async ({ page, pageUrl, backgroundPage, servers }) => {
     const origin = `http://localhost:${servers.main.port}`;
     await backgroundPage.evaluate((origin) => browser.storage.local.set({
       [`settings :: ${origin} :: workerPolyfillEnabled`]: true,

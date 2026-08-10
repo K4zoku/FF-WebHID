@@ -555,10 +555,7 @@
         return
       }
     }
-    if (
-      msg != null &&
-      (msg.type === 'event' || msg.type === 'settings' || msg.type === 'workerPolyfillState')
-    ) {
+    if (msg != null && (msg.type === 'event' || msg.type === 'settings')) {
       for (const port of pagePorts.values()) port.postMessage(msg, transfer)
     }
   }
@@ -854,34 +851,6 @@
   }
 
   /**
-   * @returns {Promise<{global: boolean, origins: string[]}>}
-   */
-  async function computeWorkerPolyfillState() {
-    const [global, all] = await Promise.all([loadGlobalSettings(), browser.storage.local.get(null)])
-    const origins = []
-    for (const [key, val] of Object.entries(all)) {
-      const parsed = parseSettingsKey(key)
-      if (parsed && parsed.scope === 'site' && parsed.name === 'workerPolyfillEnabled' && val) {
-        origins.push(parsed.origin)
-      }
-    }
-    return { global: !!global.workerPolyfillEnabled, origins }
-  }
-
-  /**
-   * @param {object} data
-   * @returns {Promise<void>}
-   */
-  async function handleWorkerPolyfillStateRequest(data) {
-    try {
-      const state = await computeWorkerPolyfillState()
-      replyToPage({ type: 'response', id: data.id, result: state })
-    } catch {
-      replyToPage({ type: 'response', id: data.id, result: { global: false, origins: [] } })
-    }
-  }
-
-  /**
    * @param {object} data
    * @returns {Promise<void>}
    */
@@ -1093,7 +1062,6 @@
     getCspInfo: handleGetCspInfoRequest,
     getPolicy: handleGetPolicyRequest,
     getSettings: handleGetSettingsRequest,
-    workerPolyfillState: handleWorkerPolyfillStateRequest,
     sendReport: handleReportRequest,
     sendFeatureReport: handleReportRequest,
     receiveFeatureReport: handleReportRequest,
@@ -1357,23 +1325,17 @@
     if (area !== 'local') return
     const origin = window.location.origin
     const patch = {}
-    let workerPolyfillChanged = false
     for (const [key, change] of Object.entries(changes)) {
       const parsed = parseSettingsKey(key)
       if (!parsed) continue
-      if (parsed.name === 'workerPolyfillEnabled') workerPolyfillChanged = true
       if (parsed.scope === 'global') {
         patch[parsed.name] = change.newValue
       } else if (parsed.scope === 'site' && parsed.origin === origin) {
         patch[parsed.name] = change.newValue
       }
     }
-    if (Object.keys(patch).length > 0) settings.set(patch)
-    if (workerPolyfillChanged) {
-      computeWorkerPolyfillState()
-        .then((state) => replyToPage({ type: 'workerPolyfillState', state }))
-        .catch(() => {})
-    }
+    if (Object.keys(patch).length === 0) return
+    settings.set(patch)
   })
 
   browser.runtime.onMessage.addListener((message) => {

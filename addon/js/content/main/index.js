@@ -488,23 +488,13 @@
   let bridgePort = null
   /** @type {Promise<void>} */
   const bridgeReady = isWorker
-    ? new Promise((resolve) => {
-        self.addEventListener('message', function onInit(e) {
-          if (e.data === null && e.ports[0]) {
-            e.stopImmediatePropagation()
-            self.removeEventListener('message', onInit)
-            bridgePort = e.ports[0]
-            setupBridgePort()
-            resolve()
-          }
-        })
-        const requestInit = () => {
-          if (bridgePort || !nativeSelfPostMessage) return
-          nativeSelfPostMessage({ type: 'webhid-init-request' })
-          setTimeout(requestInit, 300)
-        }
-        setTimeout(requestInit, 300)
-      })
+    ? (() => {
+        const ch = new NativeMessageChannel()
+        bridgePort = ch.port1
+        setupBridgePort()
+        if (nativeSelfPostMessage) nativeSelfPostMessage(null, [ch.port2])
+        return Promise.resolve()
+      })()
     : new Promise((resolve) => {
         const channel = new NativeMessageChannel()
         bridgePort = channel.port1
@@ -562,9 +552,6 @@
     response: handleResponseMessage,
     settings: (data) => {
       settings.set(data.settings || {})
-    },
-    workerPolyfillState: (data) => {
-      applyWorkerPolyfillState(data.state)
     },
     event: (data) => {
       dispatchDeviceEvent(data.event)
@@ -647,17 +634,6 @@
   const defs = GLOBAL_DEFAULTS
   const settings = createSettingsStore(defs)
 
-  /** @type {{global: boolean, origins: Set<string>}} */
-  let workerPolyfillState = { global: false, origins: new Set() }
-  /** @param {object} state @returns {void} */
-  function applyWorkerPolyfillState(state) {
-    if (!state || typeof state !== 'object') return
-    workerPolyfillState = {
-      global: !!state.global,
-      origins: new Set(Array.isArray(state.origins) ? state.origins : [])
-    }
-  }
-
   settings.on('dataPlane', (v) => logger.info('data plane changed: ' + v))
   logger.bindSettings(settings)
 
@@ -667,7 +643,6 @@
       settings.set(result)
       logger.info('data plane: ' + settings.dataPlane)
     })
-    sendRequest('workerPolyfillState', {}).then(applyWorkerPolyfillState)
   })
 
   /** @returns {{isCrossOrigin: boolean}} */
@@ -1718,58 +1693,32 @@
   installNavigatorHid()
 
   const NativeWorker = globalThis.Worker
-  /** @type {WeakSet<Worker>} */
-  const workerPortInited = new WeakSet()
-  /**
-   * @param {Worker} instance
-   * @returns {void}
-   */
-  function initPageWorkerPort(instance) {
-    if (workerPortInited.has(instance)) return
-    workerPortInited.add(instance)
-    const ch = new NativeMessageChannel()
-    nativeWorkerPostMessage.call(instance, null, [ch.port1])
-    bridgeReady.then(() => {
-      if (!bridgePort) return
-      nativeMessagePortPostMessage.call(
-        bridgePort,
-        {
-          id: frameNonce + ':' + ++nextReqId,
-          action: 'workerPort',
-          payload: {}
-        },
-        [ch.port2]
-      )
-    })
-  }
-
   /**
    * @param {string|URL} url
    * @param {object} [opts]
    * @returns {Worker}
    */
   function PatchedWorker(url, opts) {
-    let origin = ''
-    let protocol = ''
-    try {
-      const u = new URL(String(url), location.href)
-      origin = u.origin
-      protocol = u.protocol
-    } catch (e) {
-      logger.debug('worker url resolve failed', e)
-    }
-    const polyfillActive =
-      (protocol === 'http:' || protocol === 'https:') &&
-      (workerPolyfillState.global || workerPolyfillState.origins.has(origin))
     const instance = new NativeWorker(url, opts)
     if (nativeWorkerAddEventListener) {
       nativeWorkerAddEventListener.call(instance, 'message', (e) => {
-        if (!e.data || e.data.type !== 'webhid-init-request') return
-        e.stopImmediatePropagation()
-        initPageWorkerPort(instance)
+        if (e.data === null && e.ports && e.ports[0]) {
+          e.stopImmediatePropagation()
+          bridgeReady.then(() => {
+            if (!bridgePort) return
+            nativeMessagePortPostMessage.call(
+              bridgePort,
+              {
+                id: frameNonce + ':' + ++nextReqId,
+                action: 'workerPort',
+                payload: {}
+              },
+              [e.ports[0]]
+            )
+          })
+        }
       })
     }
-    if (polyfillActive) initPageWorkerPort(instance)
     return instance
   }
   if (NativeWorker) {
