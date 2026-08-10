@@ -84,6 +84,9 @@ struct ReaderConfig {
     declared_input_ids: Arc<HashSet<u8>>,
     always_protected_input: bool,
     interface_protected_input: bool,
+    devices: Arc<Mutex<HashMap<u32, Entry>>>,
+    ws_auth_hashes: Arc<Mutex<HashMap<String, (u32, String)>>>,
+    device_info: DeviceInfo,
 }
 impl DeviceManager {
     pub fn new(event_tx: broadcast::Sender<IpcResponse>) -> Self {
@@ -168,6 +171,9 @@ impl DeviceManager {
             declared_input_ids,
             always_protected_input: blocking.always_protected[0],
             interface_protected_input: blocking.interface_protected[0],
+            devices: Arc::clone(&self.devices),
+            ws_auth_hashes: Arc::clone(&self.ws_auth_hashes),
+            device_info: info.clone(),
         });
         if let Some(e) = map.get_mut(&id) {
             e.handle = Some(handle);
@@ -223,6 +229,9 @@ impl DeviceManager {
             declared_input_ids,
             always_protected_input,
             interface_protected_input,
+            devices: devices_for_task,
+            ws_auth_hashes: hashes_for_task,
+            device_info: info_for_task,
         } = cfg;
         let stop_for_task = Arc::clone(&stop_flag);
         let blocked_for_task = Arc::clone(&blocked_input_ids);
@@ -233,6 +242,26 @@ impl DeviceManager {
             "[reader] starting for {dev_id:#x} (numbered_reports={uses_numbered_reports}, buf_size={read_buf_size})"
         );
         tokio::spawn(async move {
+            // A non-timeout read error leaves the device stuck open with no
+            // hotplug event to clean it up, so the reader removes the entry,
+            // clears its auth hashes and surfaces the disconnect itself.
+            let cleanup_dead_reader = || {
+                let removed = devices_for_task
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .remove(&dev_id)
+                    .is_some();
+                if removed {
+                    hashes_for_task
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .retain(|_, (d, _)| *d != dev_id);
+                    let _ = tx.send(IpcResponse::DeviceDisconnected {
+                        id: 0,
+                        device: info_for_task.clone(),
+                    });
+                }
+            };
             loop {
                 if stop_for_task.load(Ordering::SeqCst) {
                     break;
@@ -279,10 +308,12 @@ impl DeviceManager {
                             continue;
                         }
                         log::warn!("[reader {dev_id:#x}] read error: {e}; stopping");
+                        cleanup_dead_reader();
                         break;
                     }
                     Err(e) => {
                         log::warn!("[reader {dev_id:#x}] join error: {e}; stopping");
+                        cleanup_dead_reader();
                         break;
                     }
                 }
