@@ -496,30 +496,6 @@
    * @param {object} sender
    * @returns {boolean}
    */
-  function handleRegisterDevice(request, sender, sendResponse) {
-    const tabId = sender.tab != null ? sender.tab.id : undefined
-    if (request.deviceId && tabId != null) registerDeviceTab(request.deviceId, tabId)
-    sendResponse({ s: 204 })
-    return false
-  }
-
-  /**
-   * @param {object} request
-   * @param {object} sender
-   * @returns {boolean}
-   */
-  function handleUnregisterDevice(request, sender, sendResponse) {
-    const tabId = sender.tab != null ? sender.tab.id : undefined
-    if (request.deviceId && tabId != null) unregisterDeviceTab(request.deviceId, tabId)
-    sendResponse({ s: 204 })
-    return false
-  }
-
-  /**
-   * @param {object} request
-   * @param {object} sender
-   * @returns {boolean}
-   */
   function handleDeviceCountChanged(request, sender) {
     if (actionApi) {
       const tabId = sender.tab != null ? sender.tab.id : undefined
@@ -894,8 +870,6 @@
     pairDevice: handlePairDevice,
     unpairDevice: handleUnpairDevice,
     getAllowedDevices: handleGetAllowedDevices,
-    registerDevice: handleRegisterDevice,
-    unregisterDevice: handleUnregisterDevice,
     deviceCountChanged: handleDeviceCountChanged,
     getDeviceCache: handleGetDeviceCache,
     getDeviceInfo: handleGetDeviceInfo,
