@@ -777,6 +777,15 @@
     return false
   }
 
+  function handleUnarmShadowSpawn(request, sender, sendResponse) {
+    const tabId = request.tabId != null ? request.tabId : sender.tab ? sender.tab.id : null
+    const url = typeof request.url === 'string' ? request.url : ''
+    const unarm = webhid.import('unarmShadowSpawn')
+    if (unarm) unarm(tabId, url)
+    sendResponse({ ok: true })
+    return false
+  }
+
   /**
    * @param {object} request
    * @param {object} sender
@@ -876,6 +885,7 @@
     getPendingPicker: handleGetPendingPicker,
     getPolicy: handleGetPolicy,
     armShadowSpawn: handleArmShadowSpawn,
+    unarmShadowSpawn: handleUnarmShadowSpawn,
     setFrameAllow: handleSetFrameAllow,
     pickerResult: handlePickerResult
   }

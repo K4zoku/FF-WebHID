@@ -245,6 +245,7 @@
         worker = new NativeWorker(makeUrl(location.href))
       }
     } catch (e) {
+      sendRequest('unarmShadowSpawn', { url: location.href }, { timeoutMs: 500 })
       return { result: { ok: false, error: String(e && e.message) }, transfer: null }
     }
     const previous = mainWorldWorkers.get(payload.deviceId)
@@ -260,6 +261,7 @@
       if (mainWorldWorkers.get(payload.deviceId) === worker) {
         mainWorldWorkers.delete(payload.deviceId)
       }
+      sendRequest('unarmShadowSpawn', { url: location.href }, { timeoutMs: 500 })
       if (bridgePort) {
         nativeMessagePortPostMessage.call(bridgePort, {
           type: 'workerError',

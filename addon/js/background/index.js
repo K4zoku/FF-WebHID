@@ -256,6 +256,15 @@
     shadowArms.set(key, { count: (existing ? existing.count : 0) + 1, at: Date.now() })
   })
 
+  webhid.export('unarmShadowSpawn', (tabId, url) => {
+    if (tabId == null || typeof url !== 'string' || !url) return
+    const key = `${tabId}:${url.split('#')[0]}`
+    const existing = shadowArms.get(key)
+    if (!existing) return
+    if (existing.count <= 1) shadowArms.delete(key)
+    else shadowArms.set(key, { count: existing.count - 1, at: existing.at })
+  })
+
   browser.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return
     let hasSiteChange = false

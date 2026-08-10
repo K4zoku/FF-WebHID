@@ -80,9 +80,26 @@
   }
 
   /**
-   * Consumes one shadow arm (if any) for the request's tab+document, so the
-   * polyfill's own data-worker spawn is served the worker bundle while a page
-   * self-worker with the same URL passes through untouched.
+   * Checks whether a shadow arm is pending for the request's tab+document,
+   * without consuming it. Consumption happens in handleShadowUrl's onstart,
+   * so page scripts whose URL merely equals the document URL never steal the
+   * arm from the polyfill's data-worker spawn.
+   * @param {object} details
+   * @returns {boolean}
+   */
+  function hasShadowArm(details) {
+    if (details.tabId === undefined || details.documentUrl === undefined) return false
+    const key = `${details.tabId}:${stripFragment(details.documentUrl)}`
+    const arm = shadowArms.get(key)
+    if (!arm || Date.now() - arm.at > 3000) {
+      if (arm) shadowArms.delete(key)
+      return false
+    }
+    return true
+  }
+
+  /**
+   * Consumes one shadow arm for the request's tab+document.
    * @param {object} details
    * @returns {boolean}
    */
@@ -90,10 +107,7 @@
     if (details.tabId === undefined || details.documentUrl === undefined) return false
     const key = `${details.tabId}:${stripFragment(details.documentUrl)}`
     const arm = shadowArms.get(key)
-    if (!arm || Date.now() - arm.at > 5000) {
-      if (arm) shadowArms.delete(key)
-      return false
-    }
+    if (!arm) return false
     if (arm.count <= 1) shadowArms.delete(key)
     else shadowArms.set(key, { count: arm.count - 1, at: arm.at })
     return true
@@ -120,6 +134,7 @@
         scriptDest.delete(details.requestId)
         return
       }
+      consumeShadowArm(details)
       ensureWorkerBundle().then((bundle) => {
         if (bundle) filter.write(enc.encode(bundle))
         else
@@ -472,7 +487,7 @@
         const isShadowUrl =
           details.documentUrl !== undefined &&
           sameUrlModuloFragment(details.url, details.documentUrl)
-        if (isShadowUrl && consumeShadowArm(details)) return handleShadowUrl(details)
+        if (isShadowUrl && hasShadowArm(details)) return handleShadowUrl(details)
         return handleInjection(details, settings)
       },
       { urls: ['<all_urls>'], types: ['script'] },
