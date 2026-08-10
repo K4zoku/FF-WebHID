@@ -95,6 +95,13 @@
       body.appendChild(ifaceEl)
     }
 
+    if (device.descriptorParseFailed) {
+      const hintEl = document.createElement('div')
+      hintEl.className = 'webhid-device-parse-failed'
+      hintEl.textContent = t('pickerParseFailed')
+      body.appendChild(hintEl)
+    }
+
     item.appendChild(radio)
     item.appendChild(iconSpan)
     item.appendChild(body)
@@ -117,9 +124,26 @@
     loading.setAttribute('role', 'status')
     loading.textContent = t('pickerLoading')
     listEl.replaceChildren(loading)
-    const response = await browser.runtime.sendMessage({ action: 'enumerate' })
-    /** @type {import("../types.js").HIDDeviceInfo[]} */
-    const devices = http.isOk(response.s) && Array.isArray(response.D) ? response.D : []
+    let devices
+    try {
+      const response = await browser.runtime.sendMessage({ action: 'enumerate' })
+      if (!http.isOk(response.s)) {
+        showPickerMessage(t('pickerNoDaemon'), true)
+        return
+      }
+      devices = Array.isArray(response.D) ? response.D : []
+    } catch (error) {
+      logger.warn(
+        'enumerate exception:',
+        error != null ? (error.message != null ? error.message : error) : error
+      )
+      showPickerMessage(t('pickerNoDaemon'), true)
+      return
+    }
+    if (devices.length === 0) {
+      showPickerMessage(t('pickerNoDevices'))
+      return
+    }
 
     const filtered = applyFilters(
       devices,
@@ -139,6 +163,19 @@
       deviceGroups[groupId] = devs.slice()
       listEl.appendChild(buildDeviceItem(name, devs, groupId))
     }
+  }
+
+  /**
+   * @param {string} message
+   * @param {boolean} [isError]
+   * @returns {void}
+   */
+  function showPickerMessage(message, isError = false) {
+    const msg = document.createElement('div')
+    msg.className = isError ? 'webhid-error' : 'webhid-no-devices'
+    msg.setAttribute('role', 'status')
+    msg.textContent = message
+    listEl.replaceChildren(msg)
   }
 
   connectBtn.addEventListener('click', async () => {

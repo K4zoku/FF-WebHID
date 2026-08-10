@@ -129,7 +129,26 @@ fn interface_protected(info: &DeviceInfo, report_type: ReportType) -> bool {
 /// `OnDeviceAdded`'s `collections.empty()` check. Only the `collections`
 /// field is touched: the report map, reader and send path keep working off
 /// the full parse, and `max_input_report_size` is preserved.
+///
+/// Exception: a device with *no* parsed collections (missing or unparseable
+/// report descriptor) is kept visible with empty collections. hidreport is
+/// strict where Chromium's parser is tolerant, so parse failure is a
+/// tooling gap, not evidence that the device has no reports; hiding it made
+/// whole classes of vendor devices (e.g. USB DAC control interfaces)
+/// invisible even though raw report I/O works. Protection for this case is
+/// not pruning but the `interface_protected` fallback in
+/// [`DeviceReportBlocking`]: read/send stay blocked when the hidapi
+/// interface usage is itself protected (FIDO page, GD mouse/keyboard, ...).
 pub fn prune_device_info(info: DeviceInfo) -> Option<DeviceInfo> {
+    if info.collections.is_empty() {
+        log::warn!(
+            "device {:04x}:{:04x} ({}) kept visible with no parsed collections (missing or unparseable report descriptor)",
+            info.vendor_id,
+            info.product_id,
+            info.product_name
+        );
+        return Some(info);
+    }
     let map = build_report_collection_map(&info);
     let rules = blocklist::blocklist_rules();
     let collections: Vec<webhid::Collection> = info
@@ -403,6 +422,7 @@ mod tests {
             usage_page: None,
             usage: None,
             device_id: 1,
+            descriptor_parse_failed: collections.is_empty(),
             collections,
             max_input_report_size: 64,
         }
@@ -575,6 +595,7 @@ mod tests {
             usage_page: None,
             usage: None,
             device_id: 1,
+            descriptor_parse_failed: false,
             collections: crate::descriptor::parse_report_descriptor(&bytes),
             max_input_report_size: 0,
         };
@@ -631,6 +652,14 @@ mod tests {
 
         let kbd_page = device_info(vec![col(Some(0x0007), Some(0x0001), &[5])]);
         assert!(prune_device_info(kbd_page).is_none());
+    }
+
+    #[test]
+    fn test_unparseable_descriptor_device_stays_visible() {
+        let info = device_info(vec![]);
+        let kept = prune_device_info(info).expect("parse-failed device stays visible");
+        assert!(kept.collections.is_empty());
+        assert_eq!(kept.vendor_id, 0x1234);
     }
 
     #[test]

@@ -116,6 +116,7 @@ fn info_from_hidapi_pub_with_desc(info: &HidDeviceInfo, desc: Vec<u8>) -> Option
         usage_page: Some(info.usage_page()),
         usage: Some(info.usage()),
         device_id,
+        descriptor_parse_failed: collections.is_empty(),
         collections,
         max_input_report_size,
     })

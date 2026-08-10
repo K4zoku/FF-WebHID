@@ -162,6 +162,12 @@
   margin-top: 2px;
 }
 
+.webhid-device-parse-failed {
+  font-size: 11px;
+  color: var(--accent);
+  margin-top: 2px;
+}
+
 .webhid-modal-footer {
   padding: 16px 24px 24px;
   border-top: 1px solid var(--border-subtle);

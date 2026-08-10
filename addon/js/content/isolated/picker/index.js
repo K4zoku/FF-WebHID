@@ -41,6 +41,8 @@
     fragmentReady = null
     /** @type {Function|null} */
     resolveShow = null
+    /** @type {boolean} */
+    enumerateError = false
 
     /** @constructor */
     constructor() {
@@ -151,8 +153,10 @@
         })
         if (response && http.isOk(response.s)) {
           this.devices = response.D || []
+          this.enumerateError = false
         } else {
           this.devices = []
+          this.enumerateError = true
           let code = response != null ? response.s : undefined
           code = code != null ? code : 0
           if (code === 500) {
@@ -164,6 +168,7 @@
         this.renderDevices()
       } catch (error) {
         this.devices = []
+        this.enumerateError = true
         logger.warn(
           'enumerate exception:',
           error != null ? (error.message != null ? error.message : error) : error
@@ -221,9 +226,9 @@
 
       if (this.devices.length === 0) {
         const msg = document.createElement('div')
-        msg.className = 'webhid-no-devices'
+        msg.className = this.enumerateError ? 'webhid-error' : 'webhid-no-devices'
         msg.setAttribute('role', 'status')
-        msg.textContent = t('pickerNoDevices')
+        msg.textContent = this.enumerateError ? t('pickerNoDaemon') : t('pickerNoDevices')
         deviceList.replaceChildren(msg)
         return
       }
@@ -278,6 +283,11 @@
         devices.length > 1
           ? (iface.textContent = t('pickerInterfaces', [String(devices.length)]))
           : iface.remove()
+
+        const parseHint = clone.querySelector('.webhid-device-parse-failed')
+        device.descriptorParseFailed
+          ? (parseHint.textContent = t('pickerParseFailed'))
+          : parseHint.remove()
 
         deviceList.appendChild(clone)
       }

@@ -412,6 +412,7 @@ mod tests {
             usage_page: None,
             usage: None,
             device_id: id,
+            descriptor_parse_failed: false,
             collections: vec![],
             max_input_report_size: 64,
         }

@@ -209,6 +209,12 @@
   "pickerNoDevices": {
     "message": "No HID devices found"
   },
+  "pickerNoDaemon": {
+    "message": "Cannot reach the WebHID daemon. Check that it is installed and running, then try again."
+  },
+  "pickerParseFailed": {
+    "message": "This device's report descriptor could not be parsed. Connecting and sending reports still works."
+  },
   "pickerNoMatch": {
     "message": "No devices match the specified filters"
   },

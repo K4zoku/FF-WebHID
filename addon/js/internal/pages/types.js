@@ -20,4 +20,5 @@
  * @property {number} [usagePage]
  * @property {number} [usage]
  * @property {Array<{usagePage: number, usage: number}>} [collections]
+ * @property {boolean} [descriptorParseFailed]
  */

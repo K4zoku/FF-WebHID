@@ -209,6 +209,12 @@
   "pickerNoDevices": {
     "message": "Không tìm thấy thiết bị"
   },
+  "pickerNoDaemon": {
+    "message": "Không thể kết nối tới daemon WebHID. Kiểm tra daemon đã được cài đặt và đang chạy, rồi thử lại."
+  },
+  "pickerParseFailed": {
+    "message": "Không thể phân tích report descriptor của thiết bị này. Kết nối và gửi report vẫn hoạt động bình thường."
+  },
   "pickerNoMatch": {
     "message": "Không có thiết bị khớp với bộ lọc"
   },

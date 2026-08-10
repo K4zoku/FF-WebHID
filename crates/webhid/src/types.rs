@@ -22,6 +22,12 @@ pub struct DeviceInfo {
     pub collections: Vec<Collection>,
     #[serde(default)]
     pub max_input_report_size: u32,
+    /// True when the report descriptor was missing or failed to parse, so
+    /// `collections` is empty even though the device is real and raw report
+    /// I/O works. Surfaced to the UI so a device kept visible despite an
+    /// unparseable descriptor can explain itself.
+    #[serde(default)]
+    pub descriptor_parse_failed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -697,6 +703,7 @@ mod tests {
             usage_page: None,
             usage: None,
             device_id: 0xabc,
+            descriptor_parse_failed: false,
             collections: vec![],
             max_input_report_size: 0,
         };
@@ -812,6 +819,7 @@ mod tests {
             usage_page: None,
             usage: None,
             device_id: 0xd,
+            descriptor_parse_failed: false,
             collections: vec![],
             max_input_report_size: 0,
         };
