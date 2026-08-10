@@ -20,11 +20,11 @@
     const eventType = message.e
     if (eventType === 1 || !message.i) return null
     const tabs = deviceTabMap.get(message.i)
-    return tabs && tabs.size > 0 ? [...tabs] : null
+    return tabs && tabs.size > 0 ? [...tabs.keys()] : null
   }
 
   /**
-   * Registers a tab as authorized to access a device.
+   * Registers a tab as authorized to access a device, counted per open.
    * @param {number} deviceId
    * @param {number} tabId
    * @returns {void}
@@ -33,20 +33,40 @@
     if (!deviceId || tabId == null) return
     let tabs = deviceTabMap.get(deviceId)
     if (!tabs) {
-      tabs = new Set()
+      tabs = new Map()
       deviceTabMap.set(deviceId, tabs)
     }
-    tabs.add(tabId)
+    tabs.set(tabId, (tabs.get(tabId) || 0) + 1)
     logger.debug('register device ' + deviceId + ' tab ' + tabId)
   }
 
   /**
-   * Unregisters a tab from a device, removing the device entry if no tabs remain.
+   * Unregisters one open of a device from a tab, removing the device entry
+   * when the tab holds no more opens.
    * @param {number} deviceId
    * @param {number} tabId
    * @returns {void}
    */
   function unregisterDeviceTab(deviceId, tabId) {
+    if (!deviceId || tabId == null) return
+    const tabs = deviceTabMap.get(deviceId)
+    if (!tabs) return
+    const remaining = (tabs.get(tabId) || 0) - 1
+    if (remaining > 0) {
+      tabs.set(tabId, remaining)
+    } else {
+      tabs.delete(tabId)
+      if (tabs.size === 0) deviceTabMap.delete(deviceId)
+    }
+  }
+
+  /**
+   * Removes every open of a device from a tab (grant revocation).
+   * @param {number} deviceId
+   * @param {number} tabId
+   * @returns {void}
+   */
+  function clearDeviceTab(deviceId, tabId) {
     if (!deviceId || tabId == null) return
     const tabs = deviceTabMap.get(deviceId)
     if (!tabs) return
@@ -62,7 +82,7 @@
    */
   function isTabAuthorizedForDevice(tabId, deviceId) {
     const tabs = deviceTabMap.get(deviceId)
-    return !!tabs && tabs.has(tabId)
+    return !!tabs && (tabs.get(tabId) || 0) > 0
   }
 
   /**
@@ -80,7 +100,6 @@
       }
     }
   }
-
   /**
    * Sends a globalReset message to all tabs.
    * @returns {void}
@@ -108,6 +127,7 @@
     tabsForEvent,
     registerDeviceTab,
     unregisterDeviceTab,
+    clearDeviceTab,
     isTabAuthorizedForDevice,
     purgeTab,
     broadcastGlobalReset

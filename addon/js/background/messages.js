@@ -17,7 +17,7 @@
     deleteGrantGroups,
     getAllAllowedByOrigin
   } = webhid.import('bgStorage')
-  const { registerDeviceTab, unregisterDeviceTab, isTabAuthorizedForDevice } =
+  const { registerDeviceTab, unregisterDeviceTab, clearDeviceTab, isTabAuthorizedForDevice } =
     webhid.import('bgStateOps')
   const { urlOrigin, frameKey } = webhid.import('bgCsp')
   const NativeMessaging = webhid.import('NativeMessaging')
@@ -97,7 +97,7 @@
       }
       if (tabOrigin !== origin) continue
       for (const deviceId of toRevoke) {
-        unregisterDeviceTab(deviceId, tab.id)
+        clearDeviceTab(deviceId, tab.id)
         browser.tabs
           .sendMessage(tab.id, {
             action: 'webhidDeviceEvent',

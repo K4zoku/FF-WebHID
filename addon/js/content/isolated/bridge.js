@@ -74,8 +74,10 @@
   const deviceTransports = new Map()
   /** @type {Set<string>} */
   const nmPlanes = new Set()
-  /** @type {Map<string, MessagePort>} */
+  /** @type {Map<string, Set<MessagePort>>} */
   const dataPorts = new Map()
+  /** @type {Map<string, number>} */
+  const openCounts = new Map()
   /** @type {number|null} */
   let wsPort = null
   /** @type {string|null} */
@@ -176,27 +178,31 @@
     }
     const worker = workers.get(deviceId)
     if (worker) {
-      const port = dataPorts.get(deviceId)
-      if (port && !keepPort) {
+      const ports = dataPorts.get(deviceId)
+      if (ports && !keepPort) {
         dataPorts.delete(deviceId)
-        try {
-          port.onmessage = null
-          port.close()
-        } catch (e) {
-          logger.debug('port cleanup failed (port path)', e)
+        for (const port of ports) {
+          try {
+            port.onmessage = null
+            port.close()
+          } catch (e) {
+            logger.debug('port cleanup failed (port path)', e)
+          }
         }
       }
       worker.terminate()
       workers.delete(deviceId)
       workerReadyDevices.delete(deviceId)
     } else if (!keepPort) {
-      const port = dataPorts.get(deviceId)
-      if (port) {
-        try {
-          port.onmessage = null
-          port.close()
-        } catch (e) {
-          logger.debug('port cleanup failed (no worker)', e)
+      const ports = dataPorts.get(deviceId)
+      if (ports) {
+        for (const port of ports) {
+          try {
+            port.onmessage = null
+            port.close()
+          } catch (e) {
+            logger.debug('port cleanup failed (no worker)', e)
+          }
         }
       }
       dataPorts.delete(deviceId)
@@ -625,14 +631,22 @@
   function handleWorkerErrorEvent(data) {
     const deviceId = data.deviceId
     logger.warn('worker errored for', deviceId, ':', data.message)
-    if (workers.has(deviceId)) {
-      workers.delete(deviceId)
-      connectParams.delete(deviceId)
-      replyToPage({
-        type: 'event',
-        event: { eventType: 'disconnect', deviceId: deviceId }
+    workers.delete(deviceId)
+    workerReadyDevices.delete(deviceId)
+    connectParams.delete(deviceId)
+    if (!openDevices.has(deviceId)) return
+    nmPlanes.add(deviceId)
+    deviceTransports.delete(deviceId)
+    browser.runtime
+      .sendMessage({
+        action: 'setDataPlane',
+        deviceId: deviceId,
+        mode: 'nm',
+        sessionToken: sessionTokens.get(deviceId)
       })
-    }
+      .catch((e) => logger.debug('setDataPlane NM fallback failed', e))
+    const pagePort = pagePorts.get(window)
+    if (pagePort) pagePort.postMessage({ type: 'wireWorkerPort', deviceId })
   }
 
   /** @type {object} */
@@ -792,9 +806,14 @@
       logger.debug('worker control port received for device', deviceId)
       return
     }
-    dataPorts.set(deviceId, port)
+    let devicePorts = dataPorts.get(deviceId)
+    if (!devicePorts) {
+      devicePorts = new Set()
+      dataPorts.set(deviceId, devicePorts)
+    }
+    devicePorts.add(port)
     logger.debug('data port received for device', deviceId)
-    port.onmessage = (event) => onDataPortMessage(deviceId, event.data)
+    port.onmessage = (event) => onDataPortMessage(deviceId, event.data, port)
   }
 
   /**
@@ -965,6 +984,7 @@
    */
   async function handleOpenSuccess(response) {
     const deviceId = response.i
+    openCounts.set(deviceId, (openCounts.get(deviceId) || 0) + 1)
     openDevices.add(deviceId)
     sessionTokens.set(deviceId, response.t)
     browser.runtime
@@ -999,6 +1019,12 @@
   function handleCloseSuccess(payload) {
     const deviceId = payload.deviceId
     logger.debug('close deviceId=' + deviceId)
+    const remaining = (openCounts.get(deviceId) || 0) - 1
+    if (remaining > 0) {
+      openCounts.set(deviceId, remaining)
+      return
+    }
+    openCounts.delete(deviceId)
     openDevices.delete(deviceId)
     sessionTokens.delete(deviceId)
     browser.runtime
@@ -1147,23 +1173,27 @@
    * @returns {boolean} true when a port handled the report
    */
   function forwardInputReportToPage(messageEvent) {
-    const port = dataPorts.get(messageEvent.deviceId)
-    if (!port) return false
+    const ports = dataPorts.get(messageEvent.deviceId)
+    if (!ports || ports.size === 0) return false
     const view = messageEvent.data
     const buffer = view ? view.buffer || view : null
-    try {
-      port.postMessage(
-        {
-          type: 'inputReport',
-          reportId: messageEvent.reportId,
-          data: buffer
-        },
-        buffer ? [buffer] : []
-      )
-    } catch (e) {
-      logger.debug('forward inputReport to page failed', e)
+    let handled = false
+    for (const port of ports) {
+      try {
+        port.postMessage(
+          {
+            type: 'inputReport',
+            reportId: messageEvent.reportId,
+            data: buffer
+          },
+          buffer ? [buffer] : []
+        )
+        handled = true
+      } catch (e) {
+        logger.debug('forward inputReport to page failed', e)
+      }
     }
-    return true
+    return handled
   }
 
   /**
@@ -1177,12 +1207,14 @@
       if (forwardInputReportToPage(messageEvent)) return
     }
     if (messageEvent.eventType === 'disconnect') {
-      const port = dataPorts.get(messageEvent.deviceId)
-      if (port) {
-        try {
-          port.postMessage({ type: 'disconnect' })
-        } catch (e) {
-          logger.debug('forward disconnect to page failed', e)
+      const ports = dataPorts.get(messageEvent.deviceId)
+      if (ports) {
+        for (const port of ports) {
+          try {
+            port.postMessage({ type: 'disconnect' })
+          } catch (e) {
+            logger.debug('forward disconnect to page failed', e)
+          }
         }
       }
     }
@@ -1258,9 +1290,10 @@
   /**
    * @param {string} deviceId
    * @param {object} msg
+   * @param {MessagePort} port
    * @returns {void}
    */
-  function onDataPortMessage(deviceId, msg) {
+  function onDataPortMessage(deviceId, msg, port) {
     if (!msg) return
     if (msg.type === 'send' || msg.type === 'sendFeature' || msg.type === 'receiveFeature') {
       const action =
@@ -1271,7 +1304,6 @@
             : 'receiveFeatureReport'
       const payload = { deviceId, reportId: msg.reportId }
       if (msg.type === 'send' || msg.type === 'sendFeature') payload.data = msg.data
-      const port = dataPorts.get(deviceId)
       const m = Object.assign({ action }, payload)
       browser.runtime.sendMessage(m).then(
         (response) => handleWorkerReportResponse(msg, port, response),
@@ -1304,9 +1336,13 @@
       }
     } else {
       for (const id of openDevices) {
-        const port = dataPorts.get(id)
-        if (port && !port.onmessage) {
-          port.onmessage = (event) => onDataPortMessage(id, event.data)
+        const ports = dataPorts.get(id)
+        if (ports) {
+          for (const port of ports) {
+            if (!port.onmessage) {
+              port.onmessage = (event) => onDataPortMessage(id, event.data, port)
+            }
+          }
         }
       }
     }
