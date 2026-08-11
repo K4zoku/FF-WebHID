@@ -292,13 +292,12 @@ fn report_precheck(
     report_type: ReportType,
     payload_len: Option<usize>,
 ) -> Result<(), NmResponse> {
-    if device_mgr.is_report_blocked(device_id, report_id, report_type) {
-        return Err(NmResponse::err(403));
-    }
-    if !device_mgr.validate_report_send(device_id, report_id, report_type, payload_len) {
-        return Err(NmResponse::err(500));
-    }
-    Ok(())
+    device_mgr
+        .report_send_allowed(device_id, report_id, report_type, payload_len)
+        .map_err(|reason| match reason {
+            crate::device_mgr::SendReject::Blocked => NmResponse::err(403),
+            crate::device_mgr::SendReject::Invalid => NmResponse::err(500),
+        })
 }
 
 /// Resolves the open device handle, mapping a missing device to a 404.

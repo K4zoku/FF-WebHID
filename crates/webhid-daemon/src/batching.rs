@@ -51,31 +51,34 @@ where
 }
 
 /// Flushes `batch` as a single input-report frame. Returns false when the
-/// flush callback reports failure and the sender must stop.
-fn flush_batch<F>(batch: &mut Vec<(u8, Bytes)>, frame_buf: &mut Vec<u8>, flush: &mut F) -> bool
-where
-    F: FnMut(Vec<u8>) -> bool,
-{
-    if batch.is_empty() {
-        return true;
-    }
-    write_batch_frame(frame_buf, batch);
-    if !flush(std::mem::take(frame_buf)) {
-        return false;
-    }
-    batch.clear();
-    true
+/// Rate-gate counters: reports flushed within the current window, used to
+/// pick the coalesce window for the next batch.
+struct RateGate {
+    count: u32,
+    window_start: tokio::time::Instant,
+    window: Duration,
 }
 
-/// Like [`flush_batch`], then advances the rate-gate counters used to pick
-/// the coalesce window for the next batch.
-fn flush_batch_ratelimited<F>(
+impl RateGate {
+    fn advance(&mut self, flushed: u32) {
+        let now = tokio::time::Instant::now();
+        if now.duration_since(self.window_start) >= self.window {
+            self.count = flushed;
+            self.window_start = now;
+        } else {
+            self.count = self.count.saturating_add(flushed);
+        }
+    }
+}
+
+/// Writes the batch to one frame and flushes it, advancing the rate-gate
+/// counters when provided. Returns false when the flush callback reports
+/// failure and the sender must stop.
+fn flush_batch<F>(
     batch: &mut Vec<(u8, Bytes)>,
     frame_buf: &mut Vec<u8>,
     flush: &mut F,
-    rate_count: &mut u32,
-    rate_start: &mut tokio::time::Instant,
-    rate_window: Duration,
+    rate: Option<&mut RateGate>,
 ) -> bool
 where
     F: FnMut(Vec<u8>) -> bool,
@@ -89,12 +92,8 @@ where
         return false;
     }
     batch.clear();
-    let now = tokio::time::Instant::now();
-    if now.duration_since(*rate_start) >= rate_window {
-        *rate_count = flushed;
-        *rate_start = now;
-    } else {
-        *rate_count = rate_count.saturating_add(flushed);
+    if let Some(rate) = rate {
+        rate.advance(flushed);
     }
     true
 }
@@ -129,7 +128,7 @@ where
         Ok(_) => {}
         Err(broadcast::error::RecvError::Lagged(n)) => {
             log::warn!("[sender] broadcast lagged by {n} events, flushing batch");
-            if !flush_batch(batch, frame_buf, flush) {
+            if !flush_batch(batch, frame_buf, flush, None) {
                 return false;
             }
         }
@@ -158,7 +157,7 @@ fn drain_available<F>(
             Err(broadcast::error::TryRecvError::Closed) => break,
             Err(broadcast::error::TryRecvError::Lagged(n)) => {
                 log::warn!("[sender] drain lagged by {n} events");
-                if !flush_batch(batch, frame_buf, flush) {
+                if !flush_batch(batch, frame_buf, flush, None) {
                     break;
                 }
             }
@@ -215,7 +214,7 @@ pub async fn run_sender<F>(
         loop {
             tokio::select! {
                 _ = flush_interval.tick() => {
-                    if !flush_batch(&mut batch, &mut frame_buf, &mut flush) {
+                    if !flush_batch(&mut batch, &mut frame_buf, &mut flush, None) {
                         break;
                     }
                 }
@@ -237,8 +236,11 @@ pub async fn run_sender<F>(
     let rate_window =
         Duration::from_millis(env_int::<u64>("WEBHID_WS_RATE_WINDOW_MS", RATE_WINDOW_MS));
     let high_rate_count = env_int::<u32>("WEBHID_WS_HIGH_RATE_COUNT", HIGH_RATE_COUNT);
-    let mut rate_count: u32 = 0;
-    let mut rate_start = tokio::time::Instant::now();
+    let mut rate_gate = RateGate {
+        count: 0,
+        window_start: tokio::time::Instant::now(),
+        window: rate_window,
+    };
     loop {
         let event_result = event_rx.recv().await;
         if !handle_event(
@@ -265,7 +267,7 @@ pub async fn run_sender<F>(
                 &mut batch,
                 &mut frame_buf,
                 &mut flush,
-                if rate_count >= high_rate_count {
+                if rate_gate.count >= high_rate_count {
                     high_rate_coalesce
                 } else {
                     coalesce
@@ -276,14 +278,7 @@ pub async fn run_sender<F>(
             break;
         }
 
-        if !flush_batch_ratelimited(
-            &mut batch,
-            &mut frame_buf,
-            &mut flush,
-            &mut rate_count,
-            &mut rate_start,
-            rate_window,
-        ) {
+        if !flush_batch(&mut batch, &mut frame_buf, &mut flush, Some(&mut rate_gate)) {
             break;
         }
     }
@@ -320,6 +315,38 @@ fn send_kind(msg_type: u8) -> (u8, ReportType) {
     }
 }
 
+enum SendPrecheck {
+    Proceed {
+        report_id: u8,
+        dev: crate::device_mgr::DeviceHandle,
+    },
+    Blocked,
+    Rejected,
+}
+
+/// Shared pre-checks for send/feature-read requests: empty payload,
+/// blocklist, Chromium-style validation, and device handle resolution.
+fn precheck_report(
+    device_mgr: &Arc<DeviceManager>,
+    device_id: u32,
+    payload: &[u8],
+    report_type: ReportType,
+    payload_len: Option<usize>,
+) -> SendPrecheck {
+    if payload.is_empty() {
+        return SendPrecheck::Rejected;
+    }
+    let report_id = payload[0];
+    match device_mgr.report_send_allowed(device_id, report_id, report_type, payload_len) {
+        Err(crate::device_mgr::SendReject::Blocked) => SendPrecheck::Blocked,
+        Err(crate::device_mgr::SendReject::Invalid) => SendPrecheck::Rejected,
+        Ok(()) => match device_mgr.get_file_logged(device_id) {
+            Some(dev) => SendPrecheck::Proceed { report_id, dev },
+            None => SendPrecheck::Rejected,
+        },
+    }
+}
+
 async fn handle_send_report_msg<F>(
     msg_type: u8,
     payload: &[u8],
@@ -331,43 +358,34 @@ async fn handle_send_report_msg<F>(
     F: FnMut(Vec<u8>),
 {
     let (resp_type, report_type) = send_kind(msg_type);
-    if payload.is_empty() {
-        emit(make_status_resp(resp_type, req_id, 1));
-        return;
+    match precheck_report(
+        device_mgr,
+        device_id,
+        payload,
+        report_type,
+        Some(payload.len().saturating_sub(1)),
+    ) {
+        SendPrecheck::Blocked => emit(make_status_resp(resp_type, req_id, 2)),
+        SendPrecheck::Rejected => emit(make_status_resp(resp_type, req_id, 1)),
+        SendPrecheck::Proceed { report_id, dev: dev_arc } => {
+            let report_data: Arc<[u8]> = Arc::from(&payload[1..]);
+            let result = tokio::task::spawn_blocking(move || {
+                with_device(&dev_arc, |dev| {
+                    if msg_type == MSG_SEND_REPORT {
+                        hid::write_report(dev, report_id, &report_data)
+                    } else {
+                        hid::write_feature_report(dev, report_id, &report_data)
+                    }
+                })
+            })
+            .await;
+            let status = match result {
+                Ok(Ok(())) => 0u8,
+                _ => 1u8,
+            };
+            emit(make_status_resp(resp_type, req_id, status));
+        }
     }
-    let report_id = payload[0];
-    if device_mgr.is_report_blocked(device_id, report_id, report_type) {
-        emit(make_status_resp(resp_type, req_id, 2));
-        return;
-    }
-    if !device_mgr.validate_report_send(device_id, report_id, report_type, Some(payload.len() - 1))
-    {
-        emit(make_status_resp(resp_type, req_id, 1));
-        return;
-    }
-    let report_data: Arc<[u8]> = Arc::from(&payload[1..]);
-
-    let Some(dev_arc) = device_mgr.get_file_logged(device_id) else {
-        emit(make_status_resp(resp_type, req_id, 1));
-        return;
-    };
-
-    let result = tokio::task::spawn_blocking(move || {
-        with_device(&dev_arc, |dev| {
-            if msg_type == MSG_SEND_REPORT {
-                hid::write_report(dev, report_id, &report_data)
-            } else {
-                hid::write_feature_report(dev, report_id, &report_data)
-            }
-        })
-    })
-    .await;
-
-    let status = match result {
-        Ok(Ok(())) => 0u8,
-        _ => 1u8,
-    };
-    emit(make_status_resp(resp_type, req_id, status));
 }
 
 async fn handle_receive_feature_report_msg<F>(
@@ -379,36 +397,22 @@ async fn handle_receive_feature_report_msg<F>(
 ) where
     F: FnMut(Vec<u8>),
 {
-    if payload.is_empty() {
-        emit(make_feature_read_resp(req_id, 1, &[]));
-        return;
-    }
-    let report_id = payload[0];
-    if device_mgr.is_report_blocked(device_id, report_id, ReportType::Feature) {
-        emit(make_feature_read_resp(req_id, 2, &[]));
-        return;
-    }
-    if !device_mgr.validate_report_send(device_id, report_id, ReportType::Feature, None) {
-        emit(make_feature_read_resp(req_id, 1, &[]));
-        return;
-    }
-
-    let Some(dev_arc) = device_mgr.get_file_logged(device_id) else {
-        emit(make_feature_read_resp(req_id, 1, &[]));
-        return;
-    };
-
-    let result = tokio::task::spawn_blocking(move || {
-        with_device(&dev_arc, |d| hid::read_feature_report(d, report_id))
-    })
-    .await;
-
-    match result {
-        Ok(Ok(data)) => {
-            emit(make_feature_read_resp(req_id, 0, &data));
-        }
-        _ => {
-            emit(make_feature_read_resp(req_id, 1, &[]));
+    match precheck_report(device_mgr, device_id, payload, ReportType::Feature, None) {
+        SendPrecheck::Blocked => emit(make_feature_read_resp(req_id, 2, &[])),
+        SendPrecheck::Rejected => emit(make_feature_read_resp(req_id, 1, &[])),
+        SendPrecheck::Proceed { report_id, dev: dev_arc } => {
+            let result = tokio::task::spawn_blocking(move || {
+                with_device(&dev_arc, |d| hid::read_feature_report(d, report_id))
+            })
+            .await;
+            match result {
+                Ok(Ok(data)) => {
+                    emit(make_feature_read_resp(req_id, 0, &data));
+                }
+                _ => {
+                    emit(make_feature_read_resp(req_id, 1, &[]));
+                }
+            }
         }
     }
 }

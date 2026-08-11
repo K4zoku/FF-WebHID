@@ -66,6 +66,12 @@ fn compute_ws_auth_hash(token: &str, nonce: &str) -> String {
     hex::encode(digest)
 }
 
+/// Why a send/feature-read request was rejected before touching the device.
+pub enum SendReject {
+    Blocked,
+    Invalid,
+}
+
 pub struct DeviceManager {
     devices: Arc<Mutex<HashMap<u32, Entry>>>,
     ws_auth_hashes: Arc<Mutex<HashMap<String, (u32, String)>>>,
@@ -550,6 +556,24 @@ impl DeviceManager {
             report_id,
             report_type,
         )
+    }
+
+    /// Blocklist first, then Chromium-style validation. Ok(()) means the
+    /// report may proceed; Err carries the reject reason.
+    pub fn report_send_allowed(
+        &self,
+        device_id: u32,
+        report_id: u8,
+        report_type: ReportType,
+        payload_len: Option<usize>,
+    ) -> Result<(), SendReject> {
+        if self.is_report_blocked(device_id, report_id, report_type) {
+            return Err(SendReject::Blocked);
+        }
+        if !self.validate_report_send(device_id, report_id, report_type, payload_len) {
+            return Err(SendReject::Invalid);
+        }
+        Ok(())
     }
 
     pub fn get_device_by_ws_auth(&self, hash: &str) -> Option<(u32, String)> {
