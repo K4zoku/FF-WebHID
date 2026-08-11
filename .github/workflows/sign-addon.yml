@@ -23,15 +23,16 @@ jobs:
       - name: Download signed XPI from AMO
         env:
           XPI_URL: ${{ github.event.inputs.download_xpi_url }}
+          RELEASE_TAG: ${{ inputs.tag }}
         run: |
           mkdir -p signed
-          curl -fL -o signed/webhid-addon.xpi "$XPI_URL"
-          file signed/webhid-addon.xpi
+          curl -fL -o "signed/webhid-addon-${RELEASE_TAG}.xpi" "$XPI_URL"
+          file "signed/webhid-addon-${RELEASE_TAG}.xpi"
 
       - name: Generate attestation for signed XPI
         uses: actions/attest@v4
         with:
-          subject-path: signed/webhid-addon.xpi
+          subject-path: signed/webhid-addon-${{ inputs.tag }}.xpi
 
       - name: Replace asset on release
         env:
@@ -39,4 +40,4 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag }}
           REPO: ${{ github.repository }}
         run: |
-          gh release upload "$RELEASE_TAG" signed/webhid-addon.xpi --clobber --repo "$REPO"
+          gh release upload "$RELEASE_TAG" "signed/webhid-addon-${RELEASE_TAG}.xpi" --clobber --repo "$REPO"
