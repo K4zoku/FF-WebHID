@@ -1,5 +1,6 @@
 ;(function () {
   const webhid = globalThis.webhid
+  const logger = webhid.import('logger')
 
   const TAG_COLLECTION = 0x01
   const TAG_INPUT_REPORT = 0x02
@@ -238,5 +239,25 @@
     return roots
   }
 
+  /**
+   * Decodes TLV-encoded collections on each device in-place.
+   * @param {object[]} devices
+   * @returns {void}
+   */
+  function decodeDeviceCollections(devices) {
+    if (!Array.isArray(devices)) return
+    for (const dev of devices) {
+      if (dev && typeof dev.collections === 'string') {
+        try {
+          dev.collections = decodeCollectionsTlv(dev.collections)
+        } catch (e) {
+          logger.warn('decodeCollectionsTlv failed for device', dev.deviceId, e.message)
+          dev.collections = []
+        }
+      }
+    }
+  }
+
   webhid.export('decodeCollectionsTlv', decodeCollectionsTlv)
+  webhid.export('decodeDeviceCollections', decodeDeviceCollections)
 })()

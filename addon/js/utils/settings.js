@@ -217,6 +217,19 @@
   }
 
   /**
+   * Loads global settings overlaid with the site's overrides for `origin`.
+   * @param {string} origin
+   * @returns {Promise<object>}
+   */
+  async function loadEffectiveSettings(origin) {
+    const global = await loadGlobalSettings()
+    if (!origin) return global
+    const site = await loadSiteSettings(origin)
+    for (const [k, v] of Object.entries(site)) global[k] = v
+    return global
+  }
+
+  /**
    * Saves a single global setting to storage.
    * @param {string} name
    * @param {any} value
@@ -243,6 +256,7 @@
   webhid.export('parseSettingsKey', parseSettingsKey)
   webhid.export('loadGlobalSettings', loadGlobalSettings)
   webhid.export('loadSiteSettings', loadSiteSettings)
+  webhid.export('loadEffectiveSettings', loadEffectiveSettings)
   webhid.export('saveGlobalSetting', saveGlobalSetting)
   webhid.export('saveSiteSetting', saveSiteSetting)
 })()

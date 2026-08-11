@@ -2,7 +2,7 @@
   const webhid = globalThis.webhid
   const http = webhid.import('http')
   const logger = webhid.import('logger')
-  const decodeCollectionsTlv = webhid.import('decodeCollectionsTlv')
+  const decodeDeviceCollections = webhid.import('decodeDeviceCollections')
   const { deviceCache, pendingPicker, permissionsPolicy, allowedCrossOrigin } =
     webhid.import('bgState')
   const {
@@ -17,8 +17,13 @@
     deleteGrantGroups,
     getAllAllowedByOrigin
   } = webhid.import('bgStorage')
-  const { registerDeviceTab, unregisterDeviceTab, clearDeviceTab, isTabAuthorizedForDevice } =
-    webhid.import('bgStateOps')
+  const {
+    registerDeviceTab,
+    unregisterDeviceTab,
+    clearDeviceTab,
+    isTabAuthorizedForDevice,
+    forTabsOfOrigin
+  } = webhid.import('bgStateOps')
   const { urlOrigin, frameKey } = webhid.import('bgCsp')
   const NativeMessaging = webhid.import('NativeMessaging')
   const bgPacked = webhid.import('bgPacked')
@@ -31,22 +36,16 @@
   let actionApi = null
 
   /**
-   * Decodes TLV-encoded collections on each device in-place.
+   * Replaces the in-memory device cache with `devices` (decoded), persisting
+   * them afterwards.
    * @param {object[]} devices
    * @returns {void}
    */
-  function decodeDeviceCollections(devices) {
-    if (!Array.isArray(devices)) return
-    for (const dev of devices) {
-      if (dev && typeof dev.collections === 'string') {
-        try {
-          dev.collections = decodeCollectionsTlv(dev.collections)
-        } catch (e) {
-          logger.warn('decodeCollectionsTlv failed for device', dev.deviceId, e.message)
-          dev.collections = []
-        }
-      }
-    }
+  function refreshDeviceCache(devices) {
+    decodeDeviceCollections(devices)
+    deviceCache.length = 0
+    deviceCache.push(...devices)
+    saveDeviceInfoBatch(devices)
   }
 
   /**
@@ -55,20 +54,11 @@
    * @returns {Promise<void>}
    */
   async function notifyAllowedDevicesChanged(origin, deviceIds) {
-    const tabs = await browser.tabs.query({})
-    for (const tab of tabs) {
-      if (!tab.url) continue
-      let tabOrigin
-      try {
-        tabOrigin = new URL(tab.url).origin
-      } catch {
-        continue
-      }
-      if (tabOrigin !== origin) continue
+    await forTabsOfOrigin(origin, (tab) =>
       browser.tabs
         .sendMessage(tab.id, { action: 'allowedDevicesChanged', deviceIds })
         .catch(() => {})
-    }
+    )
   }
 
   /**
@@ -86,16 +76,8 @@
       await NativeMessaging.closeDevice(deviceId).catch(() => {})
     }
     await deleteGrantGroups(memberGroups.map((g) => g.id))
-    const tabs = await browser.tabs.query({})
-    for (const tab of tabs) {
-      if (!tab.url) continue
-      let tabOrigin
-      try {
-        tabOrigin = new URL(tab.url).origin
-      } catch {
-        continue
-      }
-      if (tabOrigin !== origin) continue
+    const deviceIds = await getAllowedDevices(origin)
+    await forTabsOfOrigin(origin, (tab) => {
       for (const deviceId of toRevoke) {
         clearDeviceTab(deviceId, tab.id)
         browser.tabs
@@ -105,11 +87,10 @@
           })
           .catch(() => {})
       }
-      const deviceIds = await getAllowedDevices(origin)
       browser.tabs
         .sendMessage(tab.id, { action: 'allowedDevicesChanged', deviceIds })
         .catch(() => {})
-    }
+    })
   }
 
   /**
@@ -122,10 +103,7 @@
     NativeMessaging.enumerateDevices()
       .then((response) => {
         if (http.isOk(response.s) && response.D) {
-          decodeDeviceCollections(response.D)
-          deviceCache.length = 0
-          deviceCache.push(...response.D)
-          saveDeviceInfoBatch(response.D)
+          refreshDeviceCache(response.D)
         }
         sendResponse(response)
       })
@@ -487,10 +465,11 @@
         if (request.deviceId) {
           await removeAllowedDevice(request.origin, request.deviceId)
           removeDeviceInfo(request.deviceId)
-          const deviceIds = await getAllowedDevices(request.origin)
-          await notifyAllowedDevicesChanged(request.origin, deviceIds)
         }
         const deviceIds = await getAllowedDevices(request.origin)
+        if (request.deviceId) {
+          await notifyAllowedDevicesChanged(request.origin, deviceIds)
+        }
         sendResponse({ success: true, hashes: deviceIds })
       } catch (e) {
         sendResponse({ success: false, error: e.message })
@@ -545,11 +524,8 @@
       NativeMessaging.enumerateDevices()
         .then((response) => {
           if (http.isOk(response.s) && response.D) {
-            decodeDeviceCollections(response.D)
-            deviceCache.length = 0
-            deviceCache.push(...response.D)
+            refreshDeviceCache(response.D)
           }
-          saveDeviceInfoBatch(deviceCache)
           sendResponse({ devices: deviceCache })
         })
         .catch(() => sendResponse({ devices: deviceCache }))

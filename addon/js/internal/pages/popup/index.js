@@ -5,8 +5,7 @@
   const groupDevices = webhid.import('groupDevices')
   const t = webhid.import('t')
   const localizeHTML = webhid.import('localizeHTML')
-  const loadGlobalSettings = webhid.import('loadGlobalSettings')
-  const loadSiteSettings = webhid.import('loadSiteSettings')
+  const loadEffectiveSettings = webhid.import('loadEffectiveSettings')
   const GLOBAL_DEFAULTS = webhid.import('GLOBAL_DEFAULTS')
   const saveSiteSetting = webhid.import('saveSiteSetting')
   const syncBrowserTheme = webhid.import('syncBrowserTheme')
@@ -216,10 +215,7 @@
    * @returns {Promise<object>}
    */
   async function loadSettings() {
-    const global = await loadGlobalSettings()
-    if (!origin) return global
-    const site = await loadSiteSettings(origin)
-    return { ...global, ...site }
+    return loadEffectiveSettings(origin)
   }
 
   /**

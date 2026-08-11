@@ -5,8 +5,7 @@
   const logger = webhid.import('logger')
   const http = webhid.import('http')
   const createSettingsStore = webhid.import('createSettingsStore')
-  const loadGlobalSettings = webhid.import('loadGlobalSettings')
-  const loadSiteSettings = webhid.import('loadSiteSettings')
+  const loadEffectiveSettings = webhid.import('loadEffectiveSettings')
   const siteSettingKey = webhid.import('siteSettingKey')
   const parseSettingsKey = webhid.import('parseSettingsKey')
   const WebHidDevicePicker = webhid.import('WebHidDevicePicker')
@@ -509,13 +508,7 @@
               'WS data plane will fall back to NM'
           )
         }
-        const global = await loadGlobalSettings()
-        const origin = window.location.origin
-        if (origin) {
-          const site = await loadSiteSettings(origin)
-          for (const [k, v] of Object.entries(site)) global[k] = v
-        }
-        settings.set(global)
+        settings.set(await loadEffectiveSettings(window.location.origin))
         loadAllowedDeviceIds()
       }
     } catch (e) {
@@ -681,8 +674,7 @@
         handler(data)
         return
       }
-      if (data.id != null) requestPortMap.set(data.id, port)
-      handleRequest(data, event.ports, source)
+      dispatchPortMessage(port, event, source)
     }
     logger.debug('[bridge] page port established for', event.source === window ? 'window' : 'child')
   })
@@ -720,6 +712,20 @@
   }
 
   /**
+   * Dispatches one message arriving on a request port: maps its request id to
+   * the port and routes it to the request handler.
+   * @param {MessagePort} port
+   * @param {MessageEvent} event
+   * @param {Window|null} source
+   * @returns {void}
+   */
+  function dispatchPortMessage(port, event, source) {
+    const data = event.data
+    if (data && data.id != null) requestPortMap.set(data.id, port)
+    handleRequest(data, event.ports, source)
+  }
+
+  /**
    * @param {object} data
    * @param {MessagePort[]} ports
    * @returns {Promise<void>}
@@ -729,10 +735,7 @@
     if (!p) return
     const origin = getRequestOrigin(data)
     portOrigin.set(p, origin || window.location.origin)
-    p.onmessage = (event) => {
-      if (event.data != null && event.data.id != null) requestPortMap.set(event.data.id, p)
-      handleRequest(event.data, event.ports, null)
-    }
+    p.onmessage = (event) => dispatchPortMessage(p, event, null)
     replyToPage({ type: 'response', id: data.id, result: { ok: true } })
   }
 
@@ -877,12 +880,7 @@
    */
   async function handleGetSettingsRequest(data) {
     try {
-      const global = await loadGlobalSettings()
-      const origin = window.location.origin
-      if (origin) {
-        const site = await loadSiteSettings(origin)
-        for (const [k, v] of Object.entries(site)) global[k] = v
-      }
+      const global = await loadEffectiveSettings(window.location.origin)
       settings.set(global)
       replyToPage({ type: 'response', id: data.id, result: global })
     } catch {
@@ -994,11 +992,7 @@
       await spawnDataPlane(deviceId, response.t, response.w || wsPort)
     } else if (dataPlane === 'wt') {
       if (wtPort != null) {
-        if (settings.useWorker === false) {
-          spawnDataPlane(deviceId, response.t, null, { wtPort, wtCertHash })
-        } else {
-          await spawnDataPlane(deviceId, response.t, null, { wtPort, wtCertHash })
-        }
+        await spawnDataPlane(deviceId, response.t, null, { wtPort, wtCertHash })
       } else {
         await spawnDataPlane(deviceId, response.t, response.w || wsPort)
       }

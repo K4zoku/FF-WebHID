@@ -8,8 +8,7 @@
    * @returns {number[]|null}
    */
   function tabsForEvent(message) {
-    const eventType = message.e
-    if (eventType === 1 || !message.i) return null
+    if (!message.i) return null
     const tabs = deviceTabMap.get(message.i)
     return tabs && tabs.size > 0 ? [...tabs.keys()] : null
   }
@@ -92,26 +91,35 @@
     }
   }
   /**
+   * Runs `fn` for every tab whose top-level origin matches `origin`
+   * (all tabs when `origin` is null).
+   * @param {string|null} origin
+   * @param {(tab: object) => void|Promise<void>} fn
+   * @returns {Promise<void>}
+   */
+  async function forTabsOfOrigin(origin, fn) {
+    const tabs = await browser.tabs.query({})
+    for (const tab of tabs) {
+      if (!tab.url) continue
+      let tabOrigin
+      try {
+        tabOrigin = new URL(tab.url).origin
+      } catch {
+        continue
+      }
+      if (origin && tabOrigin !== origin) continue
+      await fn(tab)
+    }
+  }
+
+  /**
    * Sends a globalReset message to all tabs.
    * @returns {void}
    */
   function broadcastGlobalReset() {
-    browser.tabs
-      .query({})
-      .then((tabs) => {
-        for (const tab of tabs) {
-          if (!tab.url) continue
-          try {
-            new URL(tab.url)
-          } catch {
-            continue
-          }
-          browser.tabs
-            .sendMessage(tab.id, { action: 'globalReset' })
-            .catch((e) => logger.debug('globalReset send to tab failed', e))
-        }
-      })
-      .catch((e) => logger.debug('broadcastGlobalReset failed', e))
+    forTabsOfOrigin(null, (tab) =>
+      browser.tabs.sendMessage(tab.id, { action: 'globalReset' }).catch(() => {})
+    ).catch((e) => logger.debug('broadcastGlobalReset failed', e))
   }
 
   webhid.export('bgStateOps', {
@@ -121,6 +129,7 @@
     clearDeviceTab,
     isTabAuthorizedForDevice,
     purgeTab,
-    broadcastGlobalReset
+    broadcastGlobalReset,
+    forTabsOfOrigin
   })
 })()

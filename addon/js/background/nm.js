@@ -1,6 +1,6 @@
 ;(function () {
   const logger = webhid.import('logger')
-  const decodeCollectionsTlv = webhid.import('decodeCollectionsTlv')
+  const decodeDeviceCollections = webhid.import('decodeDeviceCollections')
   const {
     ACT,
     PKG_INPUT_REPORT,
@@ -12,20 +12,11 @@
   } = webhid.import('bgPacked')
   const { deviceCache } = webhid.import('bgState')
   const { saveDeviceInfo } = webhid.import('bgStorage')
-  const { tabsForEvent, broadcastGlobalReset } = webhid.import('bgStateOps')
+  const { tabsForEvent, broadcastGlobalReset, forTabsOfOrigin } = webhid.import('bgStateOps')
   const http = webhid.import('http')
 
   const NM_HOST_FORWARDER = 'webhid.forwarder_nm_host'
   const NM_HOST_DAEMON = 'webhid.daemon_nm_host'
-
-  /**
-   * Returns the list of tab IDs authorized for the device in the given control event.
-   * @param {object} message
-   * @returns {number[]|null}
-   */
-  function tabsForEventLocal(message) {
-    return tabsForEvent(message)
-  }
 
   const NativeMessaging = {
     port: null,
@@ -259,7 +250,7 @@
       try {
         if (bin.length < 8 || bin[0] !== PKG_INPUT_REPORT) return
         const deviceId = (bin[1] | (bin[2] << 8) | (bin[3] << 16) | (bin[4] << 24)) >>> 0
-        const targets = tabsForEventLocal({ i: deviceId })
+        const targets = tabsForEvent({ i: deviceId })
         if (!targets) return
         let offset = 5
         while (offset + 3 <= bin.length) {
@@ -291,15 +282,8 @@
       if (message.v) {
         if (message.e === EVT_CONNECT) {
           if (!deviceCache.some((d) => d.deviceId === message.v.deviceId)) {
-            const dev = message.v
-            if (dev && typeof dev.collections === 'string') {
-              try {
-                dev.collections = decodeCollectionsTlv(dev.collections)
-              } catch {
-                dev.collections = []
-              }
-            }
-            deviceCache.push(dev)
+            decodeDeviceCollections([message.v])
+            deviceCache.push(message.v)
           }
           saveDeviceInfo(message.v)
         } else {
@@ -321,25 +305,11 @@
       browser.runtime
         .sendMessage({ action: 'webhidDeviceEvent', event: normalized })
         .catch((e) => logger.debug('event forward to runtime failed', e))
-      browser.tabs
-        .query({})
-        .then((tabs) => {
-          for (const tab of tabs) {
-            if (!tab.url) continue
-            try {
-              new URL(tab.url)
-            } catch {
-              continue
-            }
-            browser.tabs
-              .sendMessage(tab.id, {
-                action: 'webhidDeviceEvent',
-                event: normalized
-              })
-              .catch((e) => logger.debug('event forward to all tabs failed', e))
-          }
-        })
-        .catch((e) => logger.debug('tabs.query failed', e))
+      forTabsOfOrigin(null, (tab) =>
+        browser.tabs
+          .sendMessage(tab.id, { action: 'webhidDeviceEvent', event: normalized })
+          .catch((e) => logger.debug('event forward to all tabs failed', e))
+      ).catch((e) => logger.debug('tabs.query failed', e))
     },
 
     onControlEvent(message) {
@@ -348,7 +318,7 @@
         this.handleDeviceConnectionEvent(message)
         return
       }
-      const targets = tabsForEventLocal(message)
+      const targets = tabsForEvent(message)
       if (targets) {
         for (const tabId of targets) {
           browser.tabs

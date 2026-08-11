@@ -241,15 +241,7 @@
 
     const origin = urlOrigin(details.url)
 
-    const modePromise = (async () => {
-      let mode = settings.workerSpawnMode
-      if (origin) {
-        const siteKey = siteSettingKey(origin, 'workerSpawnMode')
-        const res = await browser.storage.local.get(siteKey).catch(() => ({}))
-        if (res[siteKey] !== undefined) mode = res[siteKey]
-      }
-      return mode
-    })()
+    const modePromise = resolveSiteSpawnMode(origin, settings)
 
     /** @returns {void} */
     function passthrough() {
@@ -354,7 +346,7 @@
     let mode = settings.workerSpawnMode
     if (!origin) return mode
     const siteKey = siteSettingKey(origin, 'workerSpawnMode')
-    const siteResult = await browser.storage.local.get(siteKey)
+    const siteResult = await browser.storage.local.get(siteKey).catch(() => ({}))
     if (siteResult[siteKey] !== undefined) {
       mode = siteResult[siteKey]
     }
