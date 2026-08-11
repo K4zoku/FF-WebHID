@@ -21,7 +21,7 @@ use std::os::unix::io::RawFd;
 
 use anyhow::Context as _;
 
-use crate::{CmdResult, MockDevice, SpawnOpts, emit_stdout, handle_command};
+use crate::{LoopAction, MockDevice, SpawnOpts, emit_stdout, handle_command};
 
 pub const UHID_CREATE2: u32 = 11;
 pub const UHID_DESTROY: u32 = 1;
@@ -481,12 +481,6 @@ fn set_stdin_nonblocking() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// What the event loop should do after handling one poll() round.
-enum LoopAction {
-    Continue,
-    Exit,
-}
-
 /// Poll the uhid fd and stdin until the loop should exit.
 fn run_event_loop(fd: RawFd, dev: &dyn MockDevice, stdin_buf: &mut Vec<u8>) -> anyhow::Result<()> {
     let mut uhid_error_count = 0;
@@ -596,7 +590,7 @@ fn handle_stdin_poll(
         log::info!("stdin EOF, destroying device");
         return Ok(LoopAction::Exit);
     }
-    if poll_process_stdin(dev, buf)? {
+    if poll_process_stdin(dev, buf)? == LoopAction::Exit {
         return Ok(LoopAction::Exit);
     }
     Ok(LoopAction::Continue)
@@ -722,11 +716,11 @@ fn poll_read_stdin(buf: &mut Vec<u8>) -> anyhow::Result<usize> {
 
 /// Process complete lines from the stdin buffer. Returns `true` if the
 /// caller should stop the event loop (destroy command received).
-fn poll_process_stdin(dev: &dyn MockDevice, buf: &mut Vec<u8>) -> anyhow::Result<bool> {
+fn poll_process_stdin(dev: &dyn MockDevice, buf: &mut Vec<u8>) -> anyhow::Result<LoopAction> {
     loop {
         let newline = match buf.iter().position(|&b| b == b'\n') {
             Some(pos) => pos,
-            None => return Ok(false),
+            None => return Ok(LoopAction::Continue),
         };
 
         let raw = std::str::from_utf8(&buf[..newline])
@@ -741,8 +735,8 @@ fn poll_process_stdin(dev: &dyn MockDevice, buf: &mut Vec<u8>) -> anyhow::Result
         }
 
         match handle_command(dev, &raw) {
-            Ok(CmdResult::Continue) => {}
-            Ok(CmdResult::Destroy) => return Ok(true),
+            Ok(LoopAction::Continue) => {}
+            Ok(LoopAction::Exit) => return Ok(LoopAction::Exit),
             Err(e) => {
                 emit_stdout(&serde_json::json!({
                     "event": "error",

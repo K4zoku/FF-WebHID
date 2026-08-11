@@ -198,26 +198,23 @@ fn finish_args(state: ArgState) -> anyhow::Result<Args> {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn parse_u16(s: &str) -> anyhow::Result<u16> {
-    let s = s.trim();
-    if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
-        u16::from_str_radix(hex, 16).map_err(|e| anyhow::anyhow!("invalid hex u16 '{s}': {e}"))
-    } else {
-        s.parse::<u16>()
-            .map_err(|e| anyhow::anyhow!("invalid u16 '{s}': {e}"))
-    }
+macro_rules! define_parse {
+    ($name:ident, $t:ty) => {
+        fn $name(s: &str) -> anyhow::Result<$t> {
+            let s = s.trim();
+            if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+                <$t>::from_str_radix(hex, 16)
+                    .map_err(|e| anyhow::anyhow!("invalid hex {} '{s}': {e}", stringify!($t)))
+            } else {
+                s.parse::<$t>()
+                    .map_err(|e| anyhow::anyhow!("invalid {} '{s}': {e}", stringify!($t)))
+            }
+        }
+    };
 }
 
-#[cfg(not(target_os = "windows"))]
-fn parse_u8(s: &str) -> anyhow::Result<u8> {
-    let s = s.trim();
-    if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
-        u8::from_str_radix(hex, 16).map_err(|e| anyhow::anyhow!("invalid hex u8 '{s}': {e}"))
-    } else {
-        s.parse::<u8>()
-            .map_err(|e| anyhow::anyhow!("invalid u8 '{s}': {e}"))
-    }
-}
+define_parse!(parse_u16, u16);
+define_parse!(parse_u8, u8);
 
 #[cfg(not(target_os = "windows"))]
 fn print_usage() {
@@ -263,14 +260,15 @@ trait MockDevice {
 }
 
 #[cfg(not(target_os = "windows"))]
-enum CmdResult {
+#[derive(PartialEq)]
+enum LoopAction {
     Continue,
-    Destroy,
+    Exit,
 }
 
 /// Handle one JSON command line. Shared by all platform event loops.
 #[cfg(not(target_os = "windows"))]
-fn handle_command(dev: &dyn MockDevice, line: &str) -> anyhow::Result<CmdResult> {
+fn handle_command(dev: &dyn MockDevice, line: &str) -> anyhow::Result<LoopAction> {
     #[derive(serde::Deserialize)]
     #[serde(tag = "cmd")]
     enum Cmd {
@@ -311,13 +309,13 @@ fn handle_command(dev: &dyn MockDevice, line: &str) -> anyhow::Result<CmdResult>
             }));
         }
         Cmd::Destroy => {
-            return Ok(CmdResult::Destroy);
+            return Ok(LoopAction::Exit);
         }
         Cmd::Ping => {
             emit_stdout(&serde_json::json!({"event": "pong"}));
         }
     }
-    Ok(CmdResult::Continue)
+    Ok(LoopAction::Continue)
 }
 
 /// Emit one JSON event line on stdout. Safe to call from multiple threads

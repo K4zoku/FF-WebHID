@@ -40,7 +40,7 @@ use core_foundation_sys::dictionary::{
     kCFTypeDictionaryValueCallBacks,
 };
 
-use crate::{CmdResult, MockDevice, SpawnOpts, emit_stdout, handle_command};
+use crate::{LoopAction, MockDevice, SpawnOpts, emit_stdout, handle_command};
 
 type IOHIDUserDeviceRef = *mut c_void;
 
@@ -324,8 +324,8 @@ fn stdin_loop(dev: MacOSDevice) {
             continue;
         }
         match handle_command(&dev, line) {
-            Ok(CmdResult::Continue) => {}
-            Ok(CmdResult::Destroy) => {
+            Ok(LoopAction::Continue) => {}
+            Ok(LoopAction::Exit) => {
                 log::info!("destroy command received, exiting");
                 std::process::exit(0);
             }
