@@ -1,0 +1,281 @@
+{
+  "extensionName": {
+    "message": "WebHID"
+  },
+  "extensionDescription": {
+    "message": "WebHID API implementation for Firefox"
+  },
+  "popupTitle": {
+    "message": "WebHID"
+  },
+  "popupBack": {
+    "message": "Back"
+  },
+  "popupPairedDevices": {
+    "message": "Paired Devices"
+  },
+  "popupNoDevices": {
+    "message": "No devices paired for this site."
+  },
+  "popupSettings": {
+    "message": "Settings"
+  },
+  "popupDataPlane": {
+    "message": "Data Plane"
+  },
+  "popupDataPlaneDesc": {
+    "message": "WebTransport (in a worker), WebTransport (in the page), WebSocket, or Native Messaging"
+  },
+  "popupDataPlaneWs": {
+    "message": "WebSocket"
+  },
+  "popupDataPlaneWt": {
+    "message": "WebTransport"
+  },
+  "popupDataPlaneNm": {
+    "message": "Native Messaging"
+  },
+  "popupDevicePickerMode": {
+    "message": "Device Picker Mode"
+  },
+  "popupDevicePickerModeDesc": {
+    "message": "How the device chooser is presented on this site"
+  },
+  "popupWorkerPolyfill": {
+    "message": "Worker Polyfill"
+  },
+  "popupWorkerPolyfillDesc": {
+    "message": "Inject WebHID API into Worker scripts on this site"
+  },
+  "popupAllowActivationless": {
+    "message": "Allow requestDevice() without user gesture"
+  },
+  "popupAllowActivationlessDesc": {
+    "message": "Skip the user-activation check when this site calls requestDevice(). Spec workaround for sites that call it asynchronously; the device chooser still requires explicit user selection."
+  },
+  "popupWorkerSpawnMode": {
+    "message": "Worker Spawn Mode"
+  },
+  "popupWorkerSpawnModeDesc": {
+    "message": "How the data worker is created on this site"
+  },
+  "popupLogLevel": {
+    "message": "Log Level"
+  },
+  "popupLogLevelDesc": {
+    "message": "Console output verbosity for this site"
+  },
+  "logLevelError": {
+    "message": "Error"
+  },
+  "logLevelWarn": {
+    "message": "Warn"
+  },
+  "logLevelInfo": {
+    "message": "Info"
+  },
+  "logLevelDebug": {
+    "message": "Debug"
+  },
+  "popupDefaultNote": {
+    "message": "Changes here override defaults for this site."
+  },
+  "popupGlobalSettings": {
+    "message": "Global settings →"
+  },
+  "popupManageDevices": {
+    "message": "Manage all paired devices →"
+  },
+  "popupNoSite": {
+    "message": "(no site)"
+  },
+  "popupSiteOrigin": {
+    "message": "Site origin"
+  },
+  "popupOriginList": {
+    "message": "Origins in this tab"
+  },
+  "popupUnknown": {
+    "message": "Unknown"
+  },
+  "popupPairedDevice": {
+    "message": "Paired device"
+  },
+  "popupRevoke": {
+    "message": "Revoke"
+  },
+  "popupDeviceCount": {
+    "message": "($1/$2)"
+  },
+  "popupInPageWtWarning": {
+    "message": "In-page WebTransport may trigger a Firefox local-network permission prompt (\"wants to access other apps and services on this device\"). Tick \"Remember my choice for this site\" before clicking Allow, otherwise you will be asked again on every page load."
+  },
+  "statusReady": {
+    "message": "Ready"
+  },
+  "statusFallback": {
+    "message": "Fallback: $1"
+  },
+  "statusOffline": {
+    "message": "Daemon offline"
+  },
+  "statusOfflineGuidance": {
+    "message": "Check that the daemon is running (systemctl status webhid-daemon), that your user is in the webhid group, and that the udev rules are installed."
+  },
+  "planeNameWS": {
+    "message": "WebSocket"
+  },
+  "planeNameWT": {
+    "message": "WebTransport"
+  },
+  "planeNameNM": {
+    "message": "Native Messaging"
+  },
+  "infoPopoverMore": {
+    "message": "More info"
+  },
+  "macPrivacyTitle": {
+    "message": "macOS Input Monitoring"
+  },
+  "macPrivacyDesc": {
+    "message": "Allow the daemon to read HID devices: System Settings → Privacy & Security → Input Monitoring. If the link does not open the right tab, find it manually and enable the daemon."
+  },
+  "macPrivacyOpen": {
+    "message": "Open Privacy Settings"
+  },
+  "settingsTitle": {
+    "message": "WebHID Settings"
+  },
+  "settingsDaemonAsNmHost": {
+    "message": "Daemon as NM host"
+  },
+  "settingsDaemonAsNmHostDesc": {
+    "message": "Talk to the daemon directly over native messaging, skipping the forwarder and Unix socket. Requires the daemon_nm_host manifest and the daemon running as your user (with the udev rule). Lower latency, no root-daemon fallback. Reconnects automatically."
+  },
+  "settingsDataPlane": {
+    "message": "Data Plane"
+  },
+  "settingsDataPlaneDesc": {
+    "message": "**WebTransport** (default): the fastest option; runs in a background worker so pages stay smooth.\n**WebTransport (in-page)**: connects directly in the page; fine at normal report rates, uses more page CPU. Use it when the site blocks background workers (CSP) but still allows the connection; the worker-based options would fall back to Native Messaging there. Firefox asks a one-time local-network permission (\"Allow\") before the first in-page connection; tick \"Remember my choice for this site\". Reload pages after changing.\n**WebSocket**: fallback when WebTransport is not available (older Firefox).\n**Native Messaging**: the slowest but most compatible option; use when a site's security policy blocks the others."
+  },
+  "settingsDataPlaneWs": {
+    "message": "WebSocket"
+  },
+  "settingsDataPlaneWt": {
+    "message": "WebTransport"
+  },
+  "settingsDataPlaneWtInpage": {
+    "message": "WebTransport (in-page)"
+  },
+  "settingsDataPlaneNm": {
+    "message": "Native Messaging"
+  },
+  "settingsDevicePickerMode": {
+    "message": "Device Picker Mode"
+  },
+  "settingsDevicePickerModeDesc": {
+    "message": "**Modal**: shadow-DOM overlay on the page when requestDevice() is called (default).\n**Page Action**: URL-bar popup picker; the user clicks the icon to open it. Firefox only, Chromium falls back to modal.\n**Window**: separate popup window."
+  },
+  "settingsDevicePickerModal": {
+    "message": "Modal (overlay)"
+  },
+  "settingsDevicePickerPageAction": {
+    "message": "Page Action (URL bar popup)"
+  },
+  "settingsDevicePickerWindow": {
+    "message": "Window (separate popup window)"
+  },
+  "settingsWorkerPolyfill": {
+    "message": "Worker Polyfill"
+  },
+  "settingsWorkerPolyfillDesc": {
+    "message": "Injects the full WebHID API into Worker scripts (new Worker()). requestDevice() stays page-only, as the spec requires. Reload pages after changing."
+  },
+  "settingsAllowActivationless": {
+    "message": "Allow activation-less requestDevice()"
+  },
+  "settingsAllowActivationlessDesc": {
+    "message": "Skip the user-activation requirement for requestDevice() on this site. Spec deviation; workaround for sites that call it from an async handler. The chooser still requires explicit user selection. Reload pages after changing."
+  },
+  "settingsLogLevel": {
+    "message": "Log Level"
+  },
+  "settingsLogLevelDesc": {
+    "message": "Console verbosity: Error = errors only, Warn = +warnings, Info = +info, Debug = +debug (includes timing). Reload pages after changing."
+  },
+  "pickerTitle": {
+    "message": "Select a HID Device"
+  },
+  "pickerCancel": {
+    "message": "Cancel"
+  },
+  "pickerConnect": {
+    "message": "Connect"
+  },
+  "pickerNoDevices": {
+    "message": "No HID devices found"
+  },
+  "pickerNoDaemon": {
+    "message": "Cannot reach the WebHID daemon. Check that it is installed and running, then try again."
+  },
+  "pickerParseFailed": {
+    "message": "This device's report descriptor could not be parsed. Connecting and sending reports still works."
+  },
+  "pickerNoMatch": {
+    "message": "No devices match the specified filters"
+  },
+  "pickerNoPending": {
+    "message": "No pending device request"
+  },
+  "pickerLoading": {
+    "message": "Loading devices..."
+  },
+  "pickerInterfaces": {
+    "message": "$1 interfaces"
+  },
+  "settingsWorkerSpawnMode": {
+    "message": "Worker Spawn Mode"
+  },
+  "settingsWorkerSpawnModeDesc": {
+    "message": "**Shadow URL** (default on MV3): spawns the data worker via new Worker(location.href) with a StreamFilter intercepting the synthetic self-request; respects the page's security settings and changes nothing about the page. Fails if the server rejects it or if require-trusted-types-for is restrictive.\n**Blob + CSP rewrite** (default on MV2): spawns the worker from a blob: URL; relaxes the page's worker-src and connect-src directives. Works fully on MV2; on MV3 only a meta-tag CSP can be rewritten, so header-based policies still block it."
+  },
+  "settingsWorkerSpawnShadow": {
+    "message": "Shadow URL"
+  },
+  "settingsWorkerSpawnBlob": {
+    "message": "Blob + CSP rewrite"
+  },
+  "segDataPlaneWs": {
+    "message": "WS"
+  },
+  "segDataPlaneWt": {
+    "message": "WT"
+  },
+  "segDataPlaneWtInpage": {
+    "message": "WTI"
+  },
+  "segDataPlaneNm": {
+    "message": "NM"
+  },
+  "segPickerModal": {
+    "message": "Modal"
+  },
+  "segPickerPageAction": {
+    "message": "Page Action"
+  },
+  "segPickerWindow": {
+    "message": "Window"
+  },
+  "segSpawnShadow": {
+    "message": "Shadow"
+  },
+  "segSpawnBlob": {
+    "message": "Blob"
+  },
+  "devicesTitle": {
+    "message": "Paired Devices (all sites)"
+  },
+  "devicesNone": {
+    "message": "No devices paired on any site."
+  }
+}
