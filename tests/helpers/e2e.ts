@@ -116,13 +116,12 @@ export const test = base.extend<
 
   daemon: [
     async ({ daemonMode }, use, workerInfo) => {
-      if (daemonMode === 'forwarder') {
+      if (daemonMode === 'daemon-nm') {
         await use(null)
         return
       }
       const socketPath = workerSocketPath(workerInfo.workerIndex)
       process.env.WEBHID_SOCKET = socketPath
-      process.env.WEBHID_LOG_FILE = socketPath.replace(/\.sock$/, '.log')
       const d = await startDaemon(socketPath)
       await use(d)
       stopDaemon(d)
