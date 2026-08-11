@@ -141,10 +141,9 @@ function prepareRpmTree(rpmRoot) {
 
 function writeRpmSpec(rpmRoot, ver, binDir) {
   const nmFileList = NM_BROWSERS.flatMap((b) => [
-      `/usr/lib/${b}/native-messaging-hosts/webhid.forwarder_nm_host.json`,
-      `/usr/lib/${b}/native-messaging-hosts/webhid.daemon_nm_host.json`
-    ])
-    .join('\n')
+    `/usr/lib/${b}/native-messaging-hosts/webhid.forwarder_nm_host.json`,
+    `/usr/lib/${b}/native-messaging-hosts/webhid.daemon_nm_host.json`
+  ]).join('\n')
 
   writeFileSync(
     join(rpmRoot, 'SPECS/webhid.spec'),
