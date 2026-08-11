@@ -1,4 +1,4 @@
-import { test } from '../helpers/e2e.js'
+import { test, configureDaemonMode } from '../helpers/e2e.js'
 import { withTimeout } from '../helpers/test-utils.js'
 import { type Page } from '@playwright/test'
 import { readFile } from 'node:fs/promises'
@@ -51,7 +51,7 @@ interface BenchmarkFixtures {
 }
 
 /** Console messages that mean the data plane silently degraded to NM. */
-const FALLBACK_PATTERNS = [
+export const FALLBACK_PATTERNS = [
   'falling back to NM',
   'spawn failed',
   'using NM data plane',
@@ -75,63 +75,26 @@ export interface BenchmarkResult {
   wtStreamAttached: boolean
 }
 
-export async function setDataPlane(
+export async function setSiteSettings(
   bg: { evaluate: Page['evaluate'] },
   origin: string,
-  mode: 'ws' | 'wt' | 'nm'
+  opts: {
+    dataPlane?: 'ws' | 'wt' | 'nm'
+    workerSpawnMode?: 'shadow' | 'blob'
+    useWorker?: boolean
+    logLevel?: number
+  }
 ): Promise<void> {
+  const keys: Record<string, string | number | boolean> = {}
+  for (const [name, value] of Object.entries(opts)) {
+    if (value === undefined) continue
+    keys[`settings :: ${name}`] = value
+    keys[`settings :: ${origin} :: ${name}`] = value
+  }
   await bg.evaluate(
-    ({ origin, mode }: { origin: string; mode: string }) =>
-      browser.storage.local.set({
-        'settings :: dataPlane': mode,
-        [`settings :: ${origin} :: dataPlane`]: mode
-      }),
-    { origin, mode }
-  )
-}
-
-export async function setWorkerSpawnMode(
-  bg: { evaluate: Page['evaluate'] },
-  origin: string,
-  mode: 'shadow' | 'blob'
-): Promise<void> {
-  await bg.evaluate(
-    ({ origin, mode }: { origin: string; mode: string }) =>
-      browser.storage.local.set({
-        'settings :: workerSpawnMode': mode,
-        [`settings :: ${origin} :: workerSpawnMode`]: mode
-      }),
-    { origin, mode }
-  )
-}
-
-export async function setUseWorker(
-  bg: { evaluate: Page['evaluate'] },
-  origin: string,
-  enabled: boolean
-): Promise<void> {
-  await bg.evaluate(
-    ({ origin, enabled }: { origin: string; enabled: boolean }) =>
-      browser.storage.local.set({
-        'settings :: useWorker': enabled,
-        [`settings :: ${origin} :: useWorker`]: enabled
-      }),
-    { origin, enabled }
-  )
-}
-
-export async function setLogLevel(
-  bg: { evaluate: Page['evaluate'] },
-  origin: string,
-  level: number
-): Promise<void> {
-  await bg.evaluate(
-    ({ origin, level }: { origin: string; level: number }) =>
-      browser.storage.local.set({
-        'settings :: logLevel': level,
-        [`settings :: ${origin} :: logLevel`]: level
-      }),
-    { origin, level }
+    ({ keys }: { keys: Record<string, string | number | boolean> }) =>
+      browser.storage.local.set(keys),
+    { keys }
   )
 }
 
@@ -241,32 +204,22 @@ async function runWarmupWithRetry(page: Page, mock: WebhidMockProcess): Promise<
   throw lastErr instanceof Error ? lastErr : new Error(String(lastErr))
 }
 
-async function configureDaemonMode(
-  backgroundPage: { evaluate: Page['evaluate'] },
-  daemonMode: string
-): Promise<void> {
-  if (daemonMode !== 'daemon-nm') return
-  await backgroundPage
-    .evaluate(() => browser.storage.local.set({ 'settings :: daemonAsNmHost': true }))
-    .catch(() => {})
-}
-
 async function configurePageSettings(
   backgroundPage: { evaluate: Page['evaluate'] },
   origin: string,
   mode: 'ws' | 'wt' | 'nm',
   opts?: { inPage?: boolean }
 ): Promise<void> {
-  await setDataPlane(backgroundPage, origin, mode)
+  await setSiteSettings(backgroundPage, origin, { dataPlane: mode })
   const spawnMode = process.env.BENCHMARK_WORKER_SPAWN
   if (spawnMode === 'blob' || spawnMode === 'shadow') {
-    await setWorkerSpawnMode(backgroundPage, origin, spawnMode)
+    await setSiteSettings(backgroundPage, origin, { workerSpawnMode: spawnMode })
   }
   if (opts?.inPage) {
-    await setUseWorker(backgroundPage, origin, false)
-    await setLogLevel(backgroundPage, origin, 3)
+    await setSiteSettings(backgroundPage, origin, { useWorker: false })
+    await setSiteSettings(backgroundPage, origin, { logLevel: 3 })
   } else if (process.env.BENCHMARK_DEBUG_LOG) {
-    await setLogLevel(backgroundPage, origin, 3)
+    await setSiteSettings(backgroundPage, origin, { logLevel: 3 })
   }
 }
 
@@ -401,18 +354,7 @@ export async function runBenchmark(
   mock: WebhidMockProcess,
   opts: { inPage?: boolean } = {}
 ): Promise<BenchmarkResult> {
-  const fallbacks: string[] = []
-  let wtStreamAttached = false
-  const onConsole = (msg: { text(): string; type(): string }) => {
-    const text = msg.text()
-    if (FALLBACK_PATTERNS.some((p) => text.includes(p))) {
-      fallbacks.push(`[${msg.type()}] ${text}`)
-    }
-    if (text.includes(WT_STREAM_ATTACHED) && text.includes('polyfill')) {
-      wtStreamAttached = true
-    }
-  }
-  page.on('console', onConsole)
+  const watch = watchConsole(page)
   try {
     await page.evaluate(() =>
       (window.tests!.helper as unknown as { webhidBenchmark?: BenchApi }).webhidBenchmark!.open()
@@ -425,26 +367,21 @@ export async function runBenchmark(
       warmup = Date.now() - warmupStart
     } catch {}
 
-    if (opts.inPage && !wtStreamAttached) {
+    if (opts.inPage && !watch.wtStreamAttached) {
       const deadline = Date.now() + 2000
-      while (!wtStreamAttached && Date.now() < deadline) {
+      while (!watch.wtStreamAttached && Date.now() < deadline) {
         await page.waitForTimeout(200)
       }
-      if (!wtStreamAttached) {
+      if (!watch.wtStreamAttached) {
         throw new Error(
           'in-page WT data plane did not attach its stream during warmup; the ' +
             'spawn degraded to NM' +
-            (fallbacks.length ? ': ' + fallbacks.join(' | ') : '')
+            (watch.fallbacks.length ? ': ' + watch.fallbacks.join(' | ') : '')
         )
       }
     }
 
-    const envRuns = Number(process.env.BENCHMARK_RUNS)
-    const projectUse = test.info().project?.use as { benchmarkRuns?: number } | undefined
-    const runs =
-      Number.isInteger(envRuns) && envRuns > 0
-        ? envRuns
-        : (projectUse?.benchmarkRuns ?? DEFAULT_RUNS)
+    const runs = resolveRunCount()
 
     const runsOut: Array<{
       duration: number
@@ -477,9 +414,16 @@ export async function runBenchmark(
       document.getElementById('bench-status')!.textContent = ''
     })
 
-    return { open: openMs, warmup, runs: runsOut, failures, fallbacks, wtStreamAttached }
+    return {
+      open: openMs,
+      warmup,
+      runs: runsOut,
+      failures,
+      fallbacks: watch.fallbacks,
+      wtStreamAttached: watch.wtStreamAttached
+    }
   } finally {
-    page.off('console', onConsole)
+    watch.stop()
   }
 }
 
@@ -488,10 +432,42 @@ export function percentile(vals: number[], p: number): number {
   return s[Math.max(0, Math.ceil((p / 100) * s.length) - 1)]
 }
 
+export function resolveRunCount(): number {
+  const envRuns = Number(process.env.BENCHMARK_RUNS)
+  const projectUse = test.info().project?.use as { benchmarkRuns?: number } | undefined
+  return Number.isInteger(envRuns) && envRuns > 0
+    ? envRuns
+    : (projectUse?.benchmarkRuns ?? DEFAULT_RUNS)
+}
+
+export interface ConsoleWatch {
+  fallbacks: string[]
+  wtStreamAttached: boolean
+  stop: () => void
+}
+
+/** Collects console evidence of data-plane degradation (fallback to NM) and
+ * in-page WT stream attachment for one page. */
+export function watchConsole(page: Page): ConsoleWatch {
+  const watch: ConsoleWatch = { fallbacks: [], wtStreamAttached: false, stop: () => {} }
+  const onConsole = (msg: { text(): string; type(): string }) => {
+    const text = msg.text()
+    if (FALLBACK_PATTERNS.some((p) => text.includes(p))) {
+      watch.fallbacks.push(`[${msg.type()}] ${text}`)
+    }
+    if (text.includes(WT_STREAM_ATTACHED) && text.includes('polyfill')) {
+      watch.wtStreamAttached = true
+    }
+  }
+  page.on('console', onConsole)
+  watch.stop = () => page.off('console', onConsole)
+  return watch
+}
+
 /** Skips the benchmark when the data plane degraded to NM: the numbers would
  * measure Native Messaging, not the requested mode, so a silent pass is worse
  * than a skip with the fallback messages attached. */
-export function skipOnFallback(result: BenchmarkResult, mode: string): void {
+export function skipOnFallback(result: { fallbacks: string[] }, mode: string): void {
   if (result.fallbacks.length > 0) {
     test.skip(
       true,

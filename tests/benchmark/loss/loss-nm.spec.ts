@@ -1,5 +1,6 @@
 import { test, expect } from '../../helpers/e2e.js'
 import { benchmarkLoss, printLossResults } from './loss-utils.js'
+import { skipOnFallback } from '../benchmark-utils.js'
 
 test('input-report loss benchmark nm @ 8000Hz', async ({
   harnessCtx,
@@ -15,11 +16,5 @@ test('input-report loss benchmark nm @ 8000Hz', async ({
   )
   expect(result.runs.length).toBeGreaterThan(0)
   printLossResults('nm', result)
-  if (result.fallbacks.length > 0) {
-    test.skip(
-      true,
-      `nm loss benchmark degraded to NM fallback: ${result.fallbacks.join(' | ')}. ` +
-        'The numbers would measure NM, not nm.'
-    )
-  }
+  skipOnFallback(result, 'nm')
 })

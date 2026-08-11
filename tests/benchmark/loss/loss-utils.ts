@@ -1,4 +1,4 @@
-import { test } from '../../helpers/e2e.js'
+import { configureDaemonMode } from '../../helpers/e2e.js'
 import { sleep } from '../../helpers/test-utils.js'
 import type { Page } from '@playwright/test'
 import { sendInput, type WebhidMockProcess } from '../../helpers/e2e-process.js'
@@ -6,13 +6,7 @@ import { grantDevicePermission, mockIdFor } from '../../helpers/e2e-devices.js'
 import type { DeviceFilter } from '../../helpers/e2e-types.js'
 import { ProfilerCapture } from '../capture-profile.js'
 import { join } from 'node:path'
-import {
-  setDataPlane,
-  setUseWorker,
-  setLogLevel,
-  percentile,
-  WT_STREAM_ATTACHED
-} from '../benchmark-utils.js'
+import { percentile, resolveRunCount, setSiteSettings, watchConsole } from '../benchmark-utils.js'
 
 export const VENDOR = mockIdFor('vendor')
 
@@ -30,7 +24,6 @@ const PAYLOAD_LEN = 63
 
 const RUN_TIMEOUT_MS = 30000
 const RUN_RETRIES = 3
-const DEFAULT_RUNS = 5
 
 const envInt = (name: string, fallback: number): number => {
   const v = Number(process.env[name])
@@ -43,13 +36,6 @@ export const LOSS_RATE = envInt('BENCHMARK_LOSS_RATE', 8000)
 export const LOSS_COUNT = envInt('BENCHMARK_LOSS_COUNT', 6000)
 
 /** Console messages that mean the data plane silently degraded to NM. */
-const FALLBACK_PATTERNS = [
-  'falling back to NM',
-  'spawn failed',
-  'using NM data plane',
-  'cannot derive WS auth hash'
-]
-
 export interface LossFixtures {
   harnessCtx: { newPage(): Promise<Page> }
   backgroundPage: { evaluate: Page['evaluate'] }
@@ -173,16 +159,7 @@ export async function benchmarkLoss(
 ): Promise<LossResult> {
   const { harnessCtx, backgroundPage, httpPort, daemonMode, rdpPort } = fixtures
   const page = await harnessCtx.newPage()
-  const fallbacks: string[] = []
-  let wtStreamAttached = false
-  const onConsole = (msg: { text(): string; type(): string }) => {
-    const text = msg.text()
-    if (FALLBACK_PATTERNS.some((p) => text.includes(p))) fallbacks.push(`[${msg.type()}] ${text}`)
-    if (text.includes(WT_STREAM_ATTACHED) && text.includes('polyfill')) {
-      wtStreamAttached = true
-    }
-  }
-  page.on('console', onConsole)
+  const watch = watchConsole(page)
   const profileDir = process.env.BENCHMARK_PROFILE_DIR
   let profiler: ProfilerCapture | null = null
   if (profileDir && rdpPort) {
@@ -204,15 +181,11 @@ export async function benchmarkLoss(
       )
       .catch(() => {})
   try {
-    if (daemonMode === 'daemon-nm') {
-      await backgroundPage
-        .evaluate(() => browser.storage.local.set({ 'settings :: daemonAsNmHost': true }))
-        .catch(() => {})
-    }
-    await setDataPlane(backgroundPage, origin, mode)
+    await configureDaemonMode(backgroundPage, daemonMode)
+    await setSiteSettings(backgroundPage, origin, { dataPlane: mode })
     if (opts.inPage) {
-      await setUseWorker(backgroundPage, origin, false)
-      await setLogLevel(backgroundPage, origin, 3)
+      await setSiteSettings(backgroundPage, origin, { useWorker: false })
+      await setSiteSettings(backgroundPage, origin, { logLevel: 3 })
     }
     await page.goto(`${origin}/tests/test-page.html`, {
       waitUntil: 'domcontentloaded',
@@ -264,26 +237,21 @@ export async function benchmarkLoss(
       await runLossOnce(page, mock, LOSS_RATE, Math.floor(LOSS_COUNT / 2), 0)
     } catch {}
 
-    if (opts.inPage && !wtStreamAttached) {
+    if (opts.inPage && !watch.wtStreamAttached) {
       const deadline = Date.now() + 2000
-      while (!wtStreamAttached && Date.now() < deadline) {
+      while (!watch.wtStreamAttached && Date.now() < deadline) {
         await sleep(200)
       }
-      if (!wtStreamAttached) {
+      if (!watch.wtStreamAttached) {
         throw new Error(
           'in-page WT data plane did not attach its stream during warmup; the ' +
             'spawn degraded to NM' +
-            (fallbacks.length ? ': ' + fallbacks.join(' | ') : '')
+            (watch.fallbacks.length ? ': ' + watch.fallbacks.join(' | ') : '')
         )
       }
     }
 
-    const envRuns = Number(process.env.BENCHMARK_RUNS)
-    const projectUse = test.info().project?.use as { benchmarkRuns?: number } | undefined
-    const runs =
-      Number.isInteger(envRuns) && envRuns > 0
-        ? envRuns
-        : (projectUse?.benchmarkRuns ?? DEFAULT_RUNS)
+    const runs = resolveRunCount()
 
     const runsOut: LossRun[] = []
     let failures = 0
@@ -304,9 +272,14 @@ export async function benchmarkLoss(
         } catch {}
       }
     })
-    return { runs: runsOut, failures, fallbacks, wtStreamAttached }
+    return {
+      runs: runsOut,
+      failures,
+      fallbacks: watch.fallbacks,
+      wtStreamAttached: watch.wtStreamAttached
+    }
   } finally {
-    page.off('console', onConsole)
+    watch.stop()
     await resetSettings()
     if (profiler) {
       try {
