@@ -67,6 +67,7 @@ Single `dataPlane` setting (`ws` / `wt` / `nm`). Control plane (handshake, open/
 - Concurrent-run WS drop: running the e2e and forwarder configs concurrently occasionally drops a vendor input report (WS CPU contention). Each config runs the e2e dir (32 tests) with `workers: 1` baked in.
 - Firefox 150+ LNA (`network.lna.blocking`, default true) gates page-context WebTransport to loopback: a public origin hitting localhost gets a one-time "Allow" prompt; loopback-origin pages and worker-context WT are exempt. Page-context WT cannot survive Juggler interception (`context.route('**/*')` → `SetupReplacementChannel` → `NS_ERROR_NOT_AVAILABLE`, bridge falls back to NM after 10s): no catch-all route in `tests/helpers/e2e.ts`, ever.
 - Browser-harness limitations: each Playwright page runs in its own Firefox window (a popup opened via `newPage()` never sees another page's tab as active in its window); visually hidden toggle inputs need `check({ force: true })`; `storage.local.get(null)` throws `EmptyDatabaseError` (keyed `get` works). These blocked a Playwright spec for the popup origin picker; it was verified manually.
+- Daemon-nm log routing: the e2e daemon fixture sets `WEBHID_LOG_FILE` to the socket daemon's log path. Firefox inherits it and passes it to the daemon-as-NM-host it spawns, so both processes write to the same file; specs grep it for transport-engagement evidence (`WT connect gen=`, `WS connect gen=`).
 - OS permissions: macOS needs Input Monitoring (TCC) granted manually; Windows none (`HidD_*`); Linux `udev`/`eudev` (Alpine `mdev`).
 
 ### Daemon deployment
@@ -114,6 +115,7 @@ The popup's site label is a custom dropdown (no `<select>`) listing the active t
 
 - **WT/QUIC data plane** (`dataPlane: "wt"`): daemon WT server at boot (self-signed ECDSA P-256, SAN 127.0.0.1, ≤14-day validity, pinned via `serverCertificateHashes`); auth via URL path; one persistent bidirectional stream with `[len_u32 LE]` frame prefix; data worker auto-reconnects post-ready (500ms→5s exponential backoff, same as WS); cert renewal rotates to a fresh port with drain. p50 0.85ms vs ws 0.78ms / nm 1.77ms (loopback): TLS/QUIC costs ~+0.07ms/report; ws remains the fastest Firefox path. Seccomp needed `SYS_fcntl` + `SYS_recvmmsg`. Covered by `tests/e2e/wt.spec.ts` + `tests/benchmark/benchmark-wt.spec.ts`.
 - **Chromium native-WebHID benchmark** (`chromium-benchmark`, headless): mock pre-granted via `WebHidAllowDevicesForUrls` policy; fixed port 8123 (policy matches origins including port); `channel: 'chromium'` required (chrome-headless-shell has no udev/HID layer); never `--no-sandbox` (breaks udev). Finding: `vendor.bin`'s report ID 1 sat between two top-level collections, which Chromium's HID parser does not carry across; the ID now lives inside the vendor collection. Chromium p50 ~0.3-0.4ms; its `performance.now()` is clamped to 100µs, benchmark page uses COOP/COEP for 5µs precision.
+
 ## Not every change needs a benchmark-driven justification
 
 Some changes were made because they were interesting to try (binary-packed collections, WebTransport exploration). Don't retroactively invent a performance rationale; note it as such.

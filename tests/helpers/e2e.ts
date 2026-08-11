@@ -122,6 +122,7 @@ export const test = base.extend<
       }
       const socketPath = workerSocketPath(workerInfo.workerIndex)
       process.env.WEBHID_SOCKET = socketPath
+      process.env.WEBHID_LOG_FILE = socketPath.replace(/\.sock$/, '.log')
       const d = await startDaemon(socketPath)
       await use(d)
       stopDaemon(d)
