@@ -7,6 +7,7 @@
   const localizeHTML = webhid.import('localizeHTML')
   const loadEffectiveSettings = webhid.import('loadEffectiveSettings')
   const GLOBAL_DEFAULTS = webhid.import('GLOBAL_DEFAULTS')
+  const settingsUi = webhid.import('settingsUi')
   const saveSiteSetting = webhid.import('saveSiteSetting')
   const syncBrowserTheme = webhid.import('syncBrowserTheme')
   const initInfoPopovers = webhid.import('initInfoPopovers')
@@ -242,51 +243,18 @@
   })
 
   /**
-   * Checks the radio with the given name/value.
-   * @param {string} name
-   * @param {string} value
-   * @returns {void}
-   */
-  function setRadioValue(name, value) {
-    const radio = document.querySelector(`input[name="${name}"][value="${value}"]`)
-    if (radio) radio.checked = true
-  }
-
-  /**
-   * Returns the value of the checked radio in the group.
-   * @param {string} name
-   * @returns {string}
-   */
-  function currentRadioValue(name) {
-    const radio = document.querySelector(`input[name="${name}"]:checked`)
-    return radio ? radio.value : ''
-  }
-
-  /**
-   * Maps stored settings (dataPlane + useWorker) to the Data Plane radio value.
-   * @param {object} s
-   * @returns {string}
-   */
-  function effectiveDataPlaneValue(s) {
-    return s.dataPlane === 'wt' && s.useWorker === false ? 'wt-inpage' : s.dataPlane
-  }
-
-  /**
    * Applies the merged settings for the selected origin to the form controls.
    * @returns {void}
    */
   function applySettingsToUI() {
-    setRadioValue('dataPlane', effectiveDataPlaneValue(settings))
-    setRadioValue('devicePickerMode', settings.devicePickerMode || GLOBAL_DEFAULTS.devicePickerMode)
-    setRadioValue('workerSpawnMode', settings.workerSpawnMode || GLOBAL_DEFAULTS.workerSpawnMode)
-    setRadioValue('logLevel', String(settings.logLevel))
+    applyPlaneRadios(settings, GLOBAL_DEFAULTS)
     /** @type {HTMLInputElement} */
     document.getElementById('workerPolyfillEnabled').checked =
       settings.workerPolyfillEnabled || false
     /** @type {HTMLInputElement} */
     document.getElementById('allowActivationlessRequestDevice').checked =
       settings.allowActivationlessRequestDevice || false
-    updatePlaneVisibility()
+    refreshPlaneVisibility()
   }
 
   /**
@@ -310,65 +278,28 @@
    * @returns {void}
    */
   function updateInPageWarning() {
-    const show = currentRadioValue('dataPlane') === 'wt-inpage' && !isLoopbackOrigin(origin)
+    const show = settingsUi.currentRadioValue('dataPlane') === 'wt-inpage' && !isLoopbackOrigin(origin)
     document.getElementById('warning-inpage-wt').hidden = !show
   }
 
-  /**
-   * Shows only the options that apply to the current data plane:
-   * workerSpawnMode matters only when a worker will actually spawn (WT
-   * worker or WS).
-   * @returns {void}
-   */
-  function updatePlaneVisibility() {
-    const dp = currentRadioValue('dataPlane')
-    document.getElementById('workerSpawnMode-setting').style.display =
-      dp === 'wt' || dp === 'ws' ? '' : 'none'
+  /** Applies plane visibility plus the in-page WT warning. */
+  function refreshPlaneVisibility() {
+    updatePlaneVisibility()
     updateInPageWarning()
   }
 
-  /**
-   * Binds change handling for one radio group, saving on selection.
-   * @param {string} name
-   * @param {(value: string) => any} [transform]
-   * @returns {void}
-   */
-  function bindRadioGroup(name, transform) {
-    document.querySelectorAll(`input[name="${name}"]`).forEach((radio) => {
-      radio.addEventListener('change', () => {
-        if (!radio.checked) return
-        saveSetting(name, transform ? transform(radio.value) : radio.value)
-        refreshStatus()
-      })
-    })
-  }
+  const { applyPlaneRadios, updatePlaneVisibility, saveDataPlane, bindRadioGroup } =
+    settingsUi.createSettingsUi(saveSetting, () => refreshStatus())
+
   bindRadioGroup('devicePickerMode')
   bindRadioGroup('workerSpawnMode')
   bindRadioGroup('logLevel', (v) => parseInt(v, 10))
 
-  /**
-   * Saves the Data Plane radio selection. WebTransport (in-page) is stored as
-   * dataPlane=wt + useWorker=false, WebTransport (worker) as dataPlane=wt +
-   * useWorker=true; the backend keeps reading the useWorker flag.
-   * @param {string} value
-   * @returns {void}
-   */
-  function saveDataPlane(value) {
-    if (value === 'wt-inpage') {
-      saveSetting('dataPlane', 'wt')
-      saveSetting('useWorker', false)
-    } else if (value === 'wt') {
-      saveSetting('dataPlane', 'wt')
-      saveSetting('useWorker', true)
-    } else {
-      saveSetting('dataPlane', value)
-    }
-  }
   document.querySelectorAll('input[name="dataPlane"]').forEach((radio) => {
     radio.addEventListener('change', () => {
       if (!radio.checked) return
       saveDataPlane(radio.value)
-      updatePlaneVisibility()
+      refreshPlaneVisibility()
       refreshStatus()
     })
   })
