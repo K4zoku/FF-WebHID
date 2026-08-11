@@ -1,0 +1,281 @@
+{
+  "extensionName": {
+    "message": "WebHID"
+  },
+  "extensionDescription": {
+    "message": "WebHID API đầy đủ nhất dành cho Firefox"
+  },
+  "popupTitle": {
+    "message": "WebHID"
+  },
+  "popupBack": {
+    "message": "Quay lại"
+  },
+  "popupPairedDevices": {
+    "message": "Thiết bị đã cho phép"
+  },
+  "popupNoDevices": {
+    "message": "Chưa có thiết bị nào được cho phép trên trang này."
+  },
+  "popupSettings": {
+    "message": "Cài đặt"
+  },
+  "popupDataPlane": {
+    "message": "Kênh dữ liệu"
+  },
+  "popupDataPlaneDesc": {
+    "message": "WebTransport (trong worker), WebTransport (trong trang), WebSocket, hoặc Native Messaging"
+  },
+  "popupDataPlaneWs": {
+    "message": "WebSocket"
+  },
+  "popupDataPlaneWt": {
+    "message": "WebTransport"
+  },
+  "popupDataPlaneNm": {
+    "message": "Native Messaging"
+  },
+  "popupDevicePickerMode": {
+    "message": "Chế độ chọn thiết bị"
+  },
+  "popupDevicePickerModeDesc": {
+    "message": "Cách hiển thị bộ chọn thiết bị trên trang này"
+  },
+  "popupWorkerPolyfill": {
+    "message": "Worker Polyfill"
+  },
+  "popupWorkerPolyfillDesc": {
+    "message": "Cho phép WebHID API dùng được trên Worker scripts của trang này"
+  },
+  "popupAllowActivationless": {
+    "message": "Cho phép requestDevice() không cần thao tác người dùng"
+  },
+  "popupAllowActivationlessDesc": {
+    "message": "Bỏ qua kiểm tra user activation khi trang này gọi requestDevice(). Workaround cho trang gọi bất đồng bộ; bộ chọn thiết bị vẫn yêu cầu người dùng chọn rõ ràng."
+  },
+  "popupWorkerSpawnMode": {
+    "message": "Chế độ tạo Worker"
+  },
+  "popupWorkerSpawnModeDesc": {
+    "message": "Cách tạo data worker trên trang này"
+  },
+  "popupLogLevel": {
+    "message": "Mức độ log"
+  },
+  "popupLogLevelDesc": {
+    "message": "Độ chi tiết console output cho trang này"
+  },
+  "logLevelError": {
+    "message": "Lỗi"
+  },
+  "logLevelWarn": {
+    "message": "Cảnh báo"
+  },
+  "logLevelInfo": {
+    "message": "Thông tin"
+  },
+  "logLevelDebug": {
+    "message": "Gỡ lỗi"
+  },
+  "popupDefaultNote": {
+    "message": "Thay đổi ở đây ghi đè mặc định cho trang này."
+  },
+  "popupGlobalSettings": {
+    "message": "Cài đặt chung →"
+  },
+  "popupManageDevices": {
+    "message": "Quản lý tất cả thiết bị đã ghép →"
+  },
+  "popupNoSite": {
+    "message": "(không có trang)"
+  },
+  "popupSiteOrigin": {
+    "message": "Origin của trang"
+  },
+  "popupOriginList": {
+    "message": "Các origin trong tab này"
+  },
+  "popupUnknown": {
+    "message": "Không rõ"
+  },
+  "popupPairedDevice": {
+    "message": "Thiết bị đã cho phép"
+  },
+  "popupRevoke": {
+    "message": "Thu hồi"
+  },
+  "popupDeviceCount": {
+    "message": "($1/$2)"
+  },
+  "popupInPageWtWarning": {
+    "message": "WebTransport trong trang có thể hiện cảnh báo quyền mạng cục bộ của Firefox (\"wants to access other apps and services on this device\"). Hãy tick \"Remember my choice for this site\" trước khi bấm Allow, nếu không sẽ bị hỏi lại mỗi lần tải trang."
+  },
+  "statusReady": {
+    "message": "Sẵn sàng"
+  },
+  "statusFallback": {
+    "message": "Fallback: $1"
+  },
+  "statusOffline": {
+    "message": "Daemon ngoại tuyến"
+  },
+  "statusOfflineGuidance": {
+    "message": "Kiểm tra daemon đang chạy (systemctl status webhid-daemon), user của bạn nằm trong nhóm webhid, và udev rules đã cài."
+  },
+  "planeNameWS": {
+    "message": "WebSocket"
+  },
+  "planeNameWT": {
+    "message": "WebTransport"
+  },
+  "planeNameNM": {
+    "message": "Native Messaging"
+  },
+  "infoPopoverMore": {
+    "message": "Thông tin thêm"
+  },
+  "macPrivacyTitle": {
+    "message": "Input Monitoring trên macOS"
+  },
+  "macPrivacyDesc": {
+    "message": "Cho phép daemon đọc thiết bị HID: System Settings → Privacy & Security → Input Monitoring. Nếu link không mở đúng tab, hãy tìm thủ công và bật cho daemon."
+  },
+  "macPrivacyOpen": {
+    "message": "Mở Privacy Settings"
+  },
+  "settingsTitle": {
+    "message": "Cài đặt WebHID"
+  },
+  "settingsDaemonAsNmHost": {
+    "message": "Daemon as NM host"
+  },
+  "settingsDaemonAsNmHostDesc": {
+    "message": "Nói chuyện trực tiếp với daemon qua native messaging, bỏ qua forwarder và Unix socket. Yêu cầu manifest daemon_nm_host và daemon chạy dưới user của bạn (kèm udev rule). Độ trễ thấp hơn, không có fallback daemon root. Tự kết nối lại."
+  },
+  "settingsDataPlane": {
+    "message": "Kênh dữ liệu"
+  },
+  "settingsDataPlaneDesc": {
+    "message": "**WebTransport** (mặc định): tùy chọn nhanh nhất; chạy trong background worker nên trang mượt hơn.\n**WebTransport (in-page)**: kết nối trực tiếp trong trang; ổn ở tốc độ report thường, dùng nhiều CPU trang hơn. Dùng khi site chặn background worker (CSP) nhưng vẫn cho phép kết nối; các tùy chọn dùng worker sẽ fallback sang Native Messaging. Firefox hỏi quyền local-network (\"Allow\") một lần trước kết nối in-page đầu tiên; tick \"Remember my choice for this site\". Reload trang sau khi thay đổi.\n**WebSocket**: fallback khi không có WebTransport (Firefox cũ).\n**Native Messaging**: tùy chọn chậm nhất nhưng tương thích nhất; dùng khi chính sách bảo mật của site chặn các tùy chọn khác."
+  },
+  "settingsDataPlaneWs": {
+    "message": "WebSocket"
+  },
+  "settingsDataPlaneWt": {
+    "message": "WebTransport"
+  },
+  "settingsDataPlaneWtInpage": {
+    "message": "WebTransport (in-page)"
+  },
+  "settingsDataPlaneNm": {
+    "message": "Native Messaging"
+  },
+  "settingsDevicePickerMode": {
+    "message": "Chế độ chọn thiết bị"
+  },
+  "settingsDevicePickerModeDesc": {
+    "message": "**Modal**: overlay shadow DOM trên trang khi gọi requestDevice() (mặc định).\n**Page Action**: picker dạng popup ở thanh URL; người dùng bấm icon để mở. Chỉ Firefox, Chromium fallback về modal.\n**Window**: cửa sổ popup riêng."
+  },
+  "settingsDevicePickerModal": {
+    "message": "Modal (overlay)"
+  },
+  "settingsDevicePickerPageAction": {
+    "message": "Page Action (popup icon trên thanh URL)"
+  },
+  "settingsDevicePickerWindow": {
+    "message": "Cửa sổ (popup riêng)"
+  },
+  "settingsWorkerPolyfill": {
+    "message": "Worker Polyfill"
+  },
+  "settingsWorkerPolyfillDesc": {
+    "message": "Chèn đầy đủ WebHID API vào Worker scripts (new Worker()). requestDevice() chỉ khả dụng trên trang, đúng theo spec. Reload trang sau khi thay đổi."
+  },
+  "settingsAllowActivationless": {
+    "message": "Cho phép requestDevice() không cần user activation"
+  },
+  "settingsAllowActivationlessDesc": {
+    "message": "Bỏ qua yêu cầu user activation cho requestDevice() trên trang này. Sai lệch spec; workaround cho trang gọi từ handler bất đồng bộ. Bộ chọn vẫn yêu cầu người dùng chọn rõ ràng. Reload trang sau khi thay đổi."
+  },
+  "settingsLogLevel": {
+    "message": "Mức độ log"
+  },
+  "settingsLogLevelDesc": {
+    "message": "Độ chi tiết console: Error = chỉ lỗi, Warn = +cảnh báo, Info = +thông tin, Debug = +debug (bao gồm timing). Reload trang sau khi thay đổi."
+  },
+  "pickerTitle": {
+    "message": "Chọn thiết bị"
+  },
+  "pickerCancel": {
+    "message": "Hủy"
+  },
+  "pickerConnect": {
+    "message": "Kết nối"
+  },
+  "pickerNoDevices": {
+    "message": "Không tìm thấy thiết bị"
+  },
+  "pickerNoDaemon": {
+    "message": "Không thể kết nối tới daemon WebHID. Kiểm tra daemon đã được cài đặt và đang chạy, rồi thử lại."
+  },
+  "pickerParseFailed": {
+    "message": "Không thể phân tích report descriptor của thiết bị này. Kết nối và gửi report vẫn hoạt động bình thường."
+  },
+  "pickerNoMatch": {
+    "message": "Không có thiết bị khớp với bộ lọc"
+  },
+  "pickerNoPending": {
+    "message": "Không có yêu cầu thiết bị đang chờ"
+  },
+  "pickerLoading": {
+    "message": "Đang tải thiết bị..."
+  },
+  "pickerInterfaces": {
+    "message": "$1 giao diện"
+  },
+  "settingsWorkerSpawnMode": {
+    "message": "Chế độ tạo Worker"
+  },
+  "settingsWorkerSpawnModeDesc": {
+    "message": "**Shadow URL** (mặc định trên MV3): tạo data worker qua new Worker(location.href) với StreamFilter chặn request tự tham chiếu; tôn trọng cài đặt bảo mật của trang và không thay đổi gì trên trang. Thất bại nếu server từ chối hoặc require-trusted-types-for hạn chế.\n**Blob + CSP rewrite** (mặc định trên MV2): tạo worker từ URL blob:; nới lỏng directive worker-src và connect-src của trang. Hoạt động đầy đủ trên MV2; trên MV3 chỉ rewrite được CSP khai báo trong meta tag, nên CSP qua header vẫn chặn."
+  },
+  "settingsWorkerSpawnShadow": {
+    "message": "Shadow URL"
+  },
+  "settingsWorkerSpawnBlob": {
+    "message": "Blob + ghi đè CSP"
+  },
+  "segDataPlaneWs": {
+    "message": "WS"
+  },
+  "segDataPlaneWt": {
+    "message": "WT"
+  },
+  "segDataPlaneWtInpage": {
+    "message": "WTI"
+  },
+  "segDataPlaneNm": {
+    "message": "NM"
+  },
+  "segPickerModal": {
+    "message": "Modal"
+  },
+  "segPickerPageAction": {
+    "message": "Page Action"
+  },
+  "segPickerWindow": {
+    "message": "Window"
+  },
+  "segSpawnShadow": {
+    "message": "Shadow"
+  },
+  "segSpawnBlob": {
+    "message": "Blob"
+  },
+  "devicesTitle": {
+    "message": "Thiết bị đã ghép (mọi trang)"
+  },
+  "devicesNone": {
+    "message": "Chưa có thiết bị nào được ghép."
+  }
+}
