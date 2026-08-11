@@ -4,6 +4,6 @@ base_path: addon
 preserve_hierarchy: false
 files:
   - source: /_locales/en/messages.json
-    translation: /_locales/%two_letters_code%/messages.json
+    translation: /_locales/%locale_with_underscore%/messages.json
     update_option: update_as_unapproved
 commit_message: 'chore: sync translations from Crowdin'
