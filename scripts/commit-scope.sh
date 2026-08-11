@@ -19,6 +19,7 @@ if ! printf '%s' "$first" | grep -qE '^(feat|fix|perf|refactor|docs|ci|chore|sty
 fi
 
 declare -A AREAS=(
+  [addon/_locales/]=l10n
   [addon/]=addon
   [crates/webhid-daemon/]=daemon
   [crates/webhid/]=webhid
@@ -26,7 +27,7 @@ declare -A AREAS=(
   [crates/webhid-mock/]=mock
   [scripts/]=build
   [Makefile]=build
-  [crowdin.yml]=i18n
+  [crowdin.yml]=l10n
   [.pre-commit-config.yaml]=build
   [package.json]=build
   [package-lock.json]=build
@@ -37,7 +38,8 @@ unmatched=0
 while IFS= read -r path; do
   [ -n "$path" ] || continue
   matched=0
-  for prefix in "${!AREAS[@]}"; do
+  # Longest prefix first so addon/_locales/ beats addon/.
+  for prefix in $(printf '%s\n' "${!AREAS[@]}" | awk '{ print length, $0 }' | sort -k1,1nr | cut -d' ' -f2-); do
     case "$path" in
       "$prefix"*) COUNTS["${AREAS[$prefix]}"]=$((COUNTS["${AREAS[$prefix]}"] + 1)); matched=1; break ;;
     esac
