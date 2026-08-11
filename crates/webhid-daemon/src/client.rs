@@ -308,8 +308,8 @@ fn open_device(
     device_id: u32,
 ) -> Result<crate::device_mgr::DeviceHandle, NmResponse> {
     device_mgr
-        .get_file(device_id)
-        .map_err(|_| NmResponse::err(404))
+        .get_file_logged(device_id)
+        .ok_or_else(|| NmResponse::err(404))
 }
 
 async fn write_blocking(

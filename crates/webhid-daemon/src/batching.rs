@@ -166,21 +166,6 @@ fn drain_available<F>(
     }
 }
 
-/// Selects the coalesce window: short while the rate gate is open, long once
-/// the high-rate threshold has been crossed.
-fn coalesce_window_duration(
-    rate_count: u32,
-    high_rate_count: u32,
-    high_rate_coalesce: Duration,
-    coalesce: Duration,
-) -> Duration {
-    if rate_count >= high_rate_count {
-        high_rate_coalesce
-    } else {
-        coalesce
-    }
-}
-
 /// Waits out the coalesce window, folding further input reports into the
 /// batch. Returns false when the flush callback failed or the broadcast
 /// closed and the sender must stop.
@@ -280,7 +265,11 @@ pub async fn run_sender<F>(
                 &mut batch,
                 &mut frame_buf,
                 &mut flush,
-                coalesce_window_duration(rate_count, high_rate_count, high_rate_coalesce, coalesce),
+                if rate_count >= high_rate_count {
+                    high_rate_coalesce
+                } else {
+                    coalesce
+                },
             )
             .await
         {
@@ -322,33 +311,12 @@ pub fn make_feature_read_resp(req_id: u32, status: u8, data: &[u8]) -> Vec<u8> {
     buf
 }
 
-/// Resolves the open device file for `device_id`, logging on failure.
-fn get_device_file(
-    device_mgr: &Arc<DeviceManager>,
-    device_id: u32,
-) -> Option<crate::device_mgr::DeviceHandle> {
-    match device_mgr.get_file(device_id) {
-        Ok(f) => Some(f),
-        Err(e) => {
-            log::warn!("[sender] get_file '{device_id}': {e}");
-            None
-        }
-    }
-}
-
-fn send_resp_type(msg_type: u8) -> u8 {
+/// (response byte, report type) for a send request's message type.
+fn send_kind(msg_type: u8) -> (u8, ReportType) {
     if msg_type == MSG_SEND_REPORT {
-        RESP_SEND_REPORT
+        (RESP_SEND_REPORT, ReportType::Output)
     } else {
-        RESP_SEND_FEATURE_REPORT
-    }
-}
-
-fn send_report_type(msg_type: u8) -> ReportType {
-    if msg_type == MSG_SEND_REPORT {
-        ReportType::Output
-    } else {
-        ReportType::Feature
+        (RESP_SEND_FEATURE_REPORT, ReportType::Feature)
     }
 }
 
@@ -362,13 +330,12 @@ async fn handle_send_report_msg<F>(
 ) where
     F: FnMut(Vec<u8>),
 {
-    let resp_type = send_resp_type(msg_type);
+    let (resp_type, report_type) = send_kind(msg_type);
     if payload.is_empty() {
         emit(make_status_resp(resp_type, req_id, 1));
         return;
     }
     let report_id = payload[0];
-    let report_type = send_report_type(msg_type);
     if device_mgr.is_report_blocked(device_id, report_id, report_type) {
         emit(make_status_resp(resp_type, req_id, 2));
         return;
@@ -380,7 +347,7 @@ async fn handle_send_report_msg<F>(
     }
     let report_data: Arc<[u8]> = Arc::from(&payload[1..]);
 
-    let Some(dev_arc) = get_device_file(device_mgr, device_id) else {
+    let Some(dev_arc) = device_mgr.get_file_logged(device_id) else {
         emit(make_status_resp(resp_type, req_id, 1));
         return;
     };
@@ -426,7 +393,7 @@ async fn handle_receive_feature_report_msg<F>(
         return;
     }
 
-    let Some(dev_arc) = get_device_file(device_mgr, device_id) else {
+    let Some(dev_arc) = device_mgr.get_file_logged(device_id) else {
         emit(make_feature_read_resp(req_id, 1, &[]));
         return;
     };

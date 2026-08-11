@@ -79,6 +79,15 @@ fn report_type_from_byte(rt_byte: u8) -> ReportType {
     }
 }
 
+/// Report type -> direction byte (inverse of [`report_type_from_byte`]).
+fn report_type_to_byte(rt: ReportType) -> u8 {
+    match rt {
+        ReportType::Input => 0,
+        ReportType::Output => 1,
+        ReportType::Feature => 2,
+    }
+}
+
 fn associations_any_protected(
     rules: &[blocklist::BlocklistRule],
     vendor_id: u16,
@@ -339,11 +348,7 @@ impl DeviceReportBlocking {
         report_id: u8,
         report_type: ReportType,
     ) -> bool {
-        let rt_byte = match report_type {
-            ReportType::Input => 0,
-            ReportType::Output => 1,
-            ReportType::Feature => 2,
-        };
+        let rt_byte = report_type_to_byte(report_type);
         match self.map.get(&(report_id, rt_byte)) {
             Some(assoc) => associations_any_protected(
                 blocklist::blocklist_rules(),

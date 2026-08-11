@@ -367,6 +367,17 @@ impl DeviceManager {
         Ok(Arc::clone(&entry.device))
     }
 
+    /// Resolves the open device handle, logging on failure.
+    pub fn get_file_logged(&self, device_id: u32) -> Option<DeviceHandle> {
+        match self.get_file(device_id) {
+            Ok(f) => Some(f),
+            Err(e) => {
+                log::warn!("[device_mgr] get_file '{device_id:#x}': {e}");
+                None
+            }
+        }
+    }
+
     pub fn set_dataplane_mode(&self, device_id: u32, session_token: &str, mode: &str) {
         let map = self.devices.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(entry) = map.get(&device_id) {
