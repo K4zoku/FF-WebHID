@@ -7,6 +7,8 @@
   },
   "scripts": {
     "build": "npm run build:native && npm run build:addon",
+    "build-for-amo": "npm run fx-build",
+    "fx-build": "npm run build:addon",
     "build:addon": "node scripts/build-addon.mjs",
     "build:daemon": "cargo build --release -p webhid-daemon --manifest-path $npm_package_config_cargoManifest",
     "build:daemon:debug": "cargo build -p webhid-daemon --manifest-path $npm_package_config_cargoManifest",
