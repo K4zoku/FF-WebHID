@@ -1,85 +1,23 @@
 import { test, expect } from '../helpers/e2e.js'
-import { sleep, withTimeout } from '../helpers/test-utils.js'
-import { type Page } from '@playwright/test'
+import { sleep } from '../helpers/test-utils.js'
 import { grantDevicePermission, mockIdFor } from '../helpers/e2e-devices.js'
 import type { DeviceFilter } from '../helpers/e2e-types.js'
 import {
-  sendInput,
-  waitForOutputReport,
-  startWebhidMock,
-  type WebhidMockProcess
-} from '../helpers/e2e-process.js'
+  VENDOR,
+  VENDOR_CTX,
+  VENDOR_INPUT_SIZE,
+  VENDOR_OUTPUT_ID,
+  nextInputReport,
+  sendUntilReported,
+  type ReportEvent
+} from '../helpers/e2e-reports.js'
+import { sendInput, waitForOutputReport, startWebhidMock } from '../helpers/e2e-process.js'
 
-const VENDOR = mockIdFor('vendor')
 const GAMEPAD = mockIdFor('gamepad')
 
-const VENDOR_INPUT_SIZE = 64
-const VENDOR_OUTPUT_ID = 1
-const FEATURE_REPORT_ID = 0x02
 const GAMEPAD_INPUT_SIZE = 5
 
-const VENDOR_CTX = {
-  f: VENDOR,
-  size: VENDOR_INPUT_SIZE,
-  outputId: VENDOR_OUTPUT_ID,
-  featureId: FEATURE_REPORT_ID
-}
-
 type VendorCtx = typeof VENDOR_CTX
-
-interface ReportEvent {
-  reportId: number
-  data: number[]
-}
-
-async function sendUntilReported(
-  device: WebhidMockProcess,
-  page: Page,
-  flt: DeviceFilter,
-  reportId: number,
-  payload: number[],
-  marker: { index: number; value: number }
-): Promise<ReportEvent> {
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const reportPromise = nextInputReport(page, flt, marker)
-    await sleep(250)
-    sendInput(device, reportId, payload)
-    try {
-      return await withTimeout(reportPromise, 2000, 'report not received on attempt ' + attempt)
-    } catch (err) {
-      if (attempt === 4) throw err
-    }
-  }
-  throw new Error('unreachable')
-}
-
-function nextInputReport(
-  page: Page,
-  flt: DeviceFilter,
-  marker?: { index: number; value: number }
-): Promise<ReportEvent> {
-  return page.evaluate(
-    ({ f, link }: { f: DeviceFilter; link: { index: number; value: number } | undefined }) => {
-      const { promise, resolve, reject } = Promise.withResolvers<ReportEvent>()
-      void navigator.hid.getDevices().then((ds) => {
-        const d = ds.find((x) => x.vendorId === f.vendorId && x.productId === f.productId)
-        if (!d) {
-          reject(new Error(`device not paired: ${JSON.stringify(f)}`))
-          return
-        }
-        d.oninputreport = (event) => {
-          const r: ReportEvent = {
-            reportId: event.reportId,
-            data: Array.from(new Uint8Array(event.data.buffer))
-          }
-          if (!link || r.data[link.index] === link.value) resolve(r)
-        }
-      })
-      return promise
-    },
-    { f: flt, link: marker }
-  )
-}
 
 test.describe.serial('WebHID E2E', () => {
   test('navigator.hid is polyfilled', async ({ sharedPage }) => {
