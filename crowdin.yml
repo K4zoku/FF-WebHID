@@ -1,0 +1,9 @@
+project_id: 919347
+api_token_env: CROWDIN_PERSONAL_TOKEN
+base_path: addon
+preserve_hierarchy: false
+files:
+  - source: /_locales/en/messages.json
+    translation: /_locales/%locale%/messages.json
+    update_option: update_as_unapproved
+commit_message: 'chore: sync translations from Crowdin'
