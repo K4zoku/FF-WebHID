@@ -433,10 +433,40 @@ jobs:
             rpms-x86_64/*.rpm
             rpms-aarch64/*.rpm
 
+      - name: Build release notes from changelog
+        id: notes
+        shell: bash
+        run: |
+          python3 - "${{ steps.variables.outputs.VERSION }}" <<'EOF' > notes.md
+          import re, sys
+          version = sys.argv[1]
+          lines = open('CHANGELOG.md', encoding='utf-8').read().splitlines()
+          out = []
+          in_ver = False
+          in_sec = False
+          for ln in lines:
+              if re.match(r'^## \[' + re.escape(version) + r'\]', ln):
+                  in_ver = True
+                  continue
+              if in_ver and re.match(r'^## ', ln):
+                  break
+              if in_ver and ln.startswith('### '):
+                  in_sec = ln[4:].strip() in ('Features', 'Bug Fixes')
+                  if in_sec:
+                      out.append('')
+                      out.append(ln)
+                  continue
+              if in_ver and in_sec and ln.strip():
+                  out.append(ln)
+          print('\n'.join(out).strip())
+          EOF
+          cat notes.md
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@c12583777ecdfd3be55c69cf75464299dc01057e # v3
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          body_path: notes.md
           files: |
             dist/*.xpi
             webhid-*.zip
