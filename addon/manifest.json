@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "WebHID",
-  "version": "3.0.1",
+  "version": "3.1.0",
   "description": "WebHID API implementation for Firefox",
   "icons": {
     "48": "icons/icon.svg"
@@ -15,7 +15,9 @@
     "notifications",
     "theme"
   ],
-  "host_permissions": ["<all_urls>"],
+  "host_permissions": [
+    "<all_urls>"
+  ],
   "background": {
     "scripts": [
       "js/utils/bootstrap.js",
@@ -42,7 +44,10 @@
   "page_action": {
     "default_popup": "js/internal/pages/popup/index.html",
     "default_icon": "icons/gamepad.svg",
-    "show_matches": ["http://*/*", "https://*/*"]
+    "show_matches": [
+      "http://*/*",
+      "https://*/*"
+    ]
   },
   "action": {
     "default_icon": "icons/icon.svg",
@@ -54,7 +59,9 @@
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
+      "matches": [
+        "<all_urls>"
+      ],
       "js": [
         "js/utils/bootstrap.js",
         "js/utils/i18n.js",
@@ -73,7 +80,9 @@
       "all_frames": true
     },
     {
-      "matches": ["<all_urls>"],
+      "matches": [
+        "<all_urls>"
+      ],
       "js": [
         "js/utils/bootstrap.js",
         "js/utils/i18n.js",
@@ -96,7 +105,9 @@
     "gecko": {
       "id": "webhid@k4zoku.dev",
       "data_collection_permissions": {
-        "required": ["websiteContent"],
+        "required": [
+          "websiteContent"
+        ],
         "optional": []
       }
     }

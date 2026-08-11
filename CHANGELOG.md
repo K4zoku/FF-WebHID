@@ -2,6 +2,66 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [3.1.0](https://github.com/K4zoku/FF-WebHID/compare/v3.0.1...v3.1.0) (2026-08-11)
+
+### Features
+
+* add daemon dump subcommand for device diagnostics ([ff2e4fc](https://github.com/K4zoku/FF-WebHID/commit/ff2e4fc7263c1e94091e9ec91b69378fabfb2906))
+* per frame setting ([f026d18](https://github.com/K4zoku/FF-WebHID/commit/f026d18d57e16fa6d3b6d2fe93f960fe58a46311))
+* WT reconnect logic ([e052358](https://github.com/K4zoku/FF-WebHID/commit/e0523586a59cceeba46b77a057aea220992eb1d5))
+
+### Bug Fixes
+
+* active unarm on shadow url fail ([34b7512](https://github.com/K4zoku/FF-WebHID/commit/34b751233a7b807da15cf1ce23193df55e06ee11))
+* cheaper way to init worker polyfill ([ab9f340](https://github.com/K4zoku/FF-WebHID/commit/ab9f340b2308e60254c728fbb7baf7b6e36ed297))
+* dead reader cleanup (hotplug also cleans up, but only on removal ([9ed85d8](https://github.com/K4zoku/FF-WebHID/commit/9ed85d820887313cc9a5737d13b3f23437b1aa30))
+* don't hide devices on descriptor parse failure ([c1adccf](https://github.com/K4zoku/FF-WebHID/commit/c1adccf22b77d9bdfd8e5b117024f3a816c28484))
+* error on feature truncation, serial frame handling, misc cleanup ([9a38b00](https://github.com/K4zoku/FF-WebHID/commit/9a38b00e6c0ff414fc5e4287dec44749410678e1))
+* iframe permission policy bypass ([b5e0113](https://github.com/K4zoku/FF-WebHID/commit/b5e0113ed0259ac61a906920690113808fd1d10a))
+* keep every frame's NM data port alive and fall back to NM on worker error ([3e20591](https://github.com/K4zoku/FF-WebHID/commit/3e20591222d886029c7d03029a1978f231918d57))
+* keep SRI fixture byte-identical, out of prettier ([4d7d9cd](https://github.com/K4zoku/FF-WebHID/commit/4d7d9cd20991b762dd151154b163a893078ab77d))
+* missing mv2 background script ([51dfd03](https://github.com/K4zoku/FF-WebHID/commit/51dfd034011f5f72a75aafc94c656a5ed8db20c9))
+* patched worker sync spawn ([745ddc2](https://github.com/K4zoku/FF-WebHID/commit/745ddc28dd8d0794ddabfe24183f144a260d3606))
+* reject when max report size is zero ([85414c2](https://github.com/K4zoku/FF-WebHID/commit/85414c2d973935dba3d71acb68c475c9dd4e04f5))
+* shadow url now passthrough for page self worker, small race window ([2c7d8a8](https://github.com/K4zoku/FF-WebHID/commit/2c7d8a8bc7035b569a07d7de2812bfe5d0c7ef35))
+* terminate worker bundles with a semicolon before injection ([1e15423](https://github.com/K4zoku/FF-WebHID/commit/1e1542395ad11d97e377c1eee4a9c35e229cf69c))
+* worker polyfill & init on demand ([d36ca82](https://github.com/K4zoku/FF-WebHID/commit/d36ca825025600b19104231dfa858f3fac77bee5))
+* worker polyfill race window ([4cad0e6](https://github.com/K4zoku/FF-WebHID/commit/4cad0e6acd50bae5550b1a576069c76ac89296ba))
+
+### Code Refactoring
+
+* cleanup dead code ([be4ec72](https://github.com/K4zoku/FF-WebHID/commit/be4ec72604cd16a18bb936c4dbef4e753a179900))
+* consolidate daemon report precheck and flush ([fff00e3](https://github.com/K4zoku/FF-WebHID/commit/fff00e3a22aa691c36901ed7c198d99d0dde2e1d))
+* dedupe addon settings, tab fanout and TLV decode ([236b8e1](https://github.com/K4zoku/FF-WebHID/commit/236b8e1bafb8a7012f8de83fade3b41e810ea55f))
+* dedupe daemon report helpers ([44e3376](https://github.com/K4zoku/FF-WebHID/commit/44e337647a00391e52a3d0117677e2233042da9a))
+* dedupe unit-system mapping into webhid ([9e03c49](https://github.com/K4zoku/FF-WebHID/commit/9e03c49eaaba7e1e752c5996231e15bcd37cde02))
+* extract tab auth guard in background handlers ([038efc9](https://github.com/K4zoku/FF-WebHID/commit/038efc9b15768e09e45cf889da6d4c44938e799d))
+* merge duplicate write paths in daemon ([b751e44](https://github.com/K4zoku/FF-WebHID/commit/b751e443ff6ee1a821a9ea0e476b264dbc1fc695))
+* remove dead code handler ([4740299](https://github.com/K4zoku/FF-WebHID/commit/4740299c80aaa682ea697fff533c4757efe935a9))
+* share security consts and forwarder connect retry ([751153c](https://github.com/K4zoku/FF-WebHID/commit/751153c5fbee1608900f0f25e0ad40ffe26dec7c))
+* share settings page radio wiring ([1ebdc78](https://github.com/K4zoku/FF-WebHID/commit/1ebdc78ac5fa27f5974637d546e3edabe0582376))
+* share ws/wt wire format between worker and in-page bundles ([aa40ab3](https://github.com/K4zoku/FF-WebHID/commit/aa40ab3bf21bb3ccf15e9ea2b5005803ced4276a))
+* unify mock event-loop enums and numeric parsing ([a04c4c4](https://github.com/K4zoku/FF-WebHID/commit/a04c4c430135cf8a47e54abc92085b2fdd616ddb))
+
+### Documentation
+
+* condense AGENTS.md ([4f6500b](https://github.com/K4zoku/FF-WebHID/commit/4f6500bd590cccd4c35283a7e6792f4bce8eeae2))
+* correct WS security claim ([716bb3f](https://github.com/K4zoku/FF-WebHID/commit/716bb3ffcabb7187a95c30d12772ea0d8b1066f9))
+* drop Chromium testbed mention (explored, not worth porting) ([a0b54e4](https://github.com/K4zoku/FF-WebHID/commit/a0b54e4f5ca4d1576664679b87d2a2d9bab3e505))
+* fix stale AGENTS.md claims (send pre-check, e2e counts, WT reconnect) ([6901353](https://github.com/K4zoku/FF-WebHID/commit/6901353ffa156280e8c7295544fc34e54de41eb3))
+* pin benchmark chunking protocol shapes ([afa5a0e](https://github.com/K4zoku/FF-WebHID/commit/afa5a0e1c9139712b3138e18a9cceaabbd63829f))
+* update stale references ([6e34c97](https://github.com/K4zoku/FF-WebHID/commit/6e34c970a1c303f390250d26e1e0db43e83a2766))
+
+### CI/CD
+
+* audit prod deps only (omit dev) ([703c3af](https://github.com/K4zoku/FF-WebHID/commit/703c3affd422d069c2052c30e9e31122ba62e72f))
+* upload playwright results on failure ([b067e32](https://github.com/K4zoku/FF-WebHID/commit/b067e32ec0d06637dc048182eaed55a667bcd29d))
+
+### Chores
+
+* add prettier xml plugin for wxs, ignore rs and svg ([901d09a](https://github.com/K4zoku/FF-WebHID/commit/901d09a423c741f1d841d1d1f25c1e29bbeea116))
+* remove dead module exports ([293471c](https://github.com/K4zoku/FF-WebHID/commit/293471c880d9b70f41659f1c5a763410f580e54f))
+* remove unused subtle dependency ([9142c8f](https://github.com/K4zoku/FF-WebHID/commit/9142c8ff6ca1bb32009eefec8ebc4ceece0bd6c3))
 ## [3.0.1](https://github.com/K4zoku/FF-WebHID/compare/v3.0.0...v3.0.1) (2026-08-08)
 
 ### Features
