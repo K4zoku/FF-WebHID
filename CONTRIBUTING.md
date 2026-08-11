@@ -1,5 +1,38 @@
 # Contributing to FF-WebHID
 
+## Contributing
+
+### Ways to contribute
+
+- **Report bugs.** Open an issue with the template. Include OS, Firefox version, addon and daemon versions, and daemon logs (Windows: `%LOCALAPPDATA%\FF-WebHID\webhid-*.log`; Linux/macOS: the daemon's stderr). For device-specific issues, name the device.
+- **Test with real hardware.** The automated suites cover mock devices only; real-device behavior needs human testers. Install a dev build, reproduce the issue, and attach the logs above.
+- **Translate.** All translations go through [Crowdin](https://crowdin.com/project/ff-webhid) and land in the repo as PRs from the Crowdin integration. Do not edit `addon/_locales/*/messages.json` directly except to fix an existing translation.
+- **Write code.** See the development setup below.
+
+### Development setup
+
+Prerequisites: Rust (stable), Node.js 20+, Firefox (needed for the Playwright suites).
+
+```sh
+npm ci
+pre-commit install      # conventional-commit hook, runs on every git commit
+cargo build --manifest-path crates/Cargo.toml
+```
+
+The full build/run/test guide lives in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
+
+### Commit conventions
+
+Commits must follow [Conventional Commits](https://www.conventionalcommits.org/), enforced locally by the pre-commit hook (`compilerla/conventional-pre-commit`). Allowed types: `feat`, `fix`, `perf`, `refactor`, `docs`, `ci`, `chore`, `style`, `test`, `build`, `revert`. The changelog is generated from commit subjects; types not listed in `.versionrc.json` are omitted from it.
+
+### Pull requests
+
+- Branch from `main`; keep each commit focused on one change.
+- CI (lint, unit tests, Playwright suites) must be green before merging.
+- Do not commit directly to `_locales` translation files; translation PRs come from the Crowdin integration.
+
+---
+
 ## Design principles
 
 These are the design principles this project has converged on. Follow them by default; deviating requires a good reason, not just convenience.
