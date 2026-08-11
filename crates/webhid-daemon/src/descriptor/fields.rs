@@ -15,18 +15,6 @@ fn nibble_as_i8(n: u8) -> i8 {
     if n < 8 { n as i8 } else { (n as i8) - 16 }
 }
 
-fn unit_system_from_nibble(nibble: u8) -> &'static str {
-    match nibble {
-        0 => "none",
-        1 => "si-linear",
-        2 => "si-rotation",
-        3 => "english-linear",
-        4 => "english-rotation",
-        15 => "vendor-defined",
-        _ => "reserved",
-    }
-}
-
 fn decode_unit_safe(unit: Option<&hidreport::Unit>) -> (String, i32, i32, i32, i32, i32, i32) {
     if let Some(u) = unit {
         let raw: u32 = u32::from(*u);
@@ -34,7 +22,7 @@ fn decode_unit_safe(unit: Option<&hidreport::Unit>) -> (String, i32, i32, i32, i
         let nibble_signed =
             |i: u32| -> i32 { nibble_as_i8(((raw >> (i * 4)) & 0x0F) as u8) as i32 };
         (
-            unit_system_from_nibble(sys_nibble).to_string(),
+            webhid::collections_tlv::unit_system_from_nibble(sys_nibble).to_string(),
             nibble_signed(1),
             nibble_signed(2),
             nibble_signed(3),
@@ -281,44 +269,6 @@ mod tests {
             usage_id: 0x0001.into(),
         };
         assert_eq!(pack_usage(&u), 0xF1D0_0001);
-    }
-
-    #[test]
-    fn test_unit_system_from_nibble_none() {
-        assert_eq!(unit_system_from_nibble(0), "none");
-    }
-
-    #[test]
-    fn test_unit_system_from_nibble_si_linear() {
-        assert_eq!(unit_system_from_nibble(1), "si-linear");
-    }
-
-    #[test]
-    fn test_unit_system_from_nibble_si_rotation() {
-        assert_eq!(unit_system_from_nibble(2), "si-rotation");
-    }
-
-    #[test]
-    fn test_unit_system_from_nibble_english_linear() {
-        assert_eq!(unit_system_from_nibble(3), "english-linear");
-    }
-
-    #[test]
-    fn test_unit_system_from_nibble_english_rotation() {
-        assert_eq!(unit_system_from_nibble(4), "english-rotation");
-    }
-
-    #[test]
-    fn test_unit_system_from_nibble_vendor_defined() {
-        assert_eq!(unit_system_from_nibble(15), "vendor-defined");
-    }
-
-    #[test]
-    fn test_unit_system_from_nibble_reserved() {
-        assert_eq!(unit_system_from_nibble(5), "reserved");
-        assert_eq!(unit_system_from_nibble(7), "reserved");
-        assert_eq!(unit_system_from_nibble(8), "reserved");
-        assert_eq!(unit_system_from_nibble(14), "reserved");
     }
 
     #[test]

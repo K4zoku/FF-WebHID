@@ -9,7 +9,10 @@ const TAG_OUTPUT_REPORT: u8 = 0x03;
 const TAG_FEATURE_REPORT: u8 = 0x04;
 const TAG_FIELD: u8 = 0x05;
 
-const UNIT_SYSTEMS: &[&str] = &[
+/// Canonical unit-system vocabulary: the wire tag is the index into this
+/// table. Kept in sync with the JS mirror in `addon/js/utils/descriptor-tlv.js`
+/// (parity-tested in the JS test suite).
+pub const UNIT_SYSTEMS: &[&str] = &[
     "none",
     "si-linear",
     "si-rotation",
@@ -18,6 +21,20 @@ const UNIT_SYSTEMS: &[&str] = &[
     "vendor-defined",
     "reserved",
 ];
+
+/// HID unit nibble -> unit-system name, via the canonical table.
+pub fn unit_system_from_nibble(nibble: u8) -> &'static str {
+    let tag = match nibble {
+        0 => 0,
+        1 => 1,
+        2 => 2,
+        3 => 3,
+        4 => 4,
+        15 => 5,
+        _ => 6,
+    };
+    UNIT_SYSTEMS[tag]
+}
 
 fn unit_system_to_tag(s: &str) -> u8 {
     for (i, name) in UNIT_SYSTEMS.iter().enumerate() {
@@ -510,6 +527,45 @@ pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<Collection>, D
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_unit_system_from_nibble_none() {
+        assert_eq!(unit_system_from_nibble(0), "none");
+    }
+
+    #[test]
+    fn test_unit_system_from_nibble_si_linear() {
+        assert_eq!(unit_system_from_nibble(1), "si-linear");
+    }
+
+    #[test]
+    fn test_unit_system_from_nibble_si_rotation() {
+        assert_eq!(unit_system_from_nibble(2), "si-rotation");
+    }
+
+    #[test]
+    fn test_unit_system_from_nibble_english_linear() {
+        assert_eq!(unit_system_from_nibble(3), "english-linear");
+    }
+
+    #[test]
+    fn test_unit_system_from_nibble_english_rotation() {
+        assert_eq!(unit_system_from_nibble(4), "english-rotation");
+    }
+
+    #[test]
+    fn test_unit_system_from_nibble_vendor_defined() {
+        assert_eq!(unit_system_from_nibble(15), "vendor-defined");
+    }
+
+    #[test]
+    fn test_unit_system_from_nibble_reserved() {
+        assert_eq!(unit_system_from_nibble(5), "reserved");
+        assert_eq!(unit_system_from_nibble(7), "reserved");
+        assert_eq!(unit_system_from_nibble(8), "reserved");
+        assert_eq!(unit_system_from_nibble(14), "reserved");
+    }
+
 
     fn make_test_collection() -> Vec<Collection> {
         vec![Collection {
