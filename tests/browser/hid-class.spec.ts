@@ -1,11 +1,9 @@
 import { test, expect } from '../helpers/browser.js'
+import { navigateToPolicyCheck } from '../helpers/browser-utils.js'
 
 test.describe('HID class and navigator.hid', () => {
   test.beforeEach(async ({ sharedPage, pageUrl }) => {
-    await sharedPage.goto(pageUrl('/policy-check'), {
-      waitUntil: 'domcontentloaded',
-      timeout: 15000
-    })
+    await navigateToPolicyCheck(sharedPage, pageUrl)
   })
 
   test('navigator.hid exists in secure context', async ({ sharedPage }) => {

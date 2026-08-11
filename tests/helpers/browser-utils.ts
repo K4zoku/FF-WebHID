@@ -1,5 +1,15 @@
 import type { Page } from '@playwright/test'
 
+export async function navigateToPolicyCheck(
+  sharedPage: Page,
+  pageUrl: (path: string) => string
+): Promise<void> {
+  await sharedPage.goto(pageUrl('/policy-check'), {
+    waitUntil: 'domcontentloaded',
+    timeout: 15000
+  })
+}
+
 export interface PermResult {
   isTop?: boolean
   isCrossOrigin?: boolean

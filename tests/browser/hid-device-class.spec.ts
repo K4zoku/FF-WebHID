@@ -1,11 +1,9 @@
 import { test, expect } from '../helpers/browser.js'
+import { navigateToPolicyCheck } from '../helpers/browser-utils.js'
 
 test.describe('HIDDevice class', () => {
   test.beforeEach(async ({ sharedPage, pageUrl }) => {
-    await sharedPage.goto(pageUrl('/policy-check'), {
-      waitUntil: 'domcontentloaded',
-      timeout: 15000
-    })
+    await navigateToPolicyCheck(sharedPage, pageUrl)
   })
 
   test('HIDDevice constructor throws TypeError (Illegal constructor)', async ({ sharedPage }) => {

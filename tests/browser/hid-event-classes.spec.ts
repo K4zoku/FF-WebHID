@@ -1,11 +1,9 @@
 import { test, expect } from '../helpers/browser.js'
+import { navigateToPolicyCheck } from '../helpers/browser-utils.js'
 
 test.describe('HIDConnectionEvent', () => {
   test.beforeEach(async ({ sharedPage, pageUrl }) => {
-    await sharedPage.goto(pageUrl('/policy-check'), {
-      waitUntil: 'domcontentloaded',
-      timeout: 15000
-    })
+    await navigateToPolicyCheck(sharedPage, pageUrl)
   })
 
   test('new HIDConnectionEvent("connect", { device }) creates an instance', async ({
@@ -47,10 +45,7 @@ test.describe('HIDConnectionEvent', () => {
 
 test.describe('HIDInputReportEvent', () => {
   test.beforeEach(async ({ sharedPage, pageUrl }) => {
-    await sharedPage.goto(pageUrl('/policy-check'), {
-      waitUntil: 'domcontentloaded',
-      timeout: 15000
-    })
+    await navigateToPolicyCheck(sharedPage, pageUrl)
   })
 
   test('new HIDInputReportEvent("inputreport", { device, reportId, data }) creates an instance', async ({
