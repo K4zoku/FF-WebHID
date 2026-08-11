@@ -56,6 +56,8 @@ Single `dataPlane` setting (`ws` / `wt` / `nm`). Control plane (handshake, open/
 - The `open` metric (38-58ms) is NOT a daemon regression: `open()` itself ~15ms (worker spawn + NM control round trip + collections) plus a one-time ~25ms first-WS-message penalty in Firefox's WS IPC (later sends ~0.7ms round trip). Older docs numbers (20-23ms) measured a phase without the penalty.
 - Cold-start methodology: local sayodevice.com clone removes network variance; Playwright-driven removes click timing; Chromium grants via policy.
 - Image-pipeline benchmark (`tests/benchmark/`, see [docs/BENCHMARK.md](docs/BENCHMARK.md)): bursts of ~330 consecutive reports drop on the page side (ws 30-36, nm 7-37 mid-session); the FIRST burst after cold start or a data-plane switch is the lossiest. Benchmark invalidates dropped runs, retries, and runs an unmeasured warm-up burst per cold-start spec. Normal-rate e2e is drop-free; do not extrapolate burst loss to normal use.
+- Benchmark chunking protocols differ per harness on purpose: the image pipeline chunks a 62-byte payload + 2-byte sequence (tests/pages/benchmark-image.html + benchmark-utils PAYLOAD), the loss harness uses a 63-byte payload + 3-byte sequence (loss-utils). The page-side decoders match their own harness; keep them in sync pairwise, not across harnesses.
+
 - Hung-ack fix (2026-08): the data worker never settled in-flight send promises when WS dropped. `onClosed` rejects and clears `pending`; the page gets a fast `'ws closed'` rejection. Benchmark pitfalls: prime with an awaited 128-report burst, time-boxed per send (fire-and-forget inflates ws total ~2s; a single global gate falsely fails slow primes).
 
 ### Test harness traps
