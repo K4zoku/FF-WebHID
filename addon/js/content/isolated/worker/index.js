@@ -5,12 +5,15 @@ const createSettingsStore = webhid.import('createSettingsStore')
 const GLOBAL_DEFAULTS = webhid.import('GLOBAL_DEFAULTS')
 const createWsTransport = webhid.import('createWsTransport')
 const createWtTransport = webhid.import('createWtTransport')
+const {
+  MSG_SEND_REPORT,
+  MSG_SEND_FEATURE_REPORT,
+  MSG_RECEIVE_FEATURE_REPORT,
+  MSG_INPUT_BATCH,
+  parseInputReports,
+  handleControlResponse: handleControlResponseShared
+} = webhid.import('wireFormat')
 logger.initLogger('worker')
-const MSG_SEND_REPORT = 0x01
-const MSG_SEND_FEATURE_REPORT = 0x02
-const MSG_RECEIVE_FEATURE_REPORT = 0x03
-const RESP_RECEIVE_FEATURE_REPORT = 0x83
-const MSG_INPUT_BATCH = 0x00
 /** @type {import("./types.js").SettingsStore} */
 const settings = createSettingsStore(GLOBAL_DEFAULTS)
 logger.bindSettings(settings)
@@ -115,43 +118,33 @@ function handleDataPortMessage(msg) {
  * @returns {void}
  */
 function pushInputBatch(batch, offset = 0) {
-  let count = 0
-  const reports = []
+  const reports = parseInputReports(batch, offset)
+  if (reports.length === 0) return
   const transfers = []
-  while (offset + 1 < batch.length) {
-    const len = batch[offset] | (batch[offset + 1] << 8)
-    offset += 2
-    if (len === 0 || offset + len > batch.length) break
-    const reportId = batch[offset]
-    const payloadLen = len - 1
-    if (payloadLen > 0) {
-      const buffer = new ArrayBuffer(payloadLen)
-      const view = new Uint8Array(buffer)
-      view.set(batch.subarray(offset + 1, offset + len))
-      if (logger.level >= 3) {
-        let hex = ''
+  for (const r of reports) {
+    if (r.data) transfers.push(r.data)
+  }
+  if (logger.level >= 3) {
+    for (const r of reports) {
+      const view = r.data ? new Uint8Array(r.data) : null
+      let hex = ''
+      if (view) {
         for (let i = 0; i < Math.min(8, view.length); i++)
           hex += view[i].toString(16).padStart(2, '0') + ' '
-        logger.debug('inputReport reportId=' + reportId + ' len=' + payloadLen + ' first8=' + hex)
       }
-      reports.push({ reportId, data: buffer })
-      transfers.push(buffer)
-    } else {
-      reports.push({ reportId, data: null })
+      logger.debug(
+        'inputReport reportId=' + r.reportId + ' len=' + (view ? view.length : 0) + ' first8=' + hex
+      )
     }
-    offset += len
-    count++
   }
-  if (count > 0) {
-    if (dataPort) {
-      try {
-        dataPort.postMessage({ type: 'inputReportBatch', reports }, transfers)
-      } catch (e) {
-        logger.warn('inputReportBatch postMessage failed', e)
-      }
+  if (dataPort) {
+    try {
+      dataPort.postMessage({ type: 'inputReportBatch', reports }, transfers)
+    } catch (e) {
+      logger.warn('inputReportBatch postMessage failed', e)
     }
-    logger.debug('forwarded ' + count + ' reports via data port')
   }
+  logger.debug('forwarded ' + reports.length + ' reports via data port')
 }
 
 /**
@@ -259,24 +252,5 @@ function replyData(msg, transfer) {
  * @returns {void}
  */
 function handleControlResponse(batch) {
-  if (batch.length < 6) return
-  const respType = batch[0]
-  const dataView = new DataView(batch.buffer, batch.byteOffset, batch.byteLength)
-  const reqId = dataView.getUint32(1, true)
-  const status = batch[5]
-  const entry = pending.get(reqId)
-  if (!entry) return
-  pending.delete(reqId)
-  if (respType === RESP_RECEIVE_FEATURE_REPORT) {
-    if (status === 2) return entry.reject({ blocked: true })
-    if (status !== 0) return entry.reject(new Error('feature read failed'))
-    if (batch.length < 8) return entry.reject(new Error('short feature resp'))
-    const len = dataView.getUint16(6, true)
-    const out = new Uint8Array(len)
-    if (len > 0 && batch.length >= 8 + len) out.set(batch.subarray(8, 8 + len))
-    return entry.resolve(out)
-  }
-  if (status === 0) entry.resolve()
-  else if (status === 2) entry.reject({ blocked: true })
-  else entry.reject(new Error('write failed status=' + status))
+  handleControlResponseShared(batch, pending)
 }

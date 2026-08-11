@@ -42,10 +42,14 @@
   /** @type {Map<string, object>} */
   const inPagePlanes = new Map()
 
-  const MSG_SEND_REPORT = 0x01
-  const MSG_SEND_FEATURE_REPORT = 0x02
-  const MSG_RECEIVE_FEATURE_REPORT = 0x03
-  const RESP_RECEIVE_FEATURE_REPORT = 0x83
+  const {
+    MSG_SEND_REPORT,
+    MSG_SEND_FEATURE_REPORT,
+    MSG_RECEIVE_FEATURE_REPORT,
+    MSG_INPUT_BATCH,
+    parseInputReports,
+    handleControlResponse: handleControlResponseShared
+  } = webhid.import('wireFormat')
   /** @type {Map<number, {deviceId: string, resolve: Function, reject: Function}>} */
   const inPagePending = new Map()
 
@@ -88,7 +92,7 @@
       },
       onBinary: (batch) => {
         if (batch.length > 0 && batch[0] >= 0x81) return handleInPageControlResponse(batch)
-        const offset = batch.length > 0 && batch[0] === 0x00 ? 1 : 0
+        const offset = batch.length > 0 && batch[0] === MSG_INPUT_BATCH ? 1 : 0
         pushInPageBatch(deviceId, batch, offset)
       }
     })
@@ -103,20 +107,8 @@
    * @returns {void}
    */
   function pushInPageBatch(deviceId, batch, offset) {
-    while (offset + 1 < batch.length) {
-      const len = batch[offset] | (batch[offset + 1] << 8)
-      offset += 2
-      if (len === 0 || offset + len > batch.length) break
-      const reportId = batch[offset]
-      const payloadLen = len - 1
-      if (payloadLen > 0) {
-        const buffer = new ArrayBuffer(payloadLen)
-        new Uint8Array(buffer).set(batch.subarray(offset + 1, offset + len))
-        dispatchDeviceEvent({ eventType: 'input_report', deviceId, reportId, data: buffer })
-      } else {
-        dispatchDeviceEvent({ eventType: 'input_report', deviceId, reportId, data: null })
-      }
-      offset += len
+    for (const r of parseInputReports(batch, offset)) {
+      dispatchDeviceEvent({ eventType: 'input_report', deviceId, reportId: r.reportId, data: r.data })
     }
   }
 
@@ -156,26 +148,7 @@
    * @returns {void}
    */
   function handleInPageControlResponse(batch) {
-    if (batch.length < 6) return
-    const respType = batch[0]
-    const dataView = new DataView(batch.buffer, batch.byteOffset, batch.byteLength)
-    const reqId = dataView.getUint32(1, true)
-    const status = batch[5]
-    const entry = inPagePending.get(reqId)
-    if (!entry) return
-    inPagePending.delete(reqId)
-    if (respType === RESP_RECEIVE_FEATURE_REPORT) {
-      if (status === 2) return entry.reject({ blocked: true })
-      if (status !== 0) return entry.reject(new Error('feature read failed'))
-      if (batch.length < 8) return entry.reject(new Error('short feature resp'))
-      const len = dataView.getUint16(6, true)
-      const out = new Uint8Array(len)
-      if (len > 0 && batch.length >= 8 + len) out.set(batch.subarray(8, 8 + len))
-      return entry.resolve(out)
-    }
-    if (status === 0) entry.resolve()
-    else if (status === 2) entry.reject({ blocked: true })
-    else entry.reject(new Error('write failed status=' + status))
+    handleControlResponseShared(batch, inPagePending)
   }
 
   /**

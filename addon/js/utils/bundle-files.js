@@ -13,6 +13,7 @@
       'js/utils/settings.js',
       'js/utils/websocket.js',
       'js/utils/webtransport.js',
+      'js/utils/wire-format.js',
       'js/content/isolated/worker/index.js'
     ],
     workerPolyfill: [
@@ -22,6 +23,7 @@
       'js/utils/settings.js',
       'js/utils/device.js',
       'js/utils/webtransport.js',
+      'js/utils/wire-format.js',
       'js/content/main/index.js'
     ],
     mv2MainWorld: [
@@ -34,6 +36,7 @@
       'js/utils/descriptor-tlv.js',
       'js/utils/settings.js',
       'js/utils/webtransport.js',
+      'js/utils/wire-format.js',
       'js/content/main/index.js'
     ]
   }
