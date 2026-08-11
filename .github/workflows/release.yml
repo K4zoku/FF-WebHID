@@ -480,6 +480,18 @@ jobs:
       - name: Create source archive for AMO
         run: git archive --format=zip -o source.zip HEAD
 
+      - name: Build AMO release notes
+        id: amo-notes
+        shell: bash
+        run: |
+          python3 - <<'EOF' >> "$GITHUB_OUTPUT"
+          import json, re
+          notes = open('notes.md', encoding='utf-8').read().strip()
+          notes = re.sub(r'\s*\(\[[0-9a-f]{7}\]\([^)]*\)\)$', '', notes, flags=re.M)
+          notes = re.sub(r'^### (.+)$', r'**\1**', notes, flags=re.M)
+          print('notes=' + json.dumps({'en-US': notes}))
+          EOF
+
       - name: Upload to AMO
         uses: kewisch/action-web-ext@84a13bb9e1b6108c43788ba091c41ca1dba6ad45 # v2
         continue-on-error: true
@@ -488,6 +500,7 @@ jobs:
           source: dist/webhid-addon-v${{ steps.variables.outputs.VERSION }}.xpi
           channel: listed
           sourceCode: source.zip
+          releaseNotes: ${{ steps.amo-notes.outputs.notes }}
           apiKey: ${{ secrets.AMO_JWT_ISSUER }}
           apiSecret: ${{ secrets.AMO_JWT_SECRET }}
           timeout: 900000
