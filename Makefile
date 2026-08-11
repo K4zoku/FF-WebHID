@@ -12,7 +12,6 @@ NM_BIN      := $(RELEASE_DIR)/webhid-native-messaging
 
 PREFIX      ?= /usr/local
 USER_PREFIX ?= $(HOME)/.local
-CARGO_ARGS  ?=
 WEBHID_GROUP?= webhid
 
 NM_MANIFEST       := $(MANIFEST_DIR)/webhid.forwarder_nm_host.json
@@ -45,7 +44,7 @@ all: build
 
 build:
 	@echo "==> Building Rust crates (release)…"
-	cargo build --release $(CARGO_ARGS) --manifest-path "$(CRATES_DIR)/Cargo.toml"
+	npm run build:rs
 
 ## ---- Install ----
 ## System-wide: requires root, binaries+NM manifest shared for all users
@@ -165,11 +164,10 @@ uninstall-user:
 ## ---- Misc ----
 
 test:
-	cargo test --manifest-path "$(CRATES_DIR)/Cargo.toml"
+	npm run test:rs
 
 clean:
-	cargo clean --manifest-path "$(CRATES_DIR)/Cargo.toml"
-	rm -rf "$(DIST_DIR)"
+	npm run clean
 
 help:
 	@echo "Targets:"

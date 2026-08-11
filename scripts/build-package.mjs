@@ -42,8 +42,10 @@ function copyBins(srcDir, destDir, ...names) {
   for (const n of names) cpSync(join(srcDir, n), join(destDir, n))
 }
 
+const NM_BROWSERS = ['mozilla', 'librewolf', 'waterfox']
+
 function installNmManifests(base, nmBin, daemonBin) {
-  for (const b of ['mozilla', 'librewolf', 'waterfox']) {
+  for (const b of NM_BROWSERS) {
     const d = join(base, `usr/lib/${b}/native-messaging-hosts`)
     mkdirSync(d, { recursive: true })
     template(
@@ -138,8 +140,7 @@ function prepareRpmTree(rpmRoot) {
 }
 
 function writeRpmSpec(rpmRoot, ver, binDir) {
-  const nmFileList = ['mozilla', 'librewolf', 'waterfox']
-    .flatMap((b) => [
+  const nmFileList = NM_BROWSERS.flatMap((b) => [
       `/usr/lib/${b}/native-messaging-hosts/webhid.forwarder_nm_host.json`,
       `/usr/lib/${b}/native-messaging-hosts/webhid.daemon_nm_host.json`
     ])
