@@ -3,3 +3,10 @@ repos:
     rev: v4.4.0
     hooks:
       - id: conventional-pre-commit
+  - repo: local
+    hooks:
+      - id: add-area-scope
+        name: add area scope to commit message
+        entry: scripts/commit-scope.sh
+        language: system
+        stages: [prepare-commit-msg]
