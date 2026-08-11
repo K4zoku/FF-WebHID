@@ -8,7 +8,8 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use crate::NmRequest;
 use crate::{PKG_SEND_FEATURE_REPORT, PKG_SEND_REPORT, parse_packed_send};
 
-const MAX_MSG: usize = 1024 * 1024;
+/// Native Messaging frame ceiling: messages larger than this are rejected.
+pub const MAX_NM_FRAME: usize = 1024 * 1024;
 
 pub async fn read_message<R, T>(reader: &mut R) -> io::Result<T>
 where
@@ -16,7 +17,7 @@ where
     T: DeserializeOwned,
 {
     let len = reader.read_u32_le().await? as usize;
-    if len > MAX_MSG {
+    if len > MAX_NM_FRAME {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!("incoming message is too large ({len} bytes)"),

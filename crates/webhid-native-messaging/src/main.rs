@@ -15,85 +15,10 @@
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader, BufWriter};
 
-const MAX_FRAME_SIZE: usize = 1024 * 1024;
+use webhid::protocol::MAX_NM_FRAME;
+
 const CONNECT_TIMEOUT_MS: u64 = 5000;
 
-/// Syscall allow-list for the NM forwarder (pure byte pipe, no server).
-#[cfg(all(feature = "hardening", target_os = "linux", not(debug_assertions)))]
-const NM_SYSCALLS: &[libc::c_long] = &[
-    libc::SYS_read,
-    libc::SYS_write,
-    libc::SYS_pread64,
-    libc::SYS_pwrite64,
-    libc::SYS_readv,
-    libc::SYS_writev,
-    libc::SYS_close,
-    libc::SYS_dup,
-    libc::SYS_fcntl,
-    libc::SYS_lseek,
-    libc::SYS_openat,
-    libc::SYS_fstat,
-    libc::SYS_newfstatat,
-    #[cfg(target_arch = "x86_64")]
-    libc::SYS_access,
-    libc::SYS_mmap,
-    libc::SYS_munmap,
-    libc::SYS_mprotect,
-    libc::SYS_brk,
-    libc::SYS_madvise,
-    #[cfg(target_arch = "x86_64")]
-    libc::SYS_arch_prctl,
-    libc::SYS_prlimit64,
-    libc::SYS_poll,
-    libc::SYS_socket,
-    libc::SYS_connect,
-    libc::SYS_getsockname,
-    libc::SYS_setsockopt,
-    libc::SYS_getsockopt,
-    libc::SYS_sendmsg,
-    libc::SYS_recvmsg,
-    libc::SYS_epoll_create1,
-    libc::SYS_epoll_ctl,
-    #[cfg(target_arch = "x86_64")]
-    libc::SYS_epoll_wait,
-    libc::SYS_eventfd2,
-    libc::SYS_clone,
-    libc::SYS_clone3,
-    libc::SYS_futex,
-    libc::SYS_set_robust_list,
-    libc::SYS_get_robust_list,
-    libc::SYS_set_tid_address,
-    libc::SYS_rseq,
-    libc::SYS_exit_group,
-    libc::SYS_exit,
-    libc::SYS_getpid,
-    libc::SYS_getppid,
-    libc::SYS_gettid,
-    libc::SYS_getuid,
-    libc::SYS_getgid,
-    libc::SYS_geteuid,
-    libc::SYS_getegid,
-    libc::SYS_tgkill,
-    libc::SYS_rt_sigaction,
-    libc::SYS_rt_sigprocmask,
-    libc::SYS_rt_sigreturn,
-    libc::SYS_sigaltstack,
-    libc::SYS_clock_gettime,
-    libc::SYS_clock_nanosleep,
-    libc::SYS_nanosleep,
-    libc::SYS_getrandom,
-    libc::SYS_prctl,
-    libc::SYS_pipe2,
-    libc::SYS_uname,
-    libc::SYS_sched_getaffinity,
-    libc::SYS_sched_yield,
-];
-
-/// Fallback: empty list for debug / non-Linux (seccomp is a no-op).
-/// Only referenced when the `hardening` feature is enabled; unused in default builds.
-#[cfg(not(all(feature = "hardening", target_os = "linux", not(debug_assertions))))]
-#[allow(dead_code)]
-const NM_SYSCALLS: &[()] = &[];
 
 /// Write a JSON error frame to the NM host's stdout (→ addon). Format: `{"s":503,"E":"<msg>"}`.
 async fn write_error_frame<W: AsyncWrite + Unpin>(w: &mut W, msg: &str) {
@@ -191,46 +116,58 @@ async fn main() -> anyhow::Result<()> {
 #[cfg(feature = "hardening")]
 fn apply_hardening() {
     webhid::security::apply_prctl_hardening();
-    webhid::security::apply_seccomp_filter(&NM_SYSCALLS);
+    webhid::security::apply_seccomp_filter(webhid::security::NM_SYSCALLS);
 }
 
 #[cfg(not(feature = "hardening"))]
 fn apply_hardening() {}
 
-/// Connect to the daemon socket, retrying every candidate path with
-/// exponential backoff until `CONNECT_TIMEOUT_MS` elapses. On timeout,
-/// writes an error frame to stdout (so the addon sees it) and errors out.
-#[cfg(unix)]
-async fn connect_to_daemon() -> anyhow::Result<tokio::net::UnixStream> {
-    let candidates = candidate_sockets();
+/// Retry `connect` with exponential backoff until `CONNECT_TIMEOUT_MS`
+/// elapses. On timeout, writes an error frame to stdout (so the addon sees
+/// it) and errors out.
+async fn connect_with_retry<C, F, S>(target: &str, hint: &str, mut connect: C) -> anyhow::Result<S>
+where
+    C: FnMut() -> F,
+    F: std::future::Future<Output = std::io::Result<S>>,
+{
     let mut delay = 100u64;
     let mut total_waited = 0u64;
     loop {
-        match try_connect_candidates(&candidates).await {
-            Ok((stream, path)) => {
-                log::info!("connected to daemon at {path}");
-                return Ok(stream);
-            }
-            Err(last_err) => {
+        match connect().await {
+            Ok(s) => return Ok(s),
+            Err(e) => {
                 if total_waited >= CONNECT_TIMEOUT_MS {
-                    let msg = format!(
-                        "cannot connect to webhid-daemon (tried {}): {last_err}\n\
-                         Check: (1) daemon running? systemctl status webhid-daemon\n\
-                         (2) socket path correct? (3) user in webhid group? sudo usermod -aG webhid $USER",
-                        candidates.join(", "),
-                    );
+                    let msg = format!("cannot connect to {target}: {e}\n{hint}");
                     log::error!("{msg}");
                     let mut stdout = tokio::io::stdout();
                     write_error_frame(&mut stdout, &msg).await;
                     return Err(anyhow::anyhow!(msg));
                 }
-                log::warn!("daemon connect failed ({last_err}), retry in {delay}ms");
+                log::warn!("daemon connect failed ({e}), retry in {delay}ms");
                 tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
                 total_waited += delay;
                 delay = (delay * 2).min(2000);
             }
         }
     }
+}
+
+/// Connect to the daemon socket, retrying every candidate path with
+/// exponential backoff until `CONNECT_TIMEOUT_MS` elapses.
+#[cfg(unix)]
+async fn connect_to_daemon() -> anyhow::Result<tokio::net::UnixStream> {
+    let candidates = candidate_sockets();
+    connect_with_retry(
+        &format!("webhid-daemon (tried {})", candidates.join(", ")),
+        "Check: (1) daemon running? systemctl status webhid-daemon\n\
+         (2) socket path correct? (3) user in webhid group? sudo usermod -aG webhid $USER",
+        || async {
+            let (s, path) = try_connect_candidates(&candidates).await?;
+            log::info!("connected to daemon at {path}");
+            Ok(s)
+        },
+    )
+    .await
 }
 
 /// Try every candidate socket path once, returning the first success.
@@ -255,32 +192,18 @@ async fn try_connect_candidates(
 async fn connect_to_daemon() -> anyhow::Result<tokio::net::windows::named_pipe::NamedPipeClient> {
     use tokio::net::windows::named_pipe::ClientOptions;
     let pipe_name = std::env::var("WEBHID_PIPE").unwrap_or_else(|_| DEFAULT_PIPE.to_string());
-    let mut delay = 100u64;
-    let mut total_waited = 0u64;
-    loop {
-        match ClientOptions::new().open(&pipe_name) {
-            Ok(s) => {
-                log::info!("connected to daemon at {pipe_name}");
-                return Ok(s);
-            }
-            Err(e) => {
-                if total_waited >= CONNECT_TIMEOUT_MS {
-                    let msg = format!(
-                        "cannot connect to daemon pipe '{pipe_name}' after retries: {e}\n\
-                         Check: (1) daemon running? (2) pipe name correct?",
-                    );
-                    log::error!("{msg}");
-                    let mut stdout = tokio::io::stdout();
-                    write_error_frame(&mut stdout, &msg).await;
-                    return Err(anyhow::anyhow!(msg));
-                }
-                log::warn!("daemon connect failed ({e}), retry in {delay}ms");
-                tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
-                total_waited += delay;
-                delay = (delay * 2).min(2000);
-            }
-        }
-    }
+    connect_with_retry(
+        &format!("daemon pipe '{pipe_name}'"),
+        "Check: (1) daemon running? (2) pipe name correct?",
+        || {
+            let pipe = pipe_name.clone();
+            std::future::ready(ClientOptions::new().open(&pipe).map(|s| {
+                log::info!("connected to daemon at {pipe}");
+                s
+            }))
+        },
+    )
+    .await
 }
 
 #[cfg(not(any(unix, windows)))]
@@ -393,7 +316,7 @@ async fn read_frame<R: AsyncRead + Unpin>(
     }
 
     let len = u32::from_le_bytes(len_bytes) as usize;
-    if len > MAX_FRAME_SIZE {
+    if len > MAX_NM_FRAME {
         return Err(anyhow::anyhow!("frame too large: {len} bytes"));
     }
     buf.resize(len, 0);
@@ -438,7 +361,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_read_frame_too_large() {
-        let oversized = (MAX_FRAME_SIZE as u32 + 1).to_le_bytes();
+        let oversized = (MAX_NM_FRAME as u32 + 1).to_le_bytes();
         let mut reader: &[u8] = &oversized;
         let mut buf = Vec::new();
         let result = read_frame(&mut reader, &mut buf).await;
@@ -449,14 +372,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_read_frame_max_size() {
-        let mut frame = (MAX_FRAME_SIZE as u32).to_le_bytes().to_vec();
-        frame.resize(4 + MAX_FRAME_SIZE, 0xAB);
+        let mut frame = (MAX_NM_FRAME as u32).to_le_bytes().to_vec();
+        frame.resize(4 + MAX_NM_FRAME, 0xAB);
         let mut reader: &[u8] = &frame;
         let mut buf = Vec::new();
         let result = read_frame(&mut reader, &mut buf).await;
         assert!(result.is_ok());
         assert!(result.unwrap());
-        assert_eq!(buf.len(), MAX_FRAME_SIZE);
+        assert_eq!(buf.len(), MAX_NM_FRAME);
         assert_eq!(buf[0], 0xAB);
     }
 

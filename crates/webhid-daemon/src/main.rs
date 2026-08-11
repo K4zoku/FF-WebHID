@@ -117,7 +117,7 @@ async fn main() -> anyhow::Result<()> {
     #[cfg(all(feature = "hardening", target_os = "linux", not(debug_assertions)))]
     {
         webhid::security::apply_prctl_hardening();
-        webhid::security::apply_seccomp_filter(crate::security::DAEMON_SYSCALLS);
+        webhid::security::apply_seccomp_filter(webhid::security::DAEMON_SYSCALLS);
     }
 
     let nm_host_info = detect_nm_host_mode();
