@@ -1,20 +1,13 @@
-import {
-  test as base,
-  expect,
-  type Page,
-  type BrowserContext,
-  type WorkerFixture
-} from '@playwright/test'
+import { test as base, expect, type Page, type WorkerFixture } from '@playwright/test'
 import type {
   PlaywrightTestArgs,
   PlaywrightTestOptions,
   PlaywrightWorkerArgs,
   PlaywrightWorkerOptions
 } from '@playwright/test'
-import { createRequire } from 'module'
-import { rm } from 'fs/promises'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
+import { rm } from 'fs/promises'
 import { startStaticServer } from '../serve.js'
 import {
   startDaemon,
@@ -30,89 +23,18 @@ import {
   type WebhidMockProcess
 } from './e2e-process.js'
 import { DEVICES, type DeviceKey } from './e2e-devices.js'
-
-const require = createRequire(import.meta.url)
-
-const harnessRoot = require.resolve('firefox-webext-playwright-harness')
-const harnessDir = dirname(harnessRoot)
-
-interface FirefoxBgPage {
-  evaluate: Page['evaluate']
-}
-
-interface FirefoxWebServer {
-  registerRoute(pattern: string, handler: (route: { continue(): void }) => void): void
-  unregisterRoute(pattern: string, handler: (route: { continue(): void }) => void): void
-  clearRoutes(): void
-}
-
-interface NetworkEventBridge {
-  dispose(): void
-}
-
-interface HarnessContext extends BrowserContext {
-  _firefoxBgPage: FirefoxBgPage
-  _firefoxBridge: NetworkEventBridge
-  _firefoxWebServer: FirefoxWebServer
-  _rdpClient: unknown
-  _firefoxBackgroundConsoleActor: unknown
-  newPage(): Promise<Page>
-}
-
-interface RdpPortHandle {
-  port: number
-  release: () => Promise<void>
-}
-
-interface CreateFirefoxContextOptions {
-  routeHandler?: (route: { continue(): void }) => void
-  playwrightOptions?: { headless?: boolean; launchOptions?: object }
-}
-
-type RouteHandler = (route: { continue(): void }) => void
-
-const { acquireRdpPort } = require(`${harnessDir}/rdp-port.js`) as {
-  acquireRdpPort: (opts?: { maxAttempts?: number }) => Promise<RdpPortHandle>
-}
-const { createFirefoxContext, cleanupFirefoxContext, FirefoxBackgroundPage } = require(
-  `${harnessDir}/harness.js`
-) as {
-  createFirefoxContext: (
-    rdpPort: number,
-    extensionPath: string,
-    options?: CreateFirefoxContextOptions
-  ) => Promise<{ context: HarnessContext }>
-  cleanupFirefoxContext: (context: HarnessContext) => Promise<void>
-  FirefoxBackgroundPage: new (rdpClient: unknown, consoleActor: unknown) => FirefoxBgPage
-}
-const { NetworkEventBridge } = require(`${harnessDir}/network-bridge.js`) as {
-  NetworkEventBridge: new (firefoxWebServer: FirefoxWebServer) => NetworkEventBridge
-}
-const { wrapWithNetworkBridge } = require(`${harnessDir}/proxies.js`) as {
-  wrapWithNetworkBridge: <T>(
-    target: T,
-    bridge: NetworkEventBridge,
-    opts?: {
-      onRoute?: (pattern: string, handler: RouteHandler) => void
-      onUnroute?: (pattern: string, handler: RouteHandler) => void
-      onUnrouteAll?: () => void
-    }
-  ) => T
-}
-const { installAddScriptTagPatch } = require(`${harnessDir}/script-tag.js`) as {
-  installAddScriptTagPatch: (page: Page) => void
-}
+import {
+  backgroundPageFixture,
+  baseSharedPage,
+  harnessCtxBody,
+  pageFixture,
+  rdpPortFixture,
+  type FirefoxBgPage,
+  type HarnessContext
+} from './harness.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
-
-const defaultRouteHandler: RouteHandler = (route) => {
-  route.continue()
-}
-
-const EXTENSION_PATH = process.env.EXTENSION_PATH
-  ? resolve(process.env.EXTENSION_PATH)
-  : resolve(__dirname, '..', '..', 'addon')
 
 interface E2eWorkerFixtures {
   daemon: DaemonProcess | null
@@ -134,6 +56,18 @@ interface MockDeviceFixture {
   pid: number
   descriptorPath: string
   key: DeviceKey
+}
+
+/** Configures the addon to spawn the daemon as its NM host when running in
+ * daemon-nm mode (no-op in forwarder mode). */
+export async function configureDaemonMode(
+  backgroundPage: { evaluate: Page['evaluate'] },
+  daemonMode: string
+): Promise<void> {
+  if (daemonMode !== 'daemon-nm') return
+  await backgroundPage
+    .evaluate(() => browser.storage.local.set({ 'settings :: daemonAsNmHost': true }))
+    .catch(() => {})
 }
 
 function deviceFixture(
@@ -182,7 +116,7 @@ export const test = base.extend<
 
   daemon: [
     async ({ daemonMode }, use, workerInfo) => {
-      if (daemonMode === 'daemon-nm') {
+      if (daemonMode === 'forwarder') {
         await use(null)
         return
       }
@@ -222,104 +156,33 @@ export const test = base.extend<
     { scope: 'worker', auto: true }
   ],
 
-  rdpPort: [
-    async ({}, use) => {
-      const { port, release } = await acquireRdpPort()
-      try {
-        await use(port)
-      } finally {
-        await release()
-      }
-    },
-    { scope: 'worker' }
-  ],
+  rdpPort: rdpPortFixture(),
 
   harnessCtx: [
     async ({ rdpPort, headless }, use) => {
       const projectUse = test.info().project?.use as { launchOptions?: object } | undefined
-      const { context } = await createFirefoxContext(rdpPort, EXTENSION_PATH, {
-        routeHandler: defaultRouteHandler,
-        playwrightOptions: { headless, launchOptions: projectUse?.launchOptions }
+      await harnessCtxBody({ rdpPort, headless }, use, {
+        launchOptions: projectUse?.launchOptions
       })
-
-      let bridge: NetworkEventBridge | undefined
-      let onRoute: ((pattern: string, handler: RouteHandler) => void) | undefined
-      let onUnroute: ((pattern: string, handler: RouteHandler) => void) | undefined
-      let onUnrouteAll: (() => void) | undefined
-      try {
-        bridge = new NetworkEventBridge(context._firefoxWebServer)
-        context._firefoxBridge = bridge
-
-        context._firefoxBgPage = new FirefoxBackgroundPage(
-          context._rdpClient,
-          context._firefoxBackgroundConsoleActor
-        )
-
-        onRoute = (pattern, handler) => {
-          if (typeof pattern !== 'string') return
-          context._firefoxWebServer.registerRoute(pattern, handler)
-        }
-        onUnroute = (pattern, handler) => {
-          if (typeof pattern !== 'string') return
-          context._firefoxWebServer.unregisterRoute(pattern, handler)
-        }
-        onUnrouteAll = () => {
-          context._firefoxWebServer.clearRoutes()
-        }
-      } catch (err) {
-        bridge?.dispose()
-        await cleanupFirefoxContext(context)
-        throw err
-      }
-
-      await use(wrapWithNetworkBridge(context, bridge, { onRoute, onUnroute, onUnrouteAll }))
-
-      bridge.dispose()
-      await cleanupFirefoxContext(context)
     },
     { scope: 'worker' }
   ],
 
-  backgroundPage: [
-    async ({ harnessCtx }, use) => {
-      await use(harnessCtx._firefoxBgPage)
-    },
-    { scope: 'worker' }
-  ],
+  backgroundPage: backgroundPageFixture(),
 
   sharedPage: [
     async ({ harnessCtx, httpPort, daemonMode, backgroundPage }, use) => {
-      if (daemonMode === 'daemon-nm') {
-        await backgroundPage
-          .evaluate(() => {
-            return browser.storage.local.set({
-              'settings :: daemonAsNmHost': true
-            })
-          })
-          .catch(() => {})
-      }
-      const page = harnessCtx.pages()[0] ?? (await harnessCtx.newPage())
-      installAddScriptTagPatch(page)
+      await configureDaemonMode(backgroundPage, daemonMode)
+      const page = await baseSharedPage(harnessCtx)
       const url = `http://localhost:${httpPort}/tests/test-page.html`
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 })
       await page.waitForFunction(() => typeof navigator.hid !== 'undefined', { timeout: 15000 })
-      await use(wrapWithNetworkBridge(page, harnessCtx._firefoxBridge))
+      await use(page)
     },
     { scope: 'worker' }
   ],
 
-  page: [
-    async ({ harnessCtx }, use) => {
-      const page = await harnessCtx.newPage()
-      installAddScriptTagPatch(page)
-      try {
-        await use(wrapWithNetworkBridge(page, harnessCtx._firefoxBridge))
-      } finally {
-        await page.close().catch(() => {})
-      }
-    },
-    { scope: 'test' }
-  ]
+  page: pageFixture()
 })
 
 export { expect }
