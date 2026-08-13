@@ -1,16 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24"><path
-    d="M0 0h24v24H0z"
-    fill="none"
-  /><g
-    fill="none"
-    stroke="currentColor"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-    stroke-width="2"
-  ><path d="M6 12h4m-2-2v4m7-1h.01M18 11h.01" /><rect
-      width="20"
-      height="12"
-      x="2"
-      y="6"
-      rx="2"
-    /></g></svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24"><style>.webhid-icon{stroke:#1a1a1a}@media (prefers-color-scheme: dark){.webhid-icon{stroke:#f2f2f2}}</style><path d="M0 0h24v24H0z" fill="none"/><g class="webhid-icon" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M6 12h4m-2-2v4m7-1h.01M18 11h.01"/><rect width="20" height="12" x="2" y="6" rx="2"/></g></svg>
