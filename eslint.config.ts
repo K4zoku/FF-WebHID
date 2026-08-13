@@ -76,6 +76,7 @@ export default tseslint.config(
         ArrayBuffer: 'readonly',
         DataView: 'readonly',
         Blob: 'readonly',
+        btoa: 'readonly',
         console: 'readonly',
         URL: 'readonly',
         crypto: 'readonly',

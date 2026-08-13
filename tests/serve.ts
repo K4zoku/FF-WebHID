@@ -50,6 +50,12 @@ const PAGES: Record<string, string> = {
   '/worker-race.js': loadPage('worker-race.js'),
   '/race-probe': loadPage('race-probe.html'),
   '/main-world-race-probe': loadPage('main-world-race-probe.html'),
+  '/mv2-csp-probe': loadPage('mv2-csp-probe.html'),
+  '/mv2-csp-probe.js': loadPage('mv2-csp-probe.js'),
+  '/mv2-csp-header-probe': loadPage('mv2-csp-header-probe.html'),
+  '/mv2-csp-loose-probe': loadPage('mv2-csp-header-probe.html'),
+  '/mv2-csp-nonce-probe': loadPage('mv2-csp-nonce-probe.html'),
+  '/mv2-csp-tt-probe': loadPage('mv2-csp-header-probe.html'),
   '/sri-check': loadPage('sri-check.html'),
   '/sri-test.js': loadPage('sri-test.js'),
   '/activation': loadPage('activation.html'),
@@ -157,6 +163,18 @@ const HEADERS: Record<string, Record<string, string | string[]>> = {
   },
   '/tt-policy-restricted': {
     'Content-Security-Policy': 'trusted-types uRGq7 default'
+  },
+  '/mv2-csp-header-probe': {
+    'Content-Security-Policy': "default-src 'none'; script-src 'self'"
+  },
+  '/mv2-csp-loose-probe': {
+    'Content-Security-Policy': "default-src 'none'; script-src 'self' 'unsafe-inline'"
+  },
+  '/mv2-csp-nonce-probe': {
+    'Content-Security-Policy': "default-src 'none'; script-src 'nonce-webhid-probe' 'unsafe-inline'"
+  },
+  '/mv2-csp-tt-probe': {
+    'Content-Security-Policy': "default-src 'none'; script-src 'self'; require-trusted-types-for 'script'"
   }
 }
 
