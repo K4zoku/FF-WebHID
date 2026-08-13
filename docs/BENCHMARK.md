@@ -121,7 +121,7 @@ modes in one worker. Each mode opens the mock device cold, runs one warm-up
 burst, then 10 measured runs; a dropped or late report invalidates a run and
 it is retried. Chromium native numbers are from the 2026-08-02 dataset: the
 addon code does not affect the native benchmark, so that baseline is
-unchanged. The `addon-chromium-*` series (2026-08-13, chromium-testbed) adds
+unchanged. The `chr-*` series (2026-08-13, chromium-testbed) adds
 the same-engine addon-vs-native comparison; all four data planes run, see the
 dataset tables.
 
@@ -136,7 +136,7 @@ config:
 ---
 xychart
     title "Init time per mode (ms)"
-    x-axis [nm, ws, wt-inpage, wt, native, addon-nm, addon-ws, addon-wt-inpage, addon-wt]
+    x-axis [nm, ws, wt-inpage, wt, native, chr-nm, chr-ws, chr-wt-inpage, chr-wt]
     y-axis "ms" 0 --> 1300
     bar "total" [330.7, 208.1, 184.6, 211.5, 62.4, 1191.3, 1110.6, 1128.7, 1139.9]
     bar "warmup" [263.9, 157.6, 119.2, 168.5, 26.2, 129.7, 71.9, 83.8, 161.1]
@@ -157,7 +157,7 @@ p50 round-trip latency per run, all modes:
 config:
   themeVariables:
     xyChart:
-      plotColorPalette: '#55b4d4, #fa8532, #86b300, #f07171, #828e9f'
+      plotColorPalette: '#55b4d4, #fa8532, #86b300, #f07171, #828e9f, #f2ae49, #399ee6, #a37acc, #f29e74'
 ---
 xychart
     title "Per-run p50 round-trip latency (ms)"
@@ -168,6 +168,10 @@ xychart
     line "wt-inpage" [1.18, 1.10, 1.12, 1.08, 1.04, 1.04, 1.06, 1.04, 0.98, 1.02]
     line "wt" [1.06, 1.00, 0.96, 0.96, 0.96, 0.94, 0.92, 0.94, 0.96, 0.96]
     line "native" [0.36, 0.27, 0.24, 0.30, 0.27, 0.23, 0.23, 0.23, 0.25, 0.50]
+    line "chr-nm" [1.25, 1.23, 1.20, 1.23, 1.22, 1.28, 1.20, 1.23, 1.22, 1.22]
+    line "chr-ws" [0.46, 0.40, 0.39, 0.40, 0.40, 0.41, 0.40, 0.40, 0.43, 0.41]
+    line "chr-wt-inpage" [0.58, 0.56, 0.54, 0.50, 0.53, 0.55, 0.54, 0.54, 0.53, 0.53]
+    line "chr-wt" [0.61, 0.61, 0.60, 0.61, 0.62, 0.65, 0.59, 0.61, 0.59, 0.58]
 ```
 
 Whole-run walltime per run, all modes:
@@ -177,7 +181,7 @@ Whole-run walltime per run, all modes:
 config:
   themeVariables:
     xyChart:
-      plotColorPalette: '#55b4d4, #fa8532, #86b300, #f07171, #828e9f, #9c6ade'
+      plotColorPalette: '#55b4d4, #fa8532, #86b300, #f07171, #828e9f, #f2ae49, #399ee6, #a37acc, #f29e74'
 ---
 xychart
     title "Whole-run walltime (ms)"
@@ -188,18 +192,26 @@ xychart
     line "wt-inpage" [486.2, 461.8, 467.9, 518.3, 436.6, 416.7, 446.3, 417.8, 402.0, 440.0]
     line "wt" [490.0, 452.9, 432.4, 453.0, 434.7, 421.3, 417.9, 433.3, 434.0, 448.5]
     line "native" [184.9, 108.2, 113.9, 114.1, 112.7, 116.0, 112.5, 114.3, 106.6, 168.0]
+    line "chr-nm" [469.9, 470.2, 456.8, 470.1, 455.7, 473.2, 471.8, 473.2, 468.6, 524.2]
+    line "chr-ws" [233.9, 155.8, 139.5, 156.6, 136.0, 175.0, 156.4, 154.8, 155.8, 156.2]
+    line "chr-wt-inpage" [250.0, 239.2, 235.0, 220.5, 222.4, 236.1, 270.9, 234.3, 223.4, 219.3]
+    line "chr-wt" [276.5, 264.8, 256.0, 273.4, 271.9, 323.4, 256.3, 271.8, 256.2, 258.5]
 ```
 
 Line colors (both charts, in series order):
 
 ```mermaid
 flowchart LR
-    nm["nm"]:::m1 ~~~ ws["ws"]:::m2 ~~~ wtip["wt-inpage"]:::m3 ~~~ wt["wt"]:::m4 ~~~ nat["native"]:::m5
+    nm["nm"]:::m1 ~~~ ws["ws"]:::m2 ~~~ wtip["wt-inpage"]:::m3 ~~~ wt["wt"]:::m4 ~~~ nat["native"]:::m5 ~~~ crnm["chr-nm"]:::m6 ~~~ crws["chr-ws"]:::m7 ~~~ crwti["chr-wt-inpage"]:::m8 ~~~ crwt["chr-wt"]:::m9
     classDef m1 fill:#55b4d4,stroke:#55b4d4,color:#fff
     classDef m2 fill:#fa8532,stroke:#fa8532,color:#fff
     classDef m3 fill:#86b300,stroke:#86b300,color:#fff
     classDef m4 fill:#f07171,stroke:#f07171,color:#fff
     classDef m5 fill:#828e9f,stroke:#828e9f,color:#fff
+    classDef m6 fill:#f2ae49,stroke:#f2ae49,color:#fff
+    classDef m7 fill:#399ee6,stroke:#399ee6,color:#fff
+    classDef m8 fill:#a37acc,stroke:#a37acc,color:#fff
+    classDef m9 fill:#f29e74,stroke:#f29e74,color:#fff
 ```
 
 Per-report round-trip latency (ms):
@@ -213,6 +225,10 @@ config:
     cScale2: '#86b300'
     cScale3: '#f07171'
     cScale4: '#828e9f'
+    cScale5: '#f2ae49'
+    cScale6: '#399ee6'
+    cScale7: '#a37acc'
+    cScale8: '#f29e74'
 ---
 radar-beta
   title Per-report latency by mode
@@ -222,6 +238,10 @@ radar-beta
   curve wtip["wt-inpage"]{1.06, 1.39, 1.56, 5.38}
   curve wt["wt"]{0.96, 1.20, 1.36, 4.97}
   curve nat["native"]{0.26, 0.87, 1.56, 4.27}
+  curve chrnm["chr-nm"]{1.23, 1.75, 2.07, 5.54}
+  curve chrws["chr-ws"]{0.40, 0.56, 0.69, 2.09}
+  curve chrwti["chr-wt-inpage"]{0.54, 0.73, 0.84, 2.15}
+  curve chrwt["chr-wt"]{0.61, 0.84, 0.98, 2.67}
   graticule polygon
   max 10
   min 0
@@ -238,7 +258,10 @@ config:
     cScale2: '#86b300'
     cScale3: '#f07171'
     cScale4: '#828e9f'
-    cScale5: '#9c6ade'
+    cScale5: '#f2ae49'
+    cScale6: '#399ee6'
+    cScale7: '#a37acc'
+    cScale8: '#f29e74'
 ---
 radar-beta
   title Whole-run walltime by mode
@@ -248,100 +271,12 @@ radar-beta
   curve wtip["wt-inpage"]{446.3, 518.3, 518.3, 518.3}
   curve wt["wt"]{434.7, 490.0, 490.0, 490.0}
   curve nat["native"]{113.8, 167.9, 184.8, 184.8}
+  curve chrnm["chr-nm"]{470.0, 473.2, 524.2, 524.2}
+  curve chrws["chr-ws"]{155.7, 175.0, 233.9, 233.9}
+  curve chrwti["chr-wt-inpage"]{234.2, 249.9, 270.9, 270.9}
+  curve chrwt["chr-wt"]{264.7, 276.5, 323.3, 323.3}
   graticule polygon
   max 1200
-  min 0
-```
-
-### Chromium addon series (2026-08-13, same engine as native)
-
-The addon runs on the same Chromium build and page as the native baseline.
-All four data planes run: nm (background relay), ws and wt (blob-spawned
-worker), wt-inpage (`useWorker: false`). Colors match the Firefox modes.
-
-Per-run p50 round-trip latency:
-
-```mermaid
----
-config:
-  themeVariables:
-    xyChart:
-      plotColorPalette: '#55b4d4, #fa8532, #86b300, #f07171'
----
-xychart
-    title "Addon on Chromium: per-run p50 round-trip latency (ms)"
-    x-axis "run" [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-    y-axis "ms" 0 --> 1.4
-    line "addon-nm" [1.25, 1.23, 1.20, 1.23, 1.22, 1.28, 1.20, 1.23, 1.22, 1.22]
-    line "addon-ws" [0.46, 0.40, 0.39, 0.40, 0.40, 0.41, 0.40, 0.40, 0.43, 0.41]
-    line "addon-wt-inpage" [0.58, 0.56, 0.54, 0.50, 0.53, 0.55, 0.54, 0.54, 0.53, 0.53]
-    line "addon-wt" [0.61, 0.61, 0.60, 0.61, 0.62, 0.65, 0.59, 0.61, 0.59, 0.58]
-```
-
-Whole-run walltime:
-
-```mermaid
----
-config:
-  themeVariables:
-    xyChart:
-      plotColorPalette: '#55b4d4, #fa8532, #86b300, #f07171'
----
-xychart
-    title "Addon on Chromium: whole-run walltime (ms)"
-    x-axis "run" [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-    y-axis "ms" 0 --> 600
-    line "addon-nm" [469.9, 470.2, 456.8, 470.1, 455.7, 473.2, 471.8, 473.2, 468.6, 524.2]
-    line "addon-ws" [233.9, 155.8, 139.5, 156.6, 136.0, 175.0, 156.4, 154.8, 155.8, 156.2]
-    line "addon-wt-inpage" [250.0, 239.2, 235.0, 220.5, 222.4, 236.1, 270.9, 234.3, 223.4, 219.3]
-    line "addon-wt" [276.5, 264.8, 256.0, 273.4, 271.9, 323.4, 256.3, 271.8, 256.2, 258.5]
-```
-
-Per-report latency and whole-run walltime by mode, with native for reference:
-
-```mermaid
----
-config:
-  themeVariables:
-    cScale0: '#828e9f'
-    cScale1: '#55b4d4'
-    cScale2: '#fa8532'
-    cScale3: '#86b300'
-    cScale4: '#f07171'
----
-radar-beta
-  title Addon on Chromium: per-report latency by mode
-  axis p50["p50"], p90["p90"], p95["p95"], mx["max"]
-  curve nat["native"]{0.26, 0.87, 1.56, 4.27}
-  curve addonnm["addon-nm"]{1.23, 1.75, 2.07, 5.54}
-  curve addonws["addon-ws"]{0.40, 0.56, 0.69, 2.09}
-  curve addonwti["addon-wt-inpage"]{0.54, 0.73, 0.84, 2.15}
-  curve addonwt["addon-wt"]{0.61, 0.84, 0.98, 2.67}
-  graticule polygon
-  max 10
-  min 0
-```
-
-```mermaid
----
-config:
-  themeVariables:
-    cScale0: '#828e9f'
-    cScale1: '#55b4d4'
-    cScale2: '#fa8532'
-    cScale3: '#86b300'
-    cScale4: '#f07171'
----
-radar-beta
-  title Addon on Chromium: whole-run walltime by mode
-  axis p50["p50"], p90["p90"], p95["p95"], mx["max"]
-  curve nat["native"]{113.8, 167.9, 184.8, 184.8}
-  curve addonnm["addon-nm"]{470.0, 473.2, 524.2, 524.2}
-  curve addonws["addon-ws"]{155.7, 175.0, 233.9, 233.9}
-  curve addonwti["addon-wt-inpage"]{234.2, 249.9, 270.9, 270.9}
-  curve addonwt["addon-wt"]{264.7, 276.5, 323.3, 323.3}
-  graticule polygon
-  max 600
   min 0
 ```
 
@@ -350,17 +285,17 @@ radar-beta
 
 **Init time** (open/warmup/total, ms)
 
-| mode                     | open (ms) | warmup (ms) | total (ms) |
-| ------------------------ | --------- | ----------- | ---------- |
-| nm                       | 15.9      | 248.0       | 330.7      |
-| ws                       | 25.6      | 132.0       | 208.1      |
-| wt-inpage                | 13.2      | 106.0       | 184.6      |
-| wt                       | 34.5      | 134.0       | 211.5      |
-| native                   | 5.2       | 21.0        | 62.4       |
-| addon-chromium-nm        | 13.7      | 116.0       | 1191.3     |
-| addon-chromium-ws        | 18.9      | 53.0        | 1110.6     |
-| addon-chromium-wt-inpage | 18.8      | 65.0        | 1128.7     |
-| addon-chromium-wt        | 28.1      | 133.0       | 1139.9     |
+| mode          | open (ms) | warmup (ms) | total (ms) |
+| ------------- | --------- | ----------- | ---------- |
+| nm            | 15.9      | 248.0       | 330.7      |
+| ws            | 25.6      | 132.0       | 208.1      |
+| wt-inpage     | 13.2      | 106.0       | 184.6      |
+| wt            | 34.5      | 134.0       | 211.5      |
+| native        | 5.2       | 21.0        | 62.4       |
+| chr-nm        | 13.7      | 116.0       | 1191.3     |
+| chr-ws        | 18.9      | 53.0        | 1110.6     |
+| chr-wt-inpage | 18.8      | 65.0        | 1128.7     |
+| chr-wt        | 28.1      | 133.0       | 1139.9     |
 
 **nm** (Firefox, daemon-nm deployment)
 
@@ -437,7 +372,7 @@ radar-beta
 | #9  | 0.08 | 0.25 | 0.86 | 1.28 | 3.14 | 106.6    |
 | #10 | 0.10 | 0.50 | 1.97 | 2.22 | 4.59 | 168.0    |
 
-**addon-chromium-nm** (Chromium, addon over the NM data plane,
+**chr-nm** (Chromium, addon over the NM data plane,
 daemon-as-NM-host; 2026-08-13, chromium-testbed)
 
 | run | min  | p50  | p90  | p95  | max   | walltime |
@@ -453,7 +388,7 @@ daemon-as-NM-host; 2026-08-13, chromium-testbed)
 | #9  | 0.70 | 1.22 | 1.80 | 2.05 | 5.43  | 468.6    |
 | #10 | 0.76 | 1.22 | 1.86 | 2.37 | 10.52 | 524.2    |
 
-**addon-chromium-ws** (Chromium, addon, ws data plane with a blob-spawned
+**chr-ws** (Chromium, addon, ws data plane with a blob-spawned
 worker; 2026-08-13)
 
 | run | min  | p50  | p90  | p95  | max  | walltime |
@@ -469,7 +404,7 @@ worker; 2026-08-13)
 | #9  | 0.22 | 0.43 | 0.57 | 0.65 | 5.96 | 155.8    |
 | #10 | 0.22 | 0.41 | 0.56 | 0.71 | 2.82 | 156.2    |
 
-**addon-chromium-wt-inpage** (Chromium, addon, wt data plane in the page,
+**chr-wt-inpage** (Chromium, addon, wt data plane in the page,
 `useWorker: false`; 2026-08-13)
 
 | run | min  | p50  | p90  | p95  | max  | walltime |
@@ -485,7 +420,7 @@ worker; 2026-08-13)
 | #9  | 0.23 | 0.53 | 0.73 | 0.84 | 1.84 | 223.4    |
 | #10 | 0.27 | 0.53 | 0.73 | 0.84 | 1.99 | 219.3    |
 
-**addon-chromium-wt** (Chromium, addon, wt data plane with a blob-spawned
+**chr-wt** (Chromium, addon, wt data plane with a blob-spawned
 worker; 2026-08-13)
 
 | run | min  | p50  | p90  | p95  | max  | walltime |
@@ -503,33 +438,33 @@ worker; 2026-08-13)
 
 **Whole-run walltime summary** (10 runs each; native from 2026-08-02)
 
-| mode                     | runs | min   | p50   | p90    | p95    | max    | total  |
-| ------------------------ | ---- | ----- | ----- | ------ | ------ | ------ | ------ |
-| nm                       | 10   | 800.0 | 932.5 | 1134.0 | 1134.0 | 1134.0 | 9431.5 |
-| ws                       | 10   | 481.1 | 499.8 | 536.9  | 536.9  | 536.9  | 5076.8 |
-| wt-inpage                | 10   | 402.0 | 446.3 | 518.3  | 518.3  | 518.3  | 4493.6 |
-| wt                       | 10   | 417.9 | 434.7 | 490.0  | 490.0  | 490.0  | 4418.0 |
-| native                   | 10   | 106.6 | 113.8 | 167.9  | 184.8  | 184.8  | 1251.2 |
-| addon-chromium-nm        | 10   | 455.6 | 470.0 | 473.2  | 524.2  | 524.2  | 4733.7 |
-| addon-chromium-ws        | 10   | 136.0 | 155.7 | 175.0  | 233.9  | 233.9  | 1620.0 |
-| addon-chromium-wt-inpage | 10   | 219.2 | 234.2 | 249.9  | 270.9  | 270.9  | 2351.1 |
-| addon-chromium-wt        | 10   | 255.9 | 264.7 | 276.5  | 323.3  | 323.3  | 2708.8 |
+| mode          | runs | min   | p50   | p90    | p95    | max    | total  |
+| ------------- | ---- | ----- | ----- | ------ | ------ | ------ | ------ |
+| nm            | 10   | 800.0 | 932.5 | 1134.0 | 1134.0 | 1134.0 | 9431.5 |
+| ws            | 10   | 481.1 | 499.8 | 536.9  | 536.9  | 536.9  | 5076.8 |
+| wt-inpage     | 10   | 402.0 | 446.3 | 518.3  | 518.3  | 518.3  | 4493.6 |
+| wt            | 10   | 417.9 | 434.7 | 490.0  | 490.0  | 490.0  | 4418.0 |
+| native        | 10   | 106.6 | 113.8 | 167.9  | 184.8  | 184.8  | 1251.2 |
+| chr-nm        | 10   | 455.6 | 470.0 | 473.2  | 524.2  | 524.2  | 4733.7 |
+| chr-ws        | 10   | 136.0 | 155.7 | 175.0  | 233.9  | 233.9  | 1620.0 |
+| chr-wt-inpage | 10   | 219.2 | 234.2 | 249.9  | 270.9  | 270.9  | 2351.1 |
+| chr-wt        | 10   | 255.9 | 264.7 | 276.5  | 323.3  | 323.3  | 2708.8 |
 
 **Delta vs the native baseline** (per-report p50 is the median of the 10
 per-run p50 values; walltime p50 and total as in the summary table; total is
 the sum of the 10 whole-run walltimes)
 
-| mode                     | per-report p50 | vs native    | walltime p50 | vs native     | total  | vs native      |
-| ------------------------ | -------------- | ------------ | ------------ | ------------- | ------ | -------------- |
-| native                   | 0.26           | —            | 113.8        | —             | 1251.2 | —              |
-| addon-chromium-ws        | 0.40           | +0.14 (1.5x) | 155.7        | +41.9 (1.4x)  | 1620.0 | +368.8 (1.3x)  |
-| addon-chromium-wt-inpage | 0.54           | +0.28 (2.1x) | 234.2        | +120.4 (2.1x) | 2351.1 | +1099.9 (1.9x) |
-| addon-chromium-wt        | 0.61           | +0.35 (2.3x) | 264.7        | +150.9 (2.3x) | 2708.8 | +1457.6 (2.2x) |
-| wt (Firefox)             | 0.96           | +0.70 (3.7x) | 434.7        | +320.9 (3.8x) | 4418.0 | +3166.8 (3.5x) |
-| wt-inpage                | 1.06           | +0.80 (4.1x) | 446.3        | +332.5 (3.9x) | 4493.6 | +3242.4 (3.6x) |
-| ws (Firefox)             | 1.08           | +0.82 (4.2x) | 499.8        | +386.0 (4.4x) | 5076.8 | +3825.6 (4.1x) |
-| addon-chromium-nm        | 1.23           | +0.97 (4.7x) | 470.0        | +356.2 (4.1x) | 4733.7 | +3482.5 (3.8x) |
-| nm (Firefox)             | 1.88           | +1.62 (7.2x) | 932.5        | +818.7 (8.2x) | 9431.5 | +8180.3 (7.5x) |
+| mode          | per-report p50 | vs native    | walltime p50 | vs native     | total  | vs native      |
+| ------------- | -------------- | ------------ | ------------ | ------------- | ------ | -------------- |
+| native        | 0.26           | —            | 113.8        | —             | 1251.2 | —              |
+| chr-ws        | 0.40           | +0.14 (1.5x) | 155.7        | +41.9 (1.4x)  | 1620.0 | +368.8 (1.3x)  |
+| chr-wt-inpage | 0.54           | +0.28 (2.1x) | 234.2        | +120.4 (2.1x) | 2351.1 | +1099.9 (1.9x) |
+| chr-wt        | 0.61           | +0.35 (2.3x) | 264.7        | +150.9 (2.3x) | 2708.8 | +1457.6 (2.2x) |
+| wt (Firefox)  | 0.96           | +0.70 (3.7x) | 434.7        | +320.9 (3.8x) | 4418.0 | +3166.8 (3.5x) |
+| wt-inpage     | 1.06           | +0.80 (4.1x) | 446.3        | +332.5 (3.9x) | 4493.6 | +3242.4 (3.6x) |
+| ws (Firefox)  | 1.08           | +0.82 (4.2x) | 499.8        | +386.0 (4.4x) | 5076.8 | +3825.6 (4.1x) |
+| chr-nm        | 1.23           | +0.97 (4.7x) | 470.0        | +356.2 (4.1x) | 4733.7 | +3482.5 (3.8x) |
+| nm (Firefox)  | 1.88           | +1.62 (7.2x) | 932.5        | +818.7 (8.2x) | 9431.5 | +8180.3 (7.5x) |
 
 </details>
 
@@ -542,12 +477,12 @@ Reading the numbers:
   ~1.66-2.30ms. The addon ws/wt/wt-inpage planes on Chromium are faster than
   every Firefox mode and within 1.5-2.3x of native, while the nm plane is the
   addon's slowest data path on both engines.
-- **Whole-run walltime p50**: native 114ms, addon-ws 156ms, addon-wt-inpage
-  234ms, addon-wt 265ms, addon-nm 470ms; Firefox wt 435ms, wt-inpage 446ms,
+- **Whole-run walltime p50**: native 114ms, chr-ws 156ms, chr-wt-inpage
+  234ms, chr-wt 265ms, chr-nm 470ms; Firefox wt 435ms, wt-inpage 446ms,
   ws 500ms, nm 933ms. The addon ws plane is ~1.4x native and faster than the
   best Firefox mode.
-- **Total (sum of 10 runs)**: native 1.25s, addon-ws 1.62s, addon-wt-inpage
-  2.35s, addon-wt 2.71s, addon-nm 4.73s; Firefox wt 4.42s, wt-inpage 4.49s,
+- **Total (sum of 10 runs)**: native 1.25s, chr-ws 1.62s, chr-wt-inpage
+  2.35s, chr-wt 2.71s, chr-nm 4.73s; Firefox wt 4.42s, wt-inpage 4.49s,
   ws 5.08s, nm 9.43s. The addon ws/wt gaps vs native (1.3x/2.2x) are the
   tightest overhead measured on any engine.
 - **Same-engine addon overhead** (addon vs native, identical page, mock and
@@ -566,7 +501,7 @@ Reading the numbers:
 - These are not a polyfill-vs-native comparison for the Firefox modes:
   Firefox runs the polyfill over the daemon (daemon-nm deployment), Chromium
   native WebHID runs on the same mock; the engine, transport and grant path
-  all differ. The same-engine comparison is the `addon-chromium-*` series on
+  all differ. The same-engine comparison is the `chr-*` series on
   the same Chromium build as the native baseline.
 
 ### What the wt numbers buy (and cost)
