@@ -54,6 +54,10 @@ export async function runChromiumAddonBenchmark(
       'dist/chromium/manifest.json missing; run `TARGET=chromium npm run build:addon` first'
     )
   }
+  const daemonBin = resolve(CHROMIUM_DIST, '..', '..', 'crates', 'target', 'debug', 'webhid-daemon')
+  if (!existsSync(daemonBin)) {
+    throw new Error(`Daemon binary not found at ${daemonBin}. Build with 'cargo build' first.`)
+  }
   const mock = startWebhidMock('vendor.bin', 0x16c0, 0x0001)
   await mock.ready
   const { port, server } = await startStaticServer(POLICY_PORT)
@@ -82,7 +86,7 @@ export async function runChromiumAddonBenchmark(
     })
     expect(paired).toBe(1)
 
-    const result = await runBenchmark(page, mock)
+    const result = await runBenchmark(page, mock, { inPage: mode === 'wt-inpage' })
     expect(result.runs.length).toBeGreaterThan(0)
     expect(result.fallbacks).toHaveLength(0)
     printResults(label, result)

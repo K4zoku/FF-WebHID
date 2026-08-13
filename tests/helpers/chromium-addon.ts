@@ -97,6 +97,11 @@ export async function setExtensionSettings(
     if (mode === 'wt-inpage') {
       keys['settings :: useWorker'] = false
       keys[`settings :: ${origin} :: useWorker`] = false
+      // The in-page WT attach signal is a debug-level log
+      // ("WT persistent stream attached"); watchConsole in the benchmark
+      // runner needs it to prove the plane engaged instead of degrading to NM.
+      keys['settings :: logLevel'] = 3
+      keys[`settings :: ${origin} :: logLevel`] = 3
     }
     await page.evaluate(({ keys }) => browser.storage.local.set(keys), { keys })
     return runtimeId

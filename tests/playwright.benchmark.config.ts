@@ -15,7 +15,7 @@ export default defineConfig({
     {
       name: 'firefox-benchmark',
       testDir: './benchmark',
-      testIgnore: ['**/chromium/**', '**/loss/**'],
+      testIgnore: ['**/chromium/**', '**/chromium-addon/**', '**/loss/**'],
       use: {
         browserName: 'firefox',
         firefoxHarnessConfig: {
