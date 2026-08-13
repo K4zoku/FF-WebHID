@@ -72,11 +72,10 @@
 
   /**
    * @param {string} csp
-   * @returns {{directives: object, order: string[]}}
+   * @returns {{directives: object}}
    */
   function parseDirectives(csp) {
     const directives = {}
-    const order = []
     for (const raw of csp.split(';')) {
       const trimmed = raw.trim()
       if (!trimmed) continue
@@ -84,9 +83,8 @@
       const name = parts[0].toLowerCase()
       if (directives[name] !== undefined) continue
       directives[name] = parts.slice(1).join(' ')
-      order.push(name)
     }
-    return { directives, order }
+    return { directives }
   }
 
   /**
@@ -223,7 +221,6 @@
    * @returns {object|null}
    */
   function parseCspForWorkerSpawn(cspValues, spawnMode, pageOrigin) {
-    const mode = spawnMode
     if (!cspValues || cspValues.length === 0) return null
     let workerSrc
     let connectSrc
@@ -255,7 +252,7 @@
       }
     }
     const shadowBlocked = workerSrcBlocked || connectSrcBlocked || hasTrustedTypesRequire
-    const needsBlobFallback = mode === 'blob' || (mode === 'shadow' && shadowBlocked)
+    const needsBlobFallback = spawnMode === 'blob' || (spawnMode === 'shadow' && shadowBlocked)
     return {
       workerSrc,
       connectSrc,
@@ -271,9 +268,6 @@
   webhid.export('bgCsp', {
     urlOrigin,
     frameKey,
-    parseDirectives,
-    sourceListAllowsWorker,
-    sourceListAllowsDaemonConnects,
     rewriteCspValue,
     rewriteCspForBlob,
     parseCspForWorkerSpawn

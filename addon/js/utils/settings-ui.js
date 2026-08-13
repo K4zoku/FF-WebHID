@@ -111,9 +111,7 @@
   }
 
   webhid.export('settingsUi', {
-    setRadioValue,
     currentRadioValue,
-    effectiveDataPlaneValue,
     createSettingsUi
   })
 })()

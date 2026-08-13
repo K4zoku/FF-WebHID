@@ -4,8 +4,6 @@
   const MSG_SEND_REPORT = 0x01
   const MSG_SEND_FEATURE_REPORT = 0x02
   const MSG_RECEIVE_FEATURE_REPORT = 0x03
-  const RESP_SEND_REPORT = 0x81
-  const RESP_SEND_FEATURE_REPORT = 0x82
   const RESP_RECEIVE_FEATURE_REPORT = 0x83
   const MSG_INPUT_BATCH = 0x00
 
@@ -66,15 +64,29 @@
     else entry.reject(new Error('write failed status=' + status))
   }
 
+  /**
+   * @param {number} msgType
+   * @param {number} reqId
+   * @param {number} reportId
+   * @param {Uint8Array|null} [payload]
+   * @returns {Uint8Array}
+   */
+  function buildSendFrame(msgType, reqId, reportId, payload) {
+    const frame = new Uint8Array(6 + (payload ? payload.length : 0))
+    frame[0] = msgType
+    new DataView(frame.buffer).setUint32(1, reqId, true)
+    frame[5] = reportId
+    if (payload) frame.set(payload, 6)
+    return frame
+  }
+
   webhid.export('wireFormat', {
     MSG_SEND_REPORT,
     MSG_SEND_FEATURE_REPORT,
     MSG_RECEIVE_FEATURE_REPORT,
-    RESP_SEND_REPORT,
-    RESP_SEND_FEATURE_REPORT,
-    RESP_RECEIVE_FEATURE_REPORT,
     MSG_INPUT_BATCH,
     parseInputReports,
+    buildSendFrame,
     handleControlResponse
   })
 })()

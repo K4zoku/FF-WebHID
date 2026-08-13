@@ -5,7 +5,7 @@
   const { ensureWorkerBundle, ensureWorkerPolyfillBundle } = webhid.import('bgBundle')
   const { parseCspForWorkerSpawn, rewriteCspValue, rewriteCspForBlob, urlOrigin, frameKey } =
     webhid.import('bgCsp')
-  const siteSettingKey = webhid.import('siteSettingKey')
+  const loadSiteSettings = webhid.import('loadSiteSettings')
 
   const isMv2 = browser.runtime.getManifest().manifest_version === 2
 
@@ -174,7 +174,6 @@
     const dec = new TextDecoder()
     let firstChunk = true
     let injectPromise = Promise.resolve()
-    filter.onstart = () => {}
     filter.ondata = (event) => {
       if (!firstChunk) {
         injectPromise = injectPromise.then(() => filter.write(event.data))
@@ -345,10 +344,9 @@
   async function resolveSiteSpawnMode(origin, settings) {
     let mode = settings.workerSpawnMode
     if (!origin) return mode
-    const siteKey = siteSettingKey(origin, 'workerSpawnMode')
-    const siteResult = await browser.storage.local.get(siteKey).catch(() => ({}))
-    if (siteResult[siteKey] !== undefined) {
-      mode = siteResult[siteKey]
+    const site = await loadSiteSettings(origin).catch(() => ({}))
+    if (site.workerSpawnMode !== undefined) {
+      mode = site.workerSpawnMode
     }
     return mode
   }
@@ -564,4 +562,5 @@
   }
 
   webhid.export('registerWebRequestHandlers', registerWebRequestHandlers)
+  webhid.export('stripFragment', stripFragment)
 })()

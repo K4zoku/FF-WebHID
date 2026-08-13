@@ -254,6 +254,7 @@
 
   webhid.export('bgStorage', {
     openDb,
+    txDone,
     saveDeviceInfo,
     saveDeviceInfoBatch,
     getDeviceInfo,

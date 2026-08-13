@@ -7,6 +7,7 @@
   const localizeHTML = webhid.import('localizeHTML')
   const applyFilters = webhid.import('applyFilters')
   const groupDevices = webhid.import('groupDevices')
+  const groupIdFor = webhid.import('groupIdFor')
   const logExcludedDevices = webhid.import('logExcludedDevices')
   const applyDeviceIcon = webhid.import('applyDeviceIcon')
   const syncBrowserTheme = webhid.import('syncBrowserTheme')
@@ -159,7 +160,7 @@
     listEl.innerHTML = ''
 
     for (const [name, devs] of groups.entries()) {
-      const groupId = devs.length === 1 ? devs[0].deviceId : 'group:' + devs[0].deviceId
+      const groupId = groupIdFor(devs)
       deviceGroups[groupId] = devs.slice()
       listEl.appendChild(buildDeviceItem(name, devs, groupId))
     }

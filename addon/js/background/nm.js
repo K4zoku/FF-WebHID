@@ -24,7 +24,7 @@
     pending: new Map(),
     reconnectTimer: null,
     reconnectDelay: 1000,
-    nmHostName: 'webhid.forwarder_nm_host',
+    nmHostName: NM_HOST_FORWARDER,
     lastError: null,
 
     /**
@@ -166,7 +166,7 @@
       this.reconnectDelay = Math.min(this.reconnectDelay * 2, 10000)
     },
 
-    sendRequest(request) {
+    sendFrame(buildMessage, describe) {
       return new Promise((resolve, reject) => {
         if (!this.port) {
           this.connect().catch((e) => logger.debug('speculative reconnect failed', e))
@@ -175,9 +175,10 @@
         }
         const id = this.nextId++
         this.pending.set(id, { resolve, reject })
-        logger.debug('sendRequest a=' + (request.a || 'packed') + ' n=' + id)
         try {
-          this.port.postMessage({ ...request, n: id })
+          const message = buildMessage(id)
+          logger.debug(describe(message, id))
+          this.port.postMessage(message)
         } catch (e) {
           this.pending.delete(id)
           reject(e)
@@ -185,24 +186,18 @@
       })
     },
 
+    sendRequest(request) {
+      return this.sendFrame(
+        (id) => ({ ...request, n: id }),
+        (msg, id) => 'sendRequest a=' + (msg.a || 'packed') + ' n=' + id
+      )
+    },
+
     sendPacked(buildPackedFn) {
-      return new Promise((resolve, reject) => {
-        if (!this.port) {
-          this.connect().catch((e) => logger.debug('speculative reconnect failed', e))
-          reject(new Error('NM disconnected, reconnecting; please retry'))
-          return
-        }
-        const id = this.nextId++
-        this.pending.set(id, { resolve, reject })
-        const packedBuf = buildPackedFn(id)
-        logger.debug('sendPacked msgType=0x' + packedBuf[0].toString(16) + ' n=' + id)
-        try {
-          this.port.postMessage({ d: packedBuf.toBase64() })
-        } catch (e) {
-          this.pending.delete(id)
-          reject(e)
-        }
-      })
+      return this.sendFrame(
+        (id) => ({ d: buildPackedFn(id).toBase64() }),
+        (_msg, id) => 'sendPacked n=' + id
+      )
     },
 
     async enumerateDevices() {

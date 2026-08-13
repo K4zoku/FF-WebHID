@@ -1,7 +1,7 @@
 ;(function () {
   'use strict'
 
-  /** @type {import("./types.js").Logger} */
+  /** @type {import("../types.js").Logger} */
   const logger = globalThis.webhid.import('logger')
   const fetchResource = globalThis.webhid.import('fetchResource')
   const http = globalThis.webhid.import('http')
@@ -10,12 +10,13 @@
   const guessDeviceType = globalThis.webhid.import('guessDeviceType')
   const applyFilters = globalThis.webhid.import('applyFilters')
   const groupDevices = globalThis.webhid.import('groupDevices')
+  const groupIdFor = globalThis.webhid.import('groupIdFor')
   const logExcludedDevices = globalThis.webhid.import('logExcludedDevices')
   const applyDeviceIcon = globalThis.webhid.import('applyDeviceIcon')
   const syncBrowserTheme = globalThis.webhid.import('syncBrowserTheme')
   logger.initLogger('picker')
 
-  /** @typedef {import("./types.js").HIDDeviceInfo} HIDDeviceInfo */
+  /** @typedef {import("../main/types.js").HIDDeviceInfo} HIDDeviceInfo */
 
   /**
    *
@@ -178,22 +179,8 @@
     }
 
     /**
-     * @param {string} message
-     * @param {boolean} [isError]
-     * @returns {void}
+     * @returns {Promise<string[]>}
      */
-    showMessage(message, isError = false) {
-      if (!this.dialog) return
-      const deviceList = this.dialog.querySelector('#webhidDeviceList')
-      if (!deviceList) return
-      deviceList.innerHTML = ''
-      const div = document.createElement('div')
-      div.className = isError ? 'webhid-error' : 'webhid-no-devices'
-      div.textContent = message
-      deviceList.appendChild(div)
-    }
-
-    /** @returns {Promise<string[]>} */
     async getPairedDevices() {
       if (this.pairedDevices !== null) return this.pairedDevices
       try {
@@ -258,7 +245,7 @@
           deviceIds.push(device.deviceId)
         }
 
-        const groupId = devices.length === 1 ? devices[0].deviceId : 'group:' + devices[0].deviceId
+        const groupId = groupIdFor(devices)
         this.deviceGroups[groupId] = devices.slice()
 
         const device = devices[0]

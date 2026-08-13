@@ -1,5 +1,5 @@
 'use strict'
-/** @type {import("./types.js").Logger} */
+/** @type {import("../types.js").Logger} */
 const logger = webhid.import('logger')
 const createSettingsStore = webhid.import('createSettingsStore')
 const GLOBAL_DEFAULTS = webhid.import('GLOBAL_DEFAULTS')
@@ -11,10 +11,11 @@ const {
   MSG_RECEIVE_FEATURE_REPORT,
   MSG_INPUT_BATCH,
   parseInputReports,
-  handleControlResponse: handleControlResponseShared
+  buildSendFrame,
+  handleControlResponse
 } = webhid.import('wireFormat')
 logger.initLogger('worker')
-/** @type {import("./types.js").SettingsStore} */
+/** @type {import("../types.js").SettingsStore} */
 const settings = createSettingsStore(GLOBAL_DEFAULTS)
 logger.bindSettings(settings)
 /** @type {number} */
@@ -48,7 +49,6 @@ function handleControlMessage(msg) {
   if (msg.type === 'connect') {
     const factory = msg.transport === 'wt' ? createWtTransport : createWsTransport
     transport = factory({
-      tag: 'worker',
       onReady: () => {
         if (controlPort) controlPort.postMessage({ type: 'ready' })
         const queued = preOpen
@@ -76,7 +76,7 @@ function handleControlMessage(msg) {
       },
       onBinary: (batch) => {
         if (batch.length > 0 && batch[0] === MSG_INPUT_BATCH) return pushInputBatch(batch, 1)
-        if (batch.length > 0 && batch[0] >= 0x81) return handleControlResponse(batch)
+        if (batch.length > 0 && batch[0] >= 0x81) return handleControlResponse(batch, pending)
         pushInputBatch(batch, 0)
       }
     })
@@ -88,12 +88,8 @@ function handleControlMessage(msg) {
     return
   }
   if (msg.type === 'terminate') {
-    if (transport && transport.close) transport.close()
     self.close()
     return
-  }
-  if (msg.type === 'send' || msg.type === 'sendFeature' || msg.type === 'receiveFeature') {
-    return handleDataPortMessage(msg)
   }
 }
 
@@ -172,12 +168,7 @@ function handleSend(msg, msgType) {
     return
   }
   const reqId = nextReqId++
-  const frame = new Uint8Array(6 + payload.length)
-  const dataView = new DataView(frame.buffer)
-  frame[0] = msgType
-  dataView.setUint32(1, reqId, true)
-  frame[5] = msg.reportId
-  frame.set(payload, 6)
+  const frame = buildSendFrame(msgType, reqId, msg.reportId, payload)
   const isFeature = msgType !== MSG_SEND_REPORT
   pending.set(reqId, {
     resolve: () =>
@@ -212,11 +203,7 @@ function handleReceiveFeature(msg) {
     return
   }
   const reqId = nextReqId++
-  const frame = new Uint8Array(6)
-  const dataView = new DataView(frame.buffer)
-  frame[0] = MSG_RECEIVE_FEATURE_REPORT
-  dataView.setUint32(1, reqId, true)
-  frame[5] = msg.reportId
+  const frame = buildSendFrame(MSG_RECEIVE_FEATURE_REPORT, reqId, msg.reportId, null)
   pending.set(reqId, {
     resolve: (data) => {
       const transfer = data instanceof Uint8Array && data.buffer ? [data.buffer] : []
@@ -245,12 +232,4 @@ function handleReceiveFeature(msg) {
  */
 function replyData(msg, transfer) {
   if (dataPort) dataPort.postMessage(msg, transfer || [])
-}
-
-/**
- * @param {Uint8Array} batch
- * @returns {void}
- */
-function handleControlResponse(batch) {
-  handleControlResponseShared(batch, pending)
 }

@@ -258,6 +258,5 @@
     }
   }
 
-  webhid.export('decodeCollectionsTlv', decodeCollectionsTlv)
   webhid.export('decodeDeviceCollections', decodeDeviceCollections)
 })()

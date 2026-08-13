@@ -1,16 +1,19 @@
 ;(function () {
-  let workerBundle = null
-  let workerBundlePromise = null
+  /** @type {Map<string, Promise<string>>} */
+  const bundleCache = new Map()
 
   /**
-   * Fetches and caches the worker bundle (worker index + utils) as a single string.
+   * Fetches and caches a bundle (list name from bundle-files.js → joined
+   * source string). Warm-starting the worker bundles at load time keeps the
+   * first spawn cheap.
+   * @param {string} name
    * @returns {Promise<string>}
    */
-  async function ensureWorkerBundle() {
-    if (workerBundle) return workerBundle
-    if (workerBundlePromise) return workerBundlePromise
-    const files = webhid.import('bundleFiles').worker
-    workerBundlePromise = (async () => {
+  function ensureBundle(name) {
+    let cached = bundleCache.get(name)
+    if (cached) return cached
+    const files = webhid.import('bundleFiles')[name]
+    cached = (async () => {
       const texts = await Promise.all(
         files.map((f) =>
           fetch(browser.runtime.getURL(f)).then((r) => {
@@ -19,39 +22,17 @@
           })
         )
       )
-      workerBundle = texts.join(';') + ';'
-      return workerBundle
+      return texts.join(';') + ';'
     })()
-    return workerBundlePromise
+    bundleCache.set(name, cached)
+    return cached
   }
-  ensureWorkerBundle()
 
-  let workerPolyfillBundle = null
-  let workerPolyfillBundlePromise = null
+  ensureBundle('worker')
+  ensureBundle('workerPolyfill')
 
-  /**
-   * Fetches and caches the polyfill worker bundle (main index + utils) as a single string.
-   * @returns {Promise<string>}
-   */
-  async function ensureWorkerPolyfillBundle() {
-    if (workerPolyfillBundle) return workerPolyfillBundle
-    if (workerPolyfillBundlePromise) return workerPolyfillBundlePromise
-    const files = webhid.import('bundleFiles').workerPolyfill
-    workerPolyfillBundlePromise = (async () => {
-      const texts = await Promise.all(
-        files.map((f) =>
-          fetch(browser.runtime.getURL(f)).then((r) => {
-            if (!r.ok) throw new Error('fetch ' + f + ' failed: ' + r.status)
-            return r.text()
-          })
-        )
-      )
-      workerPolyfillBundle = texts.join(';') + ';'
-      return workerPolyfillBundle
-    })()
-    return workerPolyfillBundlePromise
-  }
-  ensureWorkerPolyfillBundle()
-
-  webhid.export('bgBundle', { ensureWorkerBundle, ensureWorkerPolyfillBundle })
+  webhid.export('bgBundle', {
+    ensureWorkerBundle: () => ensureBundle('worker'),
+    ensureWorkerPolyfillBundle: () => ensureBundle('workerPolyfill')
+  })
 })()

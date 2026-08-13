@@ -6,7 +6,7 @@
   const http = webhid.import('http')
   const createSettingsStore = webhid.import('createSettingsStore')
   const loadEffectiveSettings = webhid.import('loadEffectiveSettings')
-  const siteSettingKey = webhid.import('siteSettingKey')
+  const loadSiteSettings = webhid.import('loadSiteSettings')
   const parseSettingsKey = webhid.import('parseSettingsKey')
   const WebHidDevicePicker = webhid.import('WebHidDevicePicker')
   logger.initLogger('bridge')
@@ -96,8 +96,6 @@
   const requestPortMap = new Map()
   /** @type {Map<MessagePort, string>} */
   const portOrigin = new Map()
-  /** @type {Map<Window, boolean>} */
-  const allowAttrMap = new Map()
   /** @type {Map<string, number>} */
   const spawnGen = new Map()
 
@@ -248,9 +246,8 @@
     const origin = window.location.origin
     let mode = settings.workerSpawnMode
     if (origin) {
-      const siteKey = siteSettingKey(origin, 'workerSpawnMode')
-      const siteResult = await browser.storage.local.get(siteKey)
-      if (siteResult[siteKey] !== undefined) mode = siteResult[siteKey]
+      const site = await loadSiteSettings(origin)
+      if (site.workerSpawnMode !== undefined) mode = site.workerSpawnMode
     }
     if (mode === 'blob') {
       cachedSpawnMode = 'blob'
@@ -658,14 +655,6 @@
     pagePorts.set(source, port)
     pageSourceByPort.set(port, source)
     portOrigin.set(port, event.origin)
-    if (window === window.top) {
-      for (const iframe of document.querySelectorAll('iframe')) {
-        if (iframe.contentWindow === source) {
-          if (iframe.hasAttribute('allow')) allowAttrMap.set(source, true)
-          break
-        }
-      }
-    }
     port.onmessage = (event) => {
       const data = event.data
       if (!data) return
@@ -892,26 +881,6 @@
    * @param {object} data
    * @returns {Promise<void>}
    */
-  async function handleReportRequest(data) {
-    const payload = data.payload || {}
-    if (!payload.deviceId) return
-    try {
-      const msg = Object.assign({ action: data.action }, payload)
-      const response = await browser.runtime.sendMessage(msg)
-      const transfers = response && response.d instanceof Uint8Array ? [response.d.buffer] : []
-      replyToPage(
-        { type: 'response', id: data.id, result: response },
-        transfers.length ? transfers : undefined
-      )
-    } catch {
-      replyToPage({ type: 'response', id: data.id, result: { s: 500 } })
-    }
-  }
-
-  /**
-   * @param {object} data
-   * @returns {Promise<void>}
-   */
   async function handleRequestDeviceRequest(data) {
     const payload = data.payload || {}
     const filters = payload.filters || []
@@ -1108,9 +1077,6 @@
     getCspInfo: handleGetCspInfoRequest,
     getPolicy: handleGetPolicyRequest,
     getSettings: handleGetSettingsRequest,
-    sendReport: handleReportRequest,
-    sendFeatureReport: handleReportRequest,
-    receiveFeatureReport: handleReportRequest,
     requestDevice: handleRequestDeviceRequest
   }
 
@@ -1319,17 +1285,6 @@
             spawnDataPlane(id, token, null, { wtPort, wtCertHash, rewire: true })
           } else {
             spawnDataPlane(id, token, wsPort, { rewire: true })
-          }
-        }
-      }
-    } else {
-      for (const id of openDevices) {
-        const ports = dataPorts.get(id)
-        if (ports) {
-          for (const port of ports) {
-            if (!port.onmessage) {
-              port.onmessage = (event) => onDataPortMessage(id, event.data, port)
-            }
           }
         }
       }

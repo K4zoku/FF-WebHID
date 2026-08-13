@@ -12,29 +12,17 @@
   logger.initLogger('bg')
 
   const { workerPolyfillSites, pendingPicker, shadowArms } = webhid.import('bgState')
-  const { openDb } = webhid.import('bgStorage')
+  const { openDb, txDone } = webhid.import('bgStorage')
   const { purgeTab } = webhid.import('bgStateOps')
   const NativeMessaging = webhid.import('NativeMessaging')
   const { NM_HOST_FORWARDER, NM_HOST_DAEMON } = webhid.import('NM_HOST_NAMES')
   const registerMessageHandlers = webhid.import('registerMessageHandlers')
   const registerWebRequestHandlers = webhid.import('registerWebRequestHandlers')
+  const stripFragment = webhid.import('stripFragment')
 
   const STORAGE_SCHEMA_VERSION = 1
   const VERSION_KEY = 'meta :: storage :: version'
   const GLOBAL_NAMES = new Set(SETTING_NAMES)
-
-  /**
-   * Waits for an IndexedDB transaction to complete.
-   * @param {object} tx
-   * @returns {Promise<void>}
-   */
-  function txDone(tx) {
-    return new Promise((resolve, reject) => {
-      tx.oncomplete = () => resolve()
-      tx.onerror = () => reject(tx.error)
-      tx.onabort = () => reject(tx.error)
-    })
-  }
 
   /**
    * Copies legacy `deviceInfo:*` entries into the IndexedDB deviceInfo store.
@@ -253,14 +241,14 @@
 
   webhid.export('armShadowSpawn', (tabId, url) => {
     if (tabId == null || typeof url !== 'string' || !url) return
-    const key = `${tabId}:${url.split('#')[0]}`
+    const key = `${tabId}:${stripFragment(url)}`
     const existing = shadowArms.get(key)
     shadowArms.set(key, { count: (existing ? existing.count : 0) + 1, at: Date.now() })
   })
 
   webhid.export('unarmShadowSpawn', (tabId, url) => {
     if (tabId == null || typeof url !== 'string' || !url) return
-    const key = `${tabId}:${url.split('#')[0]}`
+    const key = `${tabId}:${stripFragment(url)}`
     const existing = shadowArms.get(key)
     if (!existing) return
     if (existing.count <= 1) shadowArms.delete(key)

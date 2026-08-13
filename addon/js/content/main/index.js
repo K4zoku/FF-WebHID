@@ -48,6 +48,7 @@
     MSG_RECEIVE_FEATURE_REPORT,
     MSG_INPUT_BATCH,
     parseInputReports,
+    buildSendFrame,
     handleControlResponse: handleControlResponseShared
   } = webhid.import('wireFormat')
   /** @type {Map<number, {deviceId: string, resolve: Function, reject: Function}>} */
@@ -61,7 +62,6 @@
     const deviceId = req.deviceId
     let readyNotified = false
     const wt = createWtTransport({
-      tag: 'page',
       onReady: () => {
         if (readyNotified) return
         readyNotified = true
@@ -91,7 +91,7 @@
         })
       },
       onBinary: (batch) => {
-        if (batch.length > 0 && batch[0] >= 0x81) return handleInPageControlResponse(batch)
+        if (batch.length > 0 && batch[0] >= 0x81) return handleControlResponseShared(batch, inPagePending)
         const offset = batch.length > 0 && batch[0] === MSG_INPUT_BATCH ? 1 : 0
         pushInPageBatch(deviceId, batch, offset)
       }
@@ -141,17 +141,6 @@
   }
 
   /**
-   * Routes a control response frame (0x81/0x82/0x83) from the in-page WT
-   * stream to its pending request. Mirrors the data worker's
-   * handleControlResponse; the daemon uses the same wire format on WS and WT.
-   * @param {Uint8Array} batch
-   * @returns {void}
-   */
-  function handleInPageControlResponse(batch) {
-    handleControlResponseShared(batch, inPagePending)
-  }
-
-  /**
    * Sends a request frame over an in-page plane and resolves on the daemon
    * ack. Returns null when the plane is not usable, so the caller falls back
    * to the data port (NM) path.
@@ -165,11 +154,7 @@
   function inPageRequest(plane, msgType, reportId, payload, mapResolve) {
     if (!plane || !plane.wt || !plane.wt.isOpen()) return null
     const reqId = ++nextReqId
-    const frame = new Uint8Array(6 + (payload ? payload.length : 0))
-    frame[0] = msgType
-    new DataView(frame.buffer).setUint32(1, reqId, true)
-    frame[5] = reportId
-    if (payload) frame.set(payload, 6)
+    const frame = buildSendFrame(msgType, reqId, reportId, payload)
     return new Promise((resolve, reject) => {
       inPagePending.set(reqId, {
         deviceId: plane.deviceId,
