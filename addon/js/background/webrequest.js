@@ -3,11 +3,59 @@
   const logger = webhid.import('logger')
   const { workerPolyfillSites, permissionsPolicy, shadowArms } = webhid.import('bgState')
   const { ensureWorkerBundle, ensureWorkerPolyfillBundle } = webhid.import('bgBundle')
-  const { parseCspForWorkerSpawn, rewriteCspValue, rewriteCspForBlob, urlOrigin, frameKey } =
+  const { parseCspForWorkerSpawn, rewriteCspValue, rewriteCspForBlob, urlOrigin, frameKey, allowInlineScript } =
     webhid.import('bgCsp')
   const loadSiteSettings = webhid.import('loadSiteSettings')
+  const bundleFiles = webhid.import('bundleFiles')
 
   const isMv2 = browser.runtime.getManifest().manifest_version === 2
+
+  let mv2ScriptHashPromise = null
+  /**
+   * CSP hash token ('sha256-…') of the exact MV2 MAIN-world bundle text the
+   * content-script injector injects, so strict page CSPs can allow it.
+   * @returns {Promise<string|null>}
+   */
+  function mv2ScriptHashToken() {
+    if (!mv2ScriptHashPromise) {
+      mv2ScriptHashPromise = (async () => {
+        const texts = await Promise.all(
+          bundleFiles.mv2MainWorld.map((f) =>
+            fetch(browser.runtime.getURL(f)).then((r) => r.text())
+          )
+        )
+        const digest = await crypto.subtle.digest(
+          'SHA-256',
+          new TextEncoder().encode(texts.join(';\n'))
+        )
+        return `'sha256-${btoa(String.fromCharCode(...new Uint8Array(digest)))}'`
+      })().catch((e) => {
+        logger.debug('mv2 script hash failed', e)
+        mv2ScriptHashPromise = null
+        return null
+      })
+    }
+    return mv2ScriptHashPromise
+  }
+
+  /**
+   * Maps the CSP response headers through `rewrite`, returning a new header
+   * array when any value changed.
+   * @param {object[]} headers
+   * @param {(value: string) => string|null} rewrite
+   * @returns {object[]|null}
+   */
+  function rewriteCspHeaders(headers, rewrite) {
+    let changed = false
+    const out = headers.map((h) => {
+      if (h.name.toLowerCase() !== 'content-security-policy') return h
+      const value = rewrite(h.value || '')
+      if (value === null || value === h.value) return h
+      changed = true
+      return { name: h.name, value }
+    })
+    return changed ? out : null
+  }
 
   /**
    * Redirect targets that continue a shadow-URL chain. Firefox keeps the same
@@ -258,6 +306,7 @@
       if (headEnd === -1 && !eof && !gaveUp) return
       processed = true
       const mode = await modePromise
+      const scriptHashToken = isMv2 ? await mv2ScriptHashToken() : null
       const html = scanText + dec.decode()
       const end = headEnd === -1 ? html.length : headEnd
       const head = html.slice(0, end)
@@ -272,9 +321,23 @@
         const info = parseCspForWorkerSpawn([csp], mode, origin)
         if (!info) return tag
         metaInfos.push(info)
-        if (mode !== 'blob' || !info.needsBlobFallback) return tag
-        const { value, modified } = rewriteCspValue(csp, info)
-        if (!modified) return tag
+        let value = csp
+        let changed = false
+        if (mode === 'blob' && info.needsBlobFallback) {
+          const { value: v, modified } = rewriteCspValue(value, info)
+          if (modified) {
+            value = v
+            changed = true
+          }
+        }
+        if (scriptHashToken) {
+          const v = allowInlineScript(value, scriptHashToken)
+          if (v !== null) {
+            value = v
+            changed = true
+          }
+        }
+        if (!changed) return tag
         anyChange = true
         return tag.replace(contentMatch[0], 'content=' + (quote || '"') + value + (quote || '"'))
       })
@@ -371,13 +434,23 @@
     const cspInfo = parseCspForWorkerSpawn(cspValues, siteSpawnMode, origin)
     if (cspInfo) cspInfo.headerShadowBlocked = cspInfo.shadowBlocked
     let modified = null
-    if (isMv2 && cspInfo && cspInfo.needsBlobFallback) {
-      modified = rewriteCspForBlob(details.responseHeaders, cspInfo)
-      if (modified) {
-        cspInfo.rewrittenCsp = modified
-          .filter((h) => h.name.toLowerCase() === 'content-security-policy')
-          .map((h) => h.value)
+    if (isMv2 && cspValues.length) {
+      const token = await mv2ScriptHashToken()
+      let headers = details.responseHeaders
+      if (cspInfo && cspInfo.needsBlobFallback) {
+        const blob = rewriteCspForBlob(headers, cspInfo)
+        if (blob) {
+          headers = blob
+          cspInfo.rewrittenCsp = blob
+            .filter((h) => h.name.toLowerCase() === 'content-security-policy')
+            .map((h) => h.value)
+        }
       }
+      if (token) {
+        const inline = rewriteCspHeaders(headers, (value) => allowInlineScript(value, token))
+        if (inline) modified = inline
+      }
+      if (!modified && headers !== details.responseHeaders) modified = headers
     }
     if (cspInfo) {
       browser.storage.session

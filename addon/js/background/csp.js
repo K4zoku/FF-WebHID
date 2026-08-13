@@ -198,6 +198,35 @@
   }
 
   /**
+   * Appends a script hash token to the directive governing inline script
+   * execution when the policy would otherwise block injected inline scripts.
+   * @param {string} csp
+   * @param {string} token
+   * @returns {string|null}
+   */
+  function allowInlineScript(csp, token) {
+    const original = csp || ''
+    if (hasUnseparatedDirective(original)) return null
+    const segments = original.split(';')
+    const names = segments.map((segment) => {
+      const parts = segment.trim().split(/\s+/)
+      return parts[0]?.toLowerCase()
+    })
+    let index = names.indexOf('script-src-elem')
+    if (index === -1) index = names.indexOf('script-src')
+    if (index === -1) index = names.indexOf('default-src')
+    if (index === -1) return null
+    const value = segments[index].trim()
+    if (value.includes(token)) return null
+    const hasUnsafeInline = value.includes("'unsafe-inline'")
+    const hasNonce = value.includes("'nonce-")
+    const hasHash = /'sha(256|384|512)-/.test(value)
+    if (hasUnsafeInline && !hasNonce && !hasHash) return null
+    segments[index] = segments[index].trim() + ' ' + token
+    return segments.join(';')
+  }
+
+  /**
    * @param {Array|null} headers
    * @param {object} cspInfo
    * @returns {Array|null}
@@ -268,6 +297,7 @@
   webhid.export('bgCsp', {
     urlOrigin,
     frameKey,
+    allowInlineScript,
     rewriteCspValue,
     rewriteCspForBlob,
     parseCspForWorkerSpawn
