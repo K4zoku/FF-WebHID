@@ -673,7 +673,7 @@
         tabId,
         popup: 'js/internal/pages/picker/index.html'
       })
-      browser.pageAction.openPopup().catch(() => {})
+      if (browser.pageAction.openPopup) browser.pageAction.openPopup().catch(() => {})
     }
     browser.tabs
       .query({ active: true, currentWindow: true })

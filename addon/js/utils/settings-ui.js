@@ -1,5 +1,6 @@
 ;(function () {
   const webhid = globalThis.webhid
+  const isChromium = webhid.import('isChromium')
 
   /**
    * Checks the radio with the given name/value.
@@ -40,7 +41,9 @@
    */
   function applyPlaneRadios(s, defaults) {
     setRadioValue('dataPlane', effectiveDataPlaneValue(s))
-    setRadioValue('devicePickerMode', s.devicePickerMode || defaults.devicePickerMode)
+    let pickerMode = s.devicePickerMode || defaults.devicePickerMode
+    if (isChromium && pickerMode === 'pageAction') pickerMode = 'modal'
+    setRadioValue('devicePickerMode', pickerMode)
     setRadioValue('workerSpawnMode', s.workerSpawnMode || defaults.workerSpawnMode)
     setRadioValue('logLevel', String(s.logLevel))
   }
@@ -54,7 +57,22 @@
   function updatePlaneVisibility() {
     const dp = currentRadioValue('dataPlane')
     document.getElementById('workerSpawnMode-setting').style.display =
-      dp === 'wt' || dp === 'ws' ? '' : 'none'
+      !isChromium && (dp === 'wt' || dp === 'ws') ? '' : 'none'
+  }
+
+  /**
+   * Hides options that are unavailable on Chromium.
+   * No-op on Firefox.
+   * @returns {void}
+   */
+  function hideChromiumOptions() {
+    if (!isChromium) return
+    const pageAction = document.querySelector('input[name="devicePickerMode"][value="pageAction"]')
+    const label = pageAction ? pageAction.closest('label') : null
+    if (label) label.style.display = 'none'
+    const polyfill = document.getElementById('workerPolyfillEnabled')
+    const polyfillSetting = polyfill ? polyfill.closest('.setting') : null
+    if (polyfillSetting) polyfillSetting.style.display = 'none'
   }
 
   /**
@@ -65,6 +83,8 @@
    * @returns {{applyPlaneRadios: typeof applyPlaneRadios, updatePlaneVisibility: typeof updatePlaneVisibility, saveDataPlane: (value: string) => any, bindRadioGroup: (name: string, transform?: (value: string) => any) => void}}
    */
   function createSettingsUi(save, afterSave) {
+    hideChromiumOptions()
+
     /**
      * Saves the Data Plane radio selection. WebTransport (in-page) is stored
      * as dataPlane=wt + useWorker=false, WebTransport (worker) as

@@ -277,18 +277,17 @@ async function packageXpi() {
 
 async function buildChromium() {
   const srcManifest = JSON.parse(readFileSync(join(SRC, 'manifest.json'), 'utf-8'))
+  const mainEntry = srcManifest.content_scripts.find((e) => e.world === 'MAIN')
+  const isolatedEntry = srcManifest.content_scripts.find((e) => e.world === 'ISOLATED')
+  if (!mainEntry || !isolatedEntry) {
+    throw new Error(
+      'manifest.json needs MAIN and ISOLATED content script entries for the chromium build'
+    )
+  }
   const worlds = [
     { name: 'background.js', list: srcManifest.background.scripts, shim: true },
-    {
-      name: 'main-world.js',
-      list: srcManifest.content_scripts[0].js,
-      shim: srcManifest.content_scripts[0].world !== 'MAIN'
-    },
-    {
-      name: 'isolated-world.js',
-      list: srcManifest.content_scripts[1].js,
-      shim: srcManifest.content_scripts[1].world !== 'MAIN'
-    }
+    { name: 'main-world.js', list: mainEntry.js, shim: mainEntry.world !== 'MAIN' },
+    { name: 'isolated-world.js', list: isolatedEntry.js, shim: isolatedEntry.world !== 'MAIN' }
   ]
 
   const chromiumManifestPath = join(SRC, 'manifest.chromium.json')
@@ -303,6 +302,12 @@ async function buildChromium() {
   allowedFiles.add(pickerPage)
   for (const asset of scanHtmlAssets(join(SRC, pickerPage))) {
     const resolved = resolveAsset(pickerPage, asset)
+    if (resolved && existsSync(join(SRC, resolved))) allowedFiles.add(resolved)
+  }
+  const devicesPage = 'js/internal/pages/devices/index.html'
+  allowedFiles.add(devicesPage)
+  for (const asset of scanHtmlAssets(join(SRC, devicesPage))) {
+    const resolved = resolveAsset(devicesPage, asset)
     if (resolved && existsSync(join(SRC, resolved))) allowedFiles.add(resolved)
   }
   allowedFiles.add('js/utils/browser-shim.js')

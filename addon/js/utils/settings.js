@@ -6,6 +6,11 @@
     browser.runtime != null &&
     browser.runtime.getManifest().manifest_version === 2
 
+  const isChromium =
+    typeof browser !== 'undefined' &&
+    browser.runtime != null &&
+    browser.runtime.getURL('').startsWith('chrome-extension://')
+
   /** @type {import("../types.js").SettingsDefaults} */
   const GLOBAL_DEFAULTS = {
     dataPlane: typeof WebTransport !== 'undefined' ? 'wt' : 'ws',
@@ -13,7 +18,7 @@
     daemonAsNmHost: false,
     devicePickerMode: 'modal',
     workerPolyfillEnabled: false,
-    workerSpawnMode: isMv2 ? 'blob' : 'shadow',
+    workerSpawnMode: isChromium || isMv2 ? 'blob' : 'shadow',
     useWorker: true,
     allowActivationlessRequestDevice: false
   }

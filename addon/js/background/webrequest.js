@@ -501,7 +501,27 @@
    * @returns {void}
    */
   function registerWebRequestHandlers(settings) {
-    if (isChromium) return
+    if (isChromium) {
+      browser.webRequest.onHeadersReceived.addListener(
+        (details) => {
+          if (details.type !== 'main_frame' && details.type !== 'sub_frame') return
+          storePermissionsPolicy(details)
+        },
+        { urls: ['<all_urls>'], types: ['main_frame', 'sub_frame'] },
+        ['responseHeaders']
+      )
+      browser.webRequest.onBeforeRequest.addListener(
+        (details) => {
+          if (details.tabId === undefined || details.frameId === undefined) return
+          const prefix = `${details.tabId}:${details.frameId}:`
+          for (const k of permissionsPolicy.keys()) {
+            if (k.startsWith(prefix)) permissionsPolicy.delete(k)
+          }
+        },
+        { urls: ['<all_urls>'], types: ['main_frame', 'sub_frame'] }
+      )
+      return
+    }
     browser.runtime
       .getBrowserInfo()
       .then((info) => {

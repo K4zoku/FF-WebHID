@@ -17,7 +17,6 @@ import {
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const CHROMIUM_DIST = resolve(__dirname, '..', '..', '..', 'dist', 'chromium')
-const POLICY_PORT = 8123
 
 async function setupPage(
   context: BrowserContext,
@@ -59,21 +58,27 @@ export async function runChromiumAddonBenchmark(
     throw new Error(`Daemon binary not found at ${daemonBin}. Build with 'cargo build' first.`)
   }
   const mock = startWebhidMock('vendor.bin', 0x16c0, 0x0001)
-  await mock.ready
-  const { port, server } = await startStaticServer(POLICY_PORT)
-  const userDataDir = mkdtempSync(join(tmpdir(), 'webhid-addon-crbench-'))
-  const context = await chromium.launchPersistentContext(userDataDir, {
-    headless: true,
-    channel: 'chromium',
-    args: [
-      '--disable-features=WebHID',
-      `--load-extension=${CHROMIUM_DIST}`,
-      `--disable-extensions-except=${CHROMIUM_DIST}`,
-      '--no-first-run',
-      '--disable-default-apps'
-    ]
-  })
+  let server: { close: () => void } | null = null
+  let userDataDir: string | null = null
+  let context: BrowserContext | null = null
   try {
+    await mock.ready
+    const started = await startStaticServer()
+    server = started.server
+    const port = started.port
+    userDataDir = mkdtempSync(join(tmpdir(), 'webhid-addon-crbench-'))
+    context = await chromium.launchPersistentContext(userDataDir, {
+      headless: true,
+      channel: 'chromium',
+      args: [
+        '--disable-features=WebHID',
+        `--load-extension=${CHROMIUM_DIST}`,
+        `--disable-extensions-except=${CHROMIUM_DIST}`,
+        '--no-first-run',
+        '--disable-default-apps'
+      ]
+    })
+
     const extensionId = await getExtensionId(context)
     installChromeNmManifest(extensionId, userDataDir)
 
@@ -91,10 +96,12 @@ export async function runChromiumAddonBenchmark(
     expect(result.fallbacks).toHaveLength(0)
     printResults(label, result)
   } finally {
-    uninstallChromeNmManifest(userDataDir)
-    server.close()
+    if (context) await context.close().catch(() => {})
+    if (userDataDir) {
+      uninstallChromeNmManifest(userDataDir)
+      rmSync(userDataDir, { recursive: true, force: true })
+    }
+    if (server) server.close()
     stopWebhidMock(mock)
-    await context.close().catch(() => {})
-    rmSync(userDataDir, { recursive: true, force: true })
   }
 }

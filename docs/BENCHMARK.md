@@ -87,13 +87,14 @@ their worker via the blob path; run this project on its own (the config pins
 ~4.7ms p50 while sequential runs are stable at ~0.6ms. Init `total` is
 measured from the device `open` mark (run #1 send-start minus open-start)
 for every series, so the modal-picker pairing that precedes open in the
-addon flow is excluded and totals stay comparable across modes; the
-per-report and whole-run numbers are. Harness conventions live in
+addon flow is excluded and totals stay comparable across modes; per-report
+and whole-run numbers are measured identically for every mode. Harness
+conventions live in
 `tests/helpers/chromium-addon.ts` and AGENTS.md.
 
 All modes run
 one unmeasured warm-up (no painting; the page shows "Warming up..."), an
-awaited 128-report priming burst so run #1 starts with a clear path,
+awaited 96-report priming burst so run #1 starts with a clear path,
 then the measured runs (the
 count is the `BENCHMARK_RUNS` env var, falling back to the project's
 `benchmarkRuns` use option, default 5) with run-level retries (a dropped or
@@ -453,6 +454,10 @@ worker)
 | chr-wt-inpage | 10   | 219.2 | 234.2 | 249.9  | 270.9  | 270.9  | 2351.1 |
 | chr-wt        | 10   | 255.9 | 264.7 | 276.5  | 323.3  | 323.3  | 2708.8 |
 
+Summary stats are computed from the unrounded per-run walltimes while the
+per-run tables round to one decimal, so a summary value can differ from the
+rounded table by up to a rounding step; totals are exact sums.
+
 </details>
 
 **Delta vs the native baseline** (per-report p50 is the median of the 10
@@ -461,7 +466,7 @@ the sum of the 10 whole-run walltimes)
 
 | mode          | per-report p50 | vs native    | walltime p50 | vs native     | total  | vs native      |
 | ------------- | -------------- | ------------ | ------------ | ------------- | ------ | -------------- |
-| native        | 0.26           | -             | 113.8        | -             | 1251.2 | -             |
+| native        | 0.26           | -            | 113.8        | -             | 1251.2 | -              |
 | chr-ws        | 0.40           | +0.14 (1.5x) | 155.7        | +41.9 (1.4x)  | 1620.0 | +368.8 (1.3x)  |
 | chr-wt-inpage | 0.54           | +0.28 (2.1x) | 234.2        | +120.4 (2.1x) | 2351.1 | +1099.9 (1.9x) |
 | chr-wt        | 0.61           | +0.35 (2.3x) | 264.7        | +150.9 (2.3x) | 2708.8 | +1457.6 (2.2x) |
@@ -478,9 +483,9 @@ the sum of the 10 whole-run walltimes)
   wt-inpage (0.54ms) are 2.1-2.3x native; nm (1.23ms) is the slowest addon
   plane, and still beats Firefox nm (1.88ms) by 1.5x.
 - **The addon adds little walltime**: chr-ws whole-run p50 is 155.7ms vs
-  native 113.8ms (1.4x). On the same engine the addon is a 1.3-2.2x total
-  overhead, tightest on ws/wt. Firefox wt (434.7ms) is slower than every
-  addon plane on Chromium.
+  native 113.8ms (1.4x). On the same engine the addon is a 1.3-3.8x total
+  overhead, tightest on ws (1.3x) and loosest on nm (3.8x). Firefox wt
+  (434.7ms) still beats the slowest Chromium addon plane, chr-nm (470.0ms).
 - **Init time** (open to run #1 send-start): native 23.9ms, addon planes
   65-161ms, Firefox 137-325ms. Warm-up is 19-312ms. The addon's modal-picker
   pairing precedes open, so it is not counted.

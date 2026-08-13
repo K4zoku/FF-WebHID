@@ -3,6 +3,7 @@
 
   /** @type {import("./types.js").Logger} */
   const logger = webhid.import('logger')
+  const isChromium = webhid.import('isChromium')
   const http = webhid.import('http')
   const createSettingsStore = webhid.import('createSettingsStore')
   const loadEffectiveSettings = webhid.import('loadEffectiveSettings')
@@ -243,6 +244,10 @@
    */
   async function resolveSpawnMode() {
     if (cachedSpawnMode) return cachedSpawnMode
+    if (isChromium) {
+      cachedSpawnMode = 'blob'
+      return 'blob'
+    }
     const origin = window.location.origin
     let mode = settings.workerSpawnMode
     if (origin) {
@@ -885,8 +890,10 @@
     const payload = data.payload || {}
     const filters = payload.filters || []
     const exclusionFilters = payload.exclusionFilters || []
+    const pickerMode =
+      isChromium && settings.devicePickerMode === 'pageAction' ? 'modal' : settings.devicePickerMode
 
-    if (settings.devicePickerMode === 'pageAction' || settings.devicePickerMode === 'window') {
+    if (pickerMode === 'pageAction' || pickerMode === 'window') {
       browser.runtime
         .sendMessage({
           action: 'showPicker',
@@ -894,7 +901,7 @@
           filters,
           exclusionFilters,
           origin: getRequestOrigin(data),
-          mode: settings.devicePickerMode
+          mode: pickerMode
         })
         .catch((e) => logger.debug('showPicker send failed', e))
       const pickerTimeout = setTimeout(() => {
