@@ -3,6 +3,7 @@
   "name": "WebHID",
   "version": "3.1.0",
   "description": "WebHID API implementation",
+  "message_serialization": "structured_clone",
   "icons": {
     "48": "icons/icon48.png"
   },
