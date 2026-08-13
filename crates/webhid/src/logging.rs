@@ -181,13 +181,10 @@ mod tests {
                 .unwrap();
         };
 
-        // Fresh per-instance logs survive.
         let fresh = dir.join("webhid-100.log");
         std::fs::write(&fresh, b"x").unwrap();
-        // Stale per-instance log and its rotated copy are removed.
         set_old("webhid-1.log");
         set_old("webhid-2.log.1");
-        // Unrelated files are never touched, however old.
         set_old("other.log");
 
         prune_old_logs(&dir);

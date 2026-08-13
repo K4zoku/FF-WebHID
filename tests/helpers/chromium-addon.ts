@@ -97,9 +97,6 @@ export async function setExtensionSettings(
     if (mode === 'wt-inpage') {
       keys['settings :: useWorker'] = false
       keys[`settings :: ${origin} :: useWorker`] = false
-      // The in-page WT attach signal is a debug-level log
-      // ("WT persistent stream attached"); watchConsole in the benchmark
-      // runner needs it to prove the plane engaged instead of degrading to NM.
       keys['settings :: logLevel'] = 3
       keys[`settings :: ${origin} :: logLevel`] = 3
     }
@@ -179,9 +176,6 @@ export async function pairViaPicker(page: Page): Promise<void> {
     },
     { timeout: 15000 }
   )
-  // The modal opens before its device list renders (enumerate round trip);
-  // give the item time to appear, then focus the dialog via its header (a
-  // click on a non-interactive area), then drive item select + Connect.
   await page.waitForTimeout(800)
   await page.mouse.click(100, 20)
   await page.keyboard.press('Tab')

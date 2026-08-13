@@ -36,7 +36,6 @@ const AREAS = new Map([
   ['package-lock.json', 'build'],
 ]);
 
-// Longest prefix first so addon/_locales/ beats addon/.
 const prefixes = [...AREAS.keys()].sort((a, b) => b.length - a.length);
 
 let files;

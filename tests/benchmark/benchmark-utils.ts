@@ -489,9 +489,6 @@ export function printResults(mode: string, result: BenchmarkResult): void {
   console.log(`open: ${fmt(result.open)}ms`)
   console.log(`warmup: ${fmt(result.warmup)}ms`)
   const first = runs[0]
-  // total = run #1 send-start minus device open start. Measuring from
-  // loadStart would include pre-open setup (pairing for the addon series,
-  // harness grant for Firefox/native), so all modes align on the open mark.
   const totalMs =
     first != null && first.marks.sendStart != null && first.marks.openStart != null
       ? first.marks.sendStart - first.marks.openStart

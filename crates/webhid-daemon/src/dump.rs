@@ -149,7 +149,6 @@ fn dump_entry(api: &HidApi, info: &HidDeviceInfo, hex_descriptor: bool) -> DumpE
     let desc = if device_blocked.is_none() {
         hid::read_raw_report_descriptor_with_api(api, info)
     } else {
-        // Blocked devices are hidden anyway; skip the open/read.
         Vec::new()
     };
 

@@ -257,9 +257,6 @@ impl DeviceManager {
 
         log::info!("[reader] starting for {dev_id:#x} (numbered_reports={uses_numbered_reports})");
         tokio::spawn(async move {
-            // A non-timeout read error leaves the device stuck open with no
-            // hotplug event to clean it up, so the reader removes the entry,
-            // clears its auth hashes and surfaces the disconnect itself.
             let cleanup_dead_reader = || {
                 let removed = devices_for_task
                     .lock()

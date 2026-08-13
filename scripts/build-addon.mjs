@@ -275,12 +275,6 @@ async function packageXpi() {
   console.log(`Created ${join(distRoot, xpiName)}`)
 }
 
-// Bundles each extension world (background SW, MAIN, ISOLATED content scripts)
-// into a single file for Chromium, where multi-file script arrays do not share
-// a globalThis registry. The file lists come from addon/manifest.json (single
-// source of truth); browser-shim.js is prepended only where the chrome API
-// exists (background SW, ISOLATED world, extension pages). The MAIN world has
-// neither browser nor chrome, so the shim would be inert there and is skipped.
 async function buildChromium() {
   const srcManifest = JSON.parse(readFileSync(join(SRC, 'manifest.json'), 'utf-8'))
   const worlds = [
