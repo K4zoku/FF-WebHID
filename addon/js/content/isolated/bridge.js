@@ -1122,6 +1122,20 @@
   }
 
   /**
+   * Rebuilds a Uint8Array from a value that crossed a Chromium extension
+   * messaging boundary (TypedArrays arrive as plain keyed objects there).
+   * TypedArrays pass through untouched.
+   * @param {*} v
+   * @returns {Uint8Array|null}
+   */
+  function normalizeBytes(v) {
+    if (v == null) return null
+    if (v instanceof Uint8Array) return v
+    if (typeof v.length === 'number') return Uint8Array.from(v)
+    return Uint8Array.from(Object.keys(v).map((k) => Number(v[k])))
+  }
+
+  /**
    * Forwards an NM input report to the page over the device's data port.
    * @param {object} messageEvent
    * @returns {boolean} true when a port handled the report
@@ -1129,8 +1143,8 @@
   function forwardInputReportToPage(messageEvent) {
     const ports = dataPorts.get(messageEvent.deviceId)
     if (!ports || ports.size === 0) return false
-    const view = messageEvent.data
-    const buffer = view ? view.buffer || view : null
+    const bytes = normalizeBytes(messageEvent.data)
+    const buffer = bytes ? bytes.buffer : null
     let handled = false
     for (const port of ports) {
       try {
@@ -1157,6 +1171,7 @@
   function handleBackgroundEvent(message) {
     const messageEvent = message.event
     if (messageEvent.eventType === 'input_report') {
+      messageEvent.data = normalizeBytes(messageEvent.data)
       if (workerReadyDevices.has(messageEvent.deviceId)) return
       if (forwardInputReportToPage(messageEvent)) return
     }
@@ -1215,7 +1230,7 @@
         }
         return
       }
-      const data = http.isOk(status) && response.d ? response.d : null
+      const data = http.isOk(status) && response.d ? normalizeBytes(response.d) : null
       try {
         port.postMessage({
           type: 'featureResult',

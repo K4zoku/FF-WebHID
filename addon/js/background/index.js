@@ -230,7 +230,7 @@
         browser.tabs
           .update(tabId, { active: true })
           .catch((e) => logger.debug('tabs.update failed', e))
-        if (browser.pageAction.openPopup)
+        if (browser.pageAction && browser.pageAction.openPopup)
           browser.pageAction.openPopup().catch((e) => logger.debug('openPopup failed', e))
         notificationsApi
           .clear('webhid-picker')

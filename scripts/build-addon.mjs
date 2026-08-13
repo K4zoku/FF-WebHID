@@ -1,6 +1,6 @@
 import { readFileSync, existsSync, readdirSync } from 'node:fs'
 import { mkdir, readFile, writeFile, rm } from 'node:fs/promises'
-import { join, dirname } from 'node:path'
+import { join, dirname, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { minify } from 'terser'
@@ -9,6 +9,7 @@ import webExt from 'web-ext'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const SRC = join(__dirname, '..', 'addon')
 const DIST = join(__dirname, '..', 'dist', 'addon')
+const CHROMIUM_DIST = join(__dirname, '..', 'dist', 'chromium')
 
 const args = parseArgs({
   args: process.argv.slice(2),
@@ -17,6 +18,7 @@ const args = parseArgs({
   }
 })
 const MANIFEST_VERSION = args.values['manifest-version'] || process.env.MV || '3'
+const TARGET = process.env.TARGET || 'firefox'
 
 const TERSER_OPTS = {
   compress: true,
@@ -80,8 +82,12 @@ function collectIcons(manifest, add) {
     }
   }
   for (const key of ['page_action', 'action']) {
-    if (manifest[key] && manifest[key].default_icon) {
-      add(manifest[key].default_icon)
+    if (!manifest[key] || !manifest[key].default_icon) continue
+    const icon = manifest[key].default_icon
+    if (typeof icon === 'string') {
+      add(icon)
+    } else if (icon && typeof icon === 'object') {
+      for (const v of Object.values(icon)) add(v)
     }
   }
 }
@@ -195,11 +201,11 @@ async function lintAddon() {
   }
 }
 
-async function writeDistFiles(allowedFiles, manifestPath) {
-  if (existsSync(DIST)) {
-    await rm(DIST, { recursive: true, force: true })
+async function writeDistFiles(allowedFiles, manifestPath, distDir = DIST) {
+  if (existsSync(distDir)) {
+    await rm(distDir, { recursive: true, force: true })
   }
-  await mkdir(DIST, { recursive: true })
+  await mkdir(distDir, { recursive: true })
 
   let jsCount = 0
   let cssCount = 0
@@ -209,13 +215,13 @@ async function writeDistFiles(allowedFiles, manifestPath) {
   for (const rel of allowedFiles) {
     if (rel === '') {
       const manifestContent = await readFile(manifestPath, 'utf-8')
-      await writeFile(join(DIST, 'manifest.json'), manifestContent, 'utf-8')
+      await writeFile(join(distDir, 'manifest.json'), manifestContent, 'utf-8')
       copyCount++
       continue
     }
 
     const srcPath = join(SRC, rel)
-    const outPath = join(DIST, rel)
+    const outPath = join(distDir, rel)
     await mkdir(dirname(outPath), { recursive: true })
     let code
     try {
@@ -264,7 +270,73 @@ async function packageXpi() {
   console.log(`Created ${join(distRoot, xpiName)}`)
 }
 
+// Bundles each extension world (background SW, MAIN, ISOLATED content scripts)
+// into a single file for Chromium, where multi-file script arrays do not share
+// a globalThis registry. The file lists come from addon/manifest.json (single
+// source of truth); browser-shim.js is prepended so `browser` aliases `chrome`.
+async function buildChromium() {
+  const srcManifest = JSON.parse(readFileSync(join(SRC, 'manifest.json'), 'utf-8'))
+  const worlds = [
+    { name: 'background.js', list: srcManifest.background.scripts },
+    { name: 'main-world.js', list: srcManifest.content_scripts[0].js },
+    { name: 'isolated-world.js', list: srcManifest.content_scripts[1].js }
+  ]
+
+  const chromiumManifestPath = join(SRC, 'manifest.chromium.json')
+  if (!existsSync(chromiumManifestPath)) {
+    console.error('manifest.chromium.json not found in addon/')
+    process.exit(1)
+  }
+
+  const manifestFiles = collectManifestFiles(chromiumManifestPath)
+  const allowedFiles = collectAllFiles(manifestFiles)
+  const pickerPage = 'js/internal/pages/picker/index.html'
+  allowedFiles.add(pickerPage)
+  for (const asset of scanHtmlAssets(join(SRC, pickerPage))) {
+    const resolved = resolveAsset(pickerPage, asset)
+    if (resolved && existsSync(join(SRC, resolved))) allowedFiles.add(resolved)
+  }
+  allowedFiles.add('js/utils/browser-shim.js')
+  console.log(`Chromium manifest references ${allowedFiles.size} files`)
+  await writeDistFiles(allowedFiles, chromiumManifestPath, CHROMIUM_DIST)
+
+  for (const rel of allowedFiles) {
+    if (!rel.endsWith('.html')) continue
+    const outPath = join(CHROMIUM_DIST, rel)
+    if (!existsSync(outPath)) continue
+    const relShim = relative(dirname(rel), 'js/utils/browser-shim.js').replace(/\\/g, '/')
+    const html = await readFile(outPath, 'utf-8')
+    const injected = html.replace(/<script/i, `<script src="${relShim}"></script><script`)
+    await writeFile(outPath, injected, 'utf-8')
+  }
+
+  for (const { name, list } of worlds) {
+    const files = ['js/utils/browser-shim.js', ...list]
+    const sources = []
+    for (const rel of files) {
+      const fullPath = join(SRC, rel)
+      if (!existsSync(fullPath)) {
+        throw new Error(`Missing file for chromium bundle ${name}: ${rel}`)
+      }
+      sources.push(readFileSync(fullPath, 'utf-8'))
+    }
+    const result = await minify(sources.join(';\n'), TERSER_OPTS)
+    if (result.error) {
+      throw new Error(`terser failed on ${name}: ${result.error}`)
+    }
+    await writeFile(join(CHROMIUM_DIST, name), result.code ?? '', 'utf-8')
+    console.log(`Built dist/chromium/${name} (${files.length} files bundled)`)
+  }
+
+  console.log('Built dist/chromium/ (unpacked, ready for --load-extension)')
+}
+
 async function build() {
+  if (TARGET === 'chromium') {
+    await buildChromium()
+    return
+  }
+
   await lintAddon()
 
   const srcName = MANIFEST_VERSION === '2' ? 'manifest.v2.json' : 'manifest.json'

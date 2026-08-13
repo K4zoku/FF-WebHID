@@ -57,6 +57,15 @@ fn socket_mode(path: &str) -> u32 {
 
 fn detect_nm_host_mode() -> Option<(String, String)> {
     let args: Vec<String> = std::env::args().collect();
+    if args.len() == 2 && args[1].starts_with("chrome-extension://") {
+        let id = args[1]
+            .trim_end_matches('/')
+            .rsplit('/')
+            .next()
+            .unwrap_or("")
+            .to_string();
+        return Some((args[1].clone(), id));
+    }
     if args.len() != 3 {
         return None;
     }

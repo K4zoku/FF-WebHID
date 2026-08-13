@@ -3,8 +3,14 @@
   const logger = webhid.import('logger')
   const { workerPolyfillSites, permissionsPolicy, shadowArms } = webhid.import('bgState')
   const { ensureWorkerBundle, ensureWorkerPolyfillBundle } = webhid.import('bgBundle')
-  const { parseCspForWorkerSpawn, rewriteCspValue, rewriteCspForBlob, urlOrigin, frameKey, allowInlineScript } =
-    webhid.import('bgCsp')
+  const {
+    parseCspForWorkerSpawn,
+    rewriteCspValue,
+    rewriteCspForBlob,
+    urlOrigin,
+    frameKey,
+    allowInlineScript
+  } = webhid.import('bgCsp')
   const loadSiteSettings = webhid.import('loadSiteSettings')
   const bundleFiles = webhid.import('bundleFiles')
 
@@ -494,6 +500,7 @@
    * @returns {void}
    */
   function registerWebRequestHandlers(settings) {
+    if (browser.runtime.getURL('').startsWith('chrome-extension://')) return
     browser.runtime
       .getBrowserInfo()
       .then((info) => {

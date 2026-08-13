@@ -62,6 +62,17 @@ export default defineConfig({
         headless: true,
         benchmarkRuns: 5
       } as PlaywrightUseOptions & { benchmarkRuns: number }
+    },
+    {
+      name: 'chromium-addon-benchmark',
+      testDir: './benchmark/chromium-addon',
+      timeout: 600000,
+      use: {
+        browserName: 'chromium',
+        channel: 'chromium',
+        headless: true,
+        benchmarkRuns: 10
+      } as PlaywrightUseOptions & { benchmarkRuns: number }
     }
   ]
 })
