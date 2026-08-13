@@ -158,17 +158,29 @@ test.describe('Worker spawn mode detection', () => {
     expect(cspInfo.needsBlobFallback).toBe(true)
   })
 
-  test('allowing CSP: no fallback needed', async ({ backgroundPage, sharedPage, pageUrl }) => {
+  test('allowing CSP: no fallback needed', async ({
+    backgroundPage,
+    sharedPage,
+    pageUrl,
+    servers
+  }) => {
+    const origin = `http://localhost:${servers.main.port}`
+    const siteKey = `settings :: ${origin} :: workerSpawnMode`
     await clearSession(backgroundPage)
-    await sharedPage.goto(pageUrl('/worker-spawn-csp-allowing'), {
-      waitUntil: 'domcontentloaded',
-      timeout: 15000
-    })
-    const entries = await readCspEntries(backgroundPage)
-    expect(entries.length).toBeGreaterThan(0)
-    expect(entries[0].needsBlobFallback).toBe(false)
-    const status = await waitForStatus(sharedPage, 'blob-status')
-    expect(status).toBe('blob-ready')
+    await backgroundPage.evaluate((key) => browser.storage.local.set({ [key]: 'shadow' }), siteKey)
+    try {
+      await sharedPage.goto(pageUrl('/worker-spawn-csp-allowing'), {
+        waitUntil: 'domcontentloaded',
+        timeout: 15000
+      })
+      const entries = await readCspEntries(backgroundPage)
+      expect(entries.length).toBeGreaterThan(0)
+      expect(entries[0].needsBlobFallback).toBe(false)
+      const status = await waitForStatus(sharedPage, 'blob-status')
+      expect(status).toBe('blob-ready')
+    } finally {
+      await backgroundPage.evaluate((key) => browser.storage.local.remove(key), siteKey)
+    }
   })
 
   test('trusted-types page triggers fallback detection', async ({
@@ -425,29 +437,45 @@ test.describe('Worker spawn mode detection', () => {
   test('duplicate directive: first occurrence wins', async ({
     backgroundPage,
     sharedPage,
-    pageUrl
+    pageUrl,
+    servers
   }) => {
+    const origin = `http://localhost:${servers.main.port}`
+    const siteKey = `settings :: ${origin} :: workerSpawnMode`
     await clearSession(backgroundPage)
-    await sharedPage.goto(pageUrl('/worker-spawn-csp-dup'), {
-      waitUntil: 'domcontentloaded',
-      timeout: 15000
-    })
-    const entries = await readCspEntries(backgroundPage)
-    const cspInfo = entries[0]
-    expect(cspInfo.workerSrcBlocked).toBe(false)
-    expect(cspInfo.needsBlobFallback).toBe(false)
+    await backgroundPage.evaluate((key) => browser.storage.local.set({ [key]: 'shadow' }), siteKey)
+    try {
+      await sharedPage.goto(pageUrl('/worker-spawn-csp-dup'), {
+        waitUntil: 'domcontentloaded',
+        timeout: 15000
+      })
+      const entries = await readCspEntries(backgroundPage)
+      const cspInfo = entries[0]
+      expect(cspInfo.workerSrcBlocked).toBe(false)
+      expect(cspInfo.needsBlobFallback).toBe(false)
+    } finally {
+      await backgroundPage.evaluate((key) => browser.storage.local.remove(key), siteKey)
+    }
   })
 
   test('wildcard and ws: scheme sources: no fallback needed', async ({
     backgroundPage,
     sharedPage,
-    pageUrl
+    pageUrl,
+    servers
   }) => {
-    for (const route of ['/worker-spawn-csp-star', '/worker-spawn-csp-ws-scheme']) {
-      await clearSession(backgroundPage)
-      await sharedPage.goto(pageUrl(route), { waitUntil: 'domcontentloaded', timeout: 15000 })
-      const entries = await readCspEntries(backgroundPage)
-      expect(entries[0].needsBlobFallback).toBe(false)
+    const origin = `http://localhost:${servers.main.port}`
+    const siteKey = `settings :: ${origin} :: workerSpawnMode`
+    await backgroundPage.evaluate((key) => browser.storage.local.set({ [key]: 'shadow' }), siteKey)
+    try {
+      for (const route of ['/worker-spawn-csp-star', '/worker-spawn-csp-ws-scheme']) {
+        await clearSession(backgroundPage)
+        await sharedPage.goto(pageUrl(route), { waitUntil: 'domcontentloaded', timeout: 15000 })
+        const entries = await readCspEntries(backgroundPage)
+        expect(entries[0].needsBlobFallback).toBe(false)
+      }
+    } finally {
+      await backgroundPage.evaluate((key) => browser.storage.local.remove(key), siteKey)
     }
   })
 
