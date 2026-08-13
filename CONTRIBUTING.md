@@ -14,8 +14,7 @@
 Prerequisites: Rust (stable), Node.js 20+, Firefox (needed for the Playwright suites).
 
 ```sh
-npm ci
-pre-commit install      # conventional-commit hook, runs on every git commit
+npm ci                  # also installs the git hooks (commitlint, area scope)
 cargo build --manifest-path crates/Cargo.toml
 ```
 
@@ -23,7 +22,7 @@ The full build/run/test guide lives in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md
 
 ### Commit conventions
 
-Commits must follow [Conventional Commits](https://www.conventionalcommits.org/), enforced locally by the pre-commit hook (`compilerla/conventional-pre-commit`). Allowed types: `feat`, `fix`, `perf`, `refactor`, `docs`, `ci`, `chore`, `style`, `test`, `build`, `revert`. The changelog is generated from commit subjects; types not listed in `.versionrc.json` are omitted from it.
+Commits must follow [Conventional Commits](https://www.conventionalcommits.org/), enforced locally by `@commitlint/cli`, an npm devDependency hook that `npm ci` installs automatically (no Python or pre-commit framework needed). A second hook adds an area scope to the subject when the change touches exactly one known area (`chore: x` touching only `addon/` becomes `chore(addon): x`). Allowed types: `feat`, `fix`, `perf`, `refactor`, `docs`, `ci`, `chore`, `style`, `test`, `build`, `revert`. The changelog is generated from commit subjects; types not listed in `.versionrc.json` are omitted from it.
 
 ### Pull requests
 

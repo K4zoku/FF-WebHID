@@ -52,13 +52,16 @@
     "test:benchmark:loss": "npx playwright test --config $npm_package_config_playwrightBenchmarkConfig --project=firefox-benchmark-loss",
     "test:benchmark:chromium": "npx playwright test --config $npm_package_config_playwrightBenchmarkConfig --project=chromium-benchmark",
     "test:headed": "npx playwright test --config $npm_package_config_playwrightConfig --headed",
-    "test:rs": "cargo test --manifest-path $npm_package_config_cargoManifest"
+    "test:rs": "cargo test --manifest-path $npm_package_config_cargoManifest",
+    "prepare": "husky"
   },
   "name": "ff-webhid",
   "private": true,
   "version": "3.1.0",
   "type": "module",
   "devDependencies": {
+    "@commitlint/cli": "^21.2.1",
+    "@commitlint/config-conventional": "^21.2.0",
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.62.0",
     "@prettier/plugin-xml": "^3.4.2",
@@ -68,6 +71,7 @@
     "eslint": "^10.8.0",
     "eslint-plugin-jsdoc": "^63.3.2",
     "firefox-webext-playwright-harness": "github:duckduckgo/firefox-webext-playwright-harness#c339f623db3b4ee464e6460e32287ca2ee588115",
+    "husky": "^9.1.7",
     "jiti": "^2.7.0",
     "jszip": "^3.10.1",
     "prettier": "^3.9.6",

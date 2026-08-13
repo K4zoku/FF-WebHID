@@ -1,0 +1,1 @@
+node scripts/commit-scope.mjs "$1"
