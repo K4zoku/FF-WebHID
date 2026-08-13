@@ -1,15 +1,15 @@
 ;(function () {
-  const isWorker = typeof window === 'undefined' || !(window instanceof Window)
-  if (!isWorker && !window.isSecureContext) {
-    console.debug('NO POLYFILL')
-    return
-  }
-
   /** @type {import("./types.js").Logger} */
   const webhid = globalThis.webhid
 
   /** @type {import("./types.js").Logger} */
   const logger = webhid.import('logger')
+  const isWorker = typeof window === 'undefined' || !(window instanceof Window)
+  if (!isWorker && !window.isSecureContext) {
+    logger.warn('NO POLYFILL')
+    return
+  }
+
   const http = webhid.import('http')
   const GLOBAL_DEFAULTS = webhid.import('GLOBAL_DEFAULTS')
   const createSettingsStore = webhid.import('createSettingsStore')

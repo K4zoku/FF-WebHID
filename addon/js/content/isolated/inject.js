@@ -1,4 +1,7 @@
 ;(function () {
+  /** @type {import("../types.js").Logger} */
+  const logger = webhid.import('logger')
+  logger.initLogger('inject')
   /** @type {string[]} */
   var scripts = webhid.import('bundleFiles').mv2MainWorld
   var codes = []
@@ -8,11 +11,11 @@
     try {
       xhr.send()
     } catch (e) {
-      console.error('inject-main: failed to load', scripts[i], e)
+      logger.error('inject-main: failed to load', scripts[i], e)
       return
     }
     if (xhr.status !== 200) {
-      console.error('inject-main: failed to load', scripts[i], xhr.status)
+      logger.error('inject-main: failed to load', scripts[i], xhr.status)
       return
     }
     codes.push(xhr.responseText)
