@@ -14,11 +14,16 @@ const CHROMIUM_DIST = join(__dirname, '..', 'dist', 'chromium')
 const args = parseArgs({
   args: process.argv.slice(2),
   options: {
-    'manifest-version': { type: 'string', alias: 'mv' }
+    'manifest-version': { type: 'string', alias: 'mv' },
+    target: { type: 'string', alias: 't' }
   }
 })
 const MANIFEST_VERSION = args.values['manifest-version'] || process.env.MV || '3'
-const TARGET = process.env.TARGET || 'firefox'
+const TARGET = args.values.target || process.env.TARGET || 'firefox'
+if (!['firefox', 'chromium'].includes(TARGET)) {
+  console.error(`Unknown TARGET '${TARGET}'; expected 'firefox' or 'chromium'`)
+  process.exit(1)
+}
 
 const TERSER_OPTS = {
   compress: true,
@@ -273,13 +278,23 @@ async function packageXpi() {
 // Bundles each extension world (background SW, MAIN, ISOLATED content scripts)
 // into a single file for Chromium, where multi-file script arrays do not share
 // a globalThis registry. The file lists come from addon/manifest.json (single
-// source of truth); browser-shim.js is prepended so `browser` aliases `chrome`.
+// source of truth); browser-shim.js is prepended only where the chrome API
+// exists (background SW, ISOLATED world, extension pages). The MAIN world has
+// neither browser nor chrome, so the shim would be inert there and is skipped.
 async function buildChromium() {
   const srcManifest = JSON.parse(readFileSync(join(SRC, 'manifest.json'), 'utf-8'))
   const worlds = [
-    { name: 'background.js', list: srcManifest.background.scripts },
-    { name: 'main-world.js', list: srcManifest.content_scripts[0].js },
-    { name: 'isolated-world.js', list: srcManifest.content_scripts[1].js }
+    { name: 'background.js', list: srcManifest.background.scripts, shim: true },
+    {
+      name: 'main-world.js',
+      list: srcManifest.content_scripts[0].js,
+      shim: srcManifest.content_scripts[0].world !== 'MAIN'
+    },
+    {
+      name: 'isolated-world.js',
+      list: srcManifest.content_scripts[1].js,
+      shim: srcManifest.content_scripts[1].world !== 'MAIN'
+    }
   ]
 
   const chromiumManifestPath = join(SRC, 'manifest.chromium.json')
@@ -310,8 +325,8 @@ async function buildChromium() {
     await writeFile(outPath, injected, 'utf-8')
   }
 
-  for (const { name, list } of worlds) {
-    const files = ['js/utils/browser-shim.js', ...list]
+  for (const { name, list, shim } of worlds) {
+    const files = shim ? ['js/utils/browser-shim.js', ...list] : list
     const sources = []
     for (const rel of files) {
       const fullPath = join(SRC, rel)
