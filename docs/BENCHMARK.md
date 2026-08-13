@@ -1,6 +1,6 @@
 # FF-WebHID Benchmark Report
 
-## Automated image-pipeline benchmark (2026-08)
+## Automated image-pipeline benchmark
 
 A Playwright-driven end-to-end benchmark measuring the full data-plane
 round-trip automatically across four modes: Firefox ws, Firefox nm, Chromium
@@ -26,9 +26,9 @@ visible in the numbers: if WS receive/parse on a dedicated
 worker really stays off the main thread, the render-heavy load should not
 slow ws as much as nm. The measured window is
 `performance.measure('roundtrip', 'send-start', 'image-painted')`,
-5 runs per mode, printed with open (open call through data-plane ready),
+5 runs per mode, printed with open (device open call duration),
 warm-up (total wall time from warm-up start until a retry succeeds, so
-failed attempts are included) and total (page load through run #1's
+failed attempts are included) and total (device open through run #1's
 send-start) durations. Then a per-run table where each run's ~520 reports
 are summarized as min/p50/p90/p95/max of per-report round-trip latency
 (send to the report arriving back) plus the run's walltime (whole-run
@@ -81,9 +81,14 @@ The **addon Chromium project** (`chromium-addon-benchmark`,
 `npm run test:benchmark:chromium:addon`) runs the same page on the same
 Chromium build with the addon loaded unpacked (`TARGET=chromium` build,
 `--disable-features=WebHID` removes native `navigator.hid`). All four data
-planes run (nm, ws, wt, wt-inpage). Its `total` init figure includes the
-modal-picker pairing, so init totals are not comparable with the other
-series; the per-report and whole-run numbers are. Harness conventions live in
+planes run (nm, ws, wt, wt-inpage). The page has no CSP, so ws/wt spawn
+their worker via the blob path; run this project on its own (the config pins
+`workers: 1`), an early wt execution alongside other benchmarks showed
+~4.7ms p50 while sequential runs are stable at ~0.6ms. Init `total` is
+measured from the device `open` mark (run #1 send-start minus open-start)
+for every series, so the modal-picker pairing that precedes open in the
+addon flow is excluded and totals stay comparable across modes; the
+per-report and whole-run numbers are. Harness conventions live in
 `tests/helpers/chromium-addon.ts` and AGENTS.md.
 
 All modes run
@@ -112,20 +117,18 @@ worst run is ~0.6%. See AGENTS.md for the design record.
 
 ---
 
-## Automated benchmark results (2026-08-05, 10 runs per mode)
+## Automated benchmark results (10 runs per mode)
 
 Fresh page per spec (a new tab is created and closed around each spec, so no
 mode measures on a page carrying JIT/GC/canvas state from earlier ones; the
 harness's default tab stays untouched). `BENCHMARK_RUNS=10`, all four Firefox
 modes in one worker. Each mode opens the mock device cold, runs one warm-up
 burst, then 10 measured runs; a dropped or late report invalidates a run and
-it is retried. Chromium native numbers are from the 2026-08-02 dataset: the
-addon code does not affect the native benchmark, so that baseline is
-unchanged. The `chr-*` series (2026-08-13, chromium-testbed) adds
-the same-engine addon-vs-native comparison; all four data planes run, see the
+it is retried. The `chr-*` series adds the same-engine addon-vs-native
+comparison on the same Chromium build; all four data planes run, see the
 dataset tables.
 
-Init time per mode, stacked (raw values in the dataset table):
+Init time per mode, stacked:
 
 ```mermaid
 ---
@@ -137,10 +140,10 @@ config:
 xychart
     title "Init time per mode (ms)"
     x-axis [nm, ws, wt-inpage, wt, native, chr-nm, chr-ws, chr-wt-inpage, chr-wt]
-    y-axis "ms" 0 --> 1300
-    bar "total" [330.7, 208.1, 184.6, 211.5, 62.4, 1191.3, 1110.6, 1128.7, 1139.9]
-    bar "warmup" [263.9, 157.6, 119.2, 168.5, 26.2, 129.7, 71.9, 83.8, 161.1]
-    bar "open" [15.9, 25.6, 13.2, 34.5, 5.2, 13.7, 18.9, 18.8, 28.1]
+    y-axis "ms" 0 --> 400
+    bar "total" [325.4, 137.6, 173.8, 165.3, 23.9, 160.5, 64.7, 103.7, 92.5]
+    bar "warmup" [319.6, 133.5, 168.4, 159.4, 19.6, 150.3, 60.7, 99.4, 88.1]
+    bar "open" [7.6, 8.5, 12.4, 9.4, 0.6, 7.3, 12.7, 16.4, 11.1]
 ```
 
 Per-run round-trip latency (p50) and whole-run walltime, for all 10 runs of
@@ -287,15 +290,15 @@ radar-beta
 
 | mode          | open (ms) | warmup (ms) | total (ms) |
 | ------------- | --------- | ----------- | ---------- |
-| nm            | 15.9      | 248.0       | 330.7      |
-| ws            | 25.6      | 132.0       | 208.1      |
-| wt-inpage     | 13.2      | 106.0       | 184.6      |
-| wt            | 34.5      | 134.0       | 211.5      |
-| native        | 5.2       | 21.0        | 62.4       |
-| chr-nm        | 13.7      | 116.0       | 1191.3     |
-| chr-ws        | 18.9      | 53.0        | 1110.6     |
-| chr-wt-inpage | 18.8      | 65.0        | 1128.7     |
-| chr-wt        | 28.1      | 133.0       | 1139.9     |
+| nm            | 7.6       | 312.0       | 325.4      |
+| ws            | 8.5       | 125.0       | 137.6      |
+| wt-inpage     | 12.4      | 156.0       | 173.8      |
+| wt            | 9.4       | 150.0       | 165.3      |
+| native        | 0.6       | 19.0        | 23.9       |
+| chr-nm        | 7.3       | 143.0       | 160.5      |
+| chr-ws        | 12.7      | 48.0        | 64.7       |
+| chr-wt-inpage | 16.4      | 83.0        | 103.7      |
+| chr-wt        | 11.1      | 77.0        | 92.5       |
 
 **nm** (Firefox, daemon-nm deployment)
 
@@ -357,7 +360,7 @@ radar-beta
 | #9  | 0.60 | 0.96 | 1.18 | 1.32 | 6.32 | 434.0    |
 | #10 | 0.58 | 0.96 | 1.24 | 1.40 | 6.28 | 448.5    |
 
-**native** (Chromium, no addon, policy grant; 2026-08-02 dataset, unchanged)
+**native** (Chromium, no addon, policy grant)
 
 | run | min  | p50  | p90  | p95  | max  | walltime |
 | --- | ---- | ---- | ---- | ---- | ---- | -------- |
@@ -373,7 +376,7 @@ radar-beta
 | #10 | 0.10 | 0.50 | 1.97 | 2.22 | 4.59 | 168.0    |
 
 **chr-nm** (Chromium, addon over the NM data plane,
-daemon-as-NM-host; 2026-08-13, chromium-testbed)
+daemon-as-NM-host)
 
 | run | min  | p50  | p90  | p95  | max   | walltime |
 | --- | ---- | ---- | ---- | ---- | ----- | -------- |
@@ -389,7 +392,7 @@ daemon-as-NM-host; 2026-08-13, chromium-testbed)
 | #10 | 0.76 | 1.22 | 1.86 | 2.37 | 10.52 | 524.2    |
 
 **chr-ws** (Chromium, addon, ws data plane with a blob-spawned
-worker; 2026-08-13)
+worker)
 
 | run | min  | p50  | p90  | p95  | max  | walltime |
 | --- | ---- | ---- | ---- | ---- | ---- | -------- |
@@ -405,7 +408,7 @@ worker; 2026-08-13)
 | #10 | 0.22 | 0.41 | 0.56 | 0.71 | 2.82 | 156.2    |
 
 **chr-wt-inpage** (Chromium, addon, wt data plane in the page,
-`useWorker: false`; 2026-08-13)
+`useWorker: false`)
 
 | run | min  | p50  | p90  | p95  | max  | walltime |
 | --- | ---- | ---- | ---- | ---- | ---- | -------- |
@@ -421,7 +424,7 @@ worker; 2026-08-13)
 | #10 | 0.27 | 0.53 | 0.73 | 0.84 | 1.99 | 219.3    |
 
 **chr-wt** (Chromium, addon, wt data plane with a blob-spawned
-worker; 2026-08-13)
+worker)
 
 | run | min  | p50  | p90  | p95  | max  | walltime |
 | --- | ---- | ---- | ---- | ---- | ---- | -------- |
@@ -436,7 +439,7 @@ worker; 2026-08-13)
 | #9  | 0.26 | 0.59 | 0.81 | 0.91 | 2.14 | 256.2    |
 | #10 | 0.30 | 0.58 | 0.84 | 0.98 | 2.63 | 258.5    |
 
-**Whole-run walltime summary** (10 runs each; native from 2026-08-02)
+**Whole-run walltime summary** (10 runs each)
 
 | mode          | runs | min   | p50   | p90    | p95    | max    | total  |
 | ------------- | ---- | ----- | ----- | ------ | ------ | ------ | ------ |
@@ -450,13 +453,15 @@ worker; 2026-08-13)
 | chr-wt-inpage | 10   | 219.2 | 234.2 | 249.9  | 270.9  | 270.9  | 2351.1 |
 | chr-wt        | 10   | 255.9 | 264.7 | 276.5  | 323.3  | 323.3  | 2708.8 |
 
+</details>
+
 **Delta vs the native baseline** (per-report p50 is the median of the 10
 per-run p50 values; walltime p50 and total as in the summary table; total is
 the sum of the 10 whole-run walltimes)
 
 | mode          | per-report p50 | vs native    | walltime p50 | vs native     | total  | vs native      |
 | ------------- | -------------- | ------------ | ------------ | ------------- | ------ | -------------- |
-| native        | 0.26           | —            | 113.8        | —             | 1251.2 | —              |
+| native        | 0.26           | -             | 113.8        | -             | 1251.2 | -             |
 | chr-ws        | 0.40           | +0.14 (1.5x) | 155.7        | +41.9 (1.4x)  | 1620.0 | +368.8 (1.3x)  |
 | chr-wt-inpage | 0.54           | +0.28 (2.1x) | 234.2        | +120.4 (2.1x) | 2351.1 | +1099.9 (1.9x) |
 | chr-wt        | 0.61           | +0.35 (2.3x) | 264.7        | +150.9 (2.3x) | 2708.8 | +1457.6 (2.2x) |
@@ -466,82 +471,44 @@ the sum of the 10 whole-run walltimes)
 | chr-nm        | 1.23           | +0.97 (4.7x) | 470.0        | +356.2 (4.1x) | 4733.7 | +3482.5 (3.8x) |
 | nm (Firefox)  | 1.88           | +1.62 (7.2x) | 932.5        | +818.7 (8.2x) | 9431.5 | +8180.3 (7.5x) |
 
-</details>
+## What the numbers mean
 
-Reading the numbers:
-
-- **Per-report round-trip latency p50** (send to the report arriving back):
-  native Chromium ~0.23-0.50ms; on the same engine the addon runs ws
-  ~0.39-0.46ms, wt-inpage ~0.50-0.58ms, wt ~0.58-0.65ms, nm ~1.20-1.28ms.
-  Firefox: wt ~0.92-1.06ms, wt-inpage ~0.98-1.18ms, ws ~1.02-1.16ms, nm
-  ~1.66-2.30ms. The addon ws/wt/wt-inpage planes on Chromium are faster than
-  every Firefox mode and within 1.5-2.3x of native, while the nm plane is the
-  addon's slowest data path on both engines.
-- **Whole-run walltime p50**: native 114ms, chr-ws 156ms, chr-wt-inpage
-  234ms, chr-wt 265ms, chr-nm 470ms; Firefox wt 435ms, wt-inpage 446ms,
-  ws 500ms, nm 933ms. The addon ws plane is ~1.4x native and faster than the
-  best Firefox mode.
-- **Total (sum of 10 runs)**: native 1.25s, chr-ws 1.62s, chr-wt-inpage
-  2.35s, chr-wt 2.71s, chr-nm 4.73s; Firefox wt 4.42s, wt-inpage 4.49s,
-  ws 5.08s, nm 9.43s. The addon ws/wt gaps vs native (1.3x/2.2x) are the
-  tightest overhead measured on any engine.
-- **Same-engine addon overhead** (addon vs native, identical page, mock and
-  Chromium build): ws 1.5x per-report p50 and 1.4x walltime p50,
-  wt-inpage 2.1x/2.1x, wt 2.3x/2.3x, nm 4.7x/4.1x. Addon `total` figures
-  include the modal-picker pairing, so init totals are not comparable; the
-  per-report and whole-run numbers are.
-- **ws/wt spawn on Chromium**: the page has no CSP, so the blob worker path
-  (`workerSpawnMode: 'blob'`) is used. Run this project on its own: an early
-  wt execution alongside other benchmarks showed ~4.7ms p50, while sequential
-  runs are stable at ~0.6ms (the config pins `workers: 1`).
-- **Init time**: warm-up ~100-250ms across modes; total (load to run #1
-  send-start) 185-331ms for the Firefox and native modes, ~1.1-1.2s for the
-  addon series (its pairing sits inside the window). No first-burst retry
-  anomaly this dataset (the 2026-08-02 wt run hit one: warmup 2.1s).
-- These are not a polyfill-vs-native comparison for the Firefox modes:
-  Firefox runs the polyfill over the daemon (daemon-nm deployment), Chromium
-  native WebHID runs on the same mock; the engine, transport and grant path
-  all differ. The same-engine comparison is the `chr-*` series on
-  the same Chromium build as the native baseline.
+- **The addon is fastest over ws on Chromium**: per-report p50 0.40ms,
+  1.5x native (0.26ms) and faster than every Firefox mode. wt (0.61ms) and
+  wt-inpage (0.54ms) are 2.1-2.3x native; nm (1.23ms) is the slowest addon
+  plane, and still beats Firefox nm (1.88ms) by 1.5x.
+- **The addon adds little walltime**: chr-ws whole-run p50 is 155.7ms vs
+  native 113.8ms (1.4x). On the same engine the addon is a 1.3-2.2x total
+  overhead, tightest on ws/wt. Firefox wt (434.7ms) is slower than every
+  addon plane on Chromium.
+- **Init time** (open to run #1 send-start): native 23.9ms, addon planes
+  65-161ms, Firefox 137-325ms. Warm-up is 19-312ms. The addon's modal-picker
+  pairing precedes open, so it is not counted.
+- **Not a polyfill-vs-native comparison for Firefox modes**: Firefox runs
+  the polyfill over the daemon (daemon-nm deployment), Chromium native runs
+  on the same mock; engine, transport and grant path differ. The same-engine
+  comparison is the `chr-*` series on the same Chromium build as native.
 
 ### What the wt numbers buy (and cost)
 
-wt runs over one persistent bidirectional QUIC stream per session, with an
-explicit `[len_u32 LE]` prefix on every frame (the batch format itself is not
-self-delimiting, so a continuous stream needs the length header). WS is
-untouched; the batch and control-response frame formats are the same in both
-transports.
-
-- Per-report round-trip p50 is **0.96ms vs ws 1.08ms and nm 1.88ms**: wt is
-  ~11% faster than ws, not slower. The old +0.07ms TLS/QUIC cost measured on
-  2026-08-02 is gone; the delivery-path difference now dominates.
-- Whole-run walltime p50 is 435ms vs ws 500ms and nm 933ms; total (10 runs)
-  4.42s vs ws 5.08s and nm 9.43s.
-- Why wt beats ws: WS input reports cross the content main thread on their
-  way to the worker (PWebSocket IPC into `RecvOnBinaryMessageAvailable`,
-  then ChannelEventQueue into the worker), which contends with page
-  rendering; wt reads reports from a DataPipe shared-memory buffer on the
-  worker with zero WebSocket IPC. Profiler-verified 2026-08: the ws
-  content-process main thread carries ~10.8k `OnBinaryMessageAvailable` and
-  ~10.8k `FrameReceived` IPC markers per 3.5s spec plus 8k
-  `ChannelEventQueue` enqueues, and 3.8x the main-thread IPC of wt; measured
-  main-thread CPU ws 75% vs wt 57% in a full-suite run. wt-inpage sits
-  between wt and ws: no delivery hops, but the DataPipe read happens on the
-  main thread. The earlier "wt ≈ ws within noise" conclusion (2026-08-02)
-  was measured on a suite that reused one page across specs; with a fresh
-  page per spec the wt advantage is consistent.
-- Open cost is unchanged (34.5ms vs ws 25.6ms; the QUIC+TLS handshake is
-  inside the open window but does not add visible time at this scale).
-
-What that buys, per the threat model in AGENTS.md: loopback TLS does not
-stop a network MITM (there is no real network between daemon and browser);
-it stops another local process from impersonating the daemon at
-`127.0.0.1:<port>` without the private key (the `serverCertificateHashes`
-pin is unforgeable without it), and does not stop an attacker with
-admin/root. Measured against that, WT is a free security option on loopback
-that is also the fastest Firefox data plane. The default `dataPlane`
-flipped from ws to wt on 2026-08-05 (ws on Firefox < 114, where
-WebTransport does not exist).
+- **wt beats ws on Firefox** (p50 0.96ms vs 1.08ms, walltime 434.7ms vs
+  499.8ms) despite the TLS/QUIC handshake: WS input reports cross the
+  content main thread (PWebSocket IPC into `RecvOnBinaryMessageAvailable`,
+  then ChannelEventQueue into the worker), contending with page rendering;
+  wt reads reports from a DataPipe shared-memory buffer on the worker with
+  zero WebSocket IPC. Profiler-verified: ws main thread carries ~10.8k
+  `OnBinaryMessageAvailable` + ~10.8k `FrameReceived` IPC markers per 3.5s
+  spec and 3.8x the IPC of wt; main-thread CPU ws 75% vs wt 57%.
+- **wt-inpage sits between**: no delivery hops, but the DataPipe read
+  happens on the main thread.
+- **Security**: loopback TLS does not stop a network MITM (there is no real
+  network between daemon and browser); it stops another local process from
+  impersonating the daemon at `127.0.0.1:<port>` without the private key
+  (the `serverCertificateHashes` pin is unforgeable without it), and does
+  not stop an attacker with admin/root. So WT is a free security option on
+  loopback that is also the fastest Firefox data plane; the default
+  `dataPlane` is wt (ws on Firefox < 114, where WebTransport does not
+  exist).
 
 ---
 
@@ -586,7 +553,7 @@ Notes:
   per-thread busy ratios and event-loop queueing without symbols.
 - The profiler adds sampling overhead, so profiled runs are for mechanism
   analysis, not for mode comparison numbers.
-- 2026-08 finding (ws vs wt): the ws content-process main thread carries
+- Finding (ws vs wt): the ws content-process main thread carries
   `Msg_OnBinaryMessageAvailable` / `Msg_FrameReceived` IPC markers
   (~10.8k each in a 3.5s spec) plus `ChannelEventQueue::Enqueue` markers,
   and 3.8x the main-thread IPC of wt; wt mode shows zero WebSocket IPC (the
