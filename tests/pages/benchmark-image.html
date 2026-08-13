@@ -127,6 +127,7 @@
           statusEl.textContent = 'Opening device...'
           performance.mark('open-start')
           await d.open()
+          performance.mark('open-done')
           device = d
           d.oninputreport = (event) => {
             const data = new Uint8Array(event.data.buffer)
@@ -339,6 +340,7 @@
           getMarks: () => ({
             loadStart: markTime('load-start'),
             openStart: markTime('open-start'),
+            openDone: markTime('open-done'),
             dataReady: markTime('data-ready'),
             runStart: markTime('run-start'),
             runEnd: markTime('run-end'),
