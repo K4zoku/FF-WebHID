@@ -1,6 +1,7 @@
 ;(function () {
   const webhid = globalThis.webhid
   const logger = webhid.import('logger')
+  const isChromium = webhid.import('isChromium')
   const { workerPolyfillSites, permissionsPolicy, shadowArms } = webhid.import('bgState')
   const { ensureWorkerBundle, ensureWorkerPolyfillBundle } = webhid.import('bgBundle')
   const {
@@ -500,7 +501,7 @@
    * @returns {void}
    */
   function registerWebRequestHandlers(settings) {
-    if (browser.runtime.getURL('').startsWith('chrome-extension://')) return
+    if (isChromium) return
     browser.runtime
       .getBrowserInfo()
       .then((info) => {

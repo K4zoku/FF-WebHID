@@ -47,4 +47,17 @@
     enumerable: false,
     configurable: true
   })
+
+  // Single shared engine detection. Runs in every world (background, MAIN,
+  // ISOLATED, extension pages, workers). Contexts without a browser API
+  // (MAIN world, plain workers) have `browser` undefined and read false,
+  // which is correct: only worlds with extension API access need to know.
+  // On Chromium the shim has already aliased `browser = chrome` by now, so
+  // the URL scheme is the reliable post-alias signal.
+  api.export(
+    'isChromium',
+    typeof browser !== 'undefined' &&
+      browser.runtime != null &&
+      browser.runtime.getURL('').startsWith('chrome-extension://')
+  )
 })()

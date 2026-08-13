@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "WebHID",
   "version": "3.1.0",
-  "description": "WebHID API implementation for Firefox",
+  "description": "WebHID API implementation",
   "icons": {
     "48": "icons/icon48.png"
   },

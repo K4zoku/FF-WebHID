@@ -2,6 +2,7 @@
   const webhid = globalThis.webhid
   const http = webhid.import('http')
   const logger = webhid.import('logger')
+  const isChromium = webhid.import('isChromium')
   const decodeDeviceCollections = webhid.import('decodeDeviceCollections')
   const { deviceCache, pendingPicker, permissionsPolicy, allowedCrossOrigin } =
     webhid.import('bgState')
@@ -663,16 +664,17 @@
    * @returns {void}
    */
   function openPickerPageAction(req, tabId, origin) {
-    browser.pageAction.setIcon({
-      tabId,
-      path: 'icons/gamepad.alert.svg'
-    })
-    browser.pageAction.setPopup({
-      tabId,
-      popup: 'js/internal/pages/picker/index.html'
-    })
-    if (browser.pageAction && browser.pageAction.openPopup)
+    if (!isChromium) {
+      browser.pageAction.setIcon({
+        tabId,
+        path: 'icons/gamepad.alert.svg'
+      })
+      browser.pageAction.setPopup({
+        tabId,
+        popup: 'js/internal/pages/picker/index.html'
+      })
       browser.pageAction.openPopup().catch(() => {})
+    }
     browser.tabs
       .query({ active: true, currentWindow: true })
       .then((tabs) => {
@@ -848,7 +850,7 @@
     const req = tabId != null ? pendingPicker.get(tabId) : null
     if (tabId != null) pendingPicker.delete(tabId)
     const reqMode = req?.mode
-    if (reqMode === 'pageAction') {
+    if (reqMode === 'pageAction' && !isChromium) {
       browser.pageAction.setIcon({ tabId, path: 'icons/gamepad.svg' })
       browser.pageAction.setPopup({
         tabId,
