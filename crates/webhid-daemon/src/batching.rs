@@ -5,7 +5,7 @@ use bytes::Bytes;
 use tokio::sync::broadcast;
 
 use crate::blocklist::ReportType;
-use crate::device_mgr::{DeviceManager, with_device};
+use crate::device_mgr::DeviceManager;
 use crate::hid;
 
 pub const MSG_SEND_REPORT: u8 = 0x01;
@@ -367,22 +367,20 @@ async fn handle_send_report_msg<F>(
     ) {
         SendPrecheck::Blocked => emit(make_status_resp(resp_type, req_id, 2)),
         SendPrecheck::Rejected => emit(make_status_resp(resp_type, req_id, 1)),
-        SendPrecheck::Proceed { report_id, dev: dev_arc } => {
+        SendPrecheck::Proceed {
+            report_id,
+            dev: dev_arc,
+        } => {
             let report_data: Arc<[u8]> = Arc::from(&payload[1..]);
-            let result = tokio::task::spawn_blocking(move || {
-                with_device(&dev_arc, |dev| {
-                    if msg_type == MSG_SEND_REPORT {
-                        hid::write_report(dev, report_id, &report_data)
-                    } else {
-                        hid::write_feature_report(dev, report_id, &report_data)
-                    }
-                })
+            let result = crate::device_mgr::run_device_op(dev_arc, move |dev| {
+                if msg_type == MSG_SEND_REPORT {
+                    hid::write_report(dev, report_id, &report_data)
+                } else {
+                    hid::write_feature_report(dev, report_id, &report_data)
+                }
             })
             .await;
-            let status = match result {
-                Ok(Ok(())) => 0u8,
-                _ => 1u8,
-            };
+            let status = if result.is_ok() { 0u8 } else { 1u8 };
             emit(make_status_resp(resp_type, req_id, status));
         }
     }
@@ -400,16 +398,19 @@ async fn handle_receive_feature_report_msg<F>(
     match precheck_report(device_mgr, device_id, payload, ReportType::Feature, None) {
         SendPrecheck::Blocked => emit(make_feature_read_resp(req_id, 2, &[])),
         SendPrecheck::Rejected => emit(make_feature_read_resp(req_id, 1, &[])),
-        SendPrecheck::Proceed { report_id, dev: dev_arc } => {
-            let result = tokio::task::spawn_blocking(move || {
-                with_device(&dev_arc, |d| hid::read_feature_report(d, report_id))
+        SendPrecheck::Proceed {
+            report_id,
+            dev: dev_arc,
+        } => {
+            let result = crate::device_mgr::run_device_op(dev_arc, move |d| {
+                hid::read_feature_report(d, report_id)
             })
             .await;
             match result {
-                Ok(Ok(data)) => {
+                Ok(data) => {
                     emit(make_feature_read_resp(req_id, 0, &data));
                 }
-                _ => {
+                Err(_) => {
                     emit(make_feature_read_resp(req_id, 1, &[]));
                 }
             }

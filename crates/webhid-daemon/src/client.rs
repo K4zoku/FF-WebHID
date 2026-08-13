@@ -5,7 +5,7 @@ use tokio::io::{AsyncRead, BufReader};
 use tokio::sync::{broadcast, mpsc};
 use webhid::{IpcResponse, NmMessage, NmRequest, NmResponse, parse_packed_send, protocol};
 
-use crate::device_mgr::{DeviceManager, with_device};
+use crate::device_mgr::DeviceManager;
 use crate::{hid, webtransport::WtState};
 
 pub async fn handle(
@@ -320,19 +320,17 @@ async fn write_blocking(
 ) -> Result<(), NmResponse> {
     let dev_arc = open_device(device_mgr, device_id)?;
     let data_owned = data.to_vec();
-    let result = tokio::task::spawn_blocking(move || {
-        with_device(&dev_arc, |d| {
-            if feature {
-                hid::write_feature_report(d, report_id, &data_owned)
-            } else {
-                hid::write_report(d, report_id, &data_owned)
-            }
-        })
+    match crate::device_mgr::run_device_op(dev_arc, move |d| {
+        if feature {
+            hid::write_feature_report(d, report_id, &data_owned)
+        } else {
+            hid::write_report(d, report_id, &data_owned)
+        }
     })
-    .await;
-    match result {
-        Ok(Ok(())) => Ok(()),
-        Ok(Err(_)) | Err(_) => Err(NmResponse::err(500)),
+    .await
+    {
+        Ok(()) => Ok(()),
+        Err(_) => Err(NmResponse::err(500)),
     }
 }
 
@@ -342,13 +340,11 @@ async fn read_feature_report_blocking(
     report_id: u8,
 ) -> Result<Vec<u8>, NmResponse> {
     let dev_arc = open_device(device_mgr, device_id)?;
-    let result = tokio::task::spawn_blocking(move || {
-        with_device(&dev_arc, |d| hid::read_feature_report(d, report_id))
-    })
-    .await;
-    match result {
-        Ok(Ok(data)) => Ok(data),
-        Ok(Err(_)) | Err(_) => Err(NmResponse::err(500)),
+    match crate::device_mgr::run_device_op(dev_arc, move |d| hid::read_feature_report(d, report_id))
+        .await
+    {
+        Ok(data) => Ok(data),
+        Err(_) => Err(NmResponse::err(500)),
     }
 }
 

@@ -23,9 +23,6 @@ use device_mgr::DeviceManager;
 const DEFAULT_WS_PORT: u16 = 0;
 const EVENT_CAPACITY: usize = 8192;
 
-#[cfg(target_os = "macos")]
-const DEFAULT_SOCKET: &str = "/tmp/webhid.sock";
-
 #[cfg(unix)]
 fn validate_socket_path(path: &str) -> String {
     #[cfg(target_os = "linux")]
@@ -46,27 +43,7 @@ fn validate_socket_path(path: &str) -> String {
 
 #[cfg(unix)]
 fn resolve_socket_path() -> String {
-    if let Ok(path) = std::env::var("WEBHID_SOCKET") {
-        return validate_socket_path(&path);
-    }
-    #[cfg(target_os = "linux")]
-    {
-        if unsafe { libc::geteuid() } == 0 {
-            return "@webhid".to_string();
-        }
-        if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR")
-            && !dir.is_empty()
-        {
-            let p = std::path::Path::new(&dir);
-            if p.is_absolute() && !dir.contains("..") {
-                return format!("{dir}/webhid/webhid.sock");
-            }
-        }
-        let uid = unsafe { libc::getuid() };
-        format!("/run/user/{uid}/webhid/webhid.sock")
-    }
-    #[cfg(not(target_os = "linux"))]
-    DEFAULT_SOCKET.to_string()
+    validate_socket_path(&webhid::socket_path::daemon_socket_path())
 }
 
 #[cfg(unix)]
@@ -77,9 +54,6 @@ fn socket_mode(path: &str) -> u32 {
         0o660
     }
 }
-
-#[cfg(target_os = "windows")]
-const DEFAULT_PIPE: &str = r"\\.\pipe\webhid";
 
 fn detect_nm_host_mode() -> Option<(String, String)> {
     let args: Vec<String> = std::env::args().collect();
@@ -277,7 +251,7 @@ async fn main() -> anyhow::Result<()> {
         use tokio::net::windows::named_pipe::ServerOptions;
         let pipe_name = match std::env::var("WEBHID_PIPE") {
             Ok(name) if name.starts_with(r"\\.\pipe\") && !name[8..].contains('\\') => name,
-            _ => DEFAULT_PIPE.to_string(),
+            _ => webhid::socket_path::PIPE.to_string(),
         };
 
         log::info!("webhid-daemon listening on {pipe_name}");

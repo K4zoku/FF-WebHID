@@ -16,7 +16,7 @@ const WS_CLOSE_BAD_TOKEN: u16 = 4402;
 type WsStream = tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>;
 
 use crate::batching;
-use crate::device_mgr::DeviceManager;
+use crate::device_mgr::{DeviceManager, is_valid_auth_hash};
 
 pub async fn start_server(
     port: u16,
@@ -220,9 +220,7 @@ async fn ws_authenticate(
 
     let hash = hash_holder.lock().unwrap_or_else(|e| e.into_inner()).take();
     match hash {
-        Some(h) if h.len() == 64 && h.chars().all(|c| c.is_ascii_hexdigit()) => {
-            Ok(Some((h, ws_stream)))
-        }
+        Some(h) if is_valid_auth_hash(&h) => Ok(Some((h, ws_stream))),
         Some(_) => {
             log::warn!("[ws] invalid auth hash format; closing");
             Err((ws_stream, WS_CLOSE_BAD_TOKEN, "bad token"))

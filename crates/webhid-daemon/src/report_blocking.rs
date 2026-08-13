@@ -65,10 +65,6 @@ fn build_report_collection_map(info: &DeviceInfo) -> ReportCollectionMap {
     map
 }
 
-fn always_protected_usage(up: Option<u16>, u: Option<u16>, rt: ReportType) -> bool {
-    blocklist::is_always_protected(up, u, rt)
-}
-
 /// Direction byte -> report type: 0 input, 1 output, 2 feature (the byte
 /// encoding used as the second half of a `ReportCollectionMap` key).
 fn report_type_from_byte(rt_byte: u8) -> ReportType {
@@ -106,14 +102,14 @@ fn associations_any_protected(
                 *u,
                 report_id,
                 report_type,
-            ) || (*is_app && always_protected_usage(*up, *u, report_type))
+            ) || (*is_app && blocklist::is_always_protected(*up, *u, report_type))
         })
 }
 
 fn has_always_protected_collection(info: &DeviceInfo, report_type: ReportType) -> bool {
     info.collections
         .iter()
-        .any(|c| always_protected_usage(c.usage_page, c.usage, report_type))
+        .any(|c| blocklist::is_always_protected(c.usage_page, c.usage, report_type))
 }
 
 fn interface_protected(info: &DeviceInfo, report_type: ReportType) -> bool {
@@ -129,7 +125,7 @@ fn interface_protected(info: &DeviceInfo, report_type: ReportType) -> bool {
         info.usage,
         0,
         report_type,
-    ) || always_protected_usage(info.usage_page, info.usage, report_type)
+    ) || blocklist::is_always_protected(info.usage_page, info.usage, report_type)
 }
 
 /// Chromium's `RemoveProtectedReports` (content/browser/hid/hid_service.cc):

@@ -12,11 +12,11 @@ use wtransport::tls::self_signed::time::Duration as TimeDuration;
 use wtransport::{Connection, Endpoint, Identity, RecvStream, SendStream, ServerConfig};
 
 use crate::batching;
-use crate::device_mgr::DeviceManager;
+use crate::device_mgr::{DeviceManager, is_valid_auth_hash};
 
 const DEFAULT_CERT_VALIDITY_SECS: u64 = 14 * 24 * 60 * 60;
 
-const MAX_FRAME_LEN: usize = 1024 * 1024;
+const MAX_FRAME_LEN: usize = webhid::protocol::MAX_NM_FRAME;
 
 struct WtGeneration {
     port: u16,
@@ -189,7 +189,7 @@ async fn handle_session(
 ) -> anyhow::Result<()> {
     let req = incoming.await?;
     let hash = req.path().trim_start_matches('/').to_string();
-    if hash.len() != 64 || !hash.chars().all(|c| c.is_ascii_hexdigit()) {
+    if !is_valid_auth_hash(&hash) {
         log::warn!("[wt] invalid auth hash in path");
         req.not_found().await;
         return Ok(());

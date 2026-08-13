@@ -37,6 +37,16 @@ pub(crate) fn with_device<R>(handle: &DeviceHandle, f: impl FnOnce(&HidDevice) -
     f(&*handle.lock().unwrap_or_else(|e| e.into_inner()))
 }
 
+pub(crate) async fn run_device_op<T, F>(handle: DeviceHandle, op: F) -> std::io::Result<T>
+where
+    F: FnOnce(&HidDevice) -> std::io::Result<T> + Send + 'static,
+    T: Send + 'static,
+{
+    tokio::task::spawn_blocking(move || with_device(&handle, op))
+        .await
+        .unwrap_or_else(|e| Err(std::io::Error::other(format!("device op join failed: {e}"))))
+}
+
 struct Entry {
     device: DeviceHandle,
     stop_flag: Arc<AtomicBool>,
@@ -64,6 +74,10 @@ fn compute_ws_auth_hash(token: &str, nonce: &str) -> String {
     hasher.update(nonce.as_bytes());
     let digest = hasher.finalize();
     hex::encode(digest)
+}
+
+pub fn is_valid_auth_hash(h: &str) -> bool {
+    h.len() == 64 && h.chars().all(|c| c.is_ascii_hexdigit())
 }
 
 /// Why a send/feature-read request was rejected before touching the device.
@@ -241,9 +255,7 @@ impl DeviceManager {
         let declared_for_task = Arc::clone(&declared_input_ids);
         let tx = self.event_tx.clone();
 
-        log::info!(
-            "[reader] starting for {dev_id:#x} (numbered_reports={uses_numbered_reports})"
-        );
+        log::info!("[reader] starting for {dev_id:#x} (numbered_reports={uses_numbered_reports})");
         tokio::spawn(async move {
             // A non-timeout read error leaves the device stuck open with no
             // hotplug event to clean it up, so the reader removes the entry,
@@ -515,51 +527,6 @@ impl DeviceManager {
         log::info!("[device_mgr] {device_id:#x} force-closed (hotplug removal)");
     }
 
-    /// Chromium's `HidConnection::Write` / `GetFeatureReport` /
-    /// `SendFeatureReport` pre-checks: the report ID must be consistent with
-    /// the device's numbered-report mode (`has_report_id != (report_id != 0)`
-    /// in Chromium) and the payload must fit the declared max size for the
-    /// report type. A payload length of `None` means a read (no payload).
-    /// A max size of zero (the report type is not declared in the descriptor)
-    /// rejects the request, matching Chromium's `max_*_report_size() == 0`
-    /// gates in `Write` / `GetFeatureReport` / `SendFeatureReport`.
-    pub fn validate_report_send(
-        &self,
-        device_id: u32,
-        report_id: u8,
-        report_type: ReportType,
-        payload_len: Option<usize>,
-    ) -> bool {
-        let map = self.devices.lock().unwrap_or_else(|e| e.into_inner());
-        let Some(entry) = map.get(&device_id) else {
-            return false;
-        };
-        entry
-            .blocking
-            .validate_report_send(report_id, report_type, payload_len)
-    }
-
-    pub fn is_report_blocked(
-        &self,
-        device_id: u32,
-        report_id: u8,
-        report_type: ReportType,
-    ) -> bool {
-        let map = self.devices.lock().unwrap_or_else(|e| e.into_inner());
-        let entry = match map.get(&device_id) {
-            Some(e) => e,
-            None => return false,
-        };
-        entry.blocking.is_report_protected(
-            entry.vendor_id,
-            entry.product_id,
-            report_id,
-            report_type,
-        )
-    }
-
-    /// Blocklist first, then Chromium-style validation. Ok(()) means the
-    /// report may proceed; Err carries the reject reason.
     pub fn report_send_allowed(
         &self,
         device_id: u32,
@@ -567,10 +534,22 @@ impl DeviceManager {
         report_type: ReportType,
         payload_len: Option<usize>,
     ) -> Result<(), SendReject> {
-        if self.is_report_blocked(device_id, report_id, report_type) {
+        let map = self.devices.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(entry) = map.get(&device_id) else {
+            return Err(SendReject::Invalid);
+        };
+        if entry.blocking.is_report_protected(
+            entry.vendor_id,
+            entry.product_id,
+            report_id,
+            report_type,
+        ) {
             return Err(SendReject::Blocked);
         }
-        if !self.validate_report_send(device_id, report_id, report_type, payload_len) {
+        if !entry
+            .blocking
+            .validate_report_send(report_id, report_type, payload_len)
+        {
             return Err(SendReject::Invalid);
         }
         Ok(())

@@ -415,25 +415,20 @@ pub fn hid_permission() -> u8 {
 /// Monitoring (TCC) gates IOHIDManager: `IOHIDManagerOpen` returns
 /// kIOReturnNotPermitted when the daemon is not allowed, while the bundled
 /// hidapi silently enumerates zero devices in that case, so the probe calls
-/// the manager directly. On other unixes, enumerate and try opening the
-/// first device: an EACCES open means missing permission, an empty list is
-/// ambiguous (no devices present).
+/// the manager directly. On other unixes the status stays "unknown" until a
+/// real open happens; `note_open_result` then records the actual outcome.
 pub fn probe_hid_permission() -> u8 {
     #[cfg(target_os = "windows")]
     {
-        return 0;
+        0
     }
     #[cfg(target_os = "macos")]
     {
-        return macos_hid_permission_probe();
+        macos_hid_permission_probe()
     }
-    #[cfg(all(unix, not(target_os = "macos")))]
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
-        unix_hid_permission_probe()
-    }
-    #[cfg(not(any(unix, windows)))]
-    {
-        return 2;
+        2
     }
 }
 
@@ -453,11 +448,6 @@ fn macos_hid_permission_probe() -> u8 {
         CFRelease(mgr.cast());
         if ret == KIORETURN_SUCCESS { 0 } else { 1 }
     }
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-fn unix_hid_permission_probe() -> u8 {
-    2
 }
 
 /// Updates the cached HID permission status from a real hidapi open result:
