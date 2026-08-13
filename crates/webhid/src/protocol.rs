@@ -11,7 +11,7 @@ use crate::{PKG_SEND_FEATURE_REPORT, PKG_SEND_REPORT, parse_packed_send};
 /// Native Messaging frame ceiling: messages larger than this are rejected.
 pub const MAX_NM_FRAME: usize = 1024 * 1024;
 
-pub async fn read_message<R, T>(reader: &mut R) -> io::Result<T>
+pub(crate) async fn read_message<R, T>(reader: &mut R) -> io::Result<T>
 where
     R: AsyncRead + Unpin,
     T: DeserializeOwned,

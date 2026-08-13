@@ -13,10 +13,10 @@ serde_json = "1"
 tokio = { version = "1", features = ["io-util"] }
 
 [features]
-hardening = ["dep:libc"]
+hardening = []
 
 [target.'cfg(target_os = "linux")'.dependencies]
-libc = { version = "0.2", optional = true }
+libc = "0.2"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt", "macros"] }
