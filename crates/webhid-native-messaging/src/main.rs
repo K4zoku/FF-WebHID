@@ -19,7 +19,6 @@ use webhid::protocol::MAX_NM_FRAME;
 
 const CONNECT_TIMEOUT_MS: u64 = 5000;
 
-
 /// Write a JSON error frame to the NM host's stdout (→ addon). Format: `{"s":503,"E":"<msg>"}`.
 async fn write_error_frame<W: AsyncWrite + Unpin>(w: &mut W, msg: &str) {
     let frame = serde_json::json!({"s": 503, "E": msg});
@@ -29,11 +28,6 @@ async fn write_error_frame<W: AsyncWrite + Unpin>(w: &mut W, msg: &str) {
     let _ = w.write_all(&json).await;
     let _ = w.flush().await;
 }
-
-#[cfg(target_os = "linux")]
-const DEFAULT_SOCKET: &str = "/run/webhid/webhid.sock";
-#[cfg(target_os = "macos")]
-const DEFAULT_SOCKET: &str = "/tmp/webhid.sock";
 
 #[cfg(target_os = "linux")]
 async fn connect_abstract(name: &str) -> std::io::Result<tokio::net::UnixStream> {
@@ -71,31 +65,8 @@ async fn connect_to_path(path: &str) -> std::io::Result<tokio::net::UnixStream> 
 
 #[cfg(unix)]
 fn candidate_sockets() -> Vec<String> {
-    if let Ok(path) = std::env::var("WEBHID_SOCKET") {
-        return vec![path];
-    }
-    let mut candidates = Vec::new();
-    #[cfg(target_os = "linux")]
-    candidates.push("@webhid".to_string());
-    #[cfg(target_os = "linux")]
-    {
-        let xdg = std::env::var("XDG_RUNTIME_DIR")
-            .ok()
-            .filter(|d| !d.is_empty());
-        match xdg {
-            Some(d) => candidates.push(format!("{d}/webhid/webhid.sock")),
-            None => {
-                let uid = unsafe { libc::getuid() };
-                candidates.push(format!("/run/user/{uid}/webhid/webhid.sock"));
-            }
-        }
-    }
-    candidates.push(DEFAULT_SOCKET.to_string());
-    candidates
+    webhid::socket_path::forwarder_socket_candidates()
 }
-
-#[cfg(target_os = "windows")]
-const DEFAULT_PIPE: &str = r"\\.\pipe\webhid";
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
@@ -191,7 +162,8 @@ async fn try_connect_candidates(
 #[cfg(windows)]
 async fn connect_to_daemon() -> anyhow::Result<tokio::net::windows::named_pipe::NamedPipeClient> {
     use tokio::net::windows::named_pipe::ClientOptions;
-    let pipe_name = std::env::var("WEBHID_PIPE").unwrap_or_else(|_| DEFAULT_PIPE.to_string());
+    let pipe_name =
+        std::env::var("WEBHID_PIPE").unwrap_or_else(|_| webhid::socket_path::PIPE.to_string());
     connect_with_retry(
         &format!("daemon pipe '{pipe_name}'"),
         "Check: (1) daemon running? (2) pipe name correct?",
