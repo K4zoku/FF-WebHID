@@ -63,6 +63,7 @@
       "js": [
         "js/utils/bootstrap.js",
         "js/utils/bundle-files.js",
+        "js/utils/logger.js",
         "js/content/isolated/inject.js"
       ],
       "run_at": "document_start",
