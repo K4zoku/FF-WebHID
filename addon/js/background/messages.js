@@ -664,17 +664,16 @@
    * @returns {void}
    */
   function openPickerPageAction(req, tabId, origin) {
-    if (!isChromium) {
-      browser.pageAction.setIcon({
-        tabId,
-        path: 'icons/gamepad.alert.svg'
-      })
-      browser.pageAction.setPopup({
-        tabId,
-        popup: 'js/internal/pages/picker/index.html'
-      })
-      if (browser.pageAction.openPopup) browser.pageAction.openPopup().catch(() => {})
-    }
+    if (isChromium) return
+    browser.pageAction.setIcon({
+      tabId,
+      path: 'icons/gamepad.alert.svg'
+    })
+    browser.pageAction.setPopup({
+      tabId,
+      popup: 'js/internal/pages/picker/index.html'
+    })
+    if (browser.pageAction.openPopup) browser.pageAction.openPopup().catch(() => {})
     browser.tabs
       .query({ active: true, currentWindow: true })
       .then((tabs) => {

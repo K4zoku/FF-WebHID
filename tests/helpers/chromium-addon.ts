@@ -1,4 +1,5 @@
 import { mkdirSync, rmSync, writeFileSync } from 'fs'
+import { spawnSync } from 'child_process'
 import { dirname, join, resolve } from 'path'
 import { fileURLToPath } from 'url'
 import { type BrowserContext, type Page } from '@playwright/test'
@@ -39,6 +40,32 @@ export function installChromeNmManifest(extensionId: string, userDataDir: string
 
 export function uninstallChromeNmManifest(userDataDir: string): void {
   rmSync(chromeNmManifestPath(userDataDir), { force: true })
+}
+
+function nmDaemonProcessCount(): number {
+  if (process.platform === 'win32') {
+    const r = spawnSync('tasklist', ['/FI', 'IMAGENAME eq webhid-daemon.exe', '/NH'], {
+      encoding: 'utf8'
+    })
+    return r.status === 0 && !r.stdout.includes('INFO: No tasks') ? 1 : 0
+  }
+  const r = spawnSync('pgrep', ['-f', 'webhid-daemon chrome-extension://'], { encoding: 'utf8' })
+  return r.status === 0 ? r.stdout.trim().split('\n').filter(Boolean).length : 0
+}
+
+/**
+ * Waits until Chrome has spawned the daemon as an NM host. The extension's
+ * boot-time connect targets the forwarder host; it only switches to the
+ * daemon host once the settings page applies `daemonAsNmHost`, so this must
+ * run after setExtensionSettings and before the first picker enumerate.
+ */
+export async function waitForNmDaemon(timeoutMs = 30000): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (nmDaemonProcessCount() > 0) return
+    await new Promise((r) => setTimeout(r, 200))
+  }
+  throw new Error(`daemon not started as an NM host within ${timeoutMs}ms`)
 }
 
 /**

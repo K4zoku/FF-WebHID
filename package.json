@@ -24,7 +24,7 @@
     "build:rs": "cargo build --release --manifest-path $npm_package_config_cargoManifest",
     "build:rs:debug": "cargo build --manifest-path $npm_package_config_cargoManifest",
     "clean": "rm -rf dist/ && cargo clean --manifest-path $npm_package_config_cargoManifest",
-    "clean:addon": "rm -rf dist/addon/ dist/webhid-addon*.xpi",
+    "clean:addon": "rm -rf dist/addon/ dist/chromium/ dist/webhid-addon*.xpi",
     "clean:rs": "cargo clean --manifest-path $npm_package_config_cargoManifest",
     "format": "npx prettier . --write",
     "format:css": "npx prettier 'addon/**/*.css' --write",

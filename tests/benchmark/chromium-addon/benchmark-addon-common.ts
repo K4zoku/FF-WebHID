@@ -12,6 +12,7 @@ import {
   getExtensionId,
   setExtensionSettings,
   pairViaPicker,
+  waitForNmDaemon,
   type AddonDataPlane
 } from '../../helpers/chromium-addon.js'
 
@@ -26,6 +27,7 @@ async function setupPage(
 ): Promise<Page> {
   const runtimeId = await setExtensionSettings(context, extensionId, origin, mode)
   expect(runtimeId).toBe(extensionId)
+  await waitForNmDaemon()
   const page = context.pages()[0] || (await context.newPage())
   await page.goto(`${origin}/tests/pages/benchmark-image.html`, {
     waitUntil: 'domcontentloaded',

@@ -18,20 +18,6 @@
   const NM_HOST_FORWARDER = 'webhid.forwarder_nm_host'
   const NM_HOST_DAEMON = 'webhid.daemon_nm_host'
 
-  /**
-   * Rebuilds a Uint8Array from a value that crossed a Chromium extension
-   * messaging boundary (TypedArrays arrive as plain keyed objects there).
-   * TypedArrays pass through untouched, preserving zero-copy on Firefox.
-   * @param {*} v
-   * @returns {Uint8Array|null}
-   */
-  function normalizeBytes(v) {
-    if (v == null) return null
-    if (v instanceof Uint8Array) return v
-    if (typeof v.length === 'number') return Uint8Array.from(v)
-    return Uint8Array.from(Object.keys(v).map((k) => Number(v[k])))
-  }
-
   const NativeMessaging = {
     port: null,
     nextId: 1,
@@ -230,7 +216,7 @@
     },
     async sendReport(deviceId, reportId, data) {
       return await this.sendPacked((reqId) =>
-        buildPackedSend(PKG_SEND_REPORT, reqId, deviceId, reportId, normalizeBytes(data))
+        buildPackedSend(PKG_SEND_REPORT, reqId, deviceId, reportId, data)
       )
     },
     async receiveFeatureReport(deviceId, reportId) {
@@ -244,7 +230,7 @@
     },
     async sendFeatureReport(deviceId, reportId, data) {
       return await this.sendPacked((reqId) =>
-        buildPackedSend(PKG_SEND_FEATURE_REPORT, reqId, deviceId, reportId, normalizeBytes(data))
+        buildPackedSend(PKG_SEND_FEATURE_REPORT, reqId, deviceId, reportId, data)
       )
     },
 

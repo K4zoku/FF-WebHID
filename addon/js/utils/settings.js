@@ -1,15 +1,11 @@
 ;(function () {
   const webhid = globalThis.webhid
+  const isChromium = webhid.import('isChromium')
 
   const isMv2 =
     typeof browser !== 'undefined' &&
     browser.runtime != null &&
     browser.runtime.getManifest().manifest_version === 2
-
-  const isChromium =
-    typeof browser !== 'undefined' &&
-    browser.runtime != null &&
-    browser.runtime.getURL('').startsWith('chrome-extension://')
 
   /** @type {import("../types.js").SettingsDefaults} */
   const GLOBAL_DEFAULTS = {

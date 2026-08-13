@@ -253,8 +253,9 @@ async function writeDistFiles(allowedFiles, manifestPath, distDir = DIST) {
     }
   }
 
+  const distLabel = relative(join(__dirname, '..'), distDir)
   console.log(
-    `Built dist/: ${jsCount} JS minified, ${cssCount} CSS minified, ${htmlCount} HTML minified, ${copyCount} files copied`
+    `Built ${distLabel}/: ${jsCount} JS minified, ${cssCount} CSS minified, ${htmlCount} HTML minified, ${copyCount} files copied`
   )
 }
 
@@ -347,6 +348,9 @@ async function buildChromium() {
 
 async function build() {
   if (TARGET === 'chromium') {
+    if (MANIFEST_VERSION !== '3') {
+      console.warn(`TARGET=chromium always builds MV3; ignoring MV=${MANIFEST_VERSION}`)
+    }
     await buildChromium()
     return
   }

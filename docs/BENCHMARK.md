@@ -3,9 +3,11 @@
 ## Automated image-pipeline benchmark
 
 A Playwright-driven end-to-end benchmark measuring the full data-plane
-round-trip automatically across four modes: Firefox ws, Firefox nm, Chromium
-native WebHID and Chromium native WebHID with the addon (same-engine
-overhead measurement, `chromium-addon-benchmark` project).
+round-trip automatically. The Firefox project (`firefox-benchmark`) runs
+all four data planes (nm, ws, wt, wt-inpage); the Chromium projects run
+native WebHID (`chromium-benchmark`) and the addon on the same Chromium
+build across the same four planes (`chromium-addon-benchmark`, the
+same-engine overhead measurement).
 
 **Scenario**: a benchmark page fetches a small PNG fixture
 (`tests/fixtures/images/sample.png`, the project icon, ~32KB), chunks it into

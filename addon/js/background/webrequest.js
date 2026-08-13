@@ -504,7 +504,6 @@
     if (isChromium) {
       browser.webRequest.onHeadersReceived.addListener(
         (details) => {
-          if (details.type !== 'main_frame' && details.type !== 'sub_frame') return
           storePermissionsPolicy(details)
         },
         { urls: ['<all_urls>'], types: ['main_frame', 'sub_frame'] },
