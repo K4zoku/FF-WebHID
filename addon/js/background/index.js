@@ -177,7 +177,9 @@
   async function loadNmHostSetting() {
     await ensureStorageSchemaVersion()
     const global = await loadGlobalSettings()
-    if (global.daemonAsNmHost === undefined) {
+    const key = globalSettingKey('daemonAsNmHost')
+    const stored = await browser.storage.local.get(key)
+    if (stored[key] === undefined) {
       const platformInfo = await browser.runtime.getPlatformInfo()
       if (platformInfo.os === 'win') {
         global.daemonAsNmHost = true
