@@ -49,6 +49,7 @@ const PAGES: Record<string, string> = {
   '/worker-polyfilled.js': loadPage('worker-polyfilled.js'),
   '/worker-race.js': loadPage('worker-race.js'),
   '/race-probe': loadPage('race-probe.html'),
+  '/main-world-race-probe': loadPage('main-world-race-probe.html'),
   '/sri-check': loadPage('sri-check.html'),
   '/sri-test.js': loadPage('sri-test.js'),
   '/activation': loadPage('activation.html'),

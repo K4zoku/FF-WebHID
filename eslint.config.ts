@@ -71,6 +71,7 @@ export default tseslint.config(
         MessagePort: 'readonly',
         WebSocket: 'readonly',
         WebTransport: 'readonly',
+        XMLHttpRequest: 'readonly',
         Uint8Array: 'readonly',
         ArrayBuffer: 'readonly',
         DataView: 'readonly',
