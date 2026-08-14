@@ -27,6 +27,25 @@ function template(src, dest, subs) {
   writeFileSync(dest, s)
 }
 
+/**
+ * Templates an NM manifest and validates the result (JSON.parse, no leftover placeholders).
+ * @param {string} src
+ * @param {string} dest
+ * @param {Record<string, string>} subs
+ * @returns {void}
+ */
+function templateManifest(src, dest, subs) {
+  template(src, dest, subs)
+  let s = ''
+  try {
+    s = readFileSync(dest, 'utf-8')
+    JSON.parse(s)
+  } catch (e) {
+    die(`staged manifest ${dest} is not valid JSON: ${e.message}`)
+  }
+  if (s.includes('{{')) die(`staged manifest ${dest} has unsubstituted placeholders`)
+}
+
 function checkBins(dir, ...names) {
   for (const n of names) {
     if (!existsSync(join(dir, n))) die(`${n} not found in ${dir}; build first`)
@@ -48,14 +67,16 @@ function installNmManifests(base, nmBin, daemonBin) {
   for (const b of NM_BROWSERS) {
     const d = join(base, `usr/lib/${b}/native-messaging-hosts`)
     mkdirSync(d, { recursive: true })
-    template(
+    templateManifest(
       join(MANIFESTS, 'webhid.forwarder_nm_host.json'),
       join(d, 'webhid.forwarder_nm_host.json'),
       { '{{NM_BIN}}': nmBin }
     )
-    template(join(MANIFESTS, 'webhid.daemon_nm_host.json'), join(d, 'webhid.daemon_nm_host.json'), {
-      '{{DAEMON_BIN}}': daemonBin
-    })
+    templateManifest(
+      join(MANIFESTS, 'webhid.daemon_nm_host.json'),
+      join(d, 'webhid.daemon_nm_host.json'),
+      { '{{DAEMON_BIN}}': daemonBin }
+    )
   }
 }
 
@@ -264,15 +285,15 @@ function buildMsi(ver, arch) {
   wipe(stage)
 
   copyBins(binDir, stage, 'webhid-daemon.exe', 'webhid-native-messaging.exe')
-  template(
+  templateManifest(
     join(MANIFESTS, 'webhid.forwarder_nm_host.json'),
     join(stage, 'webhid.forwarder_nm_host.json'),
-    { '{{NM_BIN}}': 'C:\\Program Files\\WebHID\\webhid-native-messaging.exe' }
+    { '{{NM_BIN}}': 'webhid-native-messaging.exe' }
   )
-  template(
+  templateManifest(
     join(MANIFESTS, 'webhid.daemon_nm_host.json'),
     join(stage, 'webhid.daemon_nm_host.json'),
-    { '{{DAEMON_BIN}}': 'C:\\Program Files\\WebHID\\webhid-daemon.exe' }
+    { '{{DAEMON_BIN}}': 'webhid-daemon.exe' }
   )
   cpSync(join(PACKAGING, 'windows/License.rtf'), join(stage, 'License.rtf'))
 
