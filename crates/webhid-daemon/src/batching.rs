@@ -358,15 +358,27 @@ async fn handle_send_report_msg<F>(
     F: FnMut(Vec<u8>),
 {
     let (resp_type, report_type) = send_kind(msg_type);
+    let report_id = payload.first().copied().unwrap_or(0);
+    let payload_len = payload.len().saturating_sub(1);
     match precheck_report(
         device_mgr,
         device_id,
         payload,
         report_type,
-        Some(payload.len().saturating_sub(1)),
+        Some(payload_len),
     ) {
-        SendPrecheck::Blocked => emit(make_status_resp(resp_type, req_id, 2)),
-        SendPrecheck::Rejected => emit(make_status_resp(resp_type, req_id, 1)),
+        SendPrecheck::Blocked => {
+            log::warn!(
+                "[sender] send blocked dev={device_id:#x} report={report_id} type={report_type:?} len={payload_len}"
+            );
+            emit(make_status_resp(resp_type, req_id, 2))
+        }
+        SendPrecheck::Rejected => {
+            log::warn!(
+                "[sender] send rejected dev={device_id:#x} report={report_id} type={report_type:?} len={payload_len}"
+            );
+            emit(make_status_resp(resp_type, req_id, 1))
+        }
         SendPrecheck::Proceed {
             report_id,
             dev: dev_arc,
@@ -380,7 +392,15 @@ async fn handle_send_report_msg<F>(
                 }
             })
             .await;
-            let status = if result.is_ok() { 0u8 } else { 1u8 };
+            let status = match result {
+                Ok(_) => 0u8,
+                Err(e) => {
+                    log::warn!(
+                        "[sender] write failed dev={device_id:#x} report={report_id} type={report_type:?} len={payload_len}: {e}"
+                    );
+                    1u8
+                }
+            };
             emit(make_status_resp(resp_type, req_id, status));
         }
     }

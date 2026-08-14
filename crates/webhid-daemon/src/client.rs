@@ -295,8 +295,18 @@ fn report_precheck(
     device_mgr
         .report_send_allowed(device_id, report_id, report_type, payload_len)
         .map_err(|reason| match reason {
-            crate::device_mgr::SendReject::Blocked => NmResponse::err(403),
-            crate::device_mgr::SendReject::Invalid => NmResponse::err(500),
+            crate::device_mgr::SendReject::Blocked => {
+                log::warn!(
+                    "[nm] send blocked dev={device_id:#x} report={report_id} type={report_type:?} len={payload_len:?}"
+                );
+                NmResponse::err(403)
+            }
+            crate::device_mgr::SendReject::Invalid => {
+                log::warn!(
+                    "[nm] send invalid dev={device_id:#x} report={report_id} type={report_type:?} len={payload_len:?}"
+                );
+                NmResponse::err(500)
+            }
         })
 }
 
@@ -330,7 +340,13 @@ async fn write_blocking(
     .await
     {
         Ok(()) => Ok(()),
-        Err(_) => Err(NmResponse::err(500)),
+        Err(e) => {
+            log::warn!(
+                "[nm] write failed dev={device_id:#x} report={report_id} len={} feature={feature}: {e}",
+                data.len()
+            );
+            Err(NmResponse::err(500))
+        }
     }
 }
 
