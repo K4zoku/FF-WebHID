@@ -220,7 +220,8 @@
     try {
       const resp = await browser.runtime.sendMessage({
         action: 'open',
-        deviceId
+        deviceId,
+        origin: window.location.origin
       })
       if (http.isOk(resp.s) && resp.t) {
         sessionTokens.set(deviceId, resp.t)

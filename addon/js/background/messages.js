@@ -260,19 +260,21 @@
    */
   function handleOpen(request, sender, sendResponse) {
     const tabId = sender.tab != null ? sender.tab.id : undefined
-    getAllowedDevices(request.origin).then((deviceIds) => {
-      if (!deviceIds.includes(request.deviceId)) {
-        sendResponse({ s: 403 })
-        return
-      }
-      NativeMessaging.openDevice(request.deviceId)
-        .then((response) => {
-          if (typeof response.P === 'number') lastHidPermission = response.P
-          if (http.isOk(response.s) && response.i) registerDeviceTab(response.i, tabId)
-          sendResponse(response)
-        })
-        .catch(() => sendResponse({ s: 500 }))
-    })
+    getAllowedDevices(request.origin)
+      .then((deviceIds) => {
+        if (!deviceIds.includes(request.deviceId)) {
+          sendResponse({ s: 403 })
+          return
+        }
+        NativeMessaging.openDevice(request.deviceId)
+          .then((response) => {
+            if (typeof response.P === 'number') lastHidPermission = response.P
+            if (http.isOk(response.s) && response.i) registerDeviceTab(response.i, tabId)
+            sendResponse(response)
+          })
+          .catch(() => sendResponse({ s: 500 }))
+      })
+      .catch(() => sendResponse({ s: 500 }))
     return true
   }
 
