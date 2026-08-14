@@ -333,11 +333,7 @@ pub fn write_report(dev: &HidDevice, report_id: u8, payload: &[u8]) -> std::io::
         let n = dev
             .write(&buf)
             .map_err(|e| std::io::Error::other(e.to_string()))?;
-        #[cfg(target_os = "windows")]
-        let short = n != 0 && n != buf.len();
-        #[cfg(not(target_os = "windows"))]
-        let short = n != buf.len();
-        if short {
+        if cfg!(not(target_os = "windows")) && n != buf.len() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::WriteZero,
                 format!("short write: {} of {} bytes", n, buf.len()),
