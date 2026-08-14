@@ -245,7 +245,7 @@ The daemon uses a random WebSocket port in this mode (avoids conflicts with any 
 
 The installed NM manifest (`webhid.daemon_nm_host.json`) uses the `"name": "webhid.daemon_nm_host"` identifier, distinct from the thin-forwarder manifest (`webhid.forwarder_nm_host`). The addon picks the correct name based on the "Daemon as NM host" toggle in its settings page.
 
-> **Note:** On Windows, the NM manifest `path` field should point directly to `webhid-daemon.exe`. The daemon auto-detects NM-host mode via the 2 positional args Firefox passes (manifest path + addon ID). No wrapper script or `--nm-host` flag needed.
+> **Note:** On Windows, the NM manifest `path` field can be the bare executable name (`webhid-daemon.exe`). Firefox resolves relative paths against the manifest's own directory, so the JSON must live next to the binary. The daemon auto-detects NM-host mode via the 2 positional args Firefox passes (manifest path + addon ID). No wrapper script or `--nm-host` flag needed.
 
 ---
 
@@ -278,7 +278,7 @@ Download the Windows zip from [GitHub Releases](https://github.com/K4zoku/FF-Web
    {
      "name": "webhid.forwarder_nm_host",
      "description": "WebHID native messaging host",
-     "path": "$installDir\webhid-native-messaging.exe",
+     "path": "webhid-native-messaging.exe",
      "type": "stdio",
      "allowed_extensions": ["webhid@k4zoku.dev"]
    }
