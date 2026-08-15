@@ -11,7 +11,8 @@
       "filename": "crates/webhid-native-messaging/Cargo.toml",
       "updater": ".versionrc.cargo-updater.cjs"
     },
-    { "filename": "crates/Cargo.lock", "updater": ".versionrc.cargo-lock-updater.cjs" }
+    { "filename": "crates/Cargo.lock", "updater": ".versionrc.cargo-lock-updater.cjs" },
+    { "filename": "Formula/webhid.rb", "updater": ".versionrc.homebrew-updater.cjs" }
   ],
   "types": [
     { "type": "feat", "section": "Features" },
