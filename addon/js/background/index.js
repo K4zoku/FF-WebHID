@@ -170,7 +170,7 @@
     const stored = await browser.storage.local.get(key)
     if (stored[key] === undefined) {
       const platformInfo = await browser.runtime.getPlatformInfo()
-      if (platformInfo.os === 'win') {
+      if (platformInfo.os === 'win' || platformInfo.os === "mac") {
         global.daemonAsNmHost = true
         await saveGlobalSetting('daemonAsNmHost', true)
       }
