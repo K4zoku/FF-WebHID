@@ -121,7 +121,7 @@ async fn dispatch(
 ) -> NmMessage {
     let req_id = req.id();
     let resp: NmResponse = match req {
-        NmRequest::Enumerate { .. } => handle_enumerate(device_mgr),
+        NmRequest::Enumerate { filter, .. } => handle_enumerate(device_mgr, filter.as_ref()),
         NmRequest::Open { device_id, .. } => handle_open(device_mgr, device_id, ws_port),
         NmRequest::Close {
             device_id,
@@ -155,13 +155,19 @@ async fn dispatch(
     NmMessage::Control(resp)
 }
 
-fn handle_enumerate(device_mgr: &DeviceManager) -> NmResponse {
-    match device_mgr.enumerate() {
+fn handle_enumerate(
+    device_mgr: &DeviceManager,
+    filter: Option<&webhid::EnumerateFilter>,
+) -> NmResponse {
+    let result = match filter {
+        Some(filter) => device_mgr.enumerate_filtered(Some(filter)),
+        None => device_mgr.enumerate(),
+    };
+    match result {
         Ok(devices) => NmResponse::ok_with_devices(devices),
         Err(_) => NmResponse::err(500),
     }
 }
-
 fn handle_open(device_mgr: &DeviceManager, device_id: u32, ws_port: u16) -> NmResponse {
     let mut resp = match device_mgr.open(device_id) {
         Ok((dev_id, session_token)) => NmResponse::ok_opened(dev_id, session_token, Some(ws_port)),

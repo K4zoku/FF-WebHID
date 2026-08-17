@@ -87,8 +87,19 @@ fn read_json_request(v: &serde_json::Value) -> io::Result<NmRequest> {
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing 'a' (action)"))?
         as u8;
     let id = v.get("n").and_then(|x| x.as_u64()).map(|n| n as u32);
+    let filter = v
+        .get("f")
+        .map(|value| {
+            serde_json::from_value(value.clone()).map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("invalid enumerate filter: {e}"),
+                )
+            })
+        })
+        .transpose()?;
     Ok(match action {
-        crate::ACT_ENUM => NmRequest::Enumerate { id },
+        crate::ACT_ENUM => NmRequest::Enumerate { id, filter },
         crate::ACT_OPEN => NmRequest::Open {
             id,
             device_id: get_u32(v, "i")?,
@@ -228,7 +239,40 @@ mod tests {
     #[tokio::test]
     async fn test_read_nm_request_enumerate() {
         let req = read_json(serde_json::json!({"a": 1})).await.unwrap();
-        assert!(matches!(req, NmRequest::Enumerate { id: None }));
+        assert!(matches!(
+            req,
+            NmRequest::Enumerate {
+                id: None,
+                filter: None
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_read_nm_request_enumerate_filter() {
+        let req = read_json(serde_json::json!({
+            "a": 1,
+            "n": 7,
+            "f": {
+                "filters": [{"vendorId": 0x16c0, "productId": 1}],
+                "exclusionFilters": [{"usagePage": 1, "usage": 6}]
+            }
+        }))
+        .await
+        .unwrap();
+        match req {
+            NmRequest::Enumerate {
+                id,
+                filter: Some(filter),
+            } => {
+                assert_eq!(id, Some(7));
+                assert_eq!(filter.filters[0].vendor_id, Some(0x16c0));
+                assert_eq!(filter.filters[0].product_id, Some(1));
+                assert_eq!(filter.exclusion_filters[0].usage_page, Some(1));
+                assert_eq!(filter.exclusion_filters[0].usage, Some(6));
+            }
+            _ => panic!("expected filtered Enumerate"),
+        }
     }
 
     #[tokio::test]

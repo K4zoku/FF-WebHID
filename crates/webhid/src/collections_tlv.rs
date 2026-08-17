@@ -566,7 +566,6 @@ mod tests {
         assert_eq!(unit_system_from_nibble(14), "reserved");
     }
 
-
     fn make_test_collection() -> Vec<Collection> {
         vec![Collection {
             collection_type: 1,

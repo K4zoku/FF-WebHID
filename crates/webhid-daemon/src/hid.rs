@@ -2,7 +2,7 @@
 
 use hidapi::{DeviceInfo as HidDeviceInfo, HidApi, HidDevice};
 use std::cell::RefCell;
-use webhid::{Collection, DeviceInfo};
+use webhid::{Collection, DeviceInfo, EnumerateFilter};
 
 thread_local! {
     static WRITE_BUF: RefCell<Vec<u8>> = RefCell::new(Vec::with_capacity(256));
@@ -57,11 +57,26 @@ fn resolve_linux_syspath(devnode: &str) -> Option<String> {
 /// Interfaces that share the same top-level Application collection
 /// (same report descriptor) are deduplicated.
 pub fn enumerate() -> anyhow::Result<Vec<DeviceInfo>> {
+    enumerate_with_filter(None)
+}
+
+/// Enumerates devices while rejecting impossible VID/PID candidates before
+/// report descriptors are opened and parsed.
+pub fn enumerate_with_filter(filter: Option<&EnumerateFilter>) -> anyhow::Result<Vec<DeviceInfo>> {
     let api = HidApi::new()?;
 
     let mut groups: std::collections::HashMap<(u16, u16, String), Vec<&HidDeviceInfo>> =
         std::collections::HashMap::new();
     for info in api.device_list() {
+        if let Some(filter) = filter {
+            if !crate::enumeration_filter::matches_vid_pid(
+                info.vendor_id(),
+                info.product_id(),
+                filter,
+            ) {
+                continue;
+            }
+        }
         if is_blocked_pub(info) {
             continue;
         }

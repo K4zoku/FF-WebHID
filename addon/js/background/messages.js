@@ -101,12 +101,18 @@
    * @returns {boolean}
    */
   function handleEnumerate(request, sender, sendResponse) {
-    NativeMessaging.enumerateDevices()
+    const filter = {
+      filters: Array.isArray(request.filters) ? request.filters : [],
+      exclusionFilters: Array.isArray(request.exclusionFilters) ? request.exclusionFilters : []
+    }
+    const hasFilter = filter.filters.length > 0 || filter.exclusionFilters.length > 0
+    NativeMessaging.enumerateDevices(hasFilter ? filter : undefined)
       .then((response) => {
         if (http.isOk(response.s) && response.D) {
-          refreshDeviceCache(response.D)
+          if (hasFilter) decodeDeviceCollections(response.D)
+          else refreshDeviceCache(response.D)
         }
-        sendResponse(response)
+        sendResponse(hasFilter ? Object.assign({}, response, { filtered: true }) : response)
       })
       .catch(() => sendResponse({ s: 500 }))
     return true

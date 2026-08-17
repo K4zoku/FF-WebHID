@@ -123,9 +123,25 @@ impl DeviceManager {
     }
 
     pub fn enumerate(&self) -> anyhow::Result<Vec<DeviceInfo>> {
-        Ok(hid::enumerate()?
+        self.enumerate_filtered(None)
+    }
+
+    pub fn enumerate_filtered(
+        &self,
+        filter: Option<&webhid::EnumerateFilter>,
+    ) -> anyhow::Result<Vec<DeviceInfo>> {
+        let devices = match filter {
+            Some(filter) => hid::enumerate_with_filter(Some(filter))?,
+            None => hid::enumerate()?,
+        };
+        Ok(devices
             .into_iter()
             .filter_map(prune_device_info)
+            .filter(|device| {
+                filter
+                    .map(|filter| crate::enumeration_filter::matches_device(device, filter))
+                    .unwrap_or(true)
+            })
             .collect())
     }
 

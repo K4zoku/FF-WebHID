@@ -152,9 +152,7 @@ fn handle_udev_event(event: udev::Event) -> Option<IpcResponse> {
             let mut dnmap = DEVNODE_TO_ID.lock().unwrap_or_else(|e| e.into_inner());
             let dnmap = dnmap.get_or_insert_with(HashMap::new);
             dnmap.insert(devnode, info.device_id);
-            Some(IpcResponse::DeviceConnected {
-                device: info,
-            })
+            Some(IpcResponse::DeviceConnected { device: info })
         }
         udev::EventType::Remove => {
             let device_id = {

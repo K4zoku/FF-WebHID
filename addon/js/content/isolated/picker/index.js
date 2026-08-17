@@ -8,10 +8,8 @@
   const t = globalThis.webhid.import('t')
   const localizeHTML = globalThis.webhid.import('localizeHTML')
   const guessDeviceType = globalThis.webhid.import('guessDeviceType')
-  const applyFilters = globalThis.webhid.import('applyFilters')
   const groupDevices = globalThis.webhid.import('groupDevices')
   const groupIdFor = globalThis.webhid.import('groupIdFor')
-  const logExcludedDevices = globalThis.webhid.import('logExcludedDevices')
   const applyDeviceIcon = globalThis.webhid.import('applyDeviceIcon')
   const syncBrowserTheme = globalThis.webhid.import('syncBrowserTheme')
   logger.initLogger('picker')
@@ -42,6 +40,8 @@
     fragmentReady = null
     /** @type {Function|null} */
     resolveShow = null
+    /** @type {boolean} */
+    filterApplied = false
     /** @type {boolean} */
     enumerateError = false
 
@@ -150,13 +150,17 @@
     async loadDevices() {
       try {
         const response = await browser.runtime.sendMessage({
-          action: 'enumerate'
+          action: 'enumerate',
+          filters: this.filters,
+          exclusionFilters: this.exclusionFilters
         })
         if (response && http.isOk(response.s)) {
           this.devices = response.D || []
+          this.filterApplied = response.filtered === true
           this.enumerateError = false
         } else {
           this.devices = []
+          this.filterApplied = false
           this.enumerateError = true
           let code = response != null ? response.s : undefined
           code = code != null ? code : 0
@@ -169,6 +173,7 @@
         this.renderDevices()
       } catch (error) {
         this.devices = []
+        this.filterApplied = false
         this.enumerateError = true
         logger.warn(
           'enumerate exception:',
@@ -215,21 +220,21 @@
         const msg = document.createElement('div')
         msg.className = this.enumerateError ? 'webhid-error' : 'webhid-no-devices'
         msg.setAttribute('role', 'status')
-        msg.textContent = this.enumerateError ? t('pickerNoDaemon') : t('pickerNoDevices')
+        msg.textContent = this.enumerateError
+          ? t('pickerNoDaemon')
+          : this.filterApplied
+            ? t('pickerNoMatch')
+            : t('pickerNoDevices')
         deviceList.replaceChildren(msg)
         return
       }
 
-      const filteredDevices = applyFilters(this.devices, this.filters, this.exclusionFilters)
-      if (logExcludedDevices(this.devices, filteredDevices.length, this.filters, deviceList)) return
-      logger.debug(
-        'picker: ' + filteredDevices.length + '/' + this.devices.length + ' devices matched filters'
-      )
+      logger.debug('picker: ' + this.devices.length + ' device(s) matched filters')
 
-      const groups = groupDevices(filteredDevices)
+      const groups = groupDevices(this.devices)
 
       const pairedStatuses = await Promise.all(
-        filteredDevices.map((device) => this.deviceMatchesSaved(device))
+        this.devices.map((device) => this.deviceMatchesSaved(device))
       )
 
       this.deviceGroups = {}
@@ -240,7 +245,7 @@
         let isPaired = false
         const deviceIds = []
         for (const device of devices) {
-          const index = filteredDevices.indexOf(device)
+          const index = this.devices.indexOf(device)
           if (index >= 0 && pairedStatuses[index]) isPaired = true
           deviceIds.push(device.deviceId)
         }

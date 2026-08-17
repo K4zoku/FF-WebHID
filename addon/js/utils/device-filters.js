@@ -30,58 +30,6 @@
   }
 
   /**
-   * @param {import("../types.js").HIDDeviceInfo} collection
-   * @param {number|undefined} usagePage
-   * @param {number|undefined} usage
-   * @returns {boolean}
-   */
-  function collectionMatchesUsage(collection, usagePage, usage) {
-    if (usagePage !== undefined && collection.usagePage !== usagePage) return false
-    if (usage !== undefined && collection.usage !== usage) return false
-    return true
-  }
-
-  /**
-   * @param {import("../types.js").HIDDeviceInfo} device
-   * @param {import("../types.js").HIDDeviceFilter} filter
-   * @returns {boolean}
-   */
-  function deviceMatchesFilter(device, filter) {
-    if (filter.vendorId !== undefined && device.vendorId !== filter.vendorId) return false
-    if (filter.productId !== undefined && device.productId !== filter.productId) return false
-
-    if (filter.usagePage !== undefined || filter.usage !== undefined) {
-      const collections = device.collections || []
-      const matches = collections.some((c) =>
-        collectionMatchesUsage(c, filter.usagePage, filter.usage)
-      )
-      if (!matches) return false
-    }
-    return true
-  }
-
-  /**
-   * @param {import("../types.js").HIDDeviceInfo[]} devices
-   * @param {import("../types.js").HIDDeviceFilter[]} [filters]
-   * @param {import("../types.js").HIDDeviceFilter[]} [exclusionFilters]
-   * @returns {import("../types.js").HIDDeviceInfo[]}
-   */
-  function applyFilters(devices, filters, exclusionFilters) {
-    let result = devices
-    if (Array.isArray(filters) && filters.length > 0) {
-      result = result.filter((device) =>
-        filters.some((filter) => deviceMatchesFilter(device, filter))
-      )
-    }
-    if (Array.isArray(exclusionFilters) && exclusionFilters.length > 0) {
-      result = result.filter(
-        (device) => !exclusionFilters.some((filter) => deviceMatchesFilter(device, filter))
-      )
-    }
-    return result
-  }
-
-  /**
    * @param {import("../types.js").HIDDeviceInfo[]} devices
    * @returns {Map<string, import("../types.js").HIDDeviceInfo[]>}
    */
@@ -116,7 +64,6 @@
   }
 
   webhid.export('guessDeviceType', guessDeviceType)
-  webhid.export('applyFilters', applyFilters)
   webhid.export('groupDevices', groupDevices)
   webhid.export('groupIdFor', groupIdFor)
   webhid.export('isValidFilter', isValidFilter)

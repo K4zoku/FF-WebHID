@@ -158,7 +158,7 @@ Two independent mechanisms:
 A page cannot grant itself a device, see the full inventory, or spoof the chooser:
 
 - **Pairing is bridge-side only.** The bridge blocks privileged actions from page ports (`PAGE_BLOCKED_ACTIONS`) and persists the grant itself (`grantSelectedDevices`) after the user picks in the chooser (modal, pageAction, or window mode). `pairDevice` is never reachable from a page port.
-- **Page-facing enumerate is paired-only.** A page's `enumerate` is rewritten to `enumeratePaired`, and the background filters the response to the requesting origin's paired device hashes. The chooser and extension pages call `enumerate` directly and still see everything.
+- **Chooser filtering is daemon-side.** `requestDevice()` sends the optional inclusion and exclusion filters with the existing `enumerate` action. The daemon prefilters VID/PID before descriptor I/O, then applies usage filters after blocklist pruning. Unfiltered `enumerate` still refreshes the complete background cache.
 - **The chooser result is sender-validated.** `pickerResult` is rejected unless `sender.url` is the extension's picker page; `getDeviceInfo` from a page caller is gated on the device being paired for the origin (or tab-authorized).
 - **The page cannot intercept the bridge channel.** The polyfill (MAIN world) shares the page's JS realm, so it pre-claims pristine `MessagePort`/`MessageChannel`/`Worker.prototype.postMessage`/`window.postMessage` natives at document_start; page prototype patches cannot capture the bridge port.
 - Regression coverage: `tests/e2e/picker-bypass.spec.ts` attempts the prototype-patch capture and asserts the chooser flow still grants.
@@ -393,13 +393,14 @@ sequenceDiagram
 
     P->>B: port.postMessage(requestDevice)
     B->>Picker: devicePicker.show(filters)
-    Picker->>G: runtime.sendMessage(enumerate)
-    G->>N: NM write
+    Picker->>G: runtime.sendMessage(enumerate + optional filters)
+    G->>N: NM write (same enumerate action)
     N->>D: socket
-    D-->>N: device list
+    D->>D: VID/PID prefilter, then deep usage filter after pruning
+    D-->>N: filtered device list
     N-->>G: NM read
-    G-->>Picker: sendResponse(devices)
-    Picker->>Picker: applyFilters + render list
+    G-->>Picker: sendResponse(filtered devices)
+    Picker->>Picker: render list
     Note over Picker: user selects device, clicks Connect
     Picker-->>B: webhid-device-selected event
     B->>G: runtime.sendMessage(pairDevice, per device)

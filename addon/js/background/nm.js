@@ -200,8 +200,19 @@
       )
     },
 
-    async enumerateDevices() {
-      return await this.sendRequest({ a: ACT.enum })
+    async enumerateDevices(filter) {
+      const request = { a: ACT.enum }
+      if (
+        filter &&
+        ((Array.isArray(filter.filters) && filter.filters.length > 0) ||
+          (Array.isArray(filter.exclusionFilters) && filter.exclusionFilters.length > 0))
+      ) {
+        request.f = {
+          filters: Array.isArray(filter.filters) ? filter.filters : [],
+          exclusionFilters: Array.isArray(filter.exclusionFilters) ? filter.exclusionFilters : []
+        }
+      }
+      return await this.sendRequest(request)
     },
     async openDevice(deviceId) {
       return await this.sendRequest({ a: ACT.open, i: deviceId })

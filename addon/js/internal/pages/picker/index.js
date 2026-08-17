@@ -5,10 +5,8 @@
   const guessDeviceType = webhid.import('guessDeviceType')
   const t = webhid.import('t')
   const localizeHTML = webhid.import('localizeHTML')
-  const applyFilters = webhid.import('applyFilters')
   const groupDevices = webhid.import('groupDevices')
   const groupIdFor = webhid.import('groupIdFor')
-  const logExcludedDevices = webhid.import('logExcludedDevices')
   const applyDeviceIcon = webhid.import('applyDeviceIcon')
   const syncBrowserTheme = webhid.import('syncBrowserTheme')
   logger.initLogger('picker-popup')
@@ -127,12 +125,22 @@
     listEl.replaceChildren(loading)
     let devices
     try {
-      const response = await browser.runtime.sendMessage({ action: 'enumerate' })
+      const response = await browser.runtime.sendMessage({
+        action: 'enumerate',
+        filters: pendingRequest.filters || [],
+        exclusionFilters: pendingRequest.exclusionFilters || []
+      })
       if (!http.isOk(response.s)) {
         showPickerMessage(t('pickerNoDaemon'), true)
         return
       }
       devices = Array.isArray(response.D) ? response.D : []
+      const filterApplied = response.filtered === true
+      if (devices.length === 0) {
+        showPickerMessage(filterApplied ? t('pickerNoMatch') : t('pickerNoDevices'))
+        return
+      }
+      logger.debug('picker: ' + devices.length + ' device(s) matched filters')
     } catch (error) {
       logger.warn(
         'enumerate exception:',
@@ -141,21 +149,8 @@
       showPickerMessage(t('pickerNoDaemon'), true)
       return
     }
-    if (devices.length === 0) {
-      showPickerMessage(t('pickerNoDevices'))
-      return
-    }
 
-    const filtered = applyFilters(
-      devices,
-      pendingRequest.filters || [],
-      pendingRequest.exclusionFilters || []
-    )
-    if (logExcludedDevices(devices, filtered.length, pendingRequest.filters, listEl)) return
-    logger.debug('picker: ' + filtered.length + '/' + devices.length + ' devices matched')
-
-    const groups = groupDevices(filtered)
-
+    const groups = groupDevices(devices)
     deviceGroups = {}
     listEl.innerHTML = ''
 

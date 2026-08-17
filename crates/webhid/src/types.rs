@@ -28,6 +28,30 @@ pub struct DeviceInfo {
     pub descriptor_parse_failed: bool,
 }
 
+/// Optional filters for an enumerate request used by the device picker.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnumerateFilter {
+    #[serde(default)]
+    pub filters: Vec<DeviceFilter>,
+    #[serde(default)]
+    pub exclusion_filters: Vec<DeviceFilter>,
+}
+
+/// One WebHID requestDevice filter.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceFilter {
+    #[serde(default)]
+    pub vendor_id: Option<u32>,
+    #[serde(default)]
+    pub product_id: Option<u32>,
+    #[serde(default)]
+    pub usage_page: Option<u32>,
+    #[serde(default)]
+    pub usage: Option<u32>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Collection {
@@ -155,6 +179,8 @@ pub enum NmRequest {
     Enumerate {
         #[serde(default)]
         id: Option<u32>,
+        #[serde(rename = "f", default)]
+        filter: Option<EnumerateFilter>,
     },
     Open {
         #[serde(default)]
@@ -214,7 +240,7 @@ pub enum NmRequest {
 impl NmRequest {
     pub fn id(&self) -> Option<u32> {
         match self {
-            Self::Enumerate { id }
+            Self::Enumerate { id, .. }
             | Self::Open { id, .. }
             | Self::Close { id, .. }
             | Self::SendReport { id, .. }
@@ -413,7 +439,10 @@ mod tests {
 
     #[test]
     fn test_nm_request_id_enumerate() {
-        let req = NmRequest::Enumerate { id: Some(5) };
+        let req = NmRequest::Enumerate {
+            id: Some(5),
+            filter: None,
+        };
         assert_eq!(req.id(), Some(5));
     }
 

@@ -515,12 +515,12 @@ sequenceDiagram
     participant N as NM host (N)
     participant D as Daemon (D)
 
-    P->>B: sendRequest("enumerate")
+    P->>B: sendRequest("enumerate", optional filters)
     B->>G: runtime.sendMessage
-    G->>N: port.postMessage({a:1})
+    G->>N: port.postMessage({a:1, f:optional filter})
     N->>D: socket write
-    D->>D: hidapi enumerate
-    D-->>N: socket response (device list)
+    D->>D: VID/PID prefilter, then deep filter after pruning
+    D-->>N: socket response (filtered or full device list)
     N-->>G: NM read
     G-->>B: sendResponse
     B-->>P: port.postMessage(res)
@@ -590,11 +590,12 @@ sequenceDiagram
 
     P->>B: sendRequest("requestDevice")
     B->>Picker: devicePicker.show(filters)
-    Picker->>G: runtime.sendMessage(enumerate)
-    G->>D: NM → socket
-    D-->>G: device list
+    Picker->>G: runtime.sendMessage(enumerate + filters)
+    G->>D: NM → socket, same enumerate action
+    D->>D: VID/PID prefilter, then deep filter after pruning
+    D-->>G: filtered device list
     G-->>Picker: sendResponse
-    Picker->>Picker: applyFilters + render
+    Picker->>Picker: render
     Note over Picker: user selects, clicks Connect
     Picker-->>B: webhid-device-selected
     B->>G: runtime.sendMessage(pairDevice, per device)

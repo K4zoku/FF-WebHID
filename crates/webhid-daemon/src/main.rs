@@ -4,6 +4,7 @@ mod client;
 mod descriptor;
 mod device_mgr;
 mod dump;
+mod enumeration_filter;
 mod hid;
 mod hotplug;
 mod report_blocking;

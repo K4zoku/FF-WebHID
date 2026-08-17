@@ -4,7 +4,6 @@ use std::sync::OnceLock;
 #[cfg(target_os = "linux")]
 use tokio::net::UnixStream;
 
-
 #[cfg(target_os = "linux")]
 fn resolve_webhid_gid() -> Option<libc::gid_t> {
     static GID: OnceLock<Option<libc::gid_t>> = OnceLock::new();
