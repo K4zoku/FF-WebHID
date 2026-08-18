@@ -1,0 +1,89 @@
+# Maintainer: K4zoku <k4zoku@pm.me>
+# pkgname: webhid
+# Alpine Linux package for the WebHID daemon + native-messaging host.
+#
+# Built from the git source (like the Arch PKGBUILD), so the Makefile,
+# crates/, manifests/, .cargo/ wrapper, and patches are all available
+# in $srcdir during build().
+#
+# Alpine uses BusyBox mdev by default (not udev). The daemon runs as root
+# via OpenRC, so hidraw access is not needed at the device level.
+# Users in the 'webhid' group can connect to the daemon's Unix socket.
+#
+# For non-root daemon mode, users must:
+#   1. Add their user to the 'webhid' group: addgroup $USER webhid
+#   2. Install the mdev config: already provided by this package
+#
+# Alternatively, install eudev for full udev compatibility:
+#   apk add eudev && setup-devd udev
+# Then the standard 99-webhid.rules (udev format) will work.
+
+_pkgbase=webhid
+pkgname=${_pkgbase}
+pkgver=3.1.0
+pkgrel=0
+pkgdesc="WebHID implementation for Firefox via native-messaging bridge and hidraw daemon"
+url="https://github.com/K4zoku/FF-WebHID"
+arch="x86_64 aarch64"
+license="MIT"
+depends="eudev-libs"
+makedepends="cargo pkgconf rust git"
+install=""
+options="!tracedeps"
+
+source="${_pkgbase}::git+${url}.git"
+# git source: checksum is not verifiable, use SKIP
+sha256sums="SKIP"
+
+pkgver() {
+    cd "$srcdir/${_pkgbase}"
+    git describe --tags 2>/dev/null | sed 's/^v//;s/_/./;s/\([^-]*-g\)/r\1/;s/-/./g' || echo "$pkgver"
+}
+
+prepare() {
+    cd "$srcdir/${_pkgbase}"
+    cargo fetch \
+        --target "$CARCH-unknown-linux-musl" \
+        --manifest-path "crates/Cargo.toml" 2>/dev/null || true
+}
+
+build() {
+    cd "$srcdir/${_pkgbase}"
+    make build CARGO_ARGS=--frozen
+}
+
+package() {
+    local _root="$srcdir/${_pkgbase}"
+
+    # Install binaries
+    install -Dm755 "${_root}/crates/target/release/webhid-daemon" \
+        "$pkgdir/usr/bin/webhid-daemon"
+    install -Dm755 "${_root}/crates/target/release/webhid-native-messaging" \
+        "$pkgdir/usr/bin/webhid-native-messaging"
+
+    # Install native-messaging manifests for all Gecko browsers
+    for d in mozilla librewolf waterfox; do
+        local nm_dir="$pkgdir/usr/lib/${d}/native-messaging-hosts"
+        mkdir -p "$nm_dir"
+
+        sed 's|{{NM_BIN}}|/usr/bin/webhid-native-messaging|g' \
+            "${_root}/manifests/webhid.forwarder_nm_host.json" \
+            > "$nm_dir/webhid.forwarder_nm_host.json"
+
+        sed 's|{{DAEMON_BIN}}|/usr/bin/webhid-daemon|g' \
+            "${_root}/manifests/webhid.daemon_nm_host.json" \
+            > "$nm_dir/webhid.daemon_nm_host.json"
+    done
+
+    # Install mdev config (Alpine default device manager)
+    install -Dm644 "${_root}/manifests/99-webhid-mdev.conf" \
+        "$pkgdir/etc/mdev.d/99-webhid-mdev.conf"
+
+    # Install OpenRC init script
+    install -Dm755 "${_root}/manifests/webhid-daemon.openrc" \
+        "$pkgdir/etc/init.d/webhid-daemon"
+
+    # Install license
+    install -Dm644 "${_root}/LICENSE" \
+        "$pkgdir/usr/share/licenses/${pkgname}/LICENSE"
+}

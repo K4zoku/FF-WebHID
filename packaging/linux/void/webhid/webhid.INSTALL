@@ -1,0 +1,17 @@
+#!/bin/sh
+# Void Linux post-install script for webhid
+# Creates the webhid group and reloads udev rules
+
+case "$ACTION" in
+post)
+	# Create webhid system group if it doesn't exist
+	if ! getent group webhid >/dev/null 2>&1; then
+		groupadd --system webhid 2>/dev/null || true
+	fi
+
+	# Reload udev rules (Void uses eudev)
+	if command -v udevadm >/dev/null 2>&1; then
+		udevadm control --reload-rules 2>/dev/null || true
+	fi
+	;;
+esac

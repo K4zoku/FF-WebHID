@@ -1,0 +1,15 @@
+#!/sbin/openrc-run
+
+name="webhid-daemon"
+description="WebHID daemon for Firefox WebHID API"
+command="/usr/bin/webhid-daemon"
+command_user="root:root"
+pidfile="/run/${name}.pid"
+
+depend() {
+    need net
+}
+
+start_pre() {
+    checkpath -d -m 0755 -o root -g root /run
+}

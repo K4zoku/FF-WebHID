@@ -1,0 +1,27 @@
+# Template file for webhid-addon
+pkgname=webhid-addon
+version=1.6.5
+revision=1
+build_style=fetch
+depends="webhid"
+short_desc="WebHID browser extension for Firefox and Zen (system-wide installation)"
+maintainer="K4zoku <k4zoku@pm.me>"
+license="MIT"
+homepage="https://github.com/K4zoku/FF-WebHID"
+distfiles="https://addons.mozilla.org/firefox/downloads/latest/webhid@k4zoku.dev/latest.xpi"
+checksum=0000000000000000000000000000000000000000000000000000000000000000
+# ^ Replace with real checksum after first build
+
+do_install() {
+	_ext_id="webhid@k4zoku.dev"
+	_ff_guid='{ec8030f7-c20a-464f-9b0e-13a3a9e97384}'
+
+	# Firefox / Gecko application extension directories
+	vmkdir usr/lib/mozilla/extensions/${_ff_guid}
+	vmkdir usr/lib/librewolf/extensions
+	vmkdir usr/lib/waterfox/extensions
+
+	vinstall ${distfiles} 644 usr/lib/mozilla/extensions/${_ff_guid} ${_ext_id}.xpi
+	vinstall ${distfiles} 644 usr/lib/librewolf/extensions ${_ext_id}.xpi
+	vinstall ${distfiles} 644 usr/lib/waterfox/extensions ${_ext_id}.xpi
+}

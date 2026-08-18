@@ -112,7 +112,7 @@ function buildDeb(ver, arch) {
       `Architecture: ${arch}`,
       `Maintainer: K4zoku <k4zoku@pm.me>`,
       `Description: WebHID implementation for Firefox via native-messaging bridge and hidraw daemon`,
-      ` Depends: libudev1`,
+      `Depends: libudev1`,
       `Section: utils`,
       `Priority: optional`,
       `Homepage: https://github.com/K4zoku/FF-WebHID`,
@@ -126,6 +126,16 @@ function buildDeb(ver, arch) {
       'getent group webhid >/dev/null || groupadd --system webhid',
       'systemctl daemon-reload 2>/dev/null || true',
       'systemctl enable --now webhid-daemon.service 2>/dev/null || true',
+      'udevadm control --reload-rules 2>/dev/null || true',
+      'udevadm trigger --subsystem-match=hidraw --action=add 2>/dev/null || true',
+      ''
+    ].join('\n')
+  )
+  writeFileSync(
+    join(DEBIAN, 'postrm'),
+    [
+      '#!/bin/sh',
+      'udevadm control --reload-rules 2>/dev/null || true',
       ''
     ].join('\n')
   )
@@ -138,8 +148,10 @@ function buildDeb(ver, arch) {
       ''
     ].join('\n')
   )
+
   chmodSync(join(DEBIAN, 'postinst'), 0o755)
   chmodSync(join(DEBIAN, 'prerm'), 0o755)
+  chmodSync(join(DEBIAN, 'postrm'), 0o755)
 
   const usr = join(stage, 'usr')
   mkdirSync(join(usr, 'bin'), { recursive: true })
@@ -148,6 +160,9 @@ function buildDeb(ver, arch) {
   installSystemd(stage, '/usr/bin/webhid-daemon')
   installNmManifests(stage, '/usr/bin/webhid-native-messaging', '/usr/bin/webhid-daemon')
   installLicense(stage)
+  // Install udev rules
+  mkdirSync(join(usr, 'lib', 'udev', 'rules.d'), { recursive: true })
+  cpSync(join(MANIFESTS, '99-webhid.rules'), join(usr, 'lib', 'udev', 'rules.d', '99-webhid.rules'))
 
   const out = join(DIST, `webhid-${ver}-${arch}.deb`)
   execFileSync('dpkg-deb', ['--build', '--root-owner-group', stage, out], { stdio: 'inherit' })
@@ -195,6 +210,7 @@ function writeRpmSpec(rpmRoot, ver, binDir) {
       `  install -Dm644 ${MANIFESTS}/webhid.daemon_nm_host.json %{buildroot}/usr/lib/$d/native-messaging-hosts/webhid.daemon_nm_host.json`,
       `  sed -i 's|{{DAEMON_BIN}}|/usr/bin/webhid-daemon|g' %{buildroot}/usr/lib/$d/native-messaging-hosts/webhid.daemon_nm_host.json`,
       `done`,
+      `install -Dm644 ${MANIFESTS}/99-webhid.rules %{buildroot}%{_udevrulesdir}/99-webhid.rules`,
       `install -Dm644 ${join(ROOT, 'LICENSE')} %{buildroot}/usr/share/licenses/webhid/LICENSE`,
       ``,
       `%pre`,
@@ -203,18 +219,21 @@ function writeRpmSpec(rpmRoot, ver, binDir) {
       ``,
       `%post`,
       `%systemd_post webhid-daemon.service`,
+      `udevadm control --reload-rules 2>/dev/null || :`,
       ``,
       `%preun`,
       `%systemd_preun webhid-daemon.service`,
       ``,
       `%postun`,
       `%systemd_postun webhid-daemon.service`,
+      `udevadm control --reload-rules 2>/dev/null || :`,
       ``,
       `%files`,
       `%license /usr/share/licenses/webhid/LICENSE`,
       `/usr/bin/webhid-daemon`,
       `/usr/bin/webhid-native-messaging`,
       `/usr/lib/systemd/system/webhid-daemon.service`,
+      `%{_udevrulesdir}/99-webhid.rules`,
       nmFileList,
       ''
     ].join('\n')
