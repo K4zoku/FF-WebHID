@@ -1,8 +1,8 @@
 # Maintainer: K4zoku <k4zoku@pm.me>
 #
 # This APKBUILD downloads a pinned version of the WebHID Firefox extension
-# from AMO (addons.mozilla.org). The URL and checksum are updated
-# automatically by `npm run release`.
+# from AMO (addons.mozilla.org). The URL and checksum are refreshed with
+# `npm run refresh:pins` after each release.
 
 pkgname=webhid-addon
 pkgver=3.1.0

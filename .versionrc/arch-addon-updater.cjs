@@ -1,8 +1,4 @@
-const pins = require('./pins-helper.cjs')
-
 const PKGVER_REGEX = /^(\s*pkgver\s*=\s*)([^\s]*)/m
-const AMO_URL_REGEX = /^(\s*_amo_url\s*=\s*")([^"]*)(")/m
-const SHA256SUMS_REGEX = /^sha256sums=\([^)]*\)/m
 
 function readVersion(contents) {
   const match = contents.match(PKGVER_REGEX)
@@ -11,13 +7,7 @@ function readVersion(contents) {
 }
 
 function writeVersion(contents, version) {
-  const { url, sha256 } = pins.amoInfo(version)
-  if (!AMO_URL_REGEX.test(contents)) throw new Error('_amo_url field not found in Arch addon PKGBUILD')
-  if (!SHA256SUMS_REGEX.test(contents)) throw new Error('sha256sums block not found in Arch addon PKGBUILD')
-  return contents
-    .replace(PKGVER_REGEX, `$1${version}`)
-    .replace(AMO_URL_REGEX, `$1${url}$3`)
-    .replace(SHA256SUMS_REGEX, `sha256sums=('${sha256}')`)
+  return contents.replace(PKGVER_REGEX, `$1${version}`)
 }
 
 module.exports = { readVersion, writeVersion }

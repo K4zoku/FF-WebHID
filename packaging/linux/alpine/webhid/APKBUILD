@@ -2,8 +2,8 @@
 # pkgname: webhid
 # Alpine Linux package for the WebHID daemon + native-messaging host.
 #
-# Pinned to the v${pkgver} release tarball (checksum below); updated
-# automatically by `npm run release`.
+# Pinned to the v${pkgver} release tarball (checksum below); refresh with
+# `npm run refresh:pins` after each release.
 #
 # Alpine uses BusyBox mdev by default (not udev). The daemon runs as root
 # via OpenRC, so hidraw access is not needed at the device level.

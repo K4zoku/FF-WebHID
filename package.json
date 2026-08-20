@@ -11,6 +11,7 @@
     "fx-build": "npm run build:addon",
     "build:addon": "node scripts/build-addon.mjs",
     "build:apk": "cd packaging/linux/alpine/webhid && abuild -r",
+    "refresh:pins": "node scripts/refresh-pins.mjs",
     "build:daemon": "cargo build --release -p webhid-daemon --manifest-path $npm_package_config_cargoManifest",
     "build:daemon:debug": "cargo build -p webhid-daemon --manifest-path $npm_package_config_cargoManifest",
     "build:deb": "node scripts/build-package.mjs deb",

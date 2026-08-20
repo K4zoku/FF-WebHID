@@ -1,8 +1,5 @@
-const pins = require('./pins-helper.cjs')
-
 const VERSION_REGEX = /^(\s*version\s+")([^"]+)(")/m
 const TAG_REGEX = /^(\s*tag:\s*")v([^"]+)(")/m
-const REVISION_REGEX = /^(\s*revision:\s*")[^"]*(")/m
 
 function readVersion(contents) {
   const match = contents.match(VERSION_REGEX)
@@ -12,10 +9,8 @@ function readVersion(contents) {
 
 function writeVersion(contents, version) {
   if (!TAG_REGEX.test(contents)) throw new Error('tag field not found in Homebrew formula')
-  if (!REVISION_REGEX.test(contents)) throw new Error('revision field not found in Homebrew formula')
   return contents
     .replace(TAG_REGEX, `$1v${version}$3`)
-    .replace(REVISION_REGEX, `$1${pins.tagCommit(`v${version}`)}$2`)
     .replace(VERSION_REGEX, `$1${version}$3`)
 }
 

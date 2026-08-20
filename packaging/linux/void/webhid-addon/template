@@ -8,8 +8,8 @@ short_desc="WebHID browser extension for Firefox and Zen (system-wide installati
 maintainer="K4zoku <k4zoku@pm.me>"
 license="MIT"
 homepage="https://github.com/K4zoku/FF-WebHID"
-# Pinned AMO file URL (versioned, not the mutable latest.xpi); updated
-# automatically by `npm run release`.
+# Pinned AMO file URL (versioned, not the mutable latest.xpi); refresh with
+# `npm run refresh:pins` after each release.
 distfiles="https://addons.mozilla.org/firefox/downloads/file/4950900/webhid-3.1.0.xpi"
 checksum=f34b1258949600750705f23b900697d1af908b473008ed827b0a423b58272a97
 

@@ -4,8 +4,8 @@ rustPlatform.buildRustPackage (finalAttrs: {
   pname = "webhid";
   version = "3.1.0";
 
-  # Release tarball pinned by its SHA-256; updated automatically by
-  # `npm run release`.
+  # Release tarball pinned by its SHA-256; refresh with
+  # `npm run refresh:pins` after each release.
   src = fetchurl {
     url = "https://github.com/K4zoku/FF-WebHID/archive/refs/tags/v${finalAttrs.version}.tar.gz";
     hash = "sha256-ZQmUtw9FKVyqIeDhrZGpUQsNBdY4REd+cwDIu7OLjvs=";
