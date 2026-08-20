@@ -49,6 +49,36 @@
     let open = false
     /** @type {boolean} */
     let closedHandled = true
+    /** @type {boolean} */
+    let failed = false
+
+    /**
+     * Marks the transport failed (write/attach error), tears it down, and
+     * forces a clean reconnect. The worker's onClosed handler rejects all
+     * pending requests, so a send that already reported success cannot
+     * leave the page hanging.
+     * @param {string} reason
+     * @returns {void}
+     */
+    function failTransport(reason) {
+      if (failed || !connectMsg) return
+      failed = true
+      log('warn', 'WT transport failed: ' + reason)
+      if (wt) {
+        try {
+          wt.close()
+        } catch (e) {
+          log('debug', 'WT close after failure failed', e)
+        }
+        wt = null
+      }
+      open = false
+      streamWriter = null
+      streamReader = null
+      closedHandled = true
+      if (opts.onClosed) opts.onClosed({ willReconnect: true })
+      scheduleReconnect()
+    }
 
     /**
      * @param {string|undefined} reason
@@ -138,7 +168,7 @@
         readFrames(stream)
         opts.onReady && opts.onReady()
       } catch (e) {
-        log('warn', 'WT stream attach failed: ' + (e.message || e))
+        failTransport('stream attach failed: ' + (e.message || e))
       }
     }
 
@@ -154,6 +184,7 @@
         ]
       }
       closedHandled = false
+      failed = false
       try {
         wt = new WebTransport(url, wtOpts)
       } catch (e) {
@@ -207,8 +238,10 @@
         const data = frame instanceof Uint8Array ? frame : new TextEncoder().encode(frame)
         const header = new Uint8Array(4)
         new DataView(header.buffer).setUint32(0, data.length, true)
-        streamWriter.write(header).catch((e) => log('debug', 'WT send failed: ' + (e.message || e)))
-        streamWriter.write(data).catch((e) => log('debug', 'WT send failed: ' + (e.message || e)))
+        const onWriteError = (e) =>
+          failTransport('send failed: ' + (e && e.message ? e.message : e))
+        streamWriter.write(header).catch(onWriteError)
+        streamWriter.write(data).catch(onWriteError)
         return true
       },
       /** @returns {boolean} */
@@ -247,6 +280,7 @@
         }
         open = false
         closedHandled = true
+        failed = true
         connectMsg = null
         log('debug', 'disconnected by caller')
       }
