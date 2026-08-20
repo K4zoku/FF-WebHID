@@ -271,18 +271,26 @@ async fn main() -> anyhow::Result<()> {
         log::info!("webhid-daemon listening on {pipe_name}");
         log::info!("WebSocket server on port {actual_ws_port}");
 
-        loop {
-            let server = ServerOptions::new()
-                .first_pipe_instance(true)
-                .create(&pipe_name)?;
+        // Only the first pipe instance may claim first-instance semantics;
+        // subsequent instances are created without the flag (the canonical
+        // Tokio named-pipe server pattern). Otherwise the loop breaks after
+        // the first client.
+        let mut server = ServerOptions::new()
+            .first_pipe_instance(true)
+            .create(&pipe_name)?;
 
+        loop {
             server.connect().await?;
+            let connected = std::mem::replace(
+                &mut server,
+                ServerOptions::new().create(&pipe_name)?,
+            );
             let mgr = Arc::clone(&device_mgr);
             let rx = event_tx.subscribe();
             let wt_state_for_client = Arc::clone(&wt_state);
             tokio::spawn(async move {
                 log::info!("[client] connected");
-                let (reader, writer) = tokio::io::split(server);
+                let (reader, writer) = tokio::io::split(connected);
                 let client_id = mgr.new_client_id();
                 if let Err(e) = client::handle(
                     reader,
