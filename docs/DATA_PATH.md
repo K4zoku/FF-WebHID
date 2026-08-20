@@ -336,7 +336,7 @@ Bridge sends `handshake` on init. The response contains `wsPort` (the daemon's W
 
 5. **Rate-gated batching** keeps latency low for sparse reports (0µs), coalesces bursts within 25µs, and widens to an 8ms window once the flush rate exceeds ~12 reports per 4ms, so 8kHz polling amortizes per-frame overhead without hurting low-rate latency.
 
-6. **Daemon does not broadcast to both channels.** `has_nm_session` per device checks if any session on that device is in NM mode before forwarding InputReports via NM. Per-session `dataplane_modes` (HashMap<session_token, mode>) ensures each session's mode is tracked independently.
+6. **Daemon does not broadcast to both channels.** `has_nm_session_for_client` checks whether the client holds an active NM-mode session on the device before forwarding InputReports via NM. Explicit per-client session records (`session_token -> {device_id, owner_client_id, mode, ws_auth_hash, active}`) track each session's mode independently.
 
 7. **WS data frame header is 6 bytes** (no device ID): `[type:u8][reqId:u32 LE][reportId:u8][payload]`. The WS connection is per-device, so the device ID is implicit. NM packed TLVs include a device ID (12-byte header) because the NM connection is shared across all devices.
 
@@ -672,7 +672,7 @@ sequenceDiagram
     G->>G: NM port disconnect detected
     G->>G: resolve all pending with {s:503}
     G->>B: broadcast globalReset (tabs.sendMessage)
-    B->>B: clear openDevices + sessionTokens
+    B->>B: clear openDevices + per-open token stacks
     B->>B: despawn all data workers
     loop per open device
         B-->>P: event: disconnect
