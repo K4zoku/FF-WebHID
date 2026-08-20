@@ -163,6 +163,24 @@ async fn handle_websocket(
     Ok(())
 }
 
+/// Loopback check for the WS `Host` header value (e.g. `127.0.0.1:56345`,
+/// `[::1]:56345`, `localhost`). Server-side upgrade requests use
+/// origin-form URIs whose `uri().host()` is empty, so the real target
+/// host only lives in the `Host` header.
+fn is_loopback_host(host: &str) -> bool {
+    let h = host.trim();
+    if h.is_empty() {
+        return false;
+    }
+    if let Some(rest) = h.strip_prefix('[') {
+        // IPv6 literal, optionally with a port: [::1] / [::1]:port
+        let end = rest.find(']').unwrap_or(rest.len());
+        return &rest[..end] == "::1";
+    }
+    let hostname = h.split(':').next().unwrap_or(h);
+    hostname.eq_ignore_ascii_case("localhost") || hostname == "127.0.0.1"
+}
+
 /// tungstenite's accept-hdr callback signature requires the response type in
 /// the error position; the large Err variant is inherent to the API.
 #[allow(clippy::result_large_err)]
@@ -171,11 +189,16 @@ fn ws_accept_callback(
     res: Response,
     hash_ref: &Arc<std::sync::Mutex<Option<String>>>,
 ) -> Result<Response, tokio_tungstenite::tungstenite::http::Response<Option<String>>> {
-    let host = req.uri().host().unwrap_or("");
-    let is_loopback =
-        host.is_empty() || host == "127.0.0.1" || host == "localhost" || host == "::1";
-    if !is_loopback {
-        log::warn!("[ws] rejected connection from host: {host}");
+    // Origin-form request URIs carry no host; the actual target is the
+    // `Host` header. Reject anything that does not target loopback so a
+    // rebinding-style request can never reach the daemon.
+    let host_header = req
+        .headers()
+        .get("host")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if !is_loopback_host(host_header) {
+        log::warn!("[ws] rejected connection with Host header: {host_header:?}");
         let resp = Response::builder()
             .status(StatusCode::FORBIDDEN)
             .body(Some("Access denied".into()))
