@@ -1,0 +1,6 @@
+#!/bin/sh
+# Create the webhid system group if it does not exist yet. The daemon's IPC
+# authorization (SO_PEERCRED + webhid group on the Unix socket) and the mdev
+# rule (root:webhid) both depend on it.
+addgroup -S webhid 2>/dev/null || true
+exit 0

@@ -2,9 +2,8 @@
 # pkgname: webhid
 # Alpine Linux package for the WebHID daemon + native-messaging host.
 #
-# Built from the git source (like the Arch PKGBUILD), so the Makefile,
-# crates/, manifests/, .cargo/ wrapper, and patches are all available
-# in $srcdir during build().
+# Pinned to the v${pkgver} release tarball (checksum below); regenerate with
+# `npm run bump:pins` after each version bump.
 #
 # Alpine uses BusyBox mdev by default (not udev). The daemon runs as root
 # via OpenRC, so hidraw access is not needed at the device level.
@@ -18,8 +17,7 @@
 #   apk add eudev && setup-devd udev
 # Then the standard 72-webhid.rules (udev format) will work.
 
-_pkgbase=webhid
-pkgname=${_pkgbase}
+pkgname=webhid
 pkgver=3.1.0
 pkgrel=0
 pkgdesc="WebHID implementation for Firefox via native-messaging bridge and hidraw daemon"
@@ -27,63 +25,72 @@ url="https://github.com/K4zoku/FF-WebHID"
 arch="x86_64 aarch64"
 license="MIT"
 depends="eudev-libs"
-makedepends="cargo pkgconf rust git"
-install=""
+makedepends="cargo pkgconf rust bash patch"
+install="$pkgname.pre-install"
 options="!tracedeps"
+pkggroups="webhid"
 
-source="${_pkgbase}::git+${url}.git"
-# git source: checksum is not verifiable, use SKIP
-sha256sums="SKIP"
+source="
+	https://github.com/K4zoku/FF-WebHID/archive/refs/tags/v${pkgver}.tar.gz
+	${pkgname}.pre-install
+"
 
-pkgver() {
-    cd "$srcdir/${_pkgbase}"
-    git describe --tags 2>/dev/null | sed 's/^v//;s/_/./;s/\([^-]*-g\)/r\1/;s/-/./g' || echo "$pkgver"
-}
+sha256sums="
+650994b70f45295caa21e0e1ad91a9510b0d05d63844477e7300c8bbb38b8efb
+79cac770f8360bc1ad4d6aa815834f9b1c9b003986d548f4d782c275775990e6
+"
+
+_srcdir="$srcdir/FF-WebHID-$pkgver"
 
 prepare() {
-    cd "$srcdir/${_pkgbase}"
-    cargo fetch \
-        --target "$CARCH-unknown-linux-musl" \
-        --manifest-path "crates/Cargo.toml" 2>/dev/null || true
+	cd "$_srcdir"
+	cargo fetch \
+		--target "$CARCH-unknown-linux-musl" \
+		--manifest-path "crates/Cargo.toml" 2>/dev/null || true
 }
 
 build() {
-    cd "$srcdir/${_pkgbase}"
-    make build CARGO_ARGS=--frozen
+	cd "$_srcdir"
+	# Direct cargo build (the repo Makefile only wraps this in npm). The
+	# repo's .cargo/config.toml rustc-wrapper applies the hidapi patches,
+	# which is why bash+patch are in makedepends.
+	cargo build --release --frozen \
+		--manifest-path "crates/Cargo.toml" \
+		-p webhid-daemon -p webhid-native-messaging
 }
 
 package() {
-    local _root="$srcdir/${_pkgbase}"
+	local _root="$_srcdir"
 
-    # Install binaries
-    install -Dm755 "${_root}/crates/target/release/webhid-daemon" \
-        "$pkgdir/usr/bin/webhid-daemon"
-    install -Dm755 "${_root}/crates/target/release/webhid-native-messaging" \
-        "$pkgdir/usr/bin/webhid-native-messaging"
+	# Install binaries
+	install -Dm755 "${_root}/crates/target/release/webhid-daemon" \
+		"$pkgdir/usr/bin/webhid-daemon"
+	install -Dm755 "${_root}/crates/target/release/webhid-native-messaging" \
+		"$pkgdir/usr/bin/webhid-native-messaging"
 
-    # Install native-messaging manifests for all Gecko browsers
-    for d in mozilla librewolf waterfox; do
-        local nm_dir="$pkgdir/usr/lib/${d}/native-messaging-hosts"
-        mkdir -p "$nm_dir"
+	# Install native-messaging manifests for all Gecko browsers
+	for d in mozilla librewolf waterfox; do
+		local nm_dir="$pkgdir/usr/lib/${d}/native-messaging-hosts"
+		mkdir -p "$nm_dir"
 
-        sed 's|{{NM_BIN}}|/usr/bin/webhid-native-messaging|g' \
-            "${_root}/manifests/webhid.forwarder_nm_host.json" \
-            > "$nm_dir/webhid.forwarder_nm_host.json"
+		sed 's|{{NM_BIN}}|/usr/bin/webhid-native-messaging|g' \
+			"${_root}/manifests/webhid.forwarder_nm_host.json" \
+			> "$nm_dir/webhid.forwarder_nm_host.json"
 
-        sed 's|{{DAEMON_BIN}}|/usr/bin/webhid-daemon|g' \
-            "${_root}/manifests/webhid.daemon_nm_host.json" \
-            > "$nm_dir/webhid.daemon_nm_host.json"
-    done
+		sed 's|{{DAEMON_BIN}}|/usr/bin/webhid-daemon|g' \
+			"${_root}/manifests/webhid.daemon_nm_host.json" \
+			> "$nm_dir/webhid.daemon_nm_host.json"
+	done
 
-    # Install mdev config (Alpine default device manager)
-    install -Dm644 "${_root}/manifests/99-webhid-mdev.conf" \
-        "$pkgdir/etc/mdev.d/99-webhid-mdev.conf"
+	# Install mdev config (Alpine default device manager)
+	install -Dm644 "${_root}/manifests/99-webhid-mdev.conf" \
+		"$pkgdir/etc/mdev.d/99-webhid-mdev.conf"
 
-    # Install OpenRC init script
-    install -Dm755 "${_root}/manifests/webhid-daemon.openrc" \
-        "$pkgdir/etc/init.d/webhid-daemon"
+	# Install OpenRC init script
+	install -Dm755 "${_root}/manifests/webhid-daemon.openrc" \
+		"$pkgdir/etc/init.d/webhid-daemon"
 
-    # Install license
-    install -Dm644 "${_root}/LICENSE" \
-        "$pkgdir/usr/share/licenses/${pkgname}/LICENSE"
+	# Install license
+	install -Dm644 "${_root}/LICENSE" \
+		"$pkgdir/usr/share/licenses/${pkgname}/LICENSE"
 }
