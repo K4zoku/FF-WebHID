@@ -153,52 +153,68 @@
   /** @type {Map<string, number>} */
   const spawnGen = new Map()
 
-  const allowedDeviceIds = new Set()
-  let allowedDeviceIdsReady = false
+  /** @type {Map<string, Set<string>>} origin -> allowed device ids. The
+   * bridge serves ports from several frame origins; a single top-origin set
+   * would reject delegated children and disagree with background state. */
+  const allowedByOrigin = new Map()
+  /** @type {Set<string>} origins whose allowed set is loaded. */
+  const loadedOrigins = new Set()
   const allowedDeviceIdsQueue = []
 
   /**
-   * Resolves all queued isDeviceAllowed promises with the current allowed set.
+   * Resolves all queued isDeviceAllowed promises for `origin`.
+   * @param {string} origin
    * @returns {void}
    */
-  function flushAllowedDeviceIdsQueue() {
-    while (allowedDeviceIdsQueue.length) {
-      const { deviceId, resolve } = allowedDeviceIdsQueue.shift()
-      resolve(allowedDeviceIds.has(deviceId))
+  function flushAllowedDeviceIdsQueue(origin) {
+    const allowed = allowedByOrigin.get(origin) || new Set()
+    for (let i = allowedDeviceIdsQueue.length - 1; i >= 0; i--) {
+      if (allowedDeviceIdsQueue[i].origin === origin) {
+        const { deviceId, resolve } = allowedDeviceIdsQueue[i]
+        allowedDeviceIdsQueue.splice(i, 1)
+        resolve(allowed.has(deviceId))
+      }
     }
   }
 
   /**
-   * Checks whether a device is in the allowed set, queuing if not yet loaded.
+   * Checks whether a device is in the allowed set for `origin`, queuing if
+   * that origin's set is not yet loaded.
    * @param {string} deviceId
+   * @param {string} origin
    * @returns {Promise<boolean>}
    */
-  function isDeviceAllowed(deviceId) {
-    if (allowedDeviceIdsReady) return Promise.resolve(allowedDeviceIds.has(deviceId))
+  function isDeviceAllowed(deviceId, origin) {
+    if (loadedOrigins.has(origin)) {
+      return Promise.resolve((allowedByOrigin.get(origin) || new Set()).has(deviceId))
+    }
     return new Promise((resolve) => {
-      allowedDeviceIdsQueue.push({ deviceId, resolve })
+      allowedDeviceIdsQueue.push({ origin, deviceId, resolve })
     })
   }
 
   /**
-   * Loads the allowed device IDs for the current origin from the background.
+   * Loads the allowed device IDs for `origin` from the background.
+   * @param {string} origin
    * @returns {Promise<void>}
    */
-  async function loadAllowedDeviceIds() {
+  async function loadAllowedDeviceIds(origin) {
     try {
       const resp = await browser.runtime.sendMessage({
         action: 'getAllowedDevices',
-        origin: window.location.origin
+        origin
       })
       if (resp && Array.isArray(resp.deviceIds)) {
-        allowedDeviceIds.clear()
-        for (const id of resp.deviceIds) allowedDeviceIds.add(id)
+        allowedByOrigin.set(origin, new Set(resp.deviceIds))
+      } else {
+        allowedByOrigin.set(origin, new Set())
       }
     } catch (e) {
-      logger.warn('loadAllowedDeviceIds failed:', e.message)
+      logger.warn('loadAllowedDeviceIds failed for', origin, ':', e.message)
+      allowedByOrigin.set(origin, new Set())
     }
-    allowedDeviceIdsReady = true
-    flushAllowedDeviceIdsQueue()
+    loadedOrigins.add(origin)
+    flushAllowedDeviceIdsQueue(origin)
   }
 
   /**
@@ -569,7 +585,7 @@
           )
         }
         settings.set(await loadEffectiveSettings(window.location.origin))
-        loadAllowedDeviceIds()
+        loadAllowedDeviceIds(window.location.origin)
       }
     } catch (e) {
       logger.warn('handshake failed:', e.message)
@@ -804,7 +820,7 @@
       logger.warn('data-port: missing deviceId or port')
       return
     }
-    const allowed = await isDeviceAllowed(deviceId)
+    const allowed = await isDeviceAllowed(deviceId, getRequestOrigin(data))
     if (!allowed) {
       logger.warn('data-port: not authorized for device', deviceId)
       try {
@@ -1101,7 +1117,7 @@
       }
       let response
       if (action === 'open') {
-        const allowed = await isDeviceAllowed(payload.deviceId)
+        const allowed = await isDeviceAllowed(payload.deviceId, getRequestOrigin(data))
         if (!allowed) {
           replyToPage({ type: 'response', id, result: { s: 403 } })
           return
@@ -1446,8 +1462,10 @@
 
   browser.runtime.onMessage.addListener((message) => {
     if (message.action === 'allowedDevicesChanged' && Array.isArray(message.deviceIds)) {
-      allowedDeviceIds.clear()
-      for (const id of message.deviceIds) allowedDeviceIds.add(id)
+      const origin = message.origin || window.location.origin
+      allowedByOrigin.set(origin, new Set(message.deviceIds))
+      loadedOrigins.add(origin)
+      flushAllowedDeviceIdsQueue(origin)
     }
   })
 })()

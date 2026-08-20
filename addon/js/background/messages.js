@@ -61,7 +61,7 @@
   async function notifyAllowedDevicesChanged(origin, deviceIds) {
     await forTabsOfOrigin(origin, (tab) =>
       browser.tabs
-        .sendMessage(tab.id, { action: 'allowedDevicesChanged', deviceIds })
+        .sendMessage(tab.id, { action: 'allowedDevicesChanged', origin, deviceIds })
         .catch(() => {})
     )
   }
@@ -97,7 +97,7 @@
           .catch(() => {})
       }
       browser.tabs
-        .sendMessage(tab.id, { action: 'allowedDevicesChanged', deviceIds })
+        .sendMessage(tab.id, { action: 'allowedDevicesChanged', origin, deviceIds })
         .catch(() => {})
     })
   }
