@@ -405,8 +405,11 @@ async fn read_feature_report_blocking(
     report_id: u8,
 ) -> Result<Vec<u8>, NmResponse> {
     let dev_arc = open_device(device_mgr, device_id)?;
-    match crate::device_mgr::run_device_op(dev_arc, move |d| hid::read_feature_report(d, report_id))
-        .await
+    let buf_size = device_mgr.read_buf_size(device_id);
+    match crate::device_mgr::run_device_op(dev_arc, move |d| {
+        hid::read_feature_report(d, report_id, buf_size)
+    })
+    .await
     {
         Ok(data) => Ok(data),
         Err(_) => Err(NmResponse::err(500)),

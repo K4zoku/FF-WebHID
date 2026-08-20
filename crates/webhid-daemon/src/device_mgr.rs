@@ -70,6 +70,9 @@ struct Entry {
     handle: Option<JoinHandle<()>>,
     vendor_id: u16,
     product_id: u16,
+    /// Input/feature read buffer size derived from the descriptor's max
+    /// report payload (+ report-id byte), capped by `hid::MAX_READ_BUFFER`.
+    read_buf_size: usize,
     /// Report-level protection state (map, fallbacks, send validation),
     /// computed once at open. See `crate::report_blocking`.
     blocking: Arc<crate::report_blocking::DeviceReportBlocking>,
@@ -118,6 +121,7 @@ struct ReaderConfig {
     dev_for_task: DeviceHandle,
     stop_flag: Arc<AtomicBool>,
     uses_numbered_reports: bool,
+    read_buf_size: usize,
     blocked_input_ids: Arc<HashSet<u8>>,
     declared_input_ids: Arc<HashSet<u8>>,
     always_protected_input: bool,
@@ -197,6 +201,12 @@ impl DeviceManager {
         let blocked_input_ids =
             Arc::new(blocking.blocked_input_ids(info.vendor_id, info.product_id));
         let declared_input_ids = Arc::new(blocking.declared_input_ids());
+        let max_payload = crate::descriptor::max_input_report_size(&info.collections)
+            .max(crate::descriptor::max_output_report_size(&info.collections))
+            .max(crate::descriptor::max_feature_report_size(&info.collections));
+        // Largest declared report payload + the report-id byte, floored at
+        // 64 and capped defensively at the fixed 4096 ceiling.
+        let read_buf_size = (max_payload as usize + 1).clamp(64, crate::hid::MAX_READ_BUFFER);
 
         let stop_flag = Arc::new(AtomicBool::new(false));
 
@@ -216,6 +226,7 @@ impl DeviceManager {
             handle: None,
             vendor_id: info.vendor_id,
             product_id: info.product_id,
+            read_buf_size,
             blocking: Arc::clone(&blocking),
         };
 
@@ -229,6 +240,7 @@ impl DeviceManager {
             dev_for_task,
             stop_flag,
             uses_numbered_reports,
+            read_buf_size,
             blocked_input_ids,
             declared_input_ids,
             always_protected_input: blocking.always_protected[0],
@@ -302,6 +314,7 @@ impl DeviceManager {
             dev_for_task,
             stop_flag,
             uses_numbered_reports,
+            read_buf_size,
             blocked_input_ids,
             declared_input_ids,
             always_protected_input,
@@ -361,7 +374,7 @@ impl DeviceManager {
 
                 let read_result = tokio::task::spawn_blocking({
                     let dev = Arc::clone(&dev_for_task);
-                    move || with_device(&dev, |d| hid::read_with_timeout(d, 500))
+                    move || with_device(&dev, |d| hid::read_with_timeout(d, 500, read_buf_size))
                 })
                 .await;
 
@@ -497,6 +510,15 @@ impl DeviceManager {
             .get(&device_id)
             .ok_or_else(|| anyhow!("'{device_id:#x}' not open"))?;
         Ok(Arc::clone(&entry.device))
+    }
+
+    /// Descriptor-derived read buffer size for the device (report payload +
+    /// report-id byte, floored and capped). Used for feature-report reads.
+    pub fn read_buf_size(&self, device_id: u32) -> usize {
+        let map = self.devices.lock().unwrap_or_else(|e| e.into_inner());
+        map.get(&device_id)
+            .map(|e| e.read_buf_size)
+            .unwrap_or(crate::hid::MAX_READ_BUFFER)
     }
 
     /// Resolves the open device handle, logging on failure.

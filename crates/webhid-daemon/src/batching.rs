@@ -422,8 +422,9 @@ async fn handle_receive_feature_report_msg<F>(
             report_id,
             dev: dev_arc,
         } => {
+            let buf_size = device_mgr.read_buf_size(device_id);
             let result = crate::device_mgr::run_device_op(dev_arc, move |d| {
-                hid::read_feature_report(d, report_id)
+                hid::read_feature_report(d, report_id, buf_size)
             })
             .await;
             match result {

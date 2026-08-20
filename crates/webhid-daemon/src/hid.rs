@@ -9,8 +9,6 @@ thread_local! {
     static READ_BUF: RefCell<Vec<u8>> = RefCell::new(Vec::with_capacity(256));
 }
 
-const DEFAULT_READ_SIZE: usize = 4096;
-
 /// Generate a stable `u32` device identifier from the device path.
 ///
 /// Uses FNV-1a 32-bit hash of the platform-specific device path
@@ -403,11 +401,22 @@ pub fn uses_numbered_reports(buf: &[u8]) -> bool {
     false
 }
 
+/// Defensive ceiling for HID read buffers. Buffers are sized from the
+/// descriptor-derived max report payload (plus the report-id byte), never
+/// from a fixed 4096 constant, but never grow past this cap either.
+pub const MAX_READ_BUFFER: usize = 4096;
+
 /// Block until a HID input report is available (or `timeout_ms` expires).
-pub fn read_with_timeout(dev: &HidDevice, timeout_ms: i32) -> std::io::Result<Vec<u8>> {
+/// `buf_size` must cover the largest declared input report plus its
+/// report-id byte.
+pub fn read_with_timeout(
+    dev: &HidDevice,
+    timeout_ms: i32,
+    buf_size: usize,
+) -> std::io::Result<Vec<u8>> {
     READ_BUF.with(|buf| {
         let mut buf = buf.borrow_mut();
-        buf.resize(DEFAULT_READ_SIZE, 0);
+        buf.resize(buf_size.max(64), 0);
         let n = dev
             .read_timeout(&mut buf, timeout_ms)
             .map_err(|e| std::io::Error::other(e.to_string()))?;
@@ -443,10 +452,16 @@ pub fn write_report(dev: &HidDevice, report_id: u8, payload: &[u8]) -> std::io::
 
 /// Receive a HID feature report.  hidapi's `get_feature_report` expects
 /// the first byte to be the report ID and returns the report including it.
-pub fn read_feature_report(dev: &HidDevice, report_id: u8) -> std::io::Result<Vec<u8>> {
+/// `buf_size` must cover the largest declared feature report plus its
+/// report-id byte.
+pub fn read_feature_report(
+    dev: &HidDevice,
+    report_id: u8,
+    buf_size: usize,
+) -> std::io::Result<Vec<u8>> {
     READ_BUF.with(|buf| {
         let mut buf = buf.borrow_mut();
-        buf.resize(DEFAULT_READ_SIZE, 0);
+        buf.resize(buf_size.max(64), 0);
         buf[0] = report_id;
         let n = dev
             .get_feature_report(&mut buf)
