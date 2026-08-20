@@ -60,13 +60,31 @@ pub fn enumerate() -> anyhow::Result<Vec<DeviceInfo>> {
     enumerate_with_filter(None)
 }
 
+/// Stable physical-device identity used to keep two distinct no-serial
+/// devices apart while still merging multiple interfaces of one device.
+/// On Linux the syspath base already identifies the physical device (all
+/// of its interfaces canonicalize to the same path); elsewhere the hidapi
+/// path is the best available per-interface identity.
+fn physical_identity(info: &HidDeviceInfo) -> String {
+    let path = info.path().to_string_lossy();
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(syspath) = resolve_linux_syspath(&path) {
+            return syspath;
+        }
+    }
+    path.into_owned()
+}
+
 /// Enumerates devices while rejecting impossible VID/PID candidates before
 /// report descriptors are opened and parsed.
 pub fn enumerate_with_filter(filter: Option<&EnumerateFilter>) -> anyhow::Result<Vec<DeviceInfo>> {
     let api = HidApi::new()?;
 
-    let mut groups: std::collections::HashMap<(u16, u16, String), Vec<&HidDeviceInfo>> =
-        std::collections::HashMap::new();
+    let mut groups: std::collections::HashMap<
+        (u16, u16, String),
+        Vec<(String, &HidDeviceInfo)>,
+    > = std::collections::HashMap::new();
     for info in api.device_list() {
         if let Some(filter) = filter {
             if !crate::enumeration_filter::matches_vid_pid(
@@ -81,19 +99,28 @@ pub fn enumerate_with_filter(filter: Option<&EnumerateFilter>) -> anyhow::Result
             continue;
         }
         let serial = info.serial_number().unwrap_or("").to_string();
+        // When the device has no serial number, distinct physical devices
+        // with identical vid/pid must not be merged. Bucket by physical
+        // identity instead; with a serial, the serial already separates
+        // devices and every interface of one device shares one bucket.
+        let phys = if serial.is_empty() {
+            physical_identity(info)
+        } else {
+            String::new()
+        };
         groups
             .entry((info.vendor_id(), info.product_id(), serial))
             .or_default()
-            .push(info);
+            .push((phys, info));
     }
 
     let mut devices = Vec::new();
     for ifaces in groups.values() {
-        let mut seen_descriptors: std::collections::HashSet<Vec<u8>> =
-            std::collections::HashSet::new();
-        for info in ifaces {
+        let mut seen_descriptors: std::collections::HashMap<&String, std::collections::HashSet<Vec<u8>>> =
+            std::collections::HashMap::new();
+        for (phys, info) in ifaces {
             let desc = read_raw_report_descriptor_with_api(&api, info);
-            if !seen_descriptors.insert(desc.clone()) {
+            if !seen_descriptors.entry(phys).or_default().insert(desc.clone()) {
                 continue;
             }
             if let Some(d) = info_from_hidapi_pub_with_desc(info, desc) {
