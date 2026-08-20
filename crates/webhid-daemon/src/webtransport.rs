@@ -257,14 +257,19 @@ async fn read_inbound_frames(
         if recv.read_exact(&mut frame).await.is_err() {
             break;
         }
-        batching::handle_client_message(&frame, device_mgr, device_id, move |resp| {
+        let mut queue_full = false;
+        batching::handle_client_message(&frame, device_mgr, device_id, |resp| {
+            // Response queue full: the client is saturating the session;
+            // end it rather than queue without bound.
             if frame_tx.try_send(Bytes::from(resp)).is_err() {
-                // Response queue full: the client is saturating the
-                // session; end it rather than queue without bound.
-                return;
+                queue_full = true;
             }
         })
         .await;
+        if queue_full {
+            log::warn!("[wt] response queue full; ending session");
+            break;
+        }
     }
 }
 

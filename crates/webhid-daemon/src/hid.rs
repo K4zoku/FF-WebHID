@@ -100,25 +100,25 @@ fn distinct_physical_count(entries: &[&HidDeviceInfo]) -> usize {
 /// Enumerates devices while rejecting impossible VID/PID candidates before
 /// report descriptors are opened and parsed.
 pub fn enumerate_with_filter(filter: Option<&EnumerateFilter>) -> anyhow::Result<Vec<DeviceInfo>> {
+    type GroupKey = (u16, u16, String);
+    type PhysKey = String;
     let api = HidApi::new()?;
 
-    let mut groups: std::collections::HashMap<
-        (u16, u16, String),
-        Vec<(String, &HidDeviceInfo)>,
-    > = std::collections::HashMap::new();
+    let mut groups: std::collections::HashMap<GroupKey, Vec<(PhysKey, &HidDeviceInfo)>> =
+        std::collections::HashMap::new();
     // device_id -> distinct physical devices hashing to it; used to drop
     // colliding ids from enumeration entirely (fail closed).
-    let mut id_physical: std::collections::HashMap<u32, std::collections::HashSet<String>> =
+    let mut id_physical: std::collections::HashMap<u32, std::collections::HashSet<PhysKey>> =
         std::collections::HashMap::new();
     for info in api.device_list() {
-        if let Some(filter) = filter {
-            if !crate::enumeration_filter::matches_vid_pid(
+        if let Some(filter) = filter
+            && !crate::enumeration_filter::matches_vid_pid(
                 info.vendor_id(),
                 info.product_id(),
                 filter,
-            ) {
-                continue;
-            }
+            )
+        {
+            continue;
         }
         if is_blocked_pub(info) {
             continue;
