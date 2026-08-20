@@ -212,22 +212,23 @@ impl DeviceManager {
 
         let mut is_opener = false;
         loop {
-            let notify = {
+            let wait = {
                 let mut opening = self.opening.lock().unwrap_or_else(|e| e.into_inner());
                 match opening.get(&device_id) {
-                    Some(n) => Arc::clone(n),
+                    Some(n) => Some(Arc::clone(n).notified_owned()),
                     None => {
                         let n = Arc::new(tokio::sync::Notify::new());
                         opening.insert(device_id, Arc::clone(&n));
                         is_opener = true;
-                        n
+                        None
                     }
                 }
             };
             if is_opener {
                 break;
             }
-            notify.notified().await;
+            let wait = wait.expect("waiter must hold a notification future");
+            wait.await;
             if self.register_session(device_id, &session_token, owner_client_id, &ws_auth_hash) {
                 let identity = self.get_device_identity(device_id).unwrap_or_default();
                 return Ok((device_id, session_token, identity));
@@ -882,15 +883,19 @@ mod tests {
         let task_a = tokio::spawn(async move { mgr_a.open(0x1234, 1).await });
         entered_rx.await.unwrap();
 
-        let mgr_b = Arc::clone(&mgr);
-        let task_b = tokio::spawn(async move { mgr_b.open(0x1234, 2).await });
+        let mut tasks = Vec::new();
+        for client in 2..=4u64 {
+            let mgr_b = Arc::clone(&mgr);
+            tasks.push(tokio::spawn(async move { mgr_b.open(0x1234, client).await }));
+        }
         tokio::task::yield_now().await;
 
         release_tx.send(()).unwrap();
         let res_a = task_a.await.unwrap();
-        let res_b = task_b.await.unwrap();
         assert!(res_a.is_err());
-        assert!(res_b.is_err());
+        for task in tasks {
+            assert!(task.await.unwrap().is_err());
+        }
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         assert!(mgr.opening.lock().unwrap_or_else(|e| e.into_inner()).is_empty());
         assert!(mgr.sessions.lock().unwrap_or_else(|e| e.into_inner()).is_empty());
