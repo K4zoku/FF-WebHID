@@ -90,7 +90,8 @@ async fn relay_client_event(
 }
 
 /// Reads the next NM request frame. Malformed frames are answered with 400
-/// and skipped. Returns None once the stream ends or a fatal error occurs.
+/// and skipped. Returns None once the stream ends, an oversized frame is
+/// seen (the byte boundary is unrecoverable), or a fatal error occurs.
 async fn read_next_request<R: AsyncRead + Unpin>(
     reader: &mut BufReader<R>,
     tx: &mpsc::Sender<NmMessage>,
@@ -98,15 +99,21 @@ async fn read_next_request<R: AsyncRead + Unpin>(
     loop {
         match protocol::read_nm_request(reader).await {
             Ok(r) => return Some(r),
-            Err(e) => {
-                if e.kind() == std::io::ErrorKind::InvalidData {
-                    log::warn!("[client] malformed NM frame dropped: {e}");
-                    let err_resp = NmMessage::Control(NmResponse::err(400));
-                    if tx.send(err_resp).await.is_err() {
-                        return None;
-                    }
-                    continue;
+            Err(protocol::FrameReadError::Oversized { declared }) => {
+                log::warn!(
+                    "[client] oversized NM frame ({declared} bytes); closing connection (stream desync)"
+                );
+                return None;
+            }
+            Err(protocol::FrameReadError::Malformed(e)) => {
+                log::warn!("[client] malformed NM frame dropped: {e}");
+                let err_resp = NmMessage::Control(NmResponse::err(400));
+                if tx.send(err_resp).await.is_err() {
+                    return None;
                 }
+                continue;
+            }
+            Err(protocol::FrameReadError::Io(e)) => {
                 if e.kind() != std::io::ErrorKind::UnexpectedEof {
                     log::warn!("[client] read error: {e}");
                 }

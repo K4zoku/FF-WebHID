@@ -2,7 +2,9 @@ use std::io;
 
 use base64::Engine;
 use bytes::BytesMut;
-use serde::{Serialize, de::DeserializeOwned};
+#[cfg(test)]
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::NmRequest;
@@ -11,6 +13,35 @@ use crate::{PKG_SEND_FEATURE_REPORT, PKG_SEND_REPORT, parse_packed_send};
 /// Native Messaging frame ceiling: messages larger than this are rejected.
 pub const MAX_NM_FRAME: usize = 1024 * 1024;
 
+/// A native-messaging frame could not be read.
+#[derive(Debug)]
+pub enum FrameReadError {
+    /// The declared frame length exceeds `MAX_NM_FRAME`. The body was never
+    /// consumed, so the stream is at an unknown byte boundary; the
+    /// connection must be closed rather than resuming on a bogus length.
+    Oversized { declared: usize },
+    /// The frame was fully consumed but could not be parsed; the stream is
+    /// still at a frame boundary and parsing may continue.
+    Malformed(String),
+    /// Underlying I/O failure (including clean EOF).
+    Io(std::io::Error),
+}
+
+impl std::fmt::Display for FrameReadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FrameReadError::Oversized { declared } => {
+                write!(f, "frame length {declared} exceeds maximum {MAX_NM_FRAME}")
+            }
+            FrameReadError::Malformed(msg) => write!(f, "malformed frame: {msg}"),
+            FrameReadError::Io(e) => write!(f, "frame read error: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for FrameReadError {}
+
+#[cfg(test)]
 pub(crate) async fn read_message<R, T>(reader: &mut R) -> io::Result<T>
 where
     R: AsyncRead + Unpin,
@@ -30,12 +61,27 @@ where
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("JSON decode: {e}")))
 }
 
-pub async fn read_nm_request<R: AsyncRead + Unpin>(reader: &mut R) -> io::Result<NmRequest> {
-    let v: serde_json::Value = read_message(reader).await?;
-    if let Some(req) = try_read_packed(&v)? {
+pub async fn read_nm_request<R: AsyncRead + Unpin>(
+    reader: &mut R,
+) -> Result<NmRequest, FrameReadError> {
+    let len = reader.read_u32_le().await.map_err(FrameReadError::Io)? as usize;
+    if len > MAX_NM_FRAME {
+        // Fatal: the oversized body is still on the wire. Reading it would
+        // only let the next length field fall at an unknown offset.
+        return Err(FrameReadError::Oversized { declared: len });
+    }
+    let mut buf = BytesMut::with_capacity(len);
+    buf.resize(len, 0);
+    reader
+        .read_exact(&mut buf)
+        .await
+        .map_err(FrameReadError::Io)?;
+    let v: serde_json::Value = serde_json::from_slice(&buf)
+        .map_err(|e| FrameReadError::Malformed(format!("JSON decode: {e}")))?;
+    if let Some(req) = try_read_packed(&v).map_err(|e| FrameReadError::Malformed(e.to_string()))? {
         return Ok(req);
     }
-    read_json_request(&v)
+    read_json_request(&v).map_err(|e| FrameReadError::Malformed(e.to_string()))
 }
 
 /// Packed messages: {"d":"<b64>"} with no "a" field. msgType byte inside
@@ -84,9 +130,20 @@ fn read_json_request(v: &serde_json::Value) -> io::Result<NmRequest> {
     let action = v
         .get("a")
         .and_then(|x| x.as_u64())
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing 'a' (action)"))?
-        as u8;
-    let id = v.get("n").and_then(|x| x.as_u64()).map(|n| n as u32);
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing 'a' (action)"))?;
+    let action = u8::try_from(action).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("action {action} out of range"),
+        )
+    })?;
+    let id = v
+        .get("n")
+        .and_then(|x| x.as_u64())
+        .map(|n| u32::try_from(n).map_err(|_| {
+            io::Error::new(io::ErrorKind::InvalidData, format!("request id {n} out of range"))
+        }))
+        .transpose()?;
     let filter = v
         .get("f")
         .map(|value| {
@@ -138,17 +195,29 @@ fn get_str(v: &serde_json::Value, key: &str) -> io::Result<String> {
 }
 
 fn get_u8(v: &serde_json::Value, key: &str) -> io::Result<u8> {
-    v.get(key)
+    let n = v
+        .get(key)
         .and_then(|x| x.as_u64())
-        .map(|n| n as u8)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, format!("missing '{key}'")))
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, format!("missing '{key}'")))?;
+    u8::try_from(n).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("'{key}' value {n} out of range"),
+        )
+    })
 }
 
 fn get_u32(v: &serde_json::Value, key: &str) -> io::Result<u32> {
-    v.get(key)
+    let n = v
+        .get(key)
         .and_then(|x| x.as_u64())
-        .map(|n| n as u32)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, format!("missing '{key}'")))
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, format!("missing '{key}'")))?;
+    u32::try_from(n).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("'{key}' value {n} out of range"),
+        )
+    })
 }
 
 /// Serialise `value` as JSON, prefix with its length, and write to `writer`.
@@ -229,7 +298,7 @@ mod tests {
     }
 
     /// Frame `json` as a length-prefixed message and parse it as an NmRequest.
-    async fn read_json(json: serde_json::Value) -> io::Result<NmRequest> {
+    async fn read_json(json: serde_json::Value) -> Result<NmRequest, FrameReadError> {
         let mut buf = Vec::new();
         write_message(&mut buf, &json).await.unwrap();
         let mut r: &[u8] = &buf;
@@ -300,13 +369,48 @@ mod tests {
     #[tokio::test]
     async fn test_read_nm_request_unknown_action() {
         let err = read_json(serde_json::json!({"a": 99})).await.unwrap_err();
-        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(matches!(err, FrameReadError::Malformed(_)));
     }
 
     #[tokio::test]
     async fn test_read_nm_request_missing_action() {
         let err = read_json(serde_json::json!({"n": 1})).await.unwrap_err();
-        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(matches!(err, FrameReadError::Malformed(_)));
+    }
+
+    #[tokio::test]
+    async fn test_read_nm_request_oversized_frame_is_fatal() {
+        // Declared length over the ceiling with only a few trailing bytes;
+        // must be reported as Oversized (stream at unknown boundary), not
+        // Malformed (which would imply the frame was consumed).
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&((MAX_NM_FRAME + 1) as u32).to_le_bytes());
+        buf.extend_from_slice(b"{");
+        let mut r: &[u8] = &buf;
+        match read_nm_request(&mut r).await {
+            Err(FrameReadError::Oversized { declared }) => {
+                assert_eq!(declared, MAX_NM_FRAME + 1);
+            }
+            other => panic!("expected Oversized, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_read_nm_request_action_out_of_range() {
+        let err = read_json(serde_json::json!({"a": 258})).await.unwrap_err();
+        assert!(matches!(err, FrameReadError::Malformed(_)));
+    }
+
+    #[tokio::test]
+    async fn test_read_nm_request_device_id_out_of_range() {
+        let err = read_json(serde_json::json!({"a": 2, "i": 4294967296u64})).await.unwrap_err();
+        assert!(matches!(err, FrameReadError::Malformed(_)));
+    }
+
+    #[tokio::test]
+    async fn test_read_nm_request_report_id_out_of_range() {
+        let err = read_json(serde_json::json!({"a": 5, "i": 1, "r": 257})).await.unwrap_err();
+        assert!(matches!(err, FrameReadError::Malformed(_)));
     }
 
     #[tokio::test]
@@ -363,6 +467,6 @@ mod tests {
         let tlv = vec![0xFFu8, 0, 0, 0, 0];
         let b64 = base64::engine::general_purpose::STANDARD.encode(&tlv);
         let err = read_json(serde_json::json!({"d": b64})).await.unwrap_err();
-        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(matches!(err, FrameReadError::Malformed(_)));
     }
 }
