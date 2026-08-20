@@ -73,8 +73,6 @@ struct Entry {
     /// Input/feature read buffer size derived from the descriptor's max
     /// report payload (+ report-id byte), capped by `hid::MAX_READ_BUFFER`.
     read_buf_size: usize,
-    /// 128-bit physical identity key, bound to permissions by the browser.
-    identity_key: String,
     /// Report-level protection state (map, fallbacks, send validation),
     /// computed once at open. See `crate::report_blocking`.
     blocking: Arc<crate::report_blocking::DeviceReportBlocking>,
@@ -197,17 +195,12 @@ impl DeviceManager {
             .collect())
     }
 
-    pub async fn open(
-        &self,
-        device_id: u32,
-        owner_client_id: u64,
-    ) -> anyhow::Result<(u32, String, String)> {
+    pub async fn open(&self, device_id: u32, owner_client_id: u64) -> anyhow::Result<(u32, String)> {
         let session_token = random_hex_token(16)?;
         let ws_auth_hash = compute_ws_auth_hash(&session_token, &self.ws_nonce);
 
         if self.register_session(device_id, &session_token, owner_client_id, &ws_auth_hash) {
-            let identity = self.get_device_identity(device_id).unwrap_or_default();
-            return Ok((device_id, session_token, identity));
+            return Ok((device_id, session_token));
         }
 
         let mut is_opener = false;
@@ -230,8 +223,7 @@ impl DeviceManager {
             let wait = wait.expect("waiter must hold a notification future");
             wait.await;
             if self.register_session(device_id, &session_token, owner_client_id, &ws_auth_hash) {
-                let identity = self.get_device_identity(device_id).unwrap_or_default();
-                return Ok((device_id, session_token, identity));
+                return Ok((device_id, session_token));
             }
             let opening_in_progress = self
                 .opening
@@ -258,15 +250,6 @@ impl DeviceManager {
         result
     }
 
-    /// Resolves the 128-bit physical identity key of an open device.
-    pub fn get_device_identity(&self, device_id: u32) -> Option<String> {
-        self.devices
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(&device_id)
-            .map(|e| e.identity_key.clone())
-    }
-
     /// Opens the physical HID device and spawns its reader. Only the first
     /// opener for a device runs this; concurrent openers await the notify.
     async fn open_physical(
@@ -275,7 +258,7 @@ impl DeviceManager {
         session_token: &str,
         owner_client_id: u64,
         ws_auth_hash: &str,
-    ) -> anyhow::Result<(u32, String, String)> {
+    ) -> anyhow::Result<(u32, String)> {
         let (info, uses_numbered_reports, device) =
             tokio::task::spawn_blocking({
                 let opener = Arc::clone(&self.opener);
@@ -314,8 +297,7 @@ impl DeviceManager {
         let dev_for_task = Arc::clone(&device_arc);
 
         if self.register_session(id, session_token, owner_client_id, ws_auth_hash) {
-            let identity = self.get_device_identity(id).unwrap_or_default();
-            return Ok((id, session_token.to_string(), identity));
+            return Ok((id, session_token.to_string()));
         }
 
         let entry = Entry {
@@ -325,7 +307,6 @@ impl DeviceManager {
             vendor_id: info.vendor_id,
             product_id: info.product_id,
             read_buf_size,
-            identity_key: info.identity_key.clone(),
             blocking: Arc::clone(&blocking),
         };
 
@@ -358,7 +339,7 @@ impl DeviceManager {
             e.handle = Some(handle);
         }
 
-        Ok((id, session_token.to_string(), info.identity_key))
+        Ok((id, session_token.to_string()))
     }
 
     /// Registers a new logical session for `device_id`. Returns true when

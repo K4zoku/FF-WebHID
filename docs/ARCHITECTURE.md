@@ -199,17 +199,18 @@ Alternatively, users with direct hidraw access (via udev `uaccess` rule) can ski
 
 ## Device IDs
 
-Two identifiers are derived from the same platform identity (Linux: resolved syspath; Windows: device interface path; macOS: IOService path):
+Stable, platform-independent hashes (FNV-1a 32-bit):
 
 ```
-deviceId     = fnv1a_32(path_bytes)
-identityKey  = hex(SHA-256(path_bytes)[0..16])
+deviceId = fnv1a_32(path_bytes)
 ```
 
-- `deviceId` is the wire/storage id: a JSON number in NM fields, 4-byte little-endian u32 in packed TLVs. On the JS side, the unsigned right shift `>>> 0` is mandatory when decoding to avoid signed int32 wraparound for hashes ≥ 0x80000000.
-- `identityKey` is an opaque 128-bit digest that binds permission records to a physical device. The daemon rejects ids shared by two currently-present devices and the background drops grants whose stored identity no longer matches the resolved device, so a 32-bit collision can never silently authorize a different physical device.
+- **Linux**: the `path` is the resolved syspath (canonicalized `/sys/class/hidraw/<name>/device` parent directory), not the raw `/dev/hidrawN` path.
+- **Windows**: device interface path. **macOS**: IOService path.
 
-Same physical device in same USB port produces the same ids across reboots. Two devices with identical vid/pid/serial but different physical ports have different paths → different ids.
+Same physical device in same USB port produces the same hash across reboots. Two devices with identical vid/pid/serial but different physical ports have different paths → different hashes.
+
+The hash is sent as a JSON number in wire fields and as a 4-byte little-endian u32 in packed binary TLVs. On the JS side, the unsigned right shift `>>> 0` is mandatory when decoding to avoid signed int32 wraparound for hashes ≥ 0x80000000.
 
 ## Reconnect
 

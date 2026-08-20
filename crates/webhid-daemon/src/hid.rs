@@ -9,19 +9,6 @@ thread_local! {
     static READ_BUF: RefCell<Vec<u8>> = RefCell::new(Vec::with_capacity(256));
 }
 
-/// Platform identity string the 32-bit device id and the 128-bit identity
-/// key are both derived from.
-fn identity_input(info: &HidDeviceInfo) -> String {
-    let path = info.path().to_string_lossy();
-    #[cfg(target_os = "linux")]
-    {
-        if let Some(syspath) = resolve_linux_syspath(&path) {
-            return syspath;
-        }
-    }
-    path.into_owned()
-}
-
 /// Generate a stable `u32` device identifier from the device path.
 ///
 /// Uses FNV-1a 32-bit hash of the platform-specific device path
@@ -30,18 +17,14 @@ fn identity_input(info: &HidDeviceInfo) -> String {
 /// reboots. Two devices with identical vid/pid/serial but different
 /// physical ports have different paths → different hashes.
 pub fn make_device_id(info: &HidDeviceInfo) -> u32 {
-    webhid::hash_device_id(&identity_input(info))
-}
-
-/// Opaque 128-bit identity key for a physical device: SHA-256 of the
-/// platform identity, first 16 bytes, hex. Collision-resistant where the
-/// 32-bit FNV id is not; permission records bind to this key.
-pub fn make_device_identity(info: &HidDeviceInfo) -> String {
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(identity_input(info).as_bytes());
-    let digest = hasher.finalize();
-    hex::encode(&digest[..16])
+    let path = info.path().to_string_lossy();
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(syspath) = resolve_linux_syspath(&path) {
+            return webhid::hash_device_id(&syspath);
+        }
+    }
+    webhid::hash_device_id(&path)
 }
 
 #[cfg(target_os = "linux")]
@@ -237,7 +220,6 @@ pub(crate) fn build_device_info(
         usage_page: Some(info.usage_page()),
         usage: Some(info.usage()),
         device_id: make_device_id(info),
-        identity_key: make_device_identity(info),
         descriptor_parse_failed: collections.is_empty(),
         collections,
         max_input_report_size,

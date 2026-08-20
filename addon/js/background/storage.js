@@ -142,41 +142,15 @@
   }
 
   /**
-   * Returns the allowed device grants for an origin, each carrying the
-   * 128-bit identity key captured at grant time.
-   * @param {string} origin
-   * @returns {Promise<Array<{deviceId: number, identityKey: string}>>}
-   */
-  async function getAllowedDeviceGrants(origin) {
-    const db = await openDb()
-    const tx = db.transaction('origins', 'readonly')
-    const range = IDBKeyRange.bound([origin, -Infinity], [origin, Infinity])
-    return await new Promise((resolve, reject) => {
-      const req = tx.objectStore('origins').getAll(range)
-      req.onsuccess = () =>
-        resolve(
-          req.result.map((r) => ({ deviceId: r.deviceId, identityKey: r.identityKey || '' }))
-        )
-      req.onerror = () => reject(req.error)
-    })
-  }
-
-  /**
-   * Adds a device to the allowed list for an origin, binding the physical
-   * identity key present at grant time.
+   * Adds a device to the allowed list for an origin.
    * @param {string} origin
    * @param {number} deviceId
-   * @param {string} identityKey
    * @returns {Promise<void>}
    */
-  async function addAllowedDevice(origin, deviceId, identityKey) {
+  async function addAllowedDevice(origin, deviceId) {
     const db = await openDb()
     const tx = db.transaction('origins', 'readwrite')
-    tx.objectStore('origins').put({
-      origin,
-      deviceId: Number(deviceId),
-      identityKey: identityKey || ''
-    })
+    tx.objectStore('origins').put({ origin, deviceId: Number(deviceId) })
     await txDone(tx)
   }
 
@@ -286,7 +260,6 @@
     getDeviceInfo,
     removeDeviceInfo,
     getAllowedDevices,
-    getAllowedDeviceGrants,
     addAllowedDevice,
     removeAllowedDevice,
     recordGrantGroup,

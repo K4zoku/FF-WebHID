@@ -10,7 +10,6 @@
     saveDeviceInfoBatch,
     getDeviceInfo,
     getAllowedDevices,
-    getAllowedDeviceGrants,
     addAllowedDevice,
     removeAllowedDevice,
     removeDeviceInfo,
@@ -143,20 +142,10 @@
     NativeMessaging.enumerateDevices()
       .then(async (response) => {
         if (http.isOk(response.s) && response.D) {
-          const grants = await getAllowedDeviceGrants(origin)
-          const verified = []
-          for (const d of response.D) {
-            const grant = grants.find((g) => g.deviceId === d.deviceId)
-            if (!grant) continue
-            if (grant.identityKey && d.identityKey && grant.identityKey !== d.identityKey) {
-              await removeAllowedDevice(origin, d.deviceId).catch(() => {})
-              continue
-            }
-            verified.push(d)
-          }
-          saveDeviceInfoBatch(verified).catch(() => {})
-          decodeDeviceCollections(verified)
-          sendResponse({ s: response.s, D: verified })
+          const ids = await getAllowedDevices(origin)
+          const paired = response.D.filter((d) => ids.includes(d.deviceId))
+          decodeDeviceCollections(paired)
+          sendResponse({ s: response.s, D: paired })
         } else {
           sendResponse(response)
         }
@@ -299,21 +288,21 @@
           .then(async (response) => {
             if (typeof response.P === 'number') lastHidPermission = response.P
             if (http.isOk(response.s) && response.i) {
-              const grants = await getAllowedDeviceGrants(request.origin)
-              const grant = grants.find((g) => g.deviceId === response.i)
-              const identityMatch = !!grant && !!grant.identityKey && grant.identityKey === response.K
-              if (!grant || !identityMatch) {
-                if (response.t) {
-                  await NativeMessaging.closeDevice(response.i, response.t).catch(() => {})
-                }
-                if (grant && !identityMatch) {
-                  await removeAllowedDevice(request.origin, response.i).catch(() => {})
-                }
+              // The permission may have been revoked while the daemon open
+              // was in flight (forget()/revoke race). Close the fresh
+              // session instead of returning an open for a revoked device.
+              const stillAllowed = (await getAllowedDevices(request.origin)).includes(
+                request.deviceId
+              )
+              if (!stillAllowed) {
                 logger.warn(
                   'open for device',
                   request.deviceId,
-                  'rejected after daemon open (no grant or identity mismatch)'
+                  'revoked while in flight; closing fresh session'
                 )
+                if (response.t) {
+                  await NativeMessaging.closeDevice(response.i, response.t).catch(() => {})
+                }
                 sendResponse({ s: 403 })
                 return
               }
@@ -503,16 +492,7 @@
   function handlePairDevice(request, sender, sendResponse) {
     ;(async () => {
       try {
-        let identityKey = request.device.identityKey
-        if (!identityKey) {
-          const info = await getDeviceInfo(request.device.deviceId)
-          identityKey = info && info.identityKey
-        }
-        if (!identityKey) {
-          sendResponse({ success: false, error: 'device identity unavailable', hashes: [] })
-          return
-        }
-        await addAllowedDevice(request.origin, request.device.deviceId, identityKey)
+        await addAllowedDevice(request.origin, request.device.deviceId)
         const deviceIds = await getAllowedDevices(request.origin)
         await notifyAllowedDevicesChanged(request.origin, deviceIds)
         sendResponse({ success: true, hashes: deviceIds })

@@ -1105,10 +1105,7 @@
           .sendMessage({
             action: 'pairDevice',
             origin,
-            device: {
-              deviceId: device.deviceId,
-              identityKey: device.identityKey
-            }
+            device: { deviceId: device.deviceId }
           })
           .catch(() => {})
       )
