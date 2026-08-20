@@ -37,6 +37,7 @@ const PAGES: Record<string, string> = {
   '/policy-check-allowed-self': loadPage('policy-check.html'),
   '/policy-check-allowed-all': loadPage('policy-check.html'),
   '/iframe-parent': loadPage('iframe-parent.html'),
+  '/iframe-parent-blocked': loadPage('iframe-parent.html'),
   '/iframe-child-no-allow': loadPage('iframe-child.html'),
   '/iframe-child-with-allow': loadPage('iframe-child.html'),
   '/iframe-child-forge': loadPage('iframe-child-forge.html'),
@@ -85,6 +86,9 @@ const PAGES: Record<string, string> = {
 const HEADERS: Record<string, Record<string, string | string[]>> = {
   '/policy-check': {},
   '/policy-check-blocked': {
+    'Permissions-Policy': 'hid=()'
+  },
+  '/iframe-parent-blocked': {
     'Permissions-Policy': 'hid=()'
   },
   '/policy-check-allowed-self': {

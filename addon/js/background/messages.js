@@ -781,16 +781,30 @@
     const sid = sender.frameId
     const tid = sender.tab?.id
     const origin = urlOrigin(request.url || (sender.tab && sender.tab.url) || '')
-    let hid = null
-    if (tid != null) hid = permissionsPolicy.get(frameKey(tid, sid, origin))
-    if (hid == null && tid != null) hid = permissionsPolicy.get(frameKey(tid, 0, origin))
-    if (hid === 'none') return { policy: { hid: 'none' } }
+    const entry = tid != null ? permissionsPolicy.get(`${tid}:${sid}`) : null
+    if (entry && entry.effective.kind === 'none') {
+      // Any ancestor (or the frame itself) declared hid=(): deny dominates,
+      // even for iframes delegated with allow="hid".
+      return { policy: { hid: 'none' } }
+    }
     if (request.isCrossOrigin) {
+      // Cross-origin frames need explicit delegation; the inherited deny
+      // above has already been checked.
       if (request.hasAllowAttr) return { policy: { hid: 'allowed' } }
       const allowKey = tid != null ? frameKey(tid, sid, origin) : null
       if (allowKey && allowedCrossOrigin.has(allowKey)) return { policy: { hid: 'allowed' } }
       const urlKey = `url:${urlOrigin(sender.tab && sender.tab.url)}:${request.url}`
       if (allowedCrossOrigin.has(urlKey)) return { policy: { hid: 'allowed' } }
+      return { policy: { hid: 'none' } }
+    }
+    // Same-origin frame: the frame's own origin must be inside its
+    // effective allowlist (an explicit allowlist that omits it denies it).
+    if (entry) {
+      const eff = entry.effective
+      if (eff.kind === 'all') return { policy: { hid: 'allowed' } }
+      if (eff.kind === 'list' && eff.origins.includes(origin)) {
+        return { policy: { hid: 'allowed' } }
+      }
       return { policy: { hid: 'none' } }
     }
     return { policy: { hid: 'allowed' } }

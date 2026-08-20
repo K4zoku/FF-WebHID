@@ -146,4 +146,29 @@ test.describe('Cross-origin iframe', () => {
     expect(raw!.queryHid).toBe('denied')
     expect(raw!.hidUndefined).toBe(false)
   })
+
+  test('B2: top-level hid=() denies a delegated cross-origin child', async ({
+    page,
+    pageUrl,
+    crossUrl
+  }) => {
+    // Deny dominates: an allow="hid" attribute on the iframe cannot grant
+    // what an ancestor's Permissions-Policy: hid=() already denied.
+    await page.goto(pageUrl('/iframe-parent-blocked'), {
+      waitUntil: 'domcontentloaded',
+      timeout: 15000
+    })
+    await page.evaluate((crossUrl) => {
+      const withAllow = document.createElement('iframe')
+      withAllow.id = 'with-allow'
+      withAllow.src = crossUrl + '/iframe-child-with-allow'
+      withAllow.allow = 'hid'
+      document.body.appendChild(withAllow)
+    }, crossUrl(''))
+    const raw = await readIframeResult(page, '/iframe-child-with-allow')
+    expect(raw).not.toBeNull()
+    expect(raw!.isCrossOrigin).toBe(true)
+    expect(raw!.queryHid).toBe('denied')
+    expect(raw!.hidUndefined).toBe(false)
+  })
 })
