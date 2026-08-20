@@ -21,9 +21,31 @@
   const registerWebRequestHandlers = webhid.import('registerWebRequestHandlers')
   const stripFragment = webhid.import('stripFragment')
 
-  const STORAGE_SCHEMA_VERSION = 1
+  const STORAGE_SCHEMA_VERSION = 2
   const VERSION_KEY = 'meta :: storage :: version'
   const GLOBAL_NAMES = new Set(SETTING_NAMES)
+
+  /**
+   * Drops origin grants recorded without an identity key. A grant without
+   * the physical identity captured at grant time cannot be authorized
+   * against a live device, so legacy grants fail closed and require a new
+   * requestDevice().
+   * @param {object} db
+   * @returns {Promise<void>}
+   */
+  async function migrateLegacyGrants(db) {
+    const tx = db.transaction('origins', 'readwrite')
+    const store = tx.objectStore('origins')
+    const rows = await new Promise((resolve, reject) => {
+      const req = store.getAll()
+      req.onsuccess = () => resolve(req.result || [])
+      req.onerror = () => reject(req.error)
+    })
+    for (const row of rows) {
+      if (!row.identityKey) store.delete([row.origin, row.deviceId])
+    }
+    await txDone(tx)
+  }
 
   /**
    * Copies legacy `deviceInfo:*` entries into the IndexedDB deviceInfo store.
@@ -146,6 +168,8 @@
     if (stored === undefined) {
       await migrateLegacyStorage()
     }
+    const db = await openDb()
+    await migrateLegacyGrants(db)
     await browser.storage.local.set({ [VERSION_KEY]: STORAGE_SCHEMA_VERSION })
   }
 
