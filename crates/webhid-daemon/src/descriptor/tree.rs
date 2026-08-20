@@ -76,35 +76,65 @@ impl CollectionTreeBuilder {
             .as_ref()
             .map(|id| (*id).into())
             .unwrap_or(0);
-        let items = convert_fields_aggregate(report.fields());
+        let fields = report.fields();
 
-        if items.is_empty() {
-            return;
-        }
-
-        let web_report = Report {
-            report_id: rid,
-            items,
+        let chains: Vec<&[HidCollection]> = {
+            let mut chains = Vec::with_capacity(fields.len());
+            for (i, field) in fields.iter().enumerate() {
+                let own = field.collections();
+                if !own.is_empty() {
+                    chains.push(own);
+                    continue;
+                }
+                let mut resolved: Option<&[HidCollection]> = None;
+                for j in (0..i).rev() {
+                    if !fields[j].collections().is_empty() {
+                        resolved = Some(fields[j].collections());
+                        break;
+                    }
+                }
+                if resolved.is_none() {
+                    for j in (i + 1)..fields.len() {
+                        if !fields[j].collections().is_empty() {
+                            resolved = Some(fields[j].collections());
+                            break;
+                        }
+                    }
+                }
+                chains.push(resolved.unwrap_or(&[]));
+            }
+            chains
         };
 
-        let chain: &[HidCollection] = report
-            .fields()
-            .iter()
-            .find_map(|f| match f {
-                Field::Variable(_) | Field::Array(_) => Some(f.collections()),
-                _ => None,
-            })
-            .unwrap_or(&[]);
-
-        if chain.is_empty() {
-            return;
+        let mut buckets: Vec<(String, Vec<Field>)> = Vec::new();
+        let mut bucket_index: HashMap<String, usize> = HashMap::new();
+        for (field, chain) in fields.iter().zip(chains.iter()) {
+            let Some(last) = chain.last() else {
+                continue;
+            };
+            self.ensure_chain(chain);
+            let key = Self::col_key(last);
+            let idx = match bucket_index.get(&key) {
+                Some(&i) => i,
+                None => {
+                    bucket_index.insert(key.clone(), buckets.len());
+                    buckets.push((key, Vec::new()));
+                    buckets.len() - 1
+                }
+            };
+            buckets[idx].1.push(field.clone());
         }
 
-        self.ensure_chain(chain);
-
-        if let Some(last) = chain.last() {
-            let lid = Self::col_key(last);
-            if let Some(n) = self.nodes.get_mut(&lid) {
+        for (key, bucket) in buckets {
+            let items = convert_fields_aggregate(&bucket);
+            if items.is_empty() {
+                continue;
+            }
+            let web_report = Report {
+                report_id: rid,
+                items,
+            };
+            if let Some(n) = self.nodes.get_mut(&key) {
                 match rtype {
                     "input" => n.input_reports.push(web_report),
                     "output" => n.output_reports.push(web_report),

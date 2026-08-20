@@ -1026,4 +1026,26 @@ mod tests {
         let info = device_from_descriptor(&desc);
         assert!(prune_device_info(info).is_none());
     }
+
+    #[test]
+    fn test_protected_report_id_removed_from_every_collection() {
+        let mut desc = Vec::new();
+        desc.extend(app_input_collection(VENDOR_PAGE, 0x01, Some(5), 0x02));
+        desc.extend(app_input_collection(VENDOR_PAGE, 0x01, Some(6), 0x02));
+        desc.extend(app_input_collection(GD_PAGE, 0x06, Some(5), 0x07));
+        let info = device_from_descriptor(&desc);
+        let pruned = prune_device_info(info).expect("device stays visible via report 6");
+        assert_eq!(pruned.collections.len(), 1);
+        let vendor_col = &pruned.collections[0];
+        assert_eq!(vendor_col.usage_page, Some(0xFF00));
+        assert_eq!(vendor_col.input_reports.len(), 1);
+        assert_eq!(vendor_col.input_reports[0].report_id, 6);
+        assert!(
+            !pruned
+                .collections
+                .iter()
+                .any(|c| c.input_reports.iter().any(|r| r.report_id == 5)),
+            "protected report id 5 must be absent from every visible collection"
+        );
+    }
 }

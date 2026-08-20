@@ -430,4 +430,118 @@ mod tests {
 
         assert_eq!(max_input_report_size(&collections), 5);
     }
+
+    const VENDOR_PAGE_BYTES: &[u8] = &[0x06, 0x00, 0xFF];
+    const GD_PAGE_BYTES: &[u8] = &[0x05, 0x01];
+
+    /// Bytes for one Application collection holding a single variable input
+    /// field. `report_id: None` inherits the Report ID currently in effect.
+    fn app_input_collection(
+        page: &[u8],
+        collection_usage: u8,
+        report_id: Option<u8>,
+        field_usage: u8,
+        report_size: u8,
+    ) -> Vec<u8> {
+        let mut d = Vec::new();
+        d.extend_from_slice(page);
+        d.extend_from_slice(&[0x09, collection_usage]);
+        d.extend_from_slice(&[0xA1, 0x01]);
+        if let Some(rid) = report_id {
+            d.extend_from_slice(&[0x85, rid]);
+        }
+        d.extend_from_slice(&[0x09, field_usage]);
+        d.extend_from_slice(&[0x15, 0x00]);
+        d.extend_from_slice(&[0x26, 0xFF, 0x00]);
+        d.extend_from_slice(&[0x75, report_size]);
+        d.extend_from_slice(&[0x95, 0x01]);
+        d.extend_from_slice(&[0x81, 0x02]);
+        d.extend_from_slice(&[0xC0]);
+        d
+    }
+
+    fn find_collection<'a>(cols: &'a [Collection], usage_page: u16, usage: u16) -> &'a Collection {
+        cols.iter()
+            .find(|c| c.usage_page == Some(usage_page) && c.usage == Some(usage))
+            .unwrap_or_else(|| panic!("missing collection {usage_page:#06x}/{usage:#06x}"))
+    }
+
+    #[test]
+    fn test_report_id_spans_multiple_collections() {
+        let mut desc = Vec::new();
+        desc.extend(app_input_collection(VENDOR_PAGE_BYTES, 0x01, Some(5), 0x02, 8));
+        desc.extend(app_input_collection(GD_PAGE_BYTES, 0x06, None, 0x07, 16));
+        let tree = parse_report_descriptor(&desc).expect("descriptor parses");
+        assert_eq!(tree.len(), 2);
+
+        let vendor = find_collection(&tree, 0xFF00, 0x01);
+        let keyboard = find_collection(&tree, 0x0001, 0x06);
+
+        assert_eq!(vendor.input_reports.len(), 1);
+        assert_eq!(vendor.input_reports[0].report_id, 5);
+        assert_eq!(vendor.input_reports[0].items.len(), 1);
+        assert_eq!(vendor.input_reports[0].items[0].report_size, 8);
+        assert_eq!(vendor.input_reports[0].items[0].report_count, 1);
+
+        assert_eq!(keyboard.input_reports.len(), 1);
+        assert_eq!(keyboard.input_reports[0].report_id, 5);
+        assert_eq!(keyboard.input_reports[0].items.len(), 1);
+        assert_eq!(keyboard.input_reports[0].items[0].report_size, 16);
+        assert_eq!(keyboard.input_reports[0].items[0].report_count, 1);
+    }
+
+    #[test]
+    fn test_report_tree_field_order_independent() {
+        let mut vendor_first = Vec::new();
+        vendor_first.extend(app_input_collection(VENDOR_PAGE_BYTES, 0x01, Some(5), 0x02, 8));
+        vendor_first.extend(app_input_collection(GD_PAGE_BYTES, 0x06, None, 0x07, 16));
+
+        let mut keyboard_first = Vec::new();
+        keyboard_first.extend(app_input_collection(GD_PAGE_BYTES, 0x06, Some(5), 0x07, 16));
+        keyboard_first.extend(app_input_collection(VENDOR_PAGE_BYTES, 0x01, None, 0x02, 8));
+
+        let ta = parse_report_descriptor(&vendor_first).expect("parses");
+        let tb = parse_report_descriptor(&keyboard_first).expect("parses");
+
+        let va = find_collection(&ta, 0xFF00, 0x01);
+        let vb = find_collection(&tb, 0xFF00, 0x01);
+        let ka = find_collection(&ta, 0x0001, 0x06);
+        let kb = find_collection(&tb, 0x0001, 0x06);
+
+        assert_eq!(va.input_reports[0].items[0].report_size, 8);
+        assert_eq!(vb.input_reports[0].items[0].report_size, 8);
+        assert_eq!(ka.input_reports[0].items[0].report_size, 16);
+        assert_eq!(kb.input_reports[0].items[0].report_size, 16);
+    }
+
+    #[test]
+    fn test_constant_padding_stays_in_its_collection() {
+        let mut desc = Vec::new();
+        desc.extend_from_slice(VENDOR_PAGE_BYTES);
+        desc.extend_from_slice(&[0x09, 0x01]);
+        desc.extend_from_slice(&[0xA1, 0x01]);
+        desc.extend_from_slice(&[0x85, 0x05]);
+        desc.extend_from_slice(&[0x09, 0x02]);
+        desc.extend_from_slice(&[0x75, 0x08, 0x95, 0x01]);
+        desc.extend_from_slice(&[0x81, 0x02]);
+        desc.extend_from_slice(&[0x75, 0x08, 0x95, 0x03]);
+        desc.extend_from_slice(&[0x81, 0x01]);
+        desc.extend_from_slice(&[0xC0]);
+        desc.extend(app_input_collection(GD_PAGE_BYTES, 0x06, None, 0x07, 8));
+
+        let tree = parse_report_descriptor(&desc).expect("descriptor parses");
+        let vendor = find_collection(&tree, 0xFF00, 0x01);
+        let keyboard = find_collection(&tree, 0x0001, 0x06);
+
+        let vendor_items = &vendor.input_reports[0].items;
+        assert_eq!(vendor_items.len(), 2);
+        assert!(!vendor_items[0].is_constant);
+        assert!(vendor_items[1].is_constant);
+        assert_eq!(vendor_items[1].report_size, 24);
+        assert_eq!(vendor_items[1].report_count, 1);
+
+        let keyboard_items = &keyboard.input_reports[0].items;
+        assert_eq!(keyboard_items.len(), 1);
+        assert!(!keyboard_items[0].is_constant);
+    }
 }
