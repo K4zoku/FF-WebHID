@@ -171,15 +171,13 @@ jobs:
 
           stage_macos() {
             local src_dir="$1" out_dir="$2"
-            mkdir -p "$out_dir/usr/local/bin" "$out_dir/usr/local/lib/mozilla/native-messaging-hosts" "$out_dir/etc/systemd/system"
-            cp "$src_dir/webhid-daemon" "$out_dir/usr/local/bin/"
-            cp "$src_dir/webhid-native-messaging" "$out_dir/usr/local/bin/"
-            sed 's|{{NM_BIN}}|/usr/local/bin/webhid-native-messaging|g' \
-              manifests/webhid.forwarder_nm_host.json > "$out_dir/usr/local/lib/mozilla/native-messaging-hosts/webhid.forwarder_nm_host.json"
-            sed 's|{{DAEMON_BIN}}|/usr/local/bin/webhid-daemon|g' \
-              manifests/webhid.daemon_nm_host.json > "$out_dir/usr/local/lib/mozilla/native-messaging-hosts/webhid.daemon_nm_host.json"
-            sed 's|{{DAEMON_BIN}}|/usr/local/bin/webhid-daemon|g' \
-              manifests/webhid-daemon.service > "$out_dir/etc/systemd/system/webhid-daemon.service"
+            mkdir -p "$out_dir/bin" "$out_dir/manifests"
+            cp "$src_dir/webhid-daemon" "$out_dir/bin/"
+            cp "$src_dir/webhid-native-messaging" "$out_dir/bin/"
+            cp manifests/webhid.forwarder_nm_host.json "$out_dir/manifests/"
+            cp manifests/webhid.daemon_nm_host.json "$out_dir/manifests/"
+            cp packaging/macos/install.sh "$out_dir/install.sh"
+            cp packaging/macos/uninstall.sh "$out_dir/uninstall.sh"
           }
 
           stage_macos "crates/target/x86_64-apple-darwin/release" "artifacts-x86_64"
@@ -203,6 +201,8 @@ jobs:
             Copy-Item "$binDir/webhid-native-messaging.exe" "$outDir/bin/"
             Copy-Item manifests/webhid.forwarder_nm_host.json "$outDir/manifests/webhid.forwarder_nm_host.json"
             Copy-Item manifests/webhid.daemon_nm_host.json "$outDir/manifests/webhid.daemon_nm_host.json"
+            Copy-Item packaging/windows/install.ps1 "$outDir/install.ps1"
+            Copy-Item packaging/windows/uninstall.ps1 "$outDir/uninstall.ps1"
           }
           Stage-Windows "crates/target/x86_64-pc-windows-msvc/release" "artifacts-portable-x86_64"
           Stage-Windows "crates/target/aarch64-pc-windows-msvc/release" "artifacts-portable-aarch64"

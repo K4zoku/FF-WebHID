@@ -265,40 +265,15 @@ Install and restart Firefox. On Windows, `daemonAsNmHost` defaults to `true` (th
 
 ### Portable/Manual
 
-Download the Windows zip from [GitHub Releases](https://github.com/K4zoku/FF-WebHID/releases), extract, then:
+Download the Windows zip from [GitHub Releases](https://github.com/K4zoku/FF-WebHID/releases), extract, then run:
 
-1. **Install binaries**: copy `webhid-daemon.exe` and `webhid-native-messaging.exe` to a permanent location (e.g. `C:\Program Files\WebHID\`)
+```powershell
+.\install.ps1
+```
 
-2. **Register native messaging host**: create a registry key pointing to the NM manifest:
+The zip contains `bin/` (both executables), `manifests/` (manifest templates), `install.ps1`, and `uninstall.ps1`. `install.ps1` writes both manifests into `%APPDATA%\Mozilla\NativeMessagingHosts` with absolute paths pointing at the extracted `bin/`, and registers the per-user Firefox `NativeMessagingHosts` registry keys, so the folder can live anywhere; re-run it after moving it. `uninstall.ps1` removes the registration. No admin rights are needed.
 
-   ```powershell
-   # Create webhid.forwarder_nm_host.json with the correct path:
-   $installDir = "C:\Program Files\WebHID"
-   $json = @"
-   {
-     "name": "webhid.forwarder_nm_host",
-     "description": "WebHID native messaging host",
-     "path": "webhid-native-messaging.exe",
-     "type": "stdio",
-     "allowed_extensions": ["webhid@k4zoku.dev"]
-   }
-   "@
-   $json | Out-File "$installDir\webhid.forwarder_nm_host.json" -Encoding ASCII
-
-   # Register in registry:
-   reg add "HKLM\SOFTWARE\Mozilla\NativeMessagingHosts\webhid.forwarder_nm_host" /ve /t REG_SZ /d "$installDir\webhid.forwarder_nm_host.json" /f
-   ```
-
-3. **Auto-start daemon**: create a Scheduled Task:
-
-   ```powershell
-   $action = New-ScheduledTaskAction -Execute "$installDir\webhid-daemon.exe"
-   $trigger = New-ScheduledTaskTrigger -AtLogOn
-   $settings = New-ScheduledTaskSettingsSet -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
-   Register-ScheduledTask -TaskName "WebHID Daemon" -Action $action -Trigger $trigger -Settings $settings -Force
-   ```
-
-   Or for the current session only: just run `webhid-daemon.exe` manually.
+For a system-wide install (all users) or auto-start of the persistent daemon, use the MSI instead; the portable zip targets daemon-as-NM-host mode.
 
 ---
 
@@ -323,51 +298,24 @@ brew services stop webhid
 
 ### Manual
 
-Download the macOS zip from [GitHub Releases](https://github.com/K4zoku/FF-WebHID/releases), extract, then:
+Download the macOS zip from [GitHub Releases](https://github.com/K4zoku/FF-WebHID/releases), extract, then register the native-messaging hosts for Firefox (per-user, no root):
 
 ```sh
-# Install binaries
-sudo cp webhid-daemon /usr/local/bin/
-sudo cp webhid-native-messaging /usr/local/bin/
-
-# Install NM manifest
-sudo mkdir -p /usr/local/lib/mozilla/native-messaging-hosts
-sudo cp webhid.forwarder_nm_host.json /usr/local/lib/mozilla/native-messaging-hosts/
-
-# Create launchd plist for auto-start
-cat > ~/Library/LaunchAgents/dev.k4zoku.webhid-daemon.plist << EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>dev.k4zoku.webhid-daemon</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/usr/local/bin/webhid-daemon</string>
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-</dict>
-</plist>
-EOF
-
-launchctl load ~/Library/LaunchAgents/dev.k4zoku.webhid-daemon.plist
+./install.sh
 ```
 
-The NM manifest `webhid.forwarder_nm_host.json` should contain:
+The zip contains:
 
-```json
-{
-  "name": "webhid.forwarder_nm_host",
-  "description": "WebHID native messaging host",
-  "path": "/usr/local/bin/webhid-native-messaging",
-  "type": "stdio",
-  "allowed_extensions": ["webhid@k4zoku.dev"]
-}
+```text
+bin/webhid-daemon
+bin/webhid-native-messaging
+manifests/webhid.forwarder_nm_host.json
+manifests/webhid.daemon_nm_host.json
+install.sh
+uninstall.sh
 ```
+
+`install.sh` writes both manifests into `~/Library/Application Support/Mozilla/NativeMessagingHosts` with absolute paths pointing at the extracted `bin/`, so the bundle can live anywhere; re-run it after moving the folder. `uninstall.sh` removes the registration. For the persistent forwarder mode, use Homebrew instead (`brew install K4zoku/FF-WebHID/webhid && brew services start webhid`); the zip targets daemon-as-NM-host mode.
 
 > **Note**: On Apple Silicon Macs, the universal binary runs natively. No Rosetta needed.
 
