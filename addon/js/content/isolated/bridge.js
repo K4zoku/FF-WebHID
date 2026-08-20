@@ -29,8 +29,61 @@
 
   /** @type {Set<string>} */
   const openDevices = new Set()
-  /** @type {Map<string, string>} */
-  const sessionTokens = new Map()
+  /** @type {Map<string, string[]>} deviceId -> LIFO stack of daemon session
+   * tokens, one entry per logical open. A close pops one token so every
+   * daemon session gets closed exactly once. */
+  const openTokens = new Map()
+  /** @type {Map<string, string>} deviceId -> token currently driving the
+   * device's data plane (used to decide which token to reuse on refresh). */
+  const dataPlaneTokens = new Map()
+
+  /**
+   * Pushes a session token for an open.
+   * @param {string} deviceId
+   * @param {string} token
+   * @returns {void}
+   */
+  function pushOpenToken(deviceId, token) {
+    let stack = openTokens.get(deviceId)
+    if (!stack) {
+      stack = []
+      openTokens.set(deviceId, stack)
+    }
+    stack.push(token)
+  }
+
+  /**
+   * Returns the most recent session token for a device, or null.
+   * @param {string} deviceId
+   * @returns {string|null}
+   */
+  function peekOpenToken(deviceId) {
+    const stack = openTokens.get(deviceId)
+    return stack && stack.length ? stack[stack.length - 1] : null
+  }
+
+  /**
+   * Pops (reserves) the most recent session token for a close.
+   * @param {string} deviceId
+   * @returns {string|null}
+   */
+  function popOpenToken(deviceId) {
+    const stack = openTokens.get(deviceId)
+    if (!stack || stack.length === 0) return null
+    const token = stack.pop()
+    if (stack.length === 0) openTokens.delete(deviceId)
+    return token
+  }
+
+  /**
+   * Drops every session record for a device (revoke/global reset).
+   * @param {string} deviceId
+   * @returns {void}
+   */
+  function clearDeviceOpenTokens(deviceId) {
+    openTokens.delete(deviceId)
+    dataPlaneTokens.delete(deviceId)
+  }
 
   browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'getOpenDeviceIds') {
@@ -209,32 +262,35 @@
     deviceTransports.delete(deviceId)
     nmPlanes.delete(deviceId)
     spawnGen.delete(deviceId)
+    dataPlaneTokens.delete(deviceId)
   }
 
   /**
+   * Re-attaches the data plane after an auth failure by reusing a live
+   * session token. Never opens a new daemon session: a failed auth hash
+   * means the session behind it is gone (closed or daemon restarted), and
+   * opening another session would leak the old one. If the daemon restarted
+   * the background broadcasts globalReset, which tears the device down.
    * @param {string} deviceId
    * @returns {Promise<void>}
    */
   async function refreshDataPlaneToken(deviceId) {
     if (workers.has(deviceId)) return
-    try {
-      const resp = await browser.runtime.sendMessage({
-        action: 'open',
-        deviceId,
-        origin: window.location.origin
-      })
-      if (http.isOk(resp.s) && resp.t) {
-        sessionTokens.set(deviceId, resp.t)
-        spawnDataPlane(deviceId, resp.t, resp.w || wsPort, { rewire: true })
-      } else {
-        logger.error(
-          'data plane token refresh failed for',
-          deviceId,
-          's=' + (resp != null ? resp.s : 0)
-        )
-      }
-    } catch (e) {
-      logger.error('data plane token refresh error:', e.message)
+    const failedToken = dataPlaneTokens.get(deviceId)
+    // Prefer a different live token when one exists.
+    const stack = openTokens.get(deviceId) || []
+    const token =
+      (failedToken ? stack.find((t) => t !== failedToken) : null) ||
+      peekOpenToken(deviceId)
+    if (!token) {
+      logger.warn('data plane refresh: no open session for', deviceId, '; plane stays down')
+      return
+    }
+    logger.info('data plane refresh for', deviceId, 'reusing live session token')
+    if (wtPort != null && settings.dataPlane === 'wt') {
+      await spawnDataPlane(deviceId, token, null, { wtPort, wtCertHash, rewire: true })
+    } else {
+      await spawnDataPlane(deviceId, token, wsPort, { rewire: true })
     }
   }
 
@@ -472,6 +528,7 @@
   async function spawnDataPlane(deviceId, sessionToken, wsPort, opts = {}) {
     const gen = (spawnGen.get(deviceId) || 0) + 1
     spawnGen.set(deviceId, gen)
+    dataPlaneTokens.set(deviceId, sessionToken)
     let ok
     if (settings.useWorker === false && opts.wtPort != null) {
       ok = await spawnInPageDataPlane(deviceId, sessionToken, opts)
@@ -633,12 +690,13 @@
     if (!openDevices.has(deviceId)) return
     nmPlanes.add(deviceId)
     deviceTransports.delete(deviceId)
+    const token = dataPlaneTokens.get(deviceId) || peekOpenToken(deviceId)
     browser.runtime
       .sendMessage({
         action: 'setDataPlane',
         deviceId: deviceId,
         mode: 'nm',
-        sessionToken: sessionTokens.get(deviceId)
+        sessionToken: token
       })
       .catch((e) => logger.debug('setDataPlane NM fallback failed', e))
     const pagePort = pagePorts.get(window)
@@ -955,7 +1013,7 @@
     const deviceId = response.i
     openCounts.set(deviceId, (openCounts.get(deviceId) || 0) + 1)
     openDevices.add(deviceId)
-    sessionTokens.set(deviceId, response.t)
+    pushOpenToken(deviceId, response.t)
     browser.runtime
       .sendMessage({
         action: 'deviceCountChanged',
@@ -991,7 +1049,7 @@
     }
     openCounts.delete(deviceId)
     openDevices.delete(deviceId)
-    sessionTokens.delete(deviceId)
+    clearDeviceOpenTokens(deviceId)
     browser.runtime
       .sendMessage({
         action: 'deviceCountChanged',
@@ -1054,9 +1112,12 @@
         { action: effectiveAction, origin: getRequestOrigin(data) },
         payload || {}
       )
+      let reservedToken = null
       if (action === 'close') {
-        const sessionToken = sessionTokens.get(payload.deviceId)
-        if (sessionToken) msg.T = sessionToken
+        // Reserve one exact session token for this close; restore it if the
+        // daemon did not confirm, so bridge and daemon stay in sync.
+        reservedToken = popOpenToken(payload.deviceId)
+        if (reservedToken) msg.T = reservedToken
       }
       response = await browser.runtime.sendMessage(msg)
 
@@ -1065,7 +1126,11 @@
       }
 
       if (action === 'close') {
-        handleCloseSuccess(payload)
+        if (http.isOk(response.s)) {
+          handleCloseSuccess(payload)
+        } else if (reservedToken) {
+          pushOpenToken(payload.deviceId, reservedToken)
+        }
       }
 
       const transfers = response && response.d instanceof Uint8Array ? [response.d.buffer] : []
@@ -1112,7 +1177,8 @@
     logger.warn('global reset: clearing bridge device state')
     const deviceIds = Array.from(openDevices)
     openDevices.clear()
-    sessionTokens.clear()
+    openTokens.clear()
+    dataPlaneTokens.clear()
     for (const deviceId of deviceIds) {
       try {
         despawnDataPlane(deviceId)
@@ -1178,6 +1244,23 @@
             logger.debug('forward disconnect to page failed', e)
           }
         }
+      }
+    }
+    if (messageEvent.eventType === 'revoked') {
+      // Daemon sessions were closed by the background with exact tokens;
+      // drop all local state so stale tokens can never be reused.
+      const deviceId = messageEvent.deviceId
+      if (deviceId != null) {
+        despawnDataPlane(deviceId)
+        openCounts.delete(deviceId)
+        openDevices.delete(deviceId)
+        clearDeviceOpenTokens(deviceId)
+        browser.runtime
+          .sendMessage({
+            action: 'deviceCountChanged',
+            count: openDevices.size
+          })
+          .catch((e) => logger.debug('deviceCountChanged (revoked) failed', e))
       }
     }
     if (
@@ -1282,12 +1365,12 @@
   function respawnPlanesForMode(dp) {
     if (dp === 'ws') {
       for (const id of openDevices) {
-        const token = sessionTokens.get(id)
+        const token = peekOpenToken(id)
         if (token) spawnDataPlane(id, token, wsPort, { rewire: true })
       }
     } else if (dp === 'wt') {
       for (const id of openDevices) {
-        const token = sessionTokens.get(id)
+        const token = peekOpenToken(id)
         if (token) {
           if (wtPort != null) {
             spawnDataPlane(id, token, null, { wtPort, wtCertHash, rewire: true })
@@ -1309,13 +1392,17 @@
     }
     respawnPlanesForMode(dp)
     for (const id of openDevices) {
-      browser.runtime
-        .sendMessage({
-          action: 'setDataPlane',
-          deviceId: id,
-          mode: dp
-        })
-        .catch((e) => logger.debug('applyDataPlane failed for device', id, e))
+      const stack = openTokens.get(id) || []
+      for (const token of stack) {
+        browser.runtime
+          .sendMessage({
+            action: 'setDataPlane',
+            deviceId: id,
+            mode: dp,
+            sessionToken: token
+          })
+          .catch((e) => logger.debug('applyDataPlane failed for device', id, e))
+      }
     }
     logger.info('data plane changed:', dp, 'open devices:', openDevices.size)
   }

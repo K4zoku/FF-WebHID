@@ -210,7 +210,7 @@
   })
   loadNmHostSetting().then(() => NativeMessaging.connect())
   browser.tabs.onRemoved.addListener((tabId) =>
-    purgeTab(tabId, (d) => NativeMessaging.closeDevice(d))
+    purgeTab(tabId, (deviceId, token) => NativeMessaging.closeDevice(deviceId, token))
   )
 
   const actionApi = browser.browserAction || browser.action || null

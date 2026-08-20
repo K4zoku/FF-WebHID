@@ -20,10 +20,14 @@
   } = webhid.import('bgStorage')
   const {
     registerDeviceTab,
+    registerDeviceSession,
+    unregisterDeviceSession,
     unregisterDeviceTab,
     clearDeviceTab,
     isTabAuthorizedForDevice,
-    forTabsOfOrigin
+    forTabsOfOrigin,
+    collectDeviceSessions,
+    clearDeviceSessions
   } = webhid.import('bgStateOps')
   const { urlOrigin, frameKey } = webhid.import('bgCsp')
   const NativeMessaging = webhid.import('NativeMessaging')
@@ -74,7 +78,11 @@
     for (const deviceId of toRevoke) {
       await removeAllowedDevice(origin, deviceId)
       removeDeviceInfo(deviceId)
-      await NativeMessaging.closeDevice(deviceId).catch(() => {})
+      const tokens = collectDeviceSessions(deviceId)
+      clearDeviceSessions(deviceId)
+      for (const token of tokens) {
+        await NativeMessaging.closeDevice(deviceId, token).catch(() => {})
+      }
     }
     await deleteGrantGroups(memberGroups.map((g) => g.id))
     const deviceIds = await getAllowedDevices(origin)
@@ -275,7 +283,10 @@
         NativeMessaging.openDevice(request.deviceId)
           .then((response) => {
             if (typeof response.P === 'number') lastHidPermission = response.P
-            if (http.isOk(response.s) && response.i) registerDeviceTab(response.i, tabId)
+            if (http.isOk(response.s) && response.i) {
+              registerDeviceTab(response.i, tabId)
+              if (response.t) registerDeviceSession(response.i, tabId, response.t)
+            }
             sendResponse(response)
           })
           .catch(() => sendResponse({ s: 500 }))
@@ -308,7 +319,10 @@
     }
     NativeMessaging.closeDevice(request.deviceId, request.T)
       .then((response) => {
-        if (http.isOk(response.s)) unregisterDeviceTab(request.deviceId, tabId)
+        if (http.isOk(response.s)) {
+          unregisterDeviceTab(request.deviceId, tabId)
+          if (request.T) unregisterDeviceSession(request.deviceId, tabId, request.T)
+        }
         sendResponse(response)
       })
       .catch(() => sendResponse({ s: 500 }))

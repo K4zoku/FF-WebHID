@@ -1,6 +1,6 @@
 ;(function () {
   const logger = webhid.import('logger')
-  const { deviceTabMap } = webhid.import('bgState')
+  const { deviceTabMap, deviceSessions } = webhid.import('bgState')
 
   /**
    * Returns the list of tab IDs authorized for the device in the given event, or null.
@@ -28,6 +28,71 @@
     }
     tabs.set(tabId, (tabs.get(tabId) || 0) + 1)
     logger.debug('register device ' + deviceId + ' tab ' + tabId)
+  }
+
+  /**
+   * Records one daemon session token for a (device, tab) pair so cleanup
+   * paths can close the exact session.
+   * @param {number} deviceId
+   * @param {number} tabId
+   * @param {string} token
+   * @returns {void}
+   */
+  function registerDeviceSession(deviceId, tabId, token) {
+    if (!deviceId || tabId == null || !token) return
+    let byTab = deviceSessions.get(deviceId)
+    if (!byTab) {
+      byTab = new Map()
+      deviceSessions.set(deviceId, byTab)
+    }
+    let tokens = byTab.get(tabId)
+    if (!tokens) {
+      tokens = new Set()
+      byTab.set(tabId, tokens)
+    }
+    tokens.add(token)
+    logger.debug('register session device ' + deviceId + ' tab ' + tabId)
+  }
+
+  /**
+   * Drops one session token for a (device, tab) pair after a successful
+   * close.
+   * @param {number} deviceId
+   * @param {number} tabId
+   * @param {string} token
+   * @returns {void}
+   */
+  function unregisterDeviceSession(deviceId, tabId, token) {
+    if (!deviceId || tabId == null || !token) return
+    const byTab = deviceSessions.get(deviceId)
+    if (!byTab) return
+    const tokens = byTab.get(tabId)
+    if (!tokens) return
+    tokens.delete(token)
+    if (tokens.size === 0) byTab.delete(tabId)
+    if (byTab.size === 0) deviceSessions.delete(deviceId)
+  }
+
+  /**
+   * Collects every session token for a device across all tabs (revocation).
+   * @param {number} deviceId
+   * @returns {string[]}
+   */
+  function collectDeviceSessions(deviceId) {
+    const byTab = deviceSessions.get(deviceId)
+    if (!byTab) return []
+    const tokens = []
+    for (const set of byTab.values()) tokens.push(...set)
+    return tokens
+  }
+
+  /**
+   * Drops every session record for a device (revocation).
+   * @param {number} deviceId
+   * @returns {void}
+   */
+  function clearDeviceSessions(deviceId) {
+    deviceSessions.delete(deviceId)
   }
 
   /**
@@ -76,7 +141,8 @@
   }
 
   /**
-   * Removes all device registrations for a tab and closes devices with no remaining tabs.
+   * Removes all device registrations for a tab and closes every exact
+   * session the tab held, passing `(deviceId, token)` to `closeDeviceFn`.
    * @param {number} tabId
    * @param {Function} closeDeviceFn
    * @returns {void}
@@ -86,7 +152,17 @@
     for (const [deviceId, tabs] of deviceTabMap) {
       if (tabs.delete(tabId) && tabs.size === 0) {
         deviceTabMap.delete(deviceId)
-        closeDeviceFn(deviceId).catch((e) => logger.debug('closeDevice failed', e))
+        const byTab = deviceSessions.get(deviceId)
+        const tokens = byTab ? [...(byTab.get(tabId) || [])] : []
+        if (byTab) {
+          byTab.delete(tabId)
+          if (byTab.size === 0) deviceSessions.delete(deviceId)
+        }
+        for (const token of tokens) {
+          closeDeviceFn(deviceId, token).catch((e) =>
+            logger.debug('closeDevice failed', deviceId, e)
+          )
+        }
       }
     }
   }
@@ -125,6 +201,10 @@
   webhid.export('bgStateOps', {
     tabsForEvent,
     registerDeviceTab,
+    registerDeviceSession,
+    unregisterDeviceSession,
+    collectDeviceSessions,
+    clearDeviceSessions,
     unregisterDeviceTab,
     clearDeviceTab,
     isTabAuthorizedForDevice,
