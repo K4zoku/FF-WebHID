@@ -34,12 +34,17 @@ pub fn user_socket() -> String {
 }
 
 #[cfg(target_os = "macos")]
-/// Per-user socket: /tmp is world-writable, so a fixed name would let any
-/// user pre-create the socket and impersonate the daemon for other users.
-/// The sticky bit protects the per-uid file from cross-user replacement.
+/// Per-user socket under the user's own Application Support directory. The
+/// home directory is only reachable by its owner, so no peer verification
+/// or world-writable /tmp naming is needed for cross-user isolation.
+/// Falls back to the legacy fixed /tmp path when HOME is unavailable.
 pub fn macos_socket() -> String {
-    let uid = unsafe { libc::getuid() };
-    format!("/tmp/webhid-{uid}.sock")
+    if let Ok(home) = std::env::var("HOME")
+        && !home.is_empty()
+    {
+        return format!("{home}/Library/Application Support/webhid/webhid.sock");
+    }
+    "/tmp/webhid.sock".to_string()
 }
 
 #[cfg(target_os = "windows")]

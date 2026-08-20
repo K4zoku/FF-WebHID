@@ -189,27 +189,10 @@ fn verify_daemon_peer(stream: &tokio::net::UnixStream) -> bool {
     }
 }
 
-#[cfg(target_os = "macos")]
-fn verify_daemon_peer(stream: &tokio::net::UnixStream) -> bool {
-    use std::os::fd::AsRawFd;
-    let my_uid = unsafe { libc::geteuid() };
-    let mut euid: libc::uid_t = 0;
-    let mut egid: libc::gid_t = 0;
-    if unsafe { libc::getpeereid(stream.as_raw_fd(), &mut euid, &mut egid) } != 0 {
-        log::warn!("[forwarder] getpeereid failed");
-        return false;
-    }
-    if euid == 0 || euid == my_uid {
-        true
-    } else {
-        log::warn!(
-            "[forwarder] refusing daemon socket: peer euid {euid} is neither root nor uid {my_uid}"
-        );
-        false
-    }
-}
-
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+/// On non-Linux unix (macOS): the per-user socket path with sticky /tmp and
+/// 0o660 perms already gates cross-user access, and a same-user impostor
+/// passes any peer-cred check, so no verification is performed.
+#[cfg(all(unix, not(target_os = "linux")))]
 fn verify_daemon_peer(_stream: &tokio::net::UnixStream) -> bool {
     true
 }
