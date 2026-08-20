@@ -162,7 +162,7 @@ function buildDeb(ver, arch) {
   installLicense(stage)
   // Install udev rules
   mkdirSync(join(usr, 'lib', 'udev', 'rules.d'), { recursive: true })
-  cpSync(join(MANIFESTS, '99-webhid.rules'), join(usr, 'lib', 'udev', 'rules.d', '99-webhid.rules'))
+  cpSync(join(MANIFESTS, '72-webhid.rules'), join(usr, 'lib', 'udev', 'rules.d', '72-webhid.rules'))
 
   const out = join(DIST, `webhid-${ver}-${arch}.deb`)
   execFileSync('dpkg-deb', ['--build', '--root-owner-group', stage, out], { stdio: 'inherit' })
@@ -210,7 +210,7 @@ function writeRpmSpec(rpmRoot, ver, binDir) {
       `  install -Dm644 ${MANIFESTS}/webhid.daemon_nm_host.json %{buildroot}/usr/lib/$d/native-messaging-hosts/webhid.daemon_nm_host.json`,
       `  sed -i 's|{{DAEMON_BIN}}|/usr/bin/webhid-daemon|g' %{buildroot}/usr/lib/$d/native-messaging-hosts/webhid.daemon_nm_host.json`,
       `done`,
-      `install -Dm644 ${MANIFESTS}/99-webhid.rules %{buildroot}/usr/lib/udev/rules.d/99-webhid.rules`,
+      `install -Dm644 ${MANIFESTS}/72-webhid.rules %{buildroot}/usr/lib/udev/rules.d/72-webhid.rules`,
       `install -Dm644 ${join(ROOT, 'LICENSE')} %{buildroot}/usr/share/licenses/webhid/LICENSE`,
       ``,
       `%pre`,
@@ -233,7 +233,7 @@ function writeRpmSpec(rpmRoot, ver, binDir) {
       `/usr/bin/webhid-daemon`,
       `/usr/bin/webhid-native-messaging`,
       `/usr/lib/systemd/system/webhid-daemon.service`,
-      `/usr/lib/udev/rules.d/99-webhid.rules`,
+      `/usr/lib/udev/rules.d/72-webhid.rules`,
       nmFileList,
       ''
     ].join('\n')

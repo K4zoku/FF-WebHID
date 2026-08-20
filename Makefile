@@ -105,7 +105,7 @@ install-user: build
 
 install-udev-rule:
 	@echo "==> Installing udev rule to $(UDEV_DIR)/"
-	install -Dm644 "$(MANIFEST_DIR)/99-webhid.rules" "$(DESTDIR)$(UDEV_DIR)/99-webhid.rules"
+	install -Dm644 "$(MANIFEST_DIR)/72-webhid.rules" "$(DESTDIR)$(UDEV_DIR)/72-webhid.rules"
 	udevadm control --reload-rules && udevadm trigger
 	@echo "Done."
 

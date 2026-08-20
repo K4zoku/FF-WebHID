@@ -30,8 +30,8 @@ rustPlatform.buildRustPackage (finalAttrs: {
       $out/bin/webhid-native-messaging
 
     # udev rules
-    install -Dm644 manifests/99-webhid.rules \
-      $out/lib/udev/rules.d/99-webhid.rules
+    install -Dm644 manifests/72-webhid.rules \
+      $out/lib/udev/rules.d/72-webhid.rules
 
     # systemd service
     install -Dm644 manifests/webhid-daemon.service \

@@ -16,7 +16,7 @@
 #
 # Alternatively, install eudev for full udev compatibility:
 #   apk add eudev && setup-devd udev
-# Then the standard 99-webhid.rules (udev format) will work.
+# Then the standard 72-webhid.rules (udev format) will work.
 
 _pkgbase=webhid
 pkgname=${_pkgbase}

@@ -22,7 +22,7 @@ do_install() {
 	vbin crates/target/release/webhid-native-messaging
 
 	# Install udev rules
-	vinstall "${FILESDIR}/99-webhid.rules" 644 usr/lib/udev/rules.d
+	vinstall "${FILESDIR}/72-webhid.rules" 644 usr/lib/udev/rules.d
 
 	# Install systemd service (reference for Void users with systemd)
 	vinstall "${FILESDIR}/webhid-daemon.service" 644 usr/lib/systemd/system

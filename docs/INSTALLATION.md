@@ -53,7 +53,7 @@ NM manifests. Recommended setup (daemon-as-NM-host, runs as your user):
 
 ```sh
 # 1. Grant your user direct hidraw access (one-time)
-sudo cp manifests/99-webhid.rules /etc/udev/rules.d/
+sudo cp manifests/72-webhid.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules && sudo udevadm trigger
 
 # 2. Stop the root service (it would shadow the user daemon)
@@ -62,7 +62,7 @@ sudo systemctl disable --now webhid-daemon
 # 3. Enable "Daemon as NM host" in the addon settings
 ```
 
-> Note: Rule using the `uaccess` tag needs a name lexically precede `/usr/lib/udev/rules.d/73-seat-late.rules` to be effective on Arch Linux. If your daemon cannot detect hid devices, try renaming `/etc/udev/rules.d/99-webhid.rules` to something like `71-webhid.rules` where the number is less than 73.
+> Note: A `uaccess` rule only takes effect when it is processed before `/usr/lib/udev/rules.d/73-seat-late.rules` applies the ACL. The shipped `72-webhid.rules` name already precedes it on systemd-based distributions, so no manual renaming is needed.
 
 **Prefer a persistent root daemon?** Keep the service enabled instead:
 
@@ -79,7 +79,7 @@ of the forwarder vs. daemon-as-NM-host is a few microseconds per report.
 **User daemon (systemd user service, optional):**
 
 ```sh
-sudo cp manifests/99-webhid.rules /etc/udev/rules.d/
+sudo cp manifests/72-webhid.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules && sudo udevadm trigger
 
 # Disable root service, enable user service
@@ -100,7 +100,7 @@ The package installs and auto-starts the daemon as a systemd system service (roo
 Both NM manifests are installed. For the recommended daemon-as-NM-host mode:
 
 ```sh
-sudo cp manifests/99-webhid.rules /etc/udev/rules.d/
+sudo cp manifests/72-webhid.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules && sudo udevadm trigger
 sudo systemctl disable --now webhid-daemon
 # Enable "Daemon as NM host" in the addon settings
@@ -114,7 +114,7 @@ per report.
 **Non-root daemon (optional):**
 
 ```sh
-sudo cp manifests/99-webhid.rules /etc/udev/rules.d/
+sudo cp manifests/72-webhid.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules && sudo udevadm trigger
 
 sudo systemctl disable --now webhid-daemon
@@ -133,7 +133,7 @@ The package installs and auto-starts the daemon as a systemd system service (roo
 Both NM manifests are installed. For the recommended daemon-as-NM-host mode:
 
 ```sh
-sudo cp manifests/99-webhid.rules /etc/udev/rules.d/
+sudo cp manifests/72-webhid.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules && sudo udevadm trigger
 sudo systemctl disable --now webhid-daemon
 # Enable "Daemon as NM host" in the addon settings
@@ -147,7 +147,7 @@ per report.
 **Non-root daemon (optional):**
 
 ```sh
-sudo cp manifests/99-webhid.rules /etc/udev/rules.d/
+sudo cp manifests/72-webhid.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules && sudo udevadm trigger
 
 sudo systemctl disable --now webhid-daemon
@@ -200,7 +200,7 @@ The install targets substitute the `{{NM_BIN}}` / `{{DAEMON_BIN}}` placeholders 
 
 Install paths are configurable: `make install-system PREFIX=/usr` or `make install-user USER_PREFIX=$HOME/.local`.
 
-> **udev rule**: The `99-webhid.rules` file grants console users access to `hidraw*` devices via `uaccess`, with explicit exclusions for known FIDO/U2F security keys (matching Chromium's `hid_blocklist.cc`). This is only needed for non-root daemons. Root daemons already have full access.
+> **udev rule**: The `72-webhid.rules` file grants console users access to `hidraw*` devices via `uaccess`, with explicit exclusions for known FIDO/U2F security keys (matching Chromium's `hid_blocklist.cc`). It is named before `73-seat-late.rules` so the `uaccess` tag is applied in time. This is only needed for non-root daemons. Root daemons already have full access.
 
 ### Daemon-as-NM-host mode (details)
 
@@ -396,7 +396,7 @@ Then install the [browser extension](https://addons.mozilla.org/en-US/firefox/ad
 
 - **"Cannot connect to the WebHID daemon"**: daemon not running. Start it with the commands above.
 - **"Permission denied (os error 13)"** (Linux root daemon, thin forwarder mode): your user is not in the `webhid` group. Fix with `sudo usermod -aG webhid $USER`, then log out and back in. The NM host logs this with diagnostic hints before exiting.
-- **"Permission denied"** (Linux non-root daemon): udev rule not installed. Run `sudo make install-udev-rule` or copy `99-webhid.rules` manually.
+- **"Permission denied"** (Linux non-root daemon): udev rule not installed. Run `sudo make install-udev-rule` or copy `72-webhid.rules` manually.
 - **NM host silent failure** (addon paralyzed, no logs): the NM host writes `{"s":503,"E":"..."}` error frame to stdout before exiting, addon logs `[nm] host error: <reason>`.
 - **Device picker shows "No HID devices found"**: daemon running but no HID devices detected. Check `hidapi` can enumerate: `ls /dev/hidraw*` (Linux).
 - **Badge counter not showing**: ensure the device is opened via `navigator.hid.requestDevice()`, the counter tracks open devices, not paired ones.
@@ -414,7 +414,7 @@ Then install the [browser extension](https://addons.mozilla.org/en-US/firefox/ad
 | Data Plane         | WS (default)     | Binary WS via worker with MessagePort for max performance. Switch to NM if WS is blocked.                                                                               |
 | Device Picker Mode | modal (default)  | Inline dialog, least friction. pageAction/window available for single-device sites.                                                                                     |
 
-**Setup**: Install daemon (system package or `make install-system`). Recommended: install the udev rule (`sudo make install-udev-rule` or copy `99-webhid.rules`) and enable "Daemon as NM host" in the addon settings; no group membership needed. Alternative: keep the root daemon + thin forwarder and add your user to the `webhid` group (`sudo usermod -aG webhid $USER`, log out + back in).
+**Setup**: Install daemon (system package or `make install-system`). Recommended: install the udev rule (`sudo make install-udev-rule` or copy `72-webhid.rules`) and enable "Daemon as NM host" in the addon settings; no group membership needed. Alternative: keep the root daemon + thin forwarder and add your user to the `webhid` group (`sudo usermod -aG webhid $USER`, log out + back in).
 
 ### Windows
 

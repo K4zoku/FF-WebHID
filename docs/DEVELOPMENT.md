@@ -248,7 +248,7 @@ FF-WebHID/
 │   ├── webhid.daemon_nm_host.json      Daemon-as-NM-host manifest ({{DAEMON_BIN}})
 │   ├── webhid-daemon.service           System systemd unit (root, {{DAEMON_BIN}}, Group=webhid)
 │   ├── webhid-daemon.user.service      User systemd unit (hardcodes WEBHID_WS_PORT=31337 for backwards compat)
-│   ├── 99-webhid.rules                 udev rule (uaccess + FIDO blocklist exclusions)
+│   ├── 72-webhid.rules                 udev rule (uaccess + FIDO blocklist exclusions)
 │   └── 99-webhid-e2e.rules             E2E rule (webhid group gets /dev/uhid + VID 0x16C0 hidraw)
 ├── packaging/               Platform packaging
 │   ├── linux/archlinux/     Arch PKGBUILDs (webhid daemon + webhid-addon)
@@ -325,7 +325,7 @@ Most build/package/bump workflows live in `package.json` (they were pure npm/nod
 | `make build`                                             | Release build of daemon + NM host                                        |
 | `make install-system`                                    | System-wide install: binaries + NM manifest + systemd unit, `/usr/local` |
 | `make install-user`                                      | User-local install into `~/.local` (no root)                             |
-| `make install-udev-rule`                                 | Install `99-webhid.rules` (uaccess + FIDO exclusions)                    |
+| `make install-udev-rule`                                 | Install `72-webhid.rules` (uaccess + FIDO exclusions)                    |
 | `make install-e2e-udev-rule`                             | Install `99-webhid-e2e.rules` + create `webhid` group + add `$SUDO_USER` |
 | `make install-webhid-group`                              | Create the `webhid` group and add `$SUDO_USER`                           |
 | `make install-daemon-nm-host-system` / `-user`           | Install daemon binary + `webhid.daemon_nm_host` manifest                 |
