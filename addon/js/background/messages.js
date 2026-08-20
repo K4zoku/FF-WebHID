@@ -281,9 +281,27 @@
           return
         }
         NativeMessaging.openDevice(request.deviceId)
-          .then((response) => {
+          .then(async (response) => {
             if (typeof response.P === 'number') lastHidPermission = response.P
             if (http.isOk(response.s) && response.i) {
+              // The permission may have been revoked while the daemon open
+              // was in flight (forget()/revoke race). Close the fresh
+              // session instead of returning an open for a revoked device.
+              const stillAllowed = (await getAllowedDevices(request.origin)).includes(
+                request.deviceId
+              )
+              if (!stillAllowed) {
+                logger.warn(
+                  'open for device',
+                  request.deviceId,
+                  'revoked while in flight; closing fresh session'
+                )
+                if (response.t) {
+                  await NativeMessaging.closeDevice(response.i, response.t).catch(() => {})
+                }
+                sendResponse({ s: 403 })
+                return
+              }
               registerDeviceTab(response.i, tabId)
               if (response.t) registerDeviceSession(response.i, tabId, response.t)
             }

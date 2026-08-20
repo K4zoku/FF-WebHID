@@ -795,8 +795,19 @@
             deviceId: state.deviceId,
             reportSize: state.maxInputReportSize + 3
           })
+          // Forget/revoke can run while the daemon open was in flight; a
+          // stale open must not resurrect the device. Close the fresh
+          // daemon session (best effort) and abort.
+          if (state.forgotten) {
+            sendRequest('close', { deviceId: state.deviceId }).catch(() => {})
+            throw new DOMException('Device has been forgotten', 'InvalidStateError')
+          }
           if (http.isOk(response.s)) {
             await bridgeReady
+            if (state.forgotten) {
+              sendRequest('close', { deviceId: state.deviceId }).catch(() => {})
+              throw new DOMException('Device has been forgotten', 'InvalidStateError')
+            }
             wireDevicePort(state)
             state.opened = true
             logger.info('open deviceId=' + state.deviceId)
@@ -805,7 +816,9 @@
             throw new Error('Open failed: ' + http.name(response.s || 0))
           }
         } catch (error) {
-          throw new DOMException(error.message, 'NetworkError')
+          throw error instanceof DOMException
+            ? error
+            : new DOMException(error.message, 'NetworkError')
         } finally {
           state.opening = false
         }
