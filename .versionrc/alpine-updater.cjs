@@ -1,8 +1,8 @@
-const pins = require('./.versionrc.pins-helper.cjs')
+const pins = require('./pins-helper.cjs')
 
 const PKGVER_REGEX = /^(\s*pkgver\s*=\s*)([^\s]*)/m
 const SHA256SUMS_REGEX = /^sha256sums="[^"]*"/m
-const PRE_INSTALL = 'packaging/linux/alpine/webhid/webhid.pre-install'
+const PRE_INSTALL = '../packaging/linux/alpine/webhid/webhid.pre-install'
 
 function readVersion(contents) {
   const match = contents.match(PKGVER_REGEX)

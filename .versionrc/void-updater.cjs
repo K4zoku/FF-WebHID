@@ -1,4 +1,4 @@
-const pins = require('./.versionrc.pins-helper.cjs')
+const pins = require('./pins-helper.cjs')
 
 const VERSION_REGEX = /^(\s*version\s*=\s*)([^\s]*)/m
 const CHECKSUM_REGEX = /^(\s*checksum\s*=\s*)([^\s]*)/m

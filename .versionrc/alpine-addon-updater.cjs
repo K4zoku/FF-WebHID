@@ -1,4 +1,4 @@
-const pins = require('./.versionrc.pins-helper.cjs')
+const pins = require('./pins-helper.cjs')
 
 const PKGVER_REGEX = /^(\s*pkgver\s*=\s*)([^\s]*)/m
 const AMO_URL_REGEX = /^(\s*_amo_url\s*=\s*")([^"]*)(")/m

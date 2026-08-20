@@ -5,28 +5,28 @@
     { "filename": "package.json", "type": "json" },
     { "filename": "addon/manifest.json", "type": "json" },
     { "filename": "addon/manifest.v2.json", "type": "json" },
-    { "filename": "crates/webhid/Cargo.toml", "updater": ".versionrc.cargo-updater.cjs" },
-    { "filename": "crates/webhid-daemon/Cargo.toml", "updater": ".versionrc.cargo-updater.cjs" },
+    { "filename": "crates/webhid/Cargo.toml", "updater": ".versionrc/cargo-updater.cjs" },
+    { "filename": "crates/webhid-daemon/Cargo.toml", "updater": ".versionrc/cargo-updater.cjs" },
     {
       "filename": "crates/webhid-native-messaging/Cargo.toml",
-      "updater": ".versionrc.cargo-updater.cjs"
+      "updater": ".versionrc/cargo-updater.cjs"
     },
-    { "filename": "crates/Cargo.lock", "updater": ".versionrc.cargo-lock-updater.cjs" },
-    { "filename": "Formula/webhid.rb", "updater": ".versionrc.homebrew-updater.cjs" },
-    { "filename": "nix/package.nix", "updater": ".versionrc.nix-updater.cjs" },
-    { "filename": "packaging/linux/void/webhid/template", "updater": ".versionrc.void-updater.cjs" },
+    { "filename": "crates/Cargo.lock", "updater": ".versionrc/cargo-lock-updater.cjs" },
+    { "filename": "Formula/webhid.rb", "updater": ".versionrc/homebrew-updater.cjs" },
+    { "filename": "nix/package.nix", "updater": ".versionrc/nix-updater.cjs" },
+    { "filename": "packaging/linux/void/webhid/template", "updater": ".versionrc/void-updater.cjs" },
     {
       "filename": "packaging/linux/void/webhid-addon/template",
-      "updater": ".versionrc.void-addon-updater.cjs"
+      "updater": ".versionrc/void-addon-updater.cjs"
     },
-    { "filename": "packaging/linux/alpine/webhid/APKBUILD", "updater": ".versionrc.alpine-updater.cjs" },
+    { "filename": "packaging/linux/alpine/webhid/APKBUILD", "updater": ".versionrc/alpine-updater.cjs" },
     {
       "filename": "packaging/linux/alpine/webhid-addon/APKBUILD",
-      "updater": ".versionrc.alpine-addon-updater.cjs"
+      "updater": ".versionrc/alpine-addon-updater.cjs"
     },
     {
       "filename": "packaging/linux/archlinux/webhid-addon/PKGBUILD",
-      "updater": ".versionrc.arch-addon-updater.cjs"
+      "updater": ".versionrc/arch-addon-updater.cjs"
     }
   ],
   "types": [

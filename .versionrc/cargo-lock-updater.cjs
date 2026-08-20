@@ -1,7 +1,7 @@
 const fs = require('fs')
 const path = require('path')
 
-const CRATES_DIR = path.join(__dirname, 'crates')
+const CRATES_DIR = path.join(__dirname, '..', 'crates')
 
 function workspaceMemberVersions() {
   const ws = fs.readFileSync(path.join(CRATES_DIR, 'Cargo.toml'), 'utf8')
