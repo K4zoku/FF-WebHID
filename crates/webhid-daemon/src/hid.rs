@@ -76,6 +76,29 @@ fn physical_identity(info: &HidDeviceInfo) -> String {
     path.into_owned()
 }
 
+/// Key that identifies one physical device across hidapi entries: the
+/// serial number when present, the platform physical identity otherwise.
+/// Used to detect 32-bit device-id hash collisions.
+fn physical_key(info: &HidDeviceInfo) -> String {
+    let serial = info.serial_number().unwrap_or("");
+    if serial.is_empty() {
+        physical_identity(info)
+    } else {
+        format!("serial:{serial}")
+    }
+}
+
+/// Number of distinct physical devices among `entries`. More than one means
+/// the entries' shared 32-bit device id is ambiguous and must not be used
+/// as an authority (opening the id could select the wrong physical device).
+fn distinct_physical_count(entries: &[&HidDeviceInfo]) -> usize {
+    let mut seen = std::collections::HashSet::new();
+    for info in entries {
+        seen.insert(physical_key(info));
+    }
+    seen.len()
+}
+
 /// Enumerates devices while rejecting impossible VID/PID candidates before
 /// report descriptors are opened and parsed.
 pub fn enumerate_with_filter(filter: Option<&EnumerateFilter>) -> anyhow::Result<Vec<DeviceInfo>> {
@@ -85,6 +108,10 @@ pub fn enumerate_with_filter(filter: Option<&EnumerateFilter>) -> anyhow::Result
         (u16, u16, String),
         Vec<(String, &HidDeviceInfo)>,
     > = std::collections::HashMap::new();
+    // device_id -> distinct physical devices hashing to it; used to drop
+    // colliding ids from enumeration entirely (fail closed).
+    let mut id_physical: std::collections::HashMap<u32, std::collections::HashSet<String>> =
+        std::collections::HashMap::new();
     for info in api.device_list() {
         if let Some(filter) = filter {
             if !crate::enumeration_filter::matches_vid_pid(
@@ -108,6 +135,10 @@ pub fn enumerate_with_filter(filter: Option<&EnumerateFilter>) -> anyhow::Result
         } else {
             String::new()
         };
+        id_physical
+            .entry(make_device_id(info))
+            .or_default()
+            .insert(physical_key(info));
         groups
             .entry((info.vendor_id(), info.product_id(), serial))
             .or_default()
@@ -125,6 +156,18 @@ pub fn enumerate_with_filter(filter: Option<&EnumerateFilter>) -> anyhow::Result
             }
             if let Some(d) = info_from_hidapi_pub_with_desc(info, desc) {
                 if is_blocked_by_vendor_product(&d) {
+                    continue;
+                }
+                if id_physical
+                    .get(&d.device_id)
+                    .map(|phys_set| phys_set.len() > 1)
+                    .unwrap_or(false)
+                {
+                    log::warn!(
+                        "[hid] device_id {:#x} is shared by {} distinct physical devices; hiding all of them (hash collision)",
+                        d.device_id,
+                        id_physical[&d.device_id].len()
+                    );
                     continue;
                 }
                 devices.push(d);
@@ -299,26 +342,34 @@ pub fn is_blocked_by_vendor_product(info: &webhid::DeviceInfo) -> bool {
 
 /// Open a device by its stable `device_id` (u32 FNV-1a hash of path).
 /// Returns (DeviceInfo, uses_numbered_reports, HidDevice) for I/O.
+/// When the 32-bit id is shared by more than one distinct physical device,
+/// the id is ambiguous and opening it is refused: the permission could
+/// otherwise resolve to the wrong physical device.
 pub fn open_by_device_id(device_id: u32) -> anyhow::Result<(DeviceInfo, bool, HidDevice)> {
     let api = HidApi::new()?;
-    for info in api.device_list() {
-        if is_blocked_pub(info) {
+    let matches: Vec<&HidDeviceInfo> = api
+        .device_list()
+        .filter(|info| !is_blocked_pub(info) && make_device_id(info) == device_id)
+        .collect();
+    if distinct_physical_count(&matches) > 1 {
+        return Err(anyhow::anyhow!(
+            "device_id '{device_id:#x}' is ambiguous ({} distinct physical devices hash to it); refusing to open",
+            distinct_physical_count(&matches)
+        ));
+    }
+    for info in matches {
+        let desc = read_raw_report_descriptor_with_api(&api, info);
+        let device_info = info_from_hidapi_pub_with_desc(info, desc.clone())
+            .ok_or_else(|| anyhow::anyhow!("failed to build DeviceInfo"))?;
+        if is_blocked_by_vendor_product(&device_info) {
             continue;
         }
-        if make_device_id(info) == device_id {
-            let desc = read_raw_report_descriptor_with_api(&api, info);
-            let device_info = info_from_hidapi_pub_with_desc(info, desc.clone())
-                .ok_or_else(|| anyhow::anyhow!("failed to build DeviceInfo"))?;
-            if is_blocked_by_vendor_product(&device_info) {
-                continue;
-            }
-            let numbered = uses_numbered_reports(&desc);
-            let opened = api.open_path(info.path());
-            #[cfg(unix)]
-            note_open_result(&opened);
-            let dev = opened?;
-            return Ok((device_info, numbered, dev));
-        }
+        let numbered = uses_numbered_reports(&desc);
+        let opened = api.open_path(info.path());
+        #[cfg(unix)]
+        note_open_result(&opened);
+        let dev = opened?;
+        return Ok((device_info, numbered, dev));
     }
     Err(anyhow::anyhow!("device_id '{}' not found", device_id))
 }
