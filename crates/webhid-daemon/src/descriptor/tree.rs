@@ -87,16 +87,16 @@ impl CollectionTreeBuilder {
                     continue;
                 }
                 let mut resolved: Option<&[HidCollection]> = None;
-                for j in (0..i).rev() {
-                    if !fields[j].collections().is_empty() {
-                        resolved = Some(fields[j].collections());
+                for field in fields[..i].iter().rev() {
+                    if !field.collections().is_empty() {
+                        resolved = Some(field.collections());
                         break;
                     }
                 }
                 if resolved.is_none() {
-                    for j in (i + 1)..fields.len() {
-                        if !fields[j].collections().is_empty() {
-                            resolved = Some(fields[j].collections());
+                    for field in &fields[i + 1..] {
+                        if !field.collections().is_empty() {
+                            resolved = Some(field.collections());
                             break;
                         }
                     }
