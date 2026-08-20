@@ -134,7 +134,7 @@ async fn dispatch(
     let resp: NmResponse = match req {
         NmRequest::Enumerate { filter, .. } => handle_enumerate(device_mgr, filter.as_ref()),
         NmRequest::Open { device_id, .. } => {
-            handle_open(device_mgr, device_id, ws_port, client_id)
+            handle_open(device_mgr, device_id, ws_port, client_id).await
         }
         NmRequest::Close {
             device_id,
@@ -181,13 +181,13 @@ fn handle_enumerate(
         Err(_) => NmResponse::err(500),
     }
 }
-fn handle_open(
+async fn handle_open(
     device_mgr: &DeviceManager,
     device_id: u32,
     ws_port: u16,
     client_id: u64,
 ) -> NmResponse {
-    let mut resp = match device_mgr.open(device_id, client_id) {
+    let mut resp = match device_mgr.open(device_id, client_id).await {
         Ok((dev_id, session_token)) => {
             NmResponse::ok_opened(dev_id, Some(session_token), Some(ws_port))
         }

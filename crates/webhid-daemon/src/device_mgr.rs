@@ -102,6 +102,8 @@ pub enum SendReject {
     Invalid,
 }
 
+type DeviceOpener = dyn Fn(u32) -> anyhow::Result<(DeviceInfo, bool, HidDevice)> + Send + Sync;
+
 pub struct DeviceManager {
     devices: Arc<Mutex<HashMap<u32, Entry>>>,
     /// `session_token -> Session`. Sessions are the authority for device
@@ -110,6 +112,13 @@ pub struct DeviceManager {
     /// `ws_auth_hash -> session_token`. A hash dies with its session, never
     /// with the physical device.
     ws_auth_hashes: Arc<Mutex<HashMap<String, String>>>,
+    /// `device_id -> Notify` for in-flight first opens. Exactly one opener
+    /// performs the physical open per device; concurrent openers wait on the
+    /// notify and register their session against the resulting entry.
+    opening: Mutex<HashMap<u32, Arc<tokio::sync::Notify>>>,
+    /// Physical HID opener. Injectable for tests that must control and
+    /// observe the first-open path.
+    opener: Arc<DeviceOpener>,
     ws_nonce: String,
     event_tx: broadcast::Sender<IpcResponse>,
     next_client_id: AtomicU64,
@@ -133,11 +142,20 @@ struct ReaderConfig {
 }
 impl DeviceManager {
     pub fn new(event_tx: broadcast::Sender<IpcResponse>) -> Self {
+        Self::new_with_opener(event_tx, hid::open_by_device_id)
+    }
+
+    fn new_with_opener(
+        event_tx: broadcast::Sender<IpcResponse>,
+        opener: impl Fn(u32) -> anyhow::Result<(DeviceInfo, bool, HidDevice)> + Send + Sync + 'static,
+    ) -> Self {
         let ws_nonce = random_hex_token(16).expect("getrandom should not fail on modern kernels");
         Self {
             devices: Mutex::new(HashMap::new()).into(),
             sessions: Mutex::new(HashMap::new()).into(),
             ws_auth_hashes: Mutex::new(HashMap::new()).into(),
+            opening: Mutex::new(HashMap::new()),
+            opener: Arc::new(opener),
             ws_nonce,
             event_tx,
             next_client_id: AtomicU64::new(0),
@@ -177,7 +195,7 @@ impl DeviceManager {
             .collect())
     }
 
-    pub fn open(&self, device_id: u32, owner_client_id: u64) -> anyhow::Result<(u32, String)> {
+    pub async fn open(&self, device_id: u32, owner_client_id: u64) -> anyhow::Result<(u32, String)> {
         let session_token = random_hex_token(16)?;
         let ws_auth_hash = compute_ws_auth_hash(&session_token, &self.ws_nonce);
 
@@ -185,7 +203,68 @@ impl DeviceManager {
             return Ok((device_id, session_token));
         }
 
-        let (info, uses_numbered_reports, device) = hid::open_by_device_id(device_id)?;
+        let mut is_opener = false;
+        loop {
+            let notify = {
+                let mut opening = self.opening.lock().unwrap_or_else(|e| e.into_inner());
+                match opening.get(&device_id) {
+                    Some(n) => Arc::clone(n),
+                    None => {
+                        let n = Arc::new(tokio::sync::Notify::new());
+                        opening.insert(device_id, Arc::clone(&n));
+                        is_opener = true;
+                        n
+                    }
+                }
+            };
+            if is_opener {
+                break;
+            }
+            notify.notified().await;
+            if self.register_session(device_id, &session_token, owner_client_id, &ws_auth_hash) {
+                return Ok((device_id, session_token));
+            }
+            let opening_in_progress = self
+                .opening
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .contains_key(&device_id);
+            if !opening_in_progress {
+                return Err(anyhow!(
+                    "device '{device_id:#x}' could not be opened by the concurrent opener"
+                ));
+            }
+        }
+
+        let result = self
+            .open_physical(device_id, &session_token, owner_client_id, &ws_auth_hash)
+            .await;
+        let notify = self
+            .opening
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&device_id)
+            .expect("opener sentinel must be present");
+        notify.notify_waiters();
+        result
+    }
+
+    /// Opens the physical HID device and spawns its reader. Only the first
+    /// opener for a device runs this; concurrent openers await the notify.
+    async fn open_physical(
+        &self,
+        device_id: u32,
+        session_token: &str,
+        owner_client_id: u64,
+        ws_auth_hash: &str,
+    ) -> anyhow::Result<(u32, String)> {
+        let (info, uses_numbered_reports, device) =
+            tokio::task::spawn_blocking({
+                let opener = Arc::clone(&self.opener);
+                move || (opener)(device_id)
+            })
+            .await
+            .map_err(|e| anyhow!("open task join failed: {e}"))??;
         let id = info.device_id;
 
         // Fail closed: a device whose report descriptor is missing or failed
@@ -216,8 +295,8 @@ impl DeviceManager {
         let device_arc: DeviceHandle = Arc::new(Mutex::new(device));
         let dev_for_task = Arc::clone(&device_arc);
 
-        if self.register_session(id, &session_token, owner_client_id, &ws_auth_hash) {
-            return Ok((id, session_token));
+        if self.register_session(id, session_token, owner_client_id, ws_auth_hash) {
+            return Ok((id, session_token.to_string()));
         }
 
         let entry = Entry {
@@ -233,7 +312,7 @@ impl DeviceManager {
         let mut map = self.devices.lock().unwrap_or_else(|e| e.into_inner());
         map.insert(id, entry);
         drop(map);
-        self.register_session(id, &session_token, owner_client_id, &ws_auth_hash);
+        self.register_session(id, session_token, owner_client_id, ws_auth_hash);
 
         let handle = self.spawn_reader(ReaderConfig {
             dev_id: id,
@@ -259,7 +338,7 @@ impl DeviceManager {
             e.handle = Some(handle);
         }
 
-        Ok((id, session_token))
+        Ok((id, session_token.to_string()))
     }
 
     /// Registers a new logical session for `device_id`. Returns true when
@@ -753,6 +832,49 @@ mod tests {
         let (tx, _) = broadcast::channel(16);
         let mgr = DeviceManager::new(tx);
         mgr.close_all_for_client(1);
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_first_open_serialized() {
+        use std::sync::atomic::AtomicU32;
+        use tokio::sync::oneshot;
+        let (tx, _) = broadcast::channel(16);
+        let (entered_tx, entered_rx) = oneshot::channel();
+        let (release_tx, release_rx) = oneshot::channel();
+        let entered_tx = Arc::new(std::sync::Mutex::new(Some(entered_tx)));
+        let release_rx = Arc::new(std::sync::Mutex::new(Some(release_rx)));
+        let calls = Arc::new(AtomicU32::new(0));
+        let calls_for_opener = Arc::clone(&calls);
+        let entered_for_opener = Arc::clone(&entered_tx);
+        let release_for_opener = Arc::clone(&release_rx);
+        let opener = move |id: u32| {
+            calls_for_opener.fetch_add(1, Ordering::SeqCst);
+            if let Some(tx) = entered_for_opener.lock().unwrap().take() {
+                let _ = tx.send(());
+            }
+            if let Some(rx) = release_for_opener.lock().unwrap().take() {
+                let _ = rx.blocking_recv();
+            }
+            Err(anyhow!("device '{id:#x}' not found (test opener)"))
+        };
+        let mgr = Arc::new(DeviceManager::new_with_opener(tx, opener));
+
+        let mgr_a = Arc::clone(&mgr);
+        let task_a = tokio::spawn(async move { mgr_a.open(0x1234, 1).await });
+        entered_rx.await.unwrap();
+
+        let mgr_b = Arc::clone(&mgr);
+        let task_b = tokio::spawn(async move { mgr_b.open(0x1234, 2).await });
+        tokio::task::yield_now().await;
+
+        release_tx.send(()).unwrap();
+        let res_a = task_a.await.unwrap();
+        let res_b = task_b.await.unwrap();
+        assert!(res_a.is_err());
+        assert!(res_b.is_err());
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(mgr.opening.lock().unwrap_or_else(|e| e.into_inner()).is_empty());
+        assert!(mgr.sessions.lock().unwrap_or_else(|e| e.into_inner()).is_empty());
     }
 
     #[test]
