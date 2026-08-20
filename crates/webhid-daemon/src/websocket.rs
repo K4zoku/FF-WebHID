@@ -93,6 +93,11 @@ async fn handle_websocket(
     let event_rx = event_tx.subscribe();
 
     let ws_gen = device_mgr.ws_connect(device_id, &session_token);
+    if ws_gen == 0 {
+        log::warn!("[ws] session for device {device_id:#x} closed during handshake; closing");
+        let _ = send_close(ws_stream, WS_CLOSE_UNKNOWN_TOKEN, "session closed").await;
+        return Ok(());
+    }
 
     let (mut ws_sender, mut ws_receiver) = ws_stream.split();
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();

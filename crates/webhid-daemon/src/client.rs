@@ -12,6 +12,7 @@ pub async fn handle(
     reader: impl AsyncRead + Unpin + Send + 'static,
     writer: impl tokio::io::AsyncWrite + Unpin + Send + 'static,
     device_mgr: Arc<DeviceManager>,
+    client_id: u64,
     mut event_rx: broadcast::Receiver<IpcResponse>,
     ws_port: u16,
     wt_state: Arc<WtState>,
@@ -35,7 +36,8 @@ pub async fn handle(
         loop {
             match event_rx.recv().await {
                 Ok(ev) => {
-                    if !relay_client_event(ev, &device_mgr_for_events, &tx_events).await {
+                    if !relay_client_event(ev, &device_mgr_for_events, client_id, &tx_events).await
+                    {
                         break;
                     }
                 }
@@ -51,7 +53,7 @@ pub async fn handle(
         let Some(request) = read_next_request(&mut reader, &tx).await else {
             break;
         };
-        let response = dispatch(&device_mgr, request, ws_port, &wt_state).await;
+        let response = dispatch(&device_mgr, client_id, request, ws_port, &wt_state).await;
         if tx.send(response).await.is_err() {
             break;
         }
@@ -59,7 +61,7 @@ pub async fn handle(
 
     event_task.abort();
     writer_task.abort();
-    device_mgr.close_all_devices();
+    device_mgr.close_all_for_client(client_id);
     Ok(())
 }
 
@@ -70,13 +72,14 @@ pub async fn handle(
 async fn relay_client_event(
     ev: IpcResponse,
     device_mgr: &DeviceManager,
+    client_id: u64,
     tx: &mpsc::Sender<NmMessage>,
 ) -> bool {
     if let webhid::IpcResponse::DeviceDisconnected { device, .. } = &ev {
         device_mgr.force_close(device.device_id);
     }
     if let webhid::IpcResponse::InputReport { device_id, .. } = &ev
-        && !device_mgr.has_nm_session(*device_id)
+        && !device_mgr.has_nm_session_for_client(*device_id, client_id)
     {
         return true;
     }
@@ -115,6 +118,7 @@ async fn read_next_request<R: AsyncRead + Unpin>(
 
 async fn dispatch(
     device_mgr: &DeviceManager,
+    client_id: u64,
     req: NmRequest,
     ws_port: u16,
     wt_state: &WtState,
@@ -122,12 +126,14 @@ async fn dispatch(
     let req_id = req.id();
     let resp: NmResponse = match req {
         NmRequest::Enumerate { filter, .. } => handle_enumerate(device_mgr, filter.as_ref()),
-        NmRequest::Open { device_id, .. } => handle_open(device_mgr, device_id, ws_port),
+        NmRequest::Open { device_id, .. } => {
+            handle_open(device_mgr, device_id, ws_port, client_id)
+        }
         NmRequest::Close {
             device_id,
             session_token,
             ..
-        } => handle_close(device_mgr, device_id, session_token),
+        } => handle_close(device_mgr, device_id, session_token, client_id),
         NmRequest::SendReport { packed, .. } => handle_send_report(device_mgr, packed).await,
         NmRequest::ReceiveFeatureReport {
             device_id,
@@ -145,7 +151,7 @@ async fn dispatch(
             mode,
             session_token,
             ..
-        } => handle_set_data_plane(device_mgr, device_id, mode, session_token),
+        } => handle_set_data_plane(device_mgr, device_id, mode, session_token, client_id),
         NmRequest::Handshake { .. } => handle_handshake(device_mgr, ws_port, wt_state),
     };
     let mut resp = resp;
@@ -168,9 +174,16 @@ fn handle_enumerate(
         Err(_) => NmResponse::err(500),
     }
 }
-fn handle_open(device_mgr: &DeviceManager, device_id: u32, ws_port: u16) -> NmResponse {
-    let mut resp = match device_mgr.open(device_id) {
-        Ok((dev_id, session_token)) => NmResponse::ok_opened(dev_id, session_token, Some(ws_port)),
+fn handle_open(
+    device_mgr: &DeviceManager,
+    device_id: u32,
+    ws_port: u16,
+    client_id: u64,
+) -> NmResponse {
+    let mut resp = match device_mgr.open(device_id, client_id) {
+        Ok((dev_id, session_token)) => {
+            NmResponse::ok_opened(dev_id, Some(session_token), Some(ws_port))
+        }
         Err(e) => {
             let msg = e.to_string();
             let code = if msg.contains("not found") || msg.contains("No such") {
@@ -189,15 +202,23 @@ fn handle_close(
     device_mgr: &DeviceManager,
     device_id: u32,
     session_token: Option<String>,
+    client_id: u64,
 ) -> NmResponse {
-    match device_mgr.close(device_id, session_token.as_deref()) {
+    let Some(token) = session_token else {
+        return NmResponse::err(400);
+    };
+    match device_mgr.close(device_id, &token, client_id) {
         Ok(()) => NmResponse::ok(),
         Err(e) => {
-            let code = if e.to_string().contains("not open") {
+            let msg = e.to_string();
+            let code = if msg.contains("owned by another") {
+                403
+            } else if msg.contains("not open") {
                 404
             } else {
                 500
             };
+            log::warn!("[nm] close dev={device_id:#x} rejected: {msg}");
             NmResponse::err(code)
         }
     }
@@ -264,11 +285,26 @@ fn handle_set_data_plane(
     device_id: u32,
     mode: String,
     session_token: Option<String>,
+    client_id: u64,
 ) -> NmResponse {
-    if let Some(token) = &session_token {
-        device_mgr.set_dataplane_mode(device_id, token, &mode);
+    let Some(token) = session_token else {
+        return NmResponse::err(400);
+    };
+    match device_mgr.set_dataplane_mode(device_id, &token, &mode, client_id) {
+        Ok(()) => NmResponse::ok(),
+        Err(e) => {
+            let msg = e.to_string();
+            let code = if msg.contains("owned by another") {
+                403
+            } else if msg.contains("invalid data plane mode") {
+                400
+            } else {
+                404
+            };
+            log::warn!("[nm] setDataPlane dev={device_id:#x} rejected: {msg}");
+            NmResponse::err(code)
+        }
     }
-    NmResponse::ok()
 }
 
 fn handle_handshake(device_mgr: &DeviceManager, ws_port: u16, wt_state: &WtState) -> NmResponse {

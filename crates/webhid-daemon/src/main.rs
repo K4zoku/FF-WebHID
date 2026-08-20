@@ -165,10 +165,12 @@ async fn main() -> anyhow::Result<()> {
         let stdin = tokio::io::stdin();
         let stdout = tokio::io::stdout();
         let rx = event_tx.subscribe();
+        let client_id = device_mgr.new_client_id();
         client::handle(
             stdin,
             stdout,
             device_mgr,
+            client_id,
             rx,
             actual_ws_port,
             Arc::clone(&wt_state),
@@ -236,10 +238,12 @@ async fn main() -> anyhow::Result<()> {
                     tokio::spawn(async move {
                         log::info!("[client] connected");
                         let (reader, writer) = tokio::io::split(stream);
+                        let client_id = mgr.new_client_id();
                         if let Err(e) = client::handle(
                             reader,
                             writer,
                             mgr,
+                            client_id,
                             rx,
                             actual_ws_port,
                             wt_state_for_client,
@@ -279,9 +283,17 @@ async fn main() -> anyhow::Result<()> {
             tokio::spawn(async move {
                 log::info!("[client] connected");
                 let (reader, writer) = tokio::io::split(server);
-                if let Err(e) =
-                    client::handle(reader, writer, mgr, rx, actual_ws_port, wt_state_for_client)
-                        .await
+                let client_id = mgr.new_client_id();
+                if let Err(e) = client::handle(
+                    reader,
+                    writer,
+                    mgr,
+                    client_id,
+                    rx,
+                    actual_ws_port,
+                    wt_state_for_client,
+                )
+                .await
                 {
                     log::warn!("[client] error: {e:#}");
                 }

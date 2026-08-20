@@ -205,6 +205,10 @@ async fn handle_session(
     log::info!("[wt] authenticated for device_id={device_id:#x}");
     let conn = req.accept().await?;
     let wt_gen = device_mgr.wt_connect(device_id, &session_token);
+    if wt_gen == 0 {
+        log::warn!("[wt] session for device {device_id:#x} closed during handshake; closing");
+        return Ok(());
+    }
     let result = run_session(conn, event_tx, Arc::clone(&device_mgr), device_id).await;
     device_mgr.wt_disconnect(device_id, &session_token, wt_gen);
     result
