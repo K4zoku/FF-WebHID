@@ -9,8 +9,8 @@ in
 
     package = lib.mkOption {
       type = lib.types.package;
-      default = pkgs.callPackage ../package.nix { };
-      defaultText = literalExpression "pkgs.callPackage ../package.nix {}";
+      default = pkgs.callPackage ./package.nix { };
+      defaultText = lib.literalExpression "pkgs.callPackage ./package.nix {}";
       description = ''
         WebHID daemon package. Override to use a custom build or version.
       '';
@@ -27,17 +27,20 @@ in
       default = "webhid";
       description = "Service group.";
     };
-
-    settingsDir = lib.mkOption {
-      type = lib.types.path;
-      default = "/etc/webhid";
-      description = "Configuration directory for the daemon.";
-    };
   };
 
   config = lib.mkIf cfg.enable {
-    # Install udev rules from the package
+    # Install the packaged udev rules (uaccess for seat users).
     services.udev.packages = [ cfg.package ];
+
+    # The packaged rule grants `uaccess`, which only applies to the active
+    # logged-in seat user, so the service account needs explicit device
+    # permissions. The daemon enforces the FIDO/blocklist exclusions at
+    # runtime (fail-closed), so a dedicated service group that only ever runs
+    # the daemon does not broaden usable access to protected devices.
+    services.udev.extraRules = ''
+      KERNEL=="hidraw*", GROUP="${cfg.group}", MODE="0660"
+    '';
 
     # Systemd service
     systemd.services.webhid-daemon = {
@@ -53,6 +56,14 @@ in
         Restart = "on-failure";
         RestartSec = "5s";
 
+        # The non-root daemon binds its socket under $XDG_RUNTIME_DIR
+        # (crates/webhid/src/socket_path.rs::user_socket). Point it at the
+        # systemd-managed runtime directory so the socket lands on the
+        # forwarder's ROOT_FS_SOCKET fallback (/run/webhid/webhid.sock).
+        RuntimeDirectory = "webhid";
+        RuntimeDirectoryMode = "0750";
+        Environment = "XDG_RUNTIME_DIR=/run";
+
         # Hardening
         NoNewPrivileges = true;
         PrivateTmp = true;
@@ -67,13 +78,7 @@ in
         RestrictSUIDSGID = true;
         LockPersonality = true;
         ReadOnlyPaths = [ "/etc" ];
-        PrivateDevices = true;
       };
-
-      # Create settings directory
-      preStart = ''
-        mkdir -p ${cfg.settingsDir}
-      '';
     };
 
     # Create user/group
