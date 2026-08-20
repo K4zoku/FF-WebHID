@@ -11,6 +11,8 @@ use std::collections::{HashMap, HashSet};
 
 use webhid::DeviceInfo;
 
+use hidreport::{Field, ReportDescriptor};
+
 use crate::blocklist::{self, ReportType};
 
 /// One collection on a report's chain: usage_page, usage, and whether the
@@ -29,7 +31,57 @@ type ReportAssociation = (Option<u16>, Option<u16>, bool);
 /// under a vendor top-level) are seen.
 type ReportCollectionMap = HashMap<(u8, u8), Vec<ReportAssociation>>;
 
+/// Build the report->collection association map used for blocklist pruning
+/// and runtime report blocking. Derived from the complete report descriptor
+/// when available, otherwise by walking the collection tree.
 fn build_report_collection_map(info: &DeviceInfo) -> ReportCollectionMap {
+    if !info.raw_descriptor.is_empty()
+        && let Ok(rdesc) = ReportDescriptor::try_from(info.raw_descriptor.as_slice())
+    {
+        return map_from_parsed_descriptor(&rdesc);
+    }
+    map_from_collection_tree(info)
+}
+
+/// Association map from the complete parsed descriptor: every Variable/Array
+/// field contributes its full collection ancestry to its report's entry;
+/// constant fields are skipped.
+fn map_from_parsed_descriptor(rdesc: &ReportDescriptor) -> ReportCollectionMap {
+    fn add<T: hidreport::Report>(reports: &[T], rt_byte: u8, map: &mut ReportCollectionMap) {
+        for report in reports {
+            let rid: u8 = report
+                .report_id()
+                .as_ref()
+                .map(|id| (*id).into())
+                .unwrap_or(0);
+            for field in report.fields() {
+                let chain = match field {
+                    Field::Variable(_) | Field::Array(_) => field.collections(),
+                    Field::Constant(_) => continue,
+                };
+                let entry = map.entry((rid, rt_byte)).or_default();
+                for c in chain {
+                    let assoc = (
+                        c.usages().first().map(|u| u.usage_page.into()),
+                        c.usages().first().map(|u| u.usage_id.into()),
+                        u8::from(c.collection_type()) == 1,
+                    );
+                    if !entry.contains(&assoc) {
+                        entry.push(assoc);
+                    }
+                }
+            }
+        }
+    }
+    let mut map: ReportCollectionMap = HashMap::new();
+    add(rdesc.input_reports(), 0, &mut map);
+    add(rdesc.output_reports(), 1, &mut map);
+    add(rdesc.feature_reports(), 2, &mut map);
+    map
+}
+
+/// Association map built by walking the page-visible collection tree.
+fn map_from_collection_tree(info: &DeviceInfo) -> ReportCollectionMap {
     fn walk(
         col: &webhid::Collection,
         ancestors: &[ReportAssociation],
@@ -420,6 +472,7 @@ mod tests {
             descriptor_parse_failed: collections.is_empty(),
             collections,
             max_input_report_size: 64,
+            raw_descriptor: Vec::new(),
         }
     }
 
@@ -594,6 +647,7 @@ mod tests {
             collections: crate::descriptor::parse_report_descriptor(&bytes)
                 .unwrap_or_else(|e| panic!("{file}: descriptor parse failed: {e}")),
             max_input_report_size: 0,
+            raw_descriptor: bytes,
         };
         assert!(
             !info.collections.is_empty(),
@@ -828,5 +882,141 @@ mod tests {
         let info = device_info(vec![vendor]);
         let map = build_report_collection_map(&info);
         assert!(compute_blocked_input_ids(info.vendor_id, info.product_id, &map).is_empty());
+    }
+
+    const VENDOR_PAGE: &[u8] = &[0x06, 0x00, 0xFF]; // Usage Page (Vendor 0xFF00)
+    const GD_PAGE: &[u8] = &[0x05, 0x01]; // Usage Page (Generic Desktop 0x0001)
+    const CONSUMER_PAGE: &[u8] = &[0x05, 0x0C]; // Usage Page (Consumer 0x000C)
+
+    /// Bytes for one Application collection holding a single 8-bit variable
+    /// input field. `report_id: None` emits no Report ID item, inheriting the
+    /// one currently in effect.
+    fn app_input_collection(
+        page: &[u8],
+        collection_usage: u8,
+        report_id: Option<u8>,
+        field_usage: u8,
+    ) -> Vec<u8> {
+        let mut d = Vec::new();
+        d.extend_from_slice(page);
+        d.extend_from_slice(&[0x09, collection_usage]); // Usage (collection)
+        d.extend_from_slice(&[0xA1, 0x01]); // Collection (Application)
+        if let Some(rid) = report_id {
+            d.extend_from_slice(&[0x85, rid]); // Report ID
+        }
+        d.extend_from_slice(&[0x09, field_usage]); // Usage (field)
+        d.extend_from_slice(&[0x75, 0x08]); // Report Size (8)
+        d.extend_from_slice(&[0x95, 0x01]); // Report Count (1)
+        d.extend_from_slice(&[0x81, 0x02]); // Input (Data,Var,Abs)
+        d.extend_from_slice(&[0xC0]); // End Collection
+        d
+    }
+
+    /// Build a `DeviceInfo` from a raw report descriptor, retaining the bytes
+    /// in `raw_descriptor`.
+    fn device_from_descriptor(desc: &[u8]) -> DeviceInfo {
+        let collections =
+            crate::descriptor::parse_report_descriptor(desc).expect("test descriptor parses");
+        DeviceInfo {
+            vendor_id: 0x1234,
+            product_id: 0x5678,
+            product_name: String::new(),
+            manufacturer: None,
+            serial_number: None,
+            usage_page: None,
+            usage: None,
+            device_id: 1,
+            descriptor_parse_failed: false,
+            collections,
+            max_input_report_size: 64,
+            raw_descriptor: desc.to_vec(),
+        }
+    }
+
+    /// Protected input report IDs for `info`.
+    fn blocked_inputs(info: &DeviceInfo) -> HashSet<u8> {
+        let map = build_report_collection_map(info);
+        compute_blocked_input_ids(info.vendor_id, info.product_id, &map)
+    }
+
+    #[test]
+    fn test_vendor_only_report_not_protected() {
+        let desc = app_input_collection(VENDOR_PAGE, 0x01, Some(5), 0x02);
+        let info = device_from_descriptor(&desc);
+        assert!(blocked_inputs(&info).is_empty());
+        assert!(prune_device_info(info).is_some());
+    }
+
+    #[test]
+    fn test_keyboard_only_report_protected_and_hidden() {
+        let desc = app_input_collection(GD_PAGE, 0x06, Some(5), 0x07);
+        let info = device_from_descriptor(&desc);
+        assert_eq!(blocked_inputs(&info), HashSet::from([5]));
+        assert!(prune_device_info(info).is_none());
+    }
+
+    #[test]
+    fn test_mixed_report_field_order_does_not_change_protection() {
+        // Report 5 spans a vendor and a keyboard collection.
+        let mut vendor_first = Vec::new();
+        vendor_first.extend(app_input_collection(VENDOR_PAGE, 0x01, Some(5), 0x02));
+        vendor_first.extend(app_input_collection(GD_PAGE, 0x06, None, 0x07));
+
+        let mut keyboard_first = Vec::new();
+        keyboard_first.extend(app_input_collection(GD_PAGE, 0x06, Some(5), 0x07));
+        keyboard_first.extend(app_input_collection(VENDOR_PAGE, 0x01, None, 0x02));
+
+        let vf = device_from_descriptor(&vendor_first);
+        let kf = device_from_descriptor(&keyboard_first);
+        assert_eq!(blocked_inputs(&vf), HashSet::from([5]));
+        assert_eq!(blocked_inputs(&kf), HashSet::from([5]));
+    }
+
+    #[test]
+    fn test_protected_field_in_middle_still_protects_report() {
+        // Report 5 spans vendor, keyboard, then consumer collections.
+        let mut desc = Vec::new();
+        desc.extend(app_input_collection(VENDOR_PAGE, 0x01, Some(5), 0x02));
+        desc.extend(app_input_collection(GD_PAGE, 0x06, None, 0x07));
+        desc.extend(app_input_collection(CONSUMER_PAGE, 0x01, None, 0x02));
+        let info = device_from_descriptor(&desc);
+        assert_eq!(blocked_inputs(&info), HashSet::from([5]));
+    }
+
+    #[test]
+    fn test_only_affected_report_id_blocked() {
+        // Report 5 vendor-only, report 6 keyboard.
+        let mut desc = Vec::new();
+        desc.extend(app_input_collection(VENDOR_PAGE, 0x01, Some(5), 0x02));
+        desc.extend(app_input_collection(GD_PAGE, 0x06, Some(6), 0x07));
+        let info = device_from_descriptor(&desc);
+        assert_eq!(blocked_inputs(&info), HashSet::from([6]));
+    }
+
+    #[test]
+    fn test_padding_does_not_alter_classification() {
+        let mut desc = Vec::new();
+        desc.extend_from_slice(VENDOR_PAGE);
+        desc.extend_from_slice(&[0x09, 0x01]);
+        desc.extend_from_slice(&[0xA1, 0x01]);
+        desc.extend_from_slice(&[0x85, 0x05]); // Report ID 5
+        desc.extend_from_slice(&[0x09, 0x02]);
+        desc.extend_from_slice(&[0x75, 0x08, 0x95, 0x01]);
+        desc.extend_from_slice(&[0x81, 0x02]); // vendor data field
+        desc.extend_from_slice(&[0x75, 0x08, 0x95, 0x03]);
+        desc.extend_from_slice(&[0x81, 0x01]); // constant padding
+        desc.extend_from_slice(&[0xC0]);
+        desc.extend(app_input_collection(GD_PAGE, 0x06, None, 0x07));
+        let info = device_from_descriptor(&desc);
+        assert_eq!(blocked_inputs(&info), HashSet::from([5]));
+    }
+
+    #[test]
+    fn test_mixed_protected_report_pruned_from_visible_metadata() {
+        let mut desc = Vec::new();
+        desc.extend(app_input_collection(VENDOR_PAGE, 0x01, Some(5), 0x02));
+        desc.extend(app_input_collection(GD_PAGE, 0x06, None, 0x07));
+        let info = device_from_descriptor(&desc);
+        assert!(prune_device_info(info).is_none());
     }
 }

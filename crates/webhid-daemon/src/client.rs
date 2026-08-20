@@ -407,6 +407,7 @@ mod tests {
             descriptor_parse_failed: false,
             collections: vec![],
             max_input_report_size: 64,
+            raw_descriptor: Vec::new(),
         }
     }
 

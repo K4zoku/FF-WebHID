@@ -26,6 +26,9 @@ pub struct DeviceInfo {
     /// `collections` is then empty.
     #[serde(default)]
     pub descriptor_parse_failed: bool,
+    /// Raw HID report descriptor bytes. Daemon-side only; skipped on the wire.
+    #[serde(skip)]
+    pub raw_descriptor: Vec<u8>,
 }
 
 /// Optional filters for an enumerate request used by the device picker.
@@ -593,6 +596,7 @@ mod tests {
             descriptor_parse_failed: false,
             collections: vec![],
             max_input_report_size: 0,
+            raw_descriptor: Vec::new(),
         };
         let r = NmResponse::ok_with_devices(vec![dev]);
         assert_eq!(r.status, Some(200));

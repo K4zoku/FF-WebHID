@@ -131,13 +131,17 @@ fn info_from_hidapi_pub_with_desc(info: &HidDeviceInfo, desc: Vec<u8>) -> Option
     } else {
         vec![]
     };
-    Some(build_device_info(info, collections))
+    Some(build_device_info(info, collections, desc))
 }
 
 /// Assemble a `DeviceInfo` from a hidapi entry and its parsed collections.
 /// Shared by the enumerate path and the `dump` subcommand so both report
 /// exactly the same shape the daemon sees.
-pub(crate) fn build_device_info(info: &HidDeviceInfo, collections: Vec<Collection>) -> DeviceInfo {
+pub(crate) fn build_device_info(
+    info: &HidDeviceInfo,
+    collections: Vec<Collection>,
+    raw_descriptor: Vec<u8>,
+) -> DeviceInfo {
     let max_input_report_size = crate::descriptor::max_input_report_size(&collections);
     DeviceInfo {
         vendor_id: info.vendor_id(),
@@ -151,6 +155,7 @@ pub(crate) fn build_device_info(info: &HidDeviceInfo, collections: Vec<Collectio
         descriptor_parse_failed: collections.is_empty(),
         collections,
         max_input_report_size,
+        raw_descriptor,
     }
 }
 

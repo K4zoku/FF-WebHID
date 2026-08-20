@@ -95,6 +95,7 @@ mod tests {
             }],
             max_input_report_size: 0,
             descriptor_parse_failed: false,
+            raw_descriptor: Vec::new(),
         }
     }
 

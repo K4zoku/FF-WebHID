@@ -164,7 +164,7 @@ fn dump_entry(api: &HidApi, info: &HidDeviceInfo, hex_descriptor: bool) -> DumpE
     let collection_count = parse_result.as_ref().map(|c| c.len()).unwrap_or(0);
     let parse_error = parse_result.err();
 
-    let device_info = hid::build_device_info(info, collections);
+    let device_info = hid::build_device_info(info, collections, desc.clone());
     let vendor_product_blocked = hid::is_blocked_by_vendor_product(&device_info)
         .then(|| "WICG vendor/product blocklist rule".to_string());
     let max_input_report_size = device_info.max_input_report_size;
