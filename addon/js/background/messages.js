@@ -503,12 +503,16 @@
   function handlePairDevice(request, sender, sendResponse) {
     ;(async () => {
       try {
-        const info = await getDeviceInfo(request.device.deviceId)
-        if (!info || !info.identityKey) {
+        let identityKey = request.device.identityKey
+        if (!identityKey) {
+          const info = await getDeviceInfo(request.device.deviceId)
+          identityKey = info && info.identityKey
+        }
+        if (!identityKey) {
           sendResponse({ success: false, error: 'device identity unavailable', hashes: [] })
           return
         }
-        await addAllowedDevice(request.origin, request.device.deviceId, info.identityKey)
+        await addAllowedDevice(request.origin, request.device.deviceId, identityKey)
         const deviceIds = await getAllowedDevices(request.origin)
         await notifyAllowedDevicesChanged(request.origin, deviceIds)
         sendResponse({ success: true, hashes: deviceIds })
