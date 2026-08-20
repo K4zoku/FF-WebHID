@@ -1,7 +1,9 @@
 class Webhid < Formula
   desc "WebHID implementation for Firefox via native-messaging bridge and HID daemon"
   homepage "https://github.com/K4zoku/FF-WebHID"
-  url "https://github.com/K4zoku/FF-WebHID.git", tag: "v3.1.0"
+  url "https://github.com/K4zoku/FF-WebHID.git",
+      tag: "v3.1.0",
+      revision: "0d0c4a649c4bef9bf577c4cef6eedc28bcb72e32"
   version "3.1.0"
   license "MIT"
   head "https://github.com/K4zoku/FF-WebHID.git", branch: "main"
@@ -52,8 +54,10 @@ class Webhid < Formula
       For the persistent forwarder mode instead:
         brew services start webhid
 
-      macOS also requires Input Monitoring permission for HID access:
-        System Settings -> Privacy & Security -> Input Monitoring
+      Input-class devices (keyboard, mouse, trackpad) may require Input
+      Monitoring permission (System Settings -> Privacy & Security -> Input
+      Monitoring); other HID device classes generally do not. Grant it if
+      the daemon reports permission errors.
 
       Install the Firefox addon from:
         https://addons.mozilla.org/firefox/addon/webhid/

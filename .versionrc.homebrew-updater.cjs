@@ -1,5 +1,5 @@
 const VERSION_REGEX = /^(\s*version\s+")([^"]+)(")/m
-const TAG_REGEX = /^(\s*url\s+"[^"]+",\s*tag:\s*")v([^"]+)(")/m
+const TAG_REGEX = /^(\s*tag:\s*")v([^"]+)(")/m
 
 function readVersion(contents) {
   const match = contents.match(VERSION_REGEX)
