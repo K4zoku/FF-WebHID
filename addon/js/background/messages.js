@@ -28,7 +28,7 @@
     isTabAuthorizedForDevice,
     forTabsOfOrigin,
     collectDeviceSessionsForOrigin,
-    clearDeviceSessionsForOrigin
+    enqueueOrphanCleanup
   } = webhid.import('bgStateOps')
   const { urlOrigin, frameKey } = webhid.import('bgCsp')
   const NativeMessaging = webhid.import('NativeMessaging')
@@ -80,9 +80,13 @@
       await removeAllowedDevice(origin, deviceId)
       removeDeviceInfo(deviceId)
       const tokens = collectDeviceSessionsForOrigin(deviceId, origin)
-      clearDeviceSessionsForOrigin(deviceId, origin)
       for (const token of tokens) {
-        await NativeMessaging.closeDevice(deviceId, token).catch(() => {})
+        try {
+          await NativeMessaging.closeDevice(deviceId, token)
+          unregisterDeviceSession(deviceId, token)
+        } catch {
+          enqueueOrphanCleanup(deviceId, token)
+        }
       }
     }
     await deleteGrantGroups(memberGroups.map((g) => g.id))

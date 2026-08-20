@@ -14,7 +14,7 @@
 
   const { workerPolyfillSites, pendingPicker, shadowArms } = webhid.import('bgState')
   const { openDb, txDone } = webhid.import('bgStorage')
-  const { purgeTab } = webhid.import('bgStateOps')
+  const { purgeTab, retryOrphanCleanup } = webhid.import('bgStateOps')
   const NativeMessaging = webhid.import('NativeMessaging')
   const { NM_HOST_FORWARDER, NM_HOST_DAEMON } = webhid.import('NM_HOST_NAMES')
   const registerMessageHandlers = webhid.import('registerMessageHandlers')
@@ -236,6 +236,13 @@
   browser.tabs.onRemoved.addListener((tabId) =>
     purgeTab(tabId, (deviceId, token) => NativeMessaging.closeDevice(deviceId, token))
   )
+
+  ;(function scheduleOrphanRetry() {
+    setTimeout(() => {
+      retryOrphanCleanup((deviceId, token) => NativeMessaging.closeDevice(deviceId, token))
+      scheduleOrphanRetry()
+    }, 30000)
+  })()
 
   const actionApi = browser.browserAction || browser.action || null
   if (actionApi && actionApi.onClicked) {

@@ -1,6 +1,8 @@
 ;(function () {
   const logger = webhid.import('logger')
-  const { deviceTabMap, deviceSessions } = webhid.import('bgState')
+  const { deviceTabMap, deviceSessions, orphanCleanup } = webhid.import('bgState')
+
+  const MAX_CLEANUP_ATTEMPTS = 5
 
   /**
    * Returns the list of tab IDs authorized for the device in the given event, or null.
@@ -190,9 +192,49 @@
   }
 
   /**
+   * Moves a session whose daemon close failed into the orphan retry queue.
+   * The ownership record is dropped only after the close is confirmed or the
+   * token is tracked for retry, never before.
+   * @param {number} deviceId
+   * @param {string} token
+   * @returns {void}
+   */
+  function enqueueOrphanCleanup(deviceId, token) {
+    unregisterDeviceSession(deviceId, token)
+    orphanCleanup.set(token, { deviceId, attempts: 0 })
+  }
+
+  /**
+   * Retries every queued orphan close, passing `(deviceId, token)` to
+   * `closeDeviceFn`. Entries are removed on success and dropped after
+   * `MAX_CLEANUP_ATTEMPTS` failures. Returns the number of entries touched.
+   * @param {Function} closeDeviceFn
+   * @returns {number}
+   */
+  function retryOrphanCleanup(closeDeviceFn) {
+    let touched = 0
+    for (const [token, entry] of orphanCleanup) {
+      entry.attempts += 1
+      touched += 1
+      closeDeviceFn(entry.deviceId, token).then(
+        () => orphanCleanup.delete(token),
+        (e) => {
+          if (entry.attempts >= MAX_CLEANUP_ATTEMPTS) {
+            logger.warn('orphan cleanup gave up on device', entry.deviceId, e)
+            orphanCleanup.delete(token)
+          }
+        }
+      )
+    }
+    return touched
+  }
+
+  /**
    * Removes a closing tab's registrations and closes every session the tab
-   * owned, passing `(deviceId, token)` to `closeDeviceFn`. The tab's
-   * sessions are always cleaned even when other tabs keep the device open.
+   * owned, passing `(deviceId, token)` to `closeDeviceFn`. Ownership records
+   * are removed only after the daemon confirms the close; failures move to
+   * the orphan retry queue. The tab's sessions are always cleaned even when
+   * other tabs keep the device open.
    * @param {number} tabId
    * @param {Function} closeDeviceFn
    * @returns {void}
@@ -203,10 +245,10 @@
       if (!tabs.has(tabId)) continue
       tabs.delete(tabId)
       const tokens = collectDeviceSessionsForTab(deviceId, tabId)
-      clearDeviceSessionsForTab(deviceId, tabId)
       for (const token of tokens) {
-        closeDeviceFn(deviceId, token).catch((e) =>
-          logger.debug('closeDevice failed', deviceId, e)
+        closeDeviceFn(deviceId, token).then(
+          () => unregisterDeviceSession(deviceId, token),
+          () => enqueueOrphanCleanup(deviceId, token)
         )
       }
       if (tabs.size === 0) {
@@ -258,6 +300,8 @@
     clearDeviceSessions,
     clearDeviceSessionsForOrigin,
     clearDeviceSessionsForTab,
+    enqueueOrphanCleanup,
+    retryOrphanCleanup,
     unregisterDeviceTab,
     clearDeviceTab,
     isTabAuthorizedForDevice,
