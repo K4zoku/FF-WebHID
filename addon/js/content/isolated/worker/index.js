@@ -30,6 +30,33 @@ let controlPort = null
 let dataPort = null
 /** @type {Array<object>} */
 let preOpen = []
+/** Per-request deadline so a lost request can never hang a page send. */
+const PENDING_REQUEST_TIMEOUT_MS = 30000
+/** Bound on requests queued while the transport is down. */
+const MAX_PREOPEN = 1024
+
+/**
+ * Registers a pending request with a deadline. On timeout the entry is
+ * rejected and removed; a later response is a no-op.
+ * @param {number} reqId
+ * @param {{resolve: Function, reject: Function}} entry
+ * @returns {void}
+ */
+function registerPending(reqId, entry) {
+  const timer = setTimeout(() => {
+    if (pending.delete(reqId)) entry.reject(new Error('request timed out'))
+  }, PENDING_REQUEST_TIMEOUT_MS)
+  pending.set(reqId, {
+    resolve: (...args) => {
+      clearTimeout(timer)
+      entry.resolve(...args)
+    },
+    reject: (...args) => {
+      clearTimeout(timer)
+      entry.reject(...args)
+    }
+  })
+}
 
 self.onmessage = ({ data: msg }) => {
   if (msg && msg.type === 'setPorts') {
@@ -100,6 +127,14 @@ function handleControlMessage(msg) {
 function handleDataPortMessage(msg) {
   if (!msg) return
   if (!transport || !transport.isOpen()) {
+    if (preOpen.length >= MAX_PREOPEN) {
+      replyData({
+        type: msg.type === 'receiveFeature' ? 'featureResult' : 'sendResult',
+        reqId: msg.reqId,
+        error: 'busy'
+      })
+      return
+    }
     preOpen.push(msg)
     return
   }
@@ -170,7 +205,7 @@ function handleSend(msg, msgType) {
   const reqId = nextReqId++
   const frame = buildSendFrame(msgType, reqId, msg.reportId, payload)
   const isFeature = msgType !== MSG_SEND_REPORT
-  pending.set(reqId, {
+  registerPending(reqId, {
     resolve: () =>
       replyData({
         type: isFeature ? 'featureResult' : 'sendResult',
@@ -204,7 +239,7 @@ function handleReceiveFeature(msg) {
   }
   const reqId = nextReqId++
   const frame = buildSendFrame(MSG_RECEIVE_FEATURE_REPORT, reqId, msg.reportId, null)
-  pending.set(reqId, {
+  registerPending(reqId, {
     resolve: (data) => {
       const transfer = data instanceof Uint8Array && data.buffer ? [data.buffer] : []
       replyData({ type: 'featureResult', reqId: msg.reqId, data }, transfer)

@@ -218,7 +218,7 @@ async fn handle_session(
 /// send stream, length-prefixed (u32 LE). Stops on the first write error.
 fn spawn_writer_task(
     mut send: SendStream,
-    mut frame_rx: mpsc::UnboundedReceiver<Bytes>,
+    mut frame_rx: mpsc::Receiver<Bytes>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         while let Some(frame) = frame_rx.recv().await {
@@ -235,11 +235,11 @@ fn spawn_writer_task(
 }
 
 /// Read length-prefixed client frames off the bidirectional stream until
-/// EOF or an oversized frame, dispatching each non-empty frame to the
-/// batching message handler.
+/// EOF, an oversized frame, or a full response queue, dispatching each
+/// non-empty frame to the batching message handler.
 async fn read_inbound_frames(
     recv: &mut RecvStream,
-    frame_tx: &mpsc::UnboundedSender<Bytes>,
+    frame_tx: &mpsc::Sender<Bytes>,
     device_mgr: &Arc<DeviceManager>,
     device_id: u32,
 ) {
@@ -258,7 +258,11 @@ async fn read_inbound_frames(
             break;
         }
         batching::handle_client_message(&frame, device_mgr, device_id, move |resp| {
-            let _ = frame_tx.send(Bytes::from(resp));
+            if frame_tx.try_send(Bytes::from(resp)).is_err() {
+                // Response queue full: the client is saturating the
+                // session; end it rather than queue without bound.
+                return;
+            }
         })
         .await;
     }
@@ -272,7 +276,9 @@ async fn run_session(
 ) -> anyhow::Result<()> {
     let (send, mut recv) = conn.accept_bi().await?;
 
-    let (frame_tx, frame_rx) = mpsc::unbounded_channel::<Bytes>();
+    // Bounded response/input queue; when full, the session is torn down
+    // instead of growing memory (the worker reconnects).
+    let (frame_tx, frame_rx) = mpsc::channel::<Bytes>(1024);
     let writer_task = spawn_writer_task(send, frame_rx);
 
     let event_rx = event_tx.subscribe();
@@ -280,7 +286,7 @@ async fn run_session(
     let sender_task = tokio::spawn(batching::run_sender(
         event_rx,
         device_id,
-        move |frame: Vec<u8>| flush_tx.send(Bytes::from(frame)).is_ok(),
+        move |frame: Vec<u8>| flush_tx.try_send(Bytes::from(frame)).is_ok(),
     ));
 
     read_inbound_frames(&mut recv, &frame_tx, &device_mgr, device_id).await;

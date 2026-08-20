@@ -26,6 +26,8 @@
     reconnectDelay: 1000,
     nmHostName: NM_HOST_FORWARDER,
     lastError: null,
+    /** Per-request deadline for NM requests (see sendFrame). */
+    REQUEST_TIMEOUT_MS: 30000,
 
     /**
      * @param {object} message
@@ -174,13 +176,31 @@
           return
         }
         const id = this.nextId++
-        this.pending.set(id, { resolve, reject })
+        // Deadline so a request the daemon never answers cannot hang the
+        // background (and its pending map) forever.
+        const timer = setTimeout(() => {
+          if (this.pending.delete(id)) {
+            logger.warn('NM request n=' + id + ' timed out')
+            reject(new Error('NM request timed out'))
+          }
+        }, this.REQUEST_TIMEOUT_MS)
+        this.pending.set(id, {
+          resolve: (...args) => {
+            clearTimeout(timer)
+            resolve(...args)
+          },
+          reject: (...args) => {
+            clearTimeout(timer)
+            reject(...args)
+          }
+        })
         try {
           const message = buildMessage(id)
           logger.debug(describe(message, id))
           this.port.postMessage(message)
         } catch (e) {
           this.pending.delete(id)
+          clearTimeout(timer)
           reject(e)
         }
       })

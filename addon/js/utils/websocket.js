@@ -73,6 +73,10 @@
       reconnectDelay = Math.min(reconnectDelay * 2, 5000)
     }
 
+    // Browser WebSocket buffers sends internally; cap how much an
+    // authenticated page can pile up before frames start failing.
+    const MAX_BUFFERED_BYTES = 4 * 1024 * 1024
+
     return {
       /**
        * @param {{wsPort: number, token: string, logLevel?: number}} msg
@@ -89,6 +93,10 @@
        */
       send(frame) {
         if (!ws || ws.readyState !== WebSocket.OPEN) return false
+        if (ws.bufferedAmount > MAX_BUFFERED_BYTES) {
+          log('warn', 'WS send queue saturated (' + ws.bufferedAmount + ' bytes); frame dropped')
+          return false
+        }
         ws.send(frame)
         return true
       },

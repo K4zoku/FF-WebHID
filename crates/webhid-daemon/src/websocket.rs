@@ -100,7 +100,10 @@ async fn handle_websocket(
     }
 
     let (mut ws_sender, mut ws_receiver) = ws_stream.split();
-    let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
+    // Bounded queues: a saturated authenticated page can fill the outbound
+    // or frame queue; when full, the connection is torn down instead of
+    // growing memory without limit (the worker reconnects).
+    let (tx, mut rx) = mpsc::channel::<Message>(1024);
 
     let mut outgoing_task = tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
@@ -113,7 +116,7 @@ async fn handle_websocket(
 
     let tx_for_receiver = tx.clone();
     let tx_for_worker = tx.clone();
-    let (frame_tx, mut frame_rx) = mpsc::unbounded_channel::<Bytes>();
+    let (frame_tx, mut frame_rx) = mpsc::channel::<Bytes>(1024);
     let mgr_for_worker = Arc::clone(&device_mgr);
     let device_id_for_worker = device_id;
     let mut frame_worker = tokio::spawn(async move {
@@ -123,7 +126,7 @@ async fn handle_websocket(
                 &mgr_for_worker,
                 device_id_for_worker,
                 |resp| {
-                    let _ = tx_for_worker.send(Message::Binary(resp.into()));
+                    let _ = tx_for_worker.try_send(Message::Binary(resp.into()));
                 },
             )
             .await;
@@ -144,7 +147,7 @@ async fn handle_websocket(
     let mut sender_task = tokio::spawn(batching::run_sender(
         event_rx,
         device_id_for_sender,
-        move |frame: Vec<u8>| tx_for_sender.send(Message::Binary(frame.into())).is_ok(),
+        move |frame: Vec<u8>| tx_for_sender.try_send(Message::Binary(frame.into())).is_ok(),
     ));
 
     tokio::select! {
@@ -231,10 +234,17 @@ async fn ws_authenticate(
     let hash_holder: Arc<std::sync::Mutex<Option<String>>> = Arc::new(std::sync::Mutex::new(None));
     let hash_ref = Arc::clone(&hash_holder);
 
-    let ws_stream = tokio_tungstenite::accept_hdr_async(
+    // Cap inbound message/frame size at the native-messaging ceiling so an
+    // authenticated page cannot buffer unbounded frames in tungstenite.
+    let config = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default()
+        .max_message_size(Some(webhid::protocol::MAX_NM_FRAME))
+        .max_frame_size(Some(webhid::protocol::MAX_NM_FRAME));
+
+    let ws_stream = tokio_tungstenite::accept_hdr_async_with_config(
         stream,
         #[allow(clippy::result_large_err)]
         move |req: &Request, res: Response| ws_accept_callback(req, res, &hash_ref),
+        Some(config),
     )
     .await;
 
@@ -261,17 +271,17 @@ async fn ws_authenticate(
 }
 
 /// Handle a single received WebSocket message. Returns `false` when the
-/// connection should be torn down (close frame, read error, or a Pong send
-/// that failed).
+/// connection should be torn down (close frame, read error, a Pong send
+/// that failed, or a full frame queue).
 fn handle_ws_message(
     msg: Result<Message, tokio_tungstenite::tungstenite::Error>,
-    tx: mpsc::UnboundedSender<Message>,
-    frame_tx: &mpsc::UnboundedSender<Bytes>,
+    tx: mpsc::Sender<Message>,
+    frame_tx: &mpsc::Sender<Bytes>,
 ) -> bool {
     match msg {
-        Ok(Message::Ping(data)) => tx.send(Message::Pong(data)).is_ok(),
+        Ok(Message::Ping(data)) => tx.try_send(Message::Pong(data)).is_ok(),
         Ok(Message::Close(_)) => false,
-        Ok(Message::Binary(frame)) => frame_tx.send(frame).is_ok(),
+        Ok(Message::Binary(frame)) => frame_tx.try_send(frame).is_ok(),
         Err(e) => {
             log::warn!("[ws] read error: {e}");
             false
