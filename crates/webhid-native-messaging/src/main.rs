@@ -149,11 +149,69 @@ async fn try_connect_candidates(
     let mut last_err = None;
     for path in candidates {
         match connect_to_path(path).await {
-            Ok(s) => return Ok((s, path.clone())),
+            Ok(s) => {
+                if !verify_daemon_peer(&s) {
+                    log::warn!("[forwarder] daemon socket at {path} failed peer verification; trying next candidate");
+                    last_err = Some(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        "daemon socket peer verification failed",
+                    ));
+                    continue;
+                }
+                return Ok((s, path.clone()));
+            }
             Err(e) => last_err = Some(e),
         }
     }
     Err(last_err.expect("candidate_sockets returned zero entries"))
+}
+
+/// Verifies the daemon endpoint's credentials before forwarding anything:
+/// the peer must be root (system-wide daemon) or the same user as the
+/// forwarder (per-user daemon). This blocks a local process from
+/// impersonating the daemon on a predictable socket path for another user.
+#[cfg(target_os = "linux")]
+fn verify_daemon_peer(stream: &tokio::net::UnixStream) -> bool {
+    let my_uid = unsafe { libc::geteuid() };
+    match stream.peer_cred() {
+        Ok(cred) if cred.uid() == 0 || cred.uid() == my_uid => true,
+        Ok(cred) => {
+            log::warn!(
+                "[forwarder] refusing daemon socket: peer uid {} is neither root nor uid {my_uid}",
+                cred.uid()
+            );
+            false
+        }
+        Err(e) => {
+            log::warn!("[forwarder] peer_cred() failed: {e}");
+            false
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn verify_daemon_peer(stream: &tokio::net::UnixStream) -> bool {
+    use std::os::fd::AsRawFd;
+    let my_uid = unsafe { libc::geteuid() };
+    let mut euid: libc::uid_t = 0;
+    let mut egid: libc::gid_t = 0;
+    if unsafe { libc::getpeereid(stream.as_raw_fd(), &mut euid, &mut egid) } != 0 {
+        log::warn!("[forwarder] getpeereid failed");
+        return false;
+    }
+    if euid == 0 || euid == my_uid {
+        true
+    } else {
+        log::warn!(
+            "[forwarder] refusing daemon socket: peer euid {euid} is neither root nor uid {my_uid}"
+        );
+        false
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn verify_daemon_peer(_stream: &tokio::net::UnixStream) -> bool {
+    true
 }
 
 /// Connect to the daemon named pipe, retrying with exponential backoff

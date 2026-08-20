@@ -34,7 +34,13 @@ pub fn user_socket() -> String {
 }
 
 #[cfg(target_os = "macos")]
-pub const MACOS_SOCKET: &str = "/tmp/webhid.sock";
+/// Per-user socket: /tmp is world-writable, so a fixed name would let any
+/// user pre-create the socket and impersonate the daemon for other users.
+/// The sticky bit protects the per-uid file from cross-user replacement.
+pub fn macos_socket() -> String {
+    let uid = unsafe { libc::getuid() };
+    format!("/tmp/webhid-{uid}.sock")
+}
 
 #[cfg(target_os = "windows")]
 pub const PIPE: &str = r"\\.\pipe\webhid";
@@ -51,8 +57,8 @@ pub fn daemon_socket_path() -> String {
         }
         user_socket()
     }
-    #[cfg(not(target_os = "linux"))]
-    MACOS_SOCKET.to_string()
+    #[cfg(target_os = "macos")]
+    macos_socket()
 }
 
 #[cfg(unix)]
@@ -67,7 +73,7 @@ pub fn forwarder_socket_candidates() -> Vec<String> {
         candidates.push(user_socket());
         candidates.push(ROOT_FS_SOCKET.to_string());
     }
-    #[cfg(not(target_os = "linux"))]
-    candidates.push(MACOS_SOCKET.to_string());
+    #[cfg(target_os = "macos")]
+    candidates.push(macos_socket());
     candidates
 }
