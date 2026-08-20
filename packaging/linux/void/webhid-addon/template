@@ -1,6 +1,6 @@
 # Template file for webhid-addon
 pkgname=webhid-addon
-version=1.6.5
+version=3.1.0
 revision=1
 build_style=fetch
 depends="webhid"
@@ -8,9 +8,10 @@ short_desc="WebHID browser extension for Firefox and Zen (system-wide installati
 maintainer="K4zoku <k4zoku@pm.me>"
 license="MIT"
 homepage="https://github.com/K4zoku/FF-WebHID"
-distfiles="https://addons.mozilla.org/firefox/downloads/latest/webhid@k4zoku.dev/latest.xpi"
-checksum=0000000000000000000000000000000000000000000000000000000000000000
-# ^ Replace with real checksum after first build
+# Pinned AMO file URL (versioned, not the mutable latest.xpi); regenerate with
+# `npm run bump:pins` after each release.
+distfiles="https://addons.mozilla.org/firefox/downloads/file/4950900/webhid-3.1.0.xpi"
+checksum=f34b1258949600750705f23b900697d1af908b473008ed827b0a423b58272a97
 
 do_install() {
 	_ext_id="webhid@k4zoku.dev"

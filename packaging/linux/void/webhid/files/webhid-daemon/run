@@ -1,0 +1,6 @@
+#!/bin/sh
+# runit service for the persistent WebHID daemon (Profile B).
+# Enable with: sudo ln -s /etc/sv/webhid-daemon /var/service/
+# Logs go to the service logger via stdout/stderr.
+exec 2>&1
+exec /usr/bin/webhid-daemon

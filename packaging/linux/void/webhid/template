@@ -13,8 +13,7 @@ maintainer="K4zoku <k4zoku@pm.me>"
 license="MIT"
 homepage="https://github.com/K4zoku/FF-WebHID"
 distfiles="https://github.com/K4zoku/FF-WebHID/archive/refs/tags/v${version}.tar.gz"
-checksum=6a847c1c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c
-# ^ Replace with real checksum after first build
+checksum=650994b70f45295caa21e0e1ad91a9510b0d05d63844477e7300c8bbb38b8efb
 
 do_install() {
 	# Install binaries
@@ -26,6 +25,11 @@ do_install() {
 
 	# Install systemd service (reference for Void users with systemd)
 	vinstall "${FILESDIR}/webhid-daemon.service" 644 usr/lib/systemd/system
+
+	# Install runit service for persistent-daemon mode (Void's native service
+	# manager). Enable with: sudo ln -s /etc/sv/webhid-daemon /var/service/
+	# (or: vsv enable webhid-daemon). The systemd unit stays as reference.
+	vinstall "${FILESDIR}/webhid-daemon/run" 755 usr/lib/sv/webhid-daemon/run
 
 	# Install NM manifests for all Gecko browsers
 	for d in mozilla librewolf waterfox; do
@@ -40,9 +44,4 @@ do_install() {
 
 	# Install license
 	vlicense LICENSE
-}
-
-post_install() {
-	# Create webhid group for socket access
-	# Users must add themselves: sudo usermod -aG webhid $USER
 }
