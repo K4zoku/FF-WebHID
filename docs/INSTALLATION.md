@@ -34,6 +34,34 @@ you want the daemon always-on. Both modes are switchable at any time from the
 addon settings (`about:addons → WebHID → Options → Daemon as NM host`); all
 packages ship both NM manifests.
 
+## Packaging profiles per platform
+
+Each distro package supports one or both daemon modes; the supported profile
+is stated here so a package is only expected to make its own profile work.
+
+```text
+Profile A (on-demand daemon-as-NM-host):
+  daemon binary + daemon NM manifest + device permission mechanism,
+  no persistent service.
+
+Profile B (persistent daemon + forwarder):
+  daemon + forwarder binaries, forwarder NM manifest, platform-native
+  service integration, IPC authorization (webhid group / socket perms).
+```
+
+| Package        | Profile | Notes                                                                          |
+| -------------- | ------- | ------------------------------------------------------------------------------ |
+| Arch (AUR)     | A+B     | Root systemd service (B) plus both manifests on Firefox/LibreWolf/Waterfox (A). |
+| Debian/Ubuntu  | A+B     | systemd service, udev rule, `webhid` group created by postinst.                 |
+| Fedora/RHEL    | A+B     | systemd service, udev rule, `webhid` group created by `%pre`.                   |
+| Alpine         | B       | OpenRC + mdev; group created by pre-install hook.                               |
+| Void           | B       | runit service shipped; systemd unit kept as reference.                          |
+| NixOS          | B       | systemd service as `webhid` user, udev group rule for hidraw.                   |
+| Homebrew       | A+B     | `webhid-register-firefox` (A) plus `brew services` (B).                         |
+| Windows MSI    | A+B     | Registers both NM hosts; no persistent service (use Scheduled Task manually).   |
+| Windows ZIP    | A       | `install.ps1` registers daemon-as-NM-host; MSI for all-users/B mode.            |
+| macOS ZIP      | A       | `install.sh` registers daemon-as-NM-host; Homebrew for B mode.                  |
+
 ---
 
 ## Linux
