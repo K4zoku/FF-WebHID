@@ -31,63 +31,112 @@
   }
 
   /**
-   * Records one daemon session token for a (device, tab) pair so cleanup
-   * paths can close the exact session.
+   * Records one daemon session token with its owner.
+   * `deviceSessions` is `deviceId -> Map<token, { tabId, origin }>`.
    * @param {number} deviceId
-   * @param {number} tabId
    * @param {string} token
+   * @param {{tabId: number, origin: string}} owner
    * @returns {void}
    */
-  function registerDeviceSession(deviceId, tabId, token) {
-    if (!deviceId || tabId == null || !token) return
-    let byTab = deviceSessions.get(deviceId)
-    if (!byTab) {
-      byTab = new Map()
-      deviceSessions.set(deviceId, byTab)
+  function registerDeviceSession(deviceId, token, owner) {
+    if (!deviceId || !token || !owner || owner.tabId == null || !owner.origin) return
+    let byToken = deviceSessions.get(deviceId)
+    if (!byToken) {
+      byToken = new Map()
+      deviceSessions.set(deviceId, byToken)
     }
-    let tokens = byTab.get(tabId)
-    if (!tokens) {
-      tokens = new Set()
-      byTab.set(tabId, tokens)
-    }
-    tokens.add(token)
-    logger.debug('register session device ' + deviceId + ' tab ' + tabId)
+    byToken.set(token, { tabId: owner.tabId, origin: owner.origin })
+    logger.debug('register session device ' + deviceId + ' tab ' + owner.tabId)
   }
 
   /**
-   * Drops one session token for a (device, tab) pair after a successful
-   * close.
+   * Drops the exact session token after a successful close.
    * @param {number} deviceId
-   * @param {number} tabId
    * @param {string} token
    * @returns {void}
    */
-  function unregisterDeviceSession(deviceId, tabId, token) {
-    if (!deviceId || tabId == null || !token) return
-    const byTab = deviceSessions.get(deviceId)
-    if (!byTab) return
-    const tokens = byTab.get(tabId)
-    if (!tokens) return
-    tokens.delete(token)
-    if (tokens.size === 0) byTab.delete(tabId)
-    if (byTab.size === 0) deviceSessions.delete(deviceId)
+  function unregisterDeviceSession(deviceId, token) {
+    if (!deviceId || !token) return
+    const byToken = deviceSessions.get(deviceId)
+    if (!byToken) return
+    byToken.delete(token)
+    if (byToken.size === 0) deviceSessions.delete(deviceId)
   }
 
   /**
-   * Collects every session token for a device across all tabs (revocation).
+   * Collects session tokens for a device owned by `origin` (revocation).
    * @param {number} deviceId
+   * @param {string} origin
    * @returns {string[]}
    */
-  function collectDeviceSessions(deviceId) {
-    const byTab = deviceSessions.get(deviceId)
-    if (!byTab) return []
+  function collectDeviceSessionsForOrigin(deviceId, origin) {
+    const byToken = deviceSessions.get(deviceId)
+    if (!byToken || !origin) return []
     const tokens = []
-    for (const set of byTab.values()) tokens.push(...set)
+    for (const [token, owner] of byToken) {
+      if (owner.origin === origin) tokens.push(token)
+    }
     return tokens
   }
 
   /**
-   * Drops every session record for a device (revocation).
+   * Collects session tokens for a device owned by `tabId` (tab close).
+   * @param {number} deviceId
+   * @param {number} tabId
+   * @returns {string[]}
+   */
+  function collectDeviceSessionsForTab(deviceId, tabId) {
+    const byToken = deviceSessions.get(deviceId)
+    if (!byToken || tabId == null) return []
+    const tokens = []
+    for (const [token, owner] of byToken) {
+      if (owner.tabId === tabId) tokens.push(token)
+    }
+    return tokens
+  }
+
+  /**
+   * Collects every session token for a device (disconnect/global reset).
+   * @param {number} deviceId
+   * @returns {string[]}
+   */
+  function collectDeviceSessions(deviceId) {
+    const byToken = deviceSessions.get(deviceId)
+    return byToken ? [...byToken.keys()] : []
+  }
+
+  /**
+   * Drops the session records owned by `origin` for a device.
+   * @param {number} deviceId
+   * @param {string} origin
+   * @returns {void}
+   */
+  function clearDeviceSessionsForOrigin(deviceId, origin) {
+    const byToken = deviceSessions.get(deviceId)
+    if (!byToken || !origin) return
+    for (const [token, owner] of byToken) {
+      if (owner.origin === origin) byToken.delete(token)
+    }
+    if (byToken.size === 0) deviceSessions.delete(deviceId)
+  }
+
+  /**
+   * Drops the session records owned by `tabId` for a device.
+   * @param {number} deviceId
+   * @param {number} tabId
+   * @returns {void}
+   */
+  function clearDeviceSessionsForTab(deviceId, tabId) {
+    const byToken = deviceSessions.get(deviceId)
+    if (!byToken || tabId == null) return
+    for (const [token, owner] of byToken) {
+      if (owner.tabId === tabId) byToken.delete(token)
+    }
+    if (byToken.size === 0) deviceSessions.delete(deviceId)
+  }
+
+  /**
+   * Drops every session record for a device (revocation / disconnect).
    * @param {number} deviceId
    * @returns {void}
    */
@@ -141,8 +190,9 @@
   }
 
   /**
-   * Removes all device registrations for a tab and closes every exact
-   * session the tab held, passing `(deviceId, token)` to `closeDeviceFn`.
+   * Removes a closing tab's registrations and closes every session the tab
+   * owned, passing `(deviceId, token)` to `closeDeviceFn`. The tab's
+   * sessions are always cleaned even when other tabs keep the device open.
    * @param {number} tabId
    * @param {Function} closeDeviceFn
    * @returns {void}
@@ -150,19 +200,18 @@
   function purgeTab(tabId, closeDeviceFn) {
     if (tabId == null) return
     for (const [deviceId, tabs] of deviceTabMap) {
-      if (tabs.delete(tabId) && tabs.size === 0) {
+      if (!tabs.has(tabId)) continue
+      tabs.delete(tabId)
+      const tokens = collectDeviceSessionsForTab(deviceId, tabId)
+      clearDeviceSessionsForTab(deviceId, tabId)
+      for (const token of tokens) {
+        closeDeviceFn(deviceId, token).catch((e) =>
+          logger.debug('closeDevice failed', deviceId, e)
+        )
+      }
+      if (tabs.size === 0) {
         deviceTabMap.delete(deviceId)
-        const byTab = deviceSessions.get(deviceId)
-        const tokens = byTab ? [...(byTab.get(tabId) || [])] : []
-        if (byTab) {
-          byTab.delete(tabId)
-          if (byTab.size === 0) deviceSessions.delete(deviceId)
-        }
-        for (const token of tokens) {
-          closeDeviceFn(deviceId, token).catch((e) =>
-            logger.debug('closeDevice failed', deviceId, e)
-          )
-        }
+        deviceSessions.delete(deviceId)
       }
     }
   }
@@ -204,7 +253,11 @@
     registerDeviceSession,
     unregisterDeviceSession,
     collectDeviceSessions,
+    collectDeviceSessionsForOrigin,
+    collectDeviceSessionsForTab,
     clearDeviceSessions,
+    clearDeviceSessionsForOrigin,
+    clearDeviceSessionsForTab,
     unregisterDeviceTab,
     clearDeviceTab,
     isTabAuthorizedForDevice,

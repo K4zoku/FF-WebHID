@@ -26,8 +26,8 @@
     clearDeviceTab,
     isTabAuthorizedForDevice,
     forTabsOfOrigin,
-    collectDeviceSessions,
-    clearDeviceSessions
+    collectDeviceSessionsForOrigin,
+    clearDeviceSessionsForOrigin
   } = webhid.import('bgStateOps')
   const { urlOrigin, frameKey } = webhid.import('bgCsp')
   const NativeMessaging = webhid.import('NativeMessaging')
@@ -78,8 +78,8 @@
     for (const deviceId of toRevoke) {
       await removeAllowedDevice(origin, deviceId)
       removeDeviceInfo(deviceId)
-      const tokens = collectDeviceSessions(deviceId)
-      clearDeviceSessions(deviceId)
+      const tokens = collectDeviceSessionsForOrigin(deviceId, origin)
+      clearDeviceSessionsForOrigin(deviceId, origin)
       for (const token of tokens) {
         await NativeMessaging.closeDevice(deviceId, token).catch(() => {})
       }
@@ -303,7 +303,12 @@
                 return
               }
               registerDeviceTab(response.i, tabId)
-              if (response.t) registerDeviceSession(response.i, tabId, response.t)
+              if (response.t) {
+                registerDeviceSession(response.i, response.t, {
+                  tabId,
+                  origin: request.origin
+                })
+              }
             }
             sendResponse(response)
           })
@@ -339,7 +344,7 @@
       .then((response) => {
         if (http.isOk(response.s)) {
           unregisterDeviceTab(request.deviceId, tabId)
-          if (request.T) unregisterDeviceSession(request.deviceId, tabId, request.T)
+          if (request.T) unregisterDeviceSession(request.deviceId, request.T)
         }
         sendResponse(response)
       })
