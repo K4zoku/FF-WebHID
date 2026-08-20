@@ -139,9 +139,19 @@
       .then(async (response) => {
         if (http.isOk(response.s) && response.D) {
           const ids = await getAllowedDevices(origin)
-          const paired = response.D.filter((d) => ids.includes(d.deviceId))
-          decodeDeviceCollections(paired)
-          sendResponse({ s: response.s, D: paired })
+          const verified = []
+          for (const d of response.D) {
+            if (!ids.includes(d.deviceId)) continue
+            const stored = await getDeviceInfo(d.deviceId)
+            if (stored && stored.identityKey && d.identityKey && stored.identityKey !== d.identityKey) {
+              await removeAllowedDevice(origin, d.deviceId).catch(() => {})
+              continue
+            }
+            verified.push(d)
+          }
+          saveDeviceInfoBatch(verified).catch(() => {})
+          decodeDeviceCollections(verified)
+          sendResponse({ s: response.s, D: verified })
         } else {
           sendResponse(response)
         }
@@ -284,21 +294,27 @@
           .then(async (response) => {
             if (typeof response.P === 'number') lastHidPermission = response.P
             if (http.isOk(response.s) && response.i) {
-              // The permission may have been revoked while the daemon open
-              // was in flight (forget()/revoke race). Close the fresh
-              // session instead of returning an open for a revoked device.
               const stillAllowed = (await getAllowedDevices(request.origin)).includes(
                 request.deviceId
               )
-              if (!stillAllowed) {
-                logger.warn(
-                  'open for device',
-                  request.deviceId,
-                  'revoked while in flight; closing fresh session'
-                )
+              const stored = await getDeviceInfo(response.i)
+              const identityMatch =
+                !stored ||
+                !stored.identityKey ||
+                !response.K ||
+                stored.identityKey === response.K
+              if (!stillAllowed || !identityMatch) {
                 if (response.t) {
                   await NativeMessaging.closeDevice(response.i, response.t).catch(() => {})
                 }
+                if (!identityMatch) {
+                  await removeAllowedDevice(request.origin, response.i).catch(() => {})
+                }
+                logger.warn(
+                  'open for device',
+                  request.deviceId,
+                  'rejected after daemon open (revoked or identity mismatch)'
+                )
                 sendResponse({ s: 403 })
                 return
               }

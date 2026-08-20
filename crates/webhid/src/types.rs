@@ -18,6 +18,12 @@ pub struct DeviceInfo {
     #[serde(default)]
     pub usage: Option<u16>,
     pub device_id: u32,
+    /// Opaque 128-bit digest of the platform stable physical identity
+    /// (SHA-256 of the syspath/path used for `device_id`, first 16 bytes,
+    /// hex). Binds permission records to a physical device so a 32-bit id
+    /// collision with an absent device can be detected.
+    #[serde(default)]
+    pub identity_key: String,
     #[serde(default, with = "crate::collections_tlv")]
     pub collections: Vec<Collection>,
     #[serde(default)]
@@ -305,6 +311,8 @@ pub struct NmResponse {
     pub device: Option<DeviceInfo>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "i")]
     pub device_id: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "K")]
+    pub identity_key: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "r")]
     pub report_id: Option<u8>,
 }
@@ -330,12 +338,18 @@ impl NmResponse {
             ..Default::default()
         }
     }
-    pub fn ok_opened(device_id: u32, session_token: Option<String>, ws_port: Option<u16>) -> Self {
+    pub fn ok_opened(
+        device_id: u32,
+        session_token: Option<String>,
+        ws_port: Option<u16>,
+        identity_key: Option<String>,
+    ) -> Self {
         Self {
             status: Some(201),
             device_id: Some(device_id),
             session_token,
             ws_port,
+            identity_key,
             ..Default::default()
         }
     }
@@ -593,6 +607,7 @@ mod tests {
             usage_page: None,
             usage: None,
             device_id: 0xabc,
+            identity_key: String::new(),
             descriptor_parse_failed: false,
             collections: vec![],
             max_input_report_size: 0,
@@ -605,11 +620,12 @@ mod tests {
 
     #[test]
     fn test_nm_response_ok_opened() {
-        let r = NmResponse::ok_opened(0x1234, Some("tok".into()), Some(31337));
+        let r = NmResponse::ok_opened(0x1234, Some("tok".into()), Some(31337), Some("key".into()));
         assert_eq!(r.status, Some(201));
         assert_eq!(r.device_id, Some(0x1234));
         assert_eq!(r.session_token, Some("tok".into()));
         assert_eq!(r.ws_port, Some(31337));
+        assert_eq!(r.identity_key, Some("key".into()));
     }
 
     #[test]

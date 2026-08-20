@@ -188,9 +188,12 @@ async fn handle_open(
     client_id: u64,
 ) -> NmResponse {
     let mut resp = match device_mgr.open(device_id, client_id).await {
-        Ok((dev_id, session_token)) => {
-            NmResponse::ok_opened(dev_id, Some(session_token), Some(ws_port))
-        }
+        Ok((dev_id, session_token, identity_key)) => NmResponse::ok_opened(
+            dev_id,
+            Some(session_token),
+            Some(ws_port),
+            Some(identity_key),
+        ),
         Err(e) => {
             let msg = e.to_string();
             let code = if msg.contains("not found") || msg.contains("No such") {
@@ -450,6 +453,7 @@ mod tests {
             usage_page: None,
             usage: None,
             device_id: id,
+            identity_key: String::new(),
             descriptor_parse_failed: false,
             collections: vec![],
             max_input_report_size: 64,

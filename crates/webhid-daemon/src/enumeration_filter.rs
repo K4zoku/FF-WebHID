@@ -84,6 +84,7 @@ mod tests {
             usage_page: Some(usage_page),
             usage: Some(usage),
             device_id: 1,
+            identity_key: String::new(),
             collections: vec![Collection {
                 collection_type: 1,
                 usage_page: Some(usage_page),

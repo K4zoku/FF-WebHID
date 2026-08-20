@@ -472,6 +472,7 @@ mod tests {
             usage_page: None,
             usage: None,
             device_id: 1,
+            identity_key: String::new(),
             descriptor_parse_failed: collections.is_empty(),
             collections,
             max_input_report_size: 64,
@@ -646,6 +647,7 @@ mod tests {
             usage_page: None,
             usage: None,
             device_id: 1,
+            identity_key: String::new(),
             descriptor_parse_failed: false,
             collections: crate::descriptor::parse_report_descriptor(&bytes)
                 .unwrap_or_else(|e| panic!("{file}: descriptor parse failed: {e}")),
@@ -930,6 +932,7 @@ mod tests {
             usage_page: None,
             usage: None,
             device_id: 1,
+            identity_key: String::new(),
             descriptor_parse_failed: false,
             collections,
             max_input_report_size: 64,
