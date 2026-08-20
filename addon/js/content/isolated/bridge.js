@@ -117,8 +117,26 @@
     }
   })
 
-  /** @type {Map<string, object>} */
+  /**
+   * @typedef {object} WorkerEntry
+   * @property {'spawning'|'ready'|'closing'} state
+   * @property {object|null} worker proxy, null while the control port has
+   * not arrived yet. Never overload the map value to mean both "exists but
+   * not ready" and "does not exist".
+   */
+  /** @type {Map<string, WorkerEntry>} */
   const workers = new Map()
+
+  /**
+   * Returns the ready worker proxy for `deviceId`, or null while the worker
+   * is still spawning (or absent).
+   * @param {string} deviceId
+   * @returns {object|null}
+   */
+  function getWorker(deviceId) {
+    const entry = workers.get(deviceId)
+    return entry ? entry.worker : null
+  }
   /** @type {Set<string>} */
   const workerReadyDevices = new Set()
   /** @type {Map<string, object>} */
@@ -243,8 +261,8 @@
       const pagePort = pagePorts.get(window)
       if (pagePort) pagePort.postMessage({ type: 'dataPlaneDisconnect', deviceId })
     }
-    const worker = workers.get(deviceId)
-    if (worker) {
+    const entry = workers.get(deviceId)
+    if (entry && entry.worker) {
       const ports = dataPorts.get(deviceId)
       if (ports && !keepPort) {
         dataPorts.delete(deviceId)
@@ -257,7 +275,7 @@
           }
         }
       }
-      worker.terminate()
+      entry.worker.terminate()
       workers.delete(deviceId)
       workerReadyDevices.delete(deviceId)
     } else if (!keepPort) {
@@ -477,7 +495,7 @@
       requestMainWorldSpawn({ mode: 'terminate', deviceId }).catch(() => {})
       return false
     }
-    workers.set(deviceId, null)
+    workers.set(deviceId, { state: 'spawning', worker: null })
     deviceTransports.set(deviceId, opts.wtPort != null ? 'wt' : 'ws')
     connectParams.set(deviceId, {
       transport: opts.wtPort != null ? 'wt' : 'ws',
@@ -832,7 +850,7 @@
     }
     if (workers.has(deviceId)) {
       const proxy = makeWorkerProxy(port)
-      workers.set(deviceId, proxy)
+      workers.set(deviceId, { state: 'ready', worker: proxy })
       proxy.onmessage = (event) => {
         const data = event.data
         if (!data || !data.type) return
@@ -848,7 +866,7 @@
         }
         if (data.type === 'auth-failed') {
           logger.warn('worker auth-failed for', deviceId, 'code=' + data.code + '; re-opening')
-          if (workers.get(deviceId) === proxy) {
+          if (getWorker(deviceId) === proxy) {
             workers.delete(deviceId)
             workerReadyDevices.delete(deviceId)
             dataPorts.delete(deviceId)
@@ -858,7 +876,7 @@
         }
         if (data.type === 'closed') {
           logger.warn('worker closed for', deviceId)
-          if (workers.get(deviceId) === proxy) {
+          if (getWorker(deviceId) === proxy) {
             workers.delete(deviceId)
             workerReadyDevices.delete(deviceId)
             dataPorts.delete(deviceId)
@@ -1440,7 +1458,9 @@
     }
     replyToPage({ type: 'settings', settings: patch })
     const workerMsg = { type: 'settings', ...patch }
-    for (const worker of workers.values()) worker.postMessage(workerMsg)
+    for (const entry of workers.values()) {
+      if (entry.worker) entry.worker.postMessage(workerMsg)
+    }
   })
 
   browser.storage.onChanged.addListener((changes, area) => {
