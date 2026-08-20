@@ -188,16 +188,19 @@ fn interface_protected(info: &DeviceInfo, report_type: ReportType) -> bool {
 /// the full parse, and `max_input_report_size` is preserved.
 ///
 /// A device with no parsed collections (missing or unparseable report
-/// descriptor) is kept visible with empty collections.
+/// descriptor) is also hidden. With no collections there is nothing to
+/// classify reports against, so keeping it visible would let raw reports
+/// pass unfiltered; security classification requires a parsed descriptor,
+/// so the page-facing path fails closed.
 pub fn prune_device_info(info: DeviceInfo) -> Option<DeviceInfo> {
     if info.collections.is_empty() {
         log::warn!(
-            "device {:04x}:{:04x} ({}) kept visible with no parsed collections (missing or unparseable report descriptor)",
+            "device {:04x}:{:04x} ({}) hidden: no parsed collections (missing or unparseable report descriptor), failing closed",
             info.vendor_id,
             info.product_id,
             info.product_name
         );
-        return Some(info);
+        return None;
     }
     let map = build_report_collection_map(&info);
     let rules = blocklist::blocklist_rules();
@@ -705,11 +708,12 @@ mod tests {
     }
 
     #[test]
-    fn test_unparseable_descriptor_device_stays_visible() {
+    fn test_unparseable_descriptor_device_hidden_fail_closed() {
         let info = device_info(vec![]);
-        let kept = prune_device_info(info).expect("parse-failed device stays visible");
-        assert!(kept.collections.is_empty());
-        assert_eq!(kept.vendor_id, 0x1234);
+        assert!(
+            prune_device_info(info).is_none(),
+            "parse-failed device must be hidden (fail closed)"
+        );
     }
 
     #[test]

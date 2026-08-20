@@ -156,6 +156,15 @@ impl DeviceManager {
         let (info, uses_numbered_reports, device) = hid::open_by_device_id(device_id)?;
         let id = info.device_id;
 
+        // Fail closed: a device whose report descriptor is missing or failed
+        // to parse has no collections to classify reports against, so the
+        // page-facing path must not open it (see prune_device_info).
+        if info.descriptor_parse_failed {
+            return Err(anyhow!(
+                "device '{device_id:#x}' has no parsed report descriptor; refusing to open (fail closed)"
+            ));
+        }
+
         let blocking = Arc::new(DeviceReportBlocking::new(&info, uses_numbered_reports));
         let blocked_input_ids =
             Arc::new(blocking.blocked_input_ids(info.vendor_id, info.product_id));
