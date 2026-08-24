@@ -2,6 +2,7 @@ import { test, expect } from '../helpers/browser.js'
 
 interface ActivationResult {
   ok: boolean
+  count?: number
   name?: string
   message?: string
 }
@@ -68,6 +69,26 @@ test.describe('requestDevice user-activation gate', () => {
     })
     expect(result.settled ?? '').not.toContain('SecurityError')
     await sharedPage.keyboard.press('Escape')
+  })
+
+  test('forged MAIN-world userActivation does not open the picker (ISOLATED rechecks)', async ({
+    backgroundPage,
+    sharedPage,
+    pageUrl
+  }) => {
+    await backgroundPage.evaluate((key) => browser.storage.local.remove(key), settingKey())
+    await sharedPage.goto(pageUrl('/activation'), { waitUntil: 'domcontentloaded', timeout: 15000 })
+    const result: ActivationResult = await sharedPage.evaluate(() => {
+      try {
+        Object.defineProperty(navigator, 'userActivation', {
+          value: { isActive: true },
+          configurable: true
+        })
+      } catch {}
+      return window.tests!.helper!.requestDeviceWithoutGesture!(6000)
+    })
+    expect(result.ok).toBe(true)
+    expect(result.count).toBe(0)
   })
 
   test.afterAll(async ({ backgroundPage }) => {

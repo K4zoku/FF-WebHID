@@ -257,35 +257,9 @@
     refreshPlaneVisibility()
   }
 
-  /**
-   * @param {string} o
-   * @returns {boolean}
-   */
-  function isLoopbackOrigin(o) {
-    if (!o) return false
-    try {
-      const host = new URL(o).hostname
-      return host === 'localhost' || host === '::1' || host === '[::1]' || /^127\./.test(host)
-    } catch {
-      return false
-    }
-  }
-
-  /**
-   * In-page WebTransport exists only when the Data Plane radio is on
-   * WebTransport (in-page). The LNA prompt only applies to public origins;
-   * loopback pages and worker-context WT are exempt.
-   * @returns {void}
-   */
-  function updateInPageWarning() {
-    const show = settingsUi.currentRadioValue('dataPlane') === 'wt-inpage' && !isLoopbackOrigin(origin)
-    document.getElementById('warning-inpage-wt').hidden = !show
-  }
-
-  /** Applies plane visibility plus the in-page WT warning. */
+  /** Applies plane visibility. */
   function refreshPlaneVisibility() {
     updatePlaneVisibility()
-    updateInPageWarning()
   }
 
   const { applyPlaneRadios, updatePlaneVisibility, saveDataPlane, bindRadioGroup } =

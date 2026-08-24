@@ -34,15 +34,8 @@
           <div class="info-popover">
             <p data-i18n-md="settingsDataPlaneDesc">
               <strong>WebTransport</strong> (default): the fastest option; runs in a background
-              worker so pages stay smooth.<br /><strong>WebTransport (in-page)</strong>: connects
-              directly in the page; fine at normal report rates, uses more page CPU. Use it when the
-              site blocks background workers (CSP) but still allows the connection; the worker-based
-              options would fall back to Native Messaging there. Firefox asks a one-time
-              local-network permission (<code>Allow</code>) before the first in-page connection;
-              tick <code>Remember my choice for this site</code>. Reload pages after changing.<br /><strong
-                >WebSocket</strong
-              >: fallback when WebTransport is not available (older Firefox).<br /><strong
-                >Native Messaging</strong
+              worker so pages stay smooth.<br /><strong>WebSocket</strong>: fallback when
+              WebTransport is not available (older Firefox).<br /><strong>Native Messaging</strong
               >: the slowest but most compatible option; use when a site's security policy blocks
               the others.
             </p>
@@ -58,7 +51,11 @@
             />
             <span class="seg-label" data-i18n="segDataPlaneWt">WebTransport</span>
           </label>
-          <label class="seg-option" data-i18n-attr="title:settingsDataPlaneWtInpage">
+          <label
+            class="seg-option"
+            data-i18n-attr="title:settingsDataPlaneWtInpage"
+            hidden
+          >
             <input
               type="radio"
               name="dataPlane"

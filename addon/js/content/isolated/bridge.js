@@ -15,6 +15,32 @@
   const devicePicker = new WebHidDevicePicker()
   document.documentElement.appendChild(devicePicker.host)
 
+  let nativeUserActivation = null
+  try {
+    nativeUserActivation = navigator.userActivation ?? null
+  } catch {
+    nativeUserActivation = null
+  }
+  /** @type {number} last trusted pointer/key input timestamp (ms) */
+  let lastTrustedActivationInput = 0
+  const ACTIVATION_WINDOW_MS = 5000
+  for (const type of ['pointerdown', 'mousedown', 'keydown', 'touchend']) {
+    document.addEventListener(
+      type,
+      (event) => {
+        if (event.isTrusted) lastTrustedActivationInput = Date.now()
+      },
+      { capture: true, passive: true }
+    )
+  }
+  /** @returns {boolean} whether the requesting frame holds transient activation */
+  function hasTransientActivation() {
+    if (nativeUserActivation) {
+      return nativeUserActivation.isActive === true
+    }
+    return Date.now() - lastTrustedActivationInput < ACTIVATION_WINDOW_MS
+  }
+
   const PAGE_BLOCKED_ACTIONS = new Set([
     'pairDevice',
     'recordGrantGroup',
@@ -29,50 +55,69 @@
 
   /** @type {Set<string>} */
   const openDevices = new Set()
-  /** @type {Map<string, string[]>} deviceId -> LIFO stack of daemon session
-   * tokens, one entry per logical open. A close pops one token so every
-   * daemon session gets closed exactly once. */
+  /** @type {Map<string, Map<string, string[]>>} deviceId -> origin -> LIFO
+   * stack of daemon session tokens, one entry per logical open. Ownership
+   * is tracked per requesting origin (engine-set `event.origin`), so a
+   * close only ever reserves the exact session that the requesting
+   * principal opened; a sibling frame or origin cannot pop someone else's
+   * token. Every daemon session gets closed exactly once. */
   const openTokens = new Map()
   /** @type {Map<string, string>} deviceId -> token currently driving the
    * device's data plane (used to decide which token to reuse on refresh). */
   const dataPlaneTokens = new Map()
 
   /**
-   * Pushes a session token for an open.
+   * Pushes a session token for an open by `origin`.
    * @param {string} deviceId
+   * @param {string} origin
    * @param {string} token
    * @returns {void}
    */
-  function pushOpenToken(deviceId, token) {
-    let stack = openTokens.get(deviceId)
+  function pushOpenToken(deviceId, origin, token) {
+    let byOrigin = openTokens.get(deviceId)
+    if (!byOrigin) {
+      byOrigin = new Map()
+      openTokens.set(deviceId, byOrigin)
+    }
+    let stack = byOrigin.get(origin)
     if (!stack) {
       stack = []
-      openTokens.set(deviceId, stack)
+      byOrigin.set(origin, stack)
     }
     stack.push(token)
   }
 
   /**
-   * Returns the most recent session token for a device, or null.
+   * Pops (reserves) the most recent session token opened by `origin` for a
+   * close. Only the origin that opened the session can close it.
    * @param {string} deviceId
+   * @param {string} origin
    * @returns {string|null}
    */
-  function peekOpenToken(deviceId) {
-    const stack = openTokens.get(deviceId)
-    return stack && stack.length ? stack[stack.length - 1] : null
+  function popOpenToken(deviceId, origin) {
+    const byOrigin = openTokens.get(deviceId)
+    const stack = byOrigin && byOrigin.get(origin)
+    if (!stack || stack.length === 0) return null
+    const token = stack.pop()
+    if (stack.length === 0) {
+      byOrigin.delete(origin)
+      if (byOrigin.size === 0) openTokens.delete(deviceId)
+    }
+    return token
   }
 
   /**
-   * Pops (reserves) the most recent session token for a close.
+   * Returns every remaining live token for a device across origins (data
+   * plane refresh picks any live session).
    * @param {string} deviceId
-   * @returns {string|null}
+   * @returns {string[]}
    */
-  function popOpenToken(deviceId) {
-    const stack = openTokens.get(deviceId)
-    if (!stack || stack.length === 0) return null
-    const token = stack.pop()
-    if (stack.length === 0) openTokens.delete(deviceId)
-    return token
+  function allOpenTokens(deviceId) {
+    const byOrigin = openTokens.get(deviceId)
+    if (!byOrigin) return []
+    const tokens = []
+    for (const stack of byOrigin.values()) tokens.push(...stack)
+    return tokens
   }
 
   /**
@@ -311,11 +356,8 @@
   async function refreshDataPlaneToken(deviceId) {
     if (workers.has(deviceId)) return
     const failedToken = dataPlaneTokens.get(deviceId)
-    // Prefer a different live token when one exists.
-    const stack = openTokens.get(deviceId) || []
-    const token =
-      (failedToken ? stack.find((t) => t !== failedToken) : null) ||
-      peekOpenToken(deviceId)
+    const live = allOpenTokens(deviceId)
+    const token = (failedToken ? live.find((t) => t !== failedToken) : null) || live.at(-1)
     if (!token) {
       logger.warn('data plane refresh: no open session for', deviceId, '; plane stays down')
       return
@@ -724,7 +766,7 @@
     if (!openDevices.has(deviceId)) return
     nmPlanes.add(deviceId)
     deviceTransports.delete(deviceId)
-    const token = dataPlaneTokens.get(deviceId) || peekOpenToken(deviceId)
+    const token = dataPlaneTokens.get(deviceId) || allOpenTokens(deviceId).at(-1) || null
     browser.runtime
       .sendMessage({
         action: 'setDataPlane',
@@ -983,6 +1025,11 @@
     const payload = data.payload || {}
     const filters = payload.filters || []
     const exclusionFilters = payload.exclusionFilters || []
+    if (!settings.allowActivationlessRequestDevice && !hasTransientActivation()) {
+      logger.debug('requestDevice rejected: no user activation in isolated world')
+      replyToPage({ type: 'response', id: data.id, result: { cancelled: true } })
+      return
+    }
     const pickerMode =
       isChromium && settings.devicePickerMode === 'pageAction' ? 'modal' : settings.devicePickerMode
 
@@ -1041,13 +1088,14 @@
   /**
    * Runs the post-open data-plane spawn for a device.
    * @param {object} response
+   * @param {string} origin the requesting frame's origin (engine-set)
    * @returns {Promise<void>}
    */
-  async function handleOpenSuccess(response) {
+  async function handleOpenSuccess(response, origin) {
     const deviceId = response.i
     openCounts.set(deviceId, (openCounts.get(deviceId) || 0) + 1)
     openDevices.add(deviceId)
-    pushOpenToken(deviceId, response.t)
+    pushOpenToken(deviceId, origin, response.t)
     browser.runtime
       .sendMessage({
         action: 'deviceCountChanged',
@@ -1147,23 +1195,22 @@
         payload || {}
       )
       let reservedToken = null
+      const requestOrigin = getRequestOrigin(data)
       if (action === 'close') {
-        // Reserve one exact session token for this close; restore it if the
-        // daemon did not confirm, so bridge and daemon stay in sync.
-        reservedToken = popOpenToken(payload.deviceId)
+        reservedToken = popOpenToken(payload.deviceId, requestOrigin)
         if (reservedToken) msg.T = reservedToken
       }
       response = await browser.runtime.sendMessage(msg)
 
       if (action === 'open' && http.isOk(response.s) && response.t) {
-        await handleOpenSuccess(response)
+        await handleOpenSuccess(response, requestOrigin)
       }
 
       if (action === 'close') {
         if (http.isOk(response.s)) {
           handleCloseSuccess(payload)
         } else if (reservedToken) {
-          pushOpenToken(payload.deviceId, reservedToken)
+          pushOpenToken(payload.deviceId, requestOrigin, reservedToken)
         }
       }
 
@@ -1281,8 +1328,6 @@
       }
     }
     if (messageEvent.eventType === 'revoked') {
-      // Daemon sessions were closed by the background with exact tokens;
-      // drop all local state so stale tokens can never be reused.
       const deviceId = messageEvent.deviceId
       if (deviceId != null) {
         despawnDataPlane(deviceId)
@@ -1399,12 +1444,12 @@
   function respawnPlanesForMode(dp) {
     if (dp === 'ws') {
       for (const id of openDevices) {
-        const token = peekOpenToken(id)
+        const token = allOpenTokens(id).at(-1)
         if (token) spawnDataPlane(id, token, wsPort, { rewire: true })
       }
     } else if (dp === 'wt') {
       for (const id of openDevices) {
-        const token = peekOpenToken(id)
+        const token = allOpenTokens(id).at(-1)
         if (token) {
           if (wtPort != null) {
             spawnDataPlane(id, token, null, { wtPort, wtCertHash, rewire: true })
@@ -1426,8 +1471,8 @@
     }
     respawnPlanesForMode(dp)
     for (const id of openDevices) {
-      const stack = openTokens.get(id) || []
-      for (const token of stack) {
+      const tokens = allOpenTokens(id)
+      for (const token of tokens) {
         browser.runtime
           .sendMessage({
             action: 'setDataPlane',

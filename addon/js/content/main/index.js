@@ -23,6 +23,11 @@
   const nativeMessagePortClose = MessagePort.prototype.close
   const nativeMessagePortStart = MessagePort.prototype.start
   const NativeMessageChannel = MessageChannel
+  const NativeBlob = typeof Blob !== 'undefined' ? Blob : null
+  const nativeCreateObjectURL =
+    typeof URL !== 'undefined' && URL.createObjectURL ? URL.createObjectURL.bind(URL) : null
+  const nativeRevokeObjectURL =
+    typeof URL !== 'undefined' && URL.revokeObjectURL ? URL.revokeObjectURL.bind(URL) : null
   const nativeWorkerPostMessage =
     typeof Worker !== 'undefined' ? Worker.prototype.postMessage : null
   const nativeWorkerAddEventListener =
@@ -198,10 +203,18 @@
     let worker
     try {
       if (payload.mode === 'blob') {
-        const blobUrl = URL.createObjectURL(
-          new Blob([payload.bundleText || ''], { type: 'application/javascript' })
+        if (!NativeBlob || !nativeCreateObjectURL) {
+          return { result: { ok: false, error: 'Blob URL creation unavailable' }, transfer: null }
+        }
+        const blobUrl = nativeCreateObjectURL(
+          new NativeBlob([payload.bundleText || ''], { type: 'application/javascript' })
         )
-        worker = new NativeWorker(makeUrl(blobUrl))
+        try {
+          worker = new NativeWorker(makeUrl(blobUrl))
+        } catch (e) {
+          nativeRevokeObjectURL(blobUrl)
+          throw e
+        }
       } else {
         await sendRequest('armShadowSpawn', { url: location.href }, { timeoutMs: 2000 })
         worker = new NativeWorker(makeUrl(location.href))
@@ -795,9 +808,6 @@
             deviceId: state.deviceId,
             reportSize: state.maxInputReportSize + 3
           })
-          // Forget/revoke can run while the daemon open was in flight; a
-          // stale open must not resurrect the device. Close the fresh
-          // daemon session (best effort) and abort.
           if (state.forgotten) {
             sendRequest('close', { deviceId: state.deviceId }).catch(() => {})
             throw new DOMException('Device has been forgotten', 'InvalidStateError')

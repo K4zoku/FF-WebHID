@@ -25,11 +25,16 @@
 
   /**
    * Maps stored settings (dataPlane + useWorker) to the Data Plane radio value.
+   * The in-page WebTransport mode (`useWorker: false`) is a benchmark-only
+   * security downgrade: it hands daemon bearer credentials to the hostile
+   * MAIN world, so it is hidden from the UI and always presented as the
+   * isolated worker mode. Existing stored wt-inpage settings still work for
+   * the benchmark harness; the UI just never offers or shows the mode.
    * @param {object} s
    * @returns {string}
    */
   function effectiveDataPlaneValue(s) {
-    return s.dataPlane === 'wt' && s.useWorker === false ? 'wt-inpage' : s.dataPlane
+    return s.dataPlane === 'wt' && s.useWorker === false ? 'wt' : s.dataPlane
   }
 
   /**
