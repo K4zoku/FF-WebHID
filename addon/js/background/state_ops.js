@@ -192,6 +192,26 @@
   }
 
   /**
+   * Whether `token` is the exact daemon session opened by `origin` (and, when
+   * given, `tabId`). Principal-aware close/data-plane checks use this so a
+   * sibling frame or origin can never operate on someone else's session.
+   * @param {number} deviceId
+   * @param {string} token
+   * @param {string} origin
+   * @param {number} [tabId]
+   * @returns {boolean}
+   */
+  function isSessionOwnedBy(deviceId, token, origin, tabId) {
+    const byToken = deviceSessions.get(deviceId)
+    if (!byToken) return false
+    const owner = byToken.get(token)
+    if (!owner) return false
+    if (owner.origin !== origin) return false
+    if (tabId != null && owner.tabId !== tabId) return false
+    return true
+  }
+
+  /**
    * Moves a session whose daemon close failed into the orphan retry queue.
    * The ownership record is dropped only after the close is confirmed or the
    * token is tracked for retry, never before.
@@ -305,6 +325,7 @@
     unregisterDeviceTab,
     clearDeviceTab,
     isTabAuthorizedForDevice,
+    isSessionOwnedBy,
     purgeTab,
     broadcastGlobalReset,
     forTabsOfOrigin

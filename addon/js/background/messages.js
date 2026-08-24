@@ -25,6 +25,7 @@
     unregisterDeviceTab,
     clearDeviceTab,
     isTabAuthorizedForDevice,
+    isSessionOwnedBy,
     forTabsOfOrigin,
     collectDeviceSessionsForOrigin,
     enqueueOrphanCleanup
@@ -288,9 +289,6 @@
           .then(async (response) => {
             if (typeof response.P === 'number') lastHidPermission = response.P
             if (http.isOk(response.s) && response.i) {
-              // The permission may have been revoked while the daemon open
-              // was in flight (forget()/revoke race). Close the fresh
-              // session instead of returning an open for a revoked device.
               const stillAllowed = (await getAllowedDevices(request.origin)).includes(
                 request.deviceId
               )
@@ -341,6 +339,10 @@
   function handleClose(request, sender, sendResponse) {
     const tabId = sender.tab != null ? sender.tab.id : undefined
     if (!isTabAuthorizedForDevice(tabId, request.deviceId)) {
+      sendResponse({ s: 403 })
+      return true
+    }
+    if (request.T && !isSessionOwnedBy(request.deviceId, request.T, request.origin, tabId)) {
       sendResponse({ s: 403 })
       return true
     }
@@ -400,6 +402,13 @@
     if (!tabAllowsDevice(sender, request.deviceId)) {
       sendResponse({ s: 403 })
       return true
+    }
+    if (request.sessionToken) {
+      const tabId = sender.tab != null ? sender.tab.id : undefined
+      if (!isSessionOwnedBy(request.deviceId, request.sessionToken, request.origin, tabId)) {
+        sendResponse({ s: 403 })
+        return true
+      }
     }
     NativeMessaging.sendRequest({
       a: bgPacked.ACT.sdp,
@@ -792,13 +801,9 @@
     const origin = urlOrigin(request.url || (sender.tab && sender.tab.url) || '')
     const entry = tid != null ? permissionsPolicy.get(`${tid}:${sid}`) : null
     if (entry && entry.effective.kind === 'none') {
-      // Any ancestor (or the frame itself) declared hid=(): deny dominates,
-      // even for iframes delegated with allow="hid".
       return { policy: { hid: 'none' } }
     }
     if (request.isCrossOrigin) {
-      // Cross-origin frames need explicit delegation; the inherited deny
-      // above has already been checked.
       if (request.hasAllowAttr) return { policy: { hid: 'allowed' } }
       const allowKey = tid != null ? frameKey(tid, sid, origin) : null
       if (allowKey && allowedCrossOrigin.has(allowKey)) return { policy: { hid: 'allowed' } }
@@ -806,8 +811,6 @@
       if (allowedCrossOrigin.has(urlKey)) return { policy: { hid: 'allowed' } }
       return { policy: { hid: 'none' } }
     }
-    // Same-origin frame: the frame's own origin must be inside its
-    // effective allowlist (an explicit allowlist that omits it denies it).
     if (entry) {
       const eff = entry.effective
       if (eff.kind === 'all') return { policy: { hid: 'allowed' } }

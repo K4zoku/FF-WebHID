@@ -23,11 +23,24 @@
   const nativeMessagePortClose = MessagePort.prototype.close
   const nativeMessagePortStart = MessagePort.prototype.start
   const NativeMessageChannel = MessageChannel
+  const NativeWorker = typeof Worker !== 'undefined' ? Worker : null
   const NativeBlob = typeof Blob !== 'undefined' ? Blob : null
+  const NativeEvent = typeof Event !== 'undefined' ? Event : null
+  const NativeDOMException = typeof DOMException !== 'undefined' ? DOMException : null
   const nativeCreateObjectURL =
     typeof URL !== 'undefined' && URL.createObjectURL ? URL.createObjectURL.bind(URL) : null
   const nativeRevokeObjectURL =
     typeof URL !== 'undefined' && URL.revokeObjectURL ? URL.revokeObjectURL.bind(URL) : null
+  const nativeCryptoRandomUUID =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID.bind(crypto)
+      : null
+  const nativeSetTimeout = typeof setTimeout !== 'undefined' ? setTimeout : null
+  const nativeClearTimeout = typeof clearTimeout !== 'undefined' ? clearTimeout : null
+  const nativeCreateTrustedTypePolicy =
+    typeof trustedTypes !== 'undefined' && trustedTypes !== null
+      ? trustedTypes.createPolicy.bind(trustedTypes)
+      : null
   const nativeWorkerPostMessage =
     typeof Worker !== 'undefined' ? Worker.prototype.postMessage : null
   const nativeWorkerAddEventListener =
@@ -166,15 +179,15 @@
         resolve: (data) => resolve(mapResolve(data)),
         reject: (e) => {
           if (e && e.blocked) {
-            reject(new DOMException('Report is blocked', 'NotAllowedError'))
+            reject(new NativeDOMException('Report is blocked', 'NotAllowedError'))
           } else {
-            reject(new DOMException((e && e.message) || e || 'request failed', 'NetworkError'))
+            reject(new NativeDOMException((e && e.message) || e || 'request failed', 'NetworkError'))
           }
         }
       })
       if (!plane.wt.send(frame)) {
         inPagePending.delete(reqId)
-        reject(new DOMException('wt not open', 'NetworkError'))
+        reject(new NativeDOMException('wt not open', 'NetworkError'))
       }
     })
   }
@@ -309,7 +322,7 @@
   /** @returns {void} */
   function setupTrustedTypesSharing() {
     if (typeof trustedTypes === 'undefined' || trustedTypes === null) return
-    const nativeCreatePolicy = trustedTypes.createPolicy.bind(trustedTypes)
+    if (!nativeCreateTrustedTypePolicy) return
     let captured = false
     let resolveReady
     ttReady = new Promise((resolve) => {
@@ -328,15 +341,15 @@
     }
     const claim = (name) => {
       try {
-        return nativeCreatePolicy(name, baseRules)
+        return nativeCreateTrustedTypePolicy(name, baseRules)
       } catch {
         return null
       }
     }
 
     trustedTypes.createPolicy = function (claimedName, pageRules) {
-      if (captured) return nativeCreatePolicy(claimedName, pageRules)
-      const policy = nativeCreatePolicy(claimedName, baseRules)
+      if (captured) return nativeCreateTrustedTypePolicy(claimedName, pageRules)
+      const policy = nativeCreateTrustedTypePolicy(claimedName, baseRules)
       markCaptured(policy)
       return makeWrappedPolicy(policy, claimedName, pageRules)
     }
@@ -352,7 +365,7 @@
           const policy = claim(name)
           if (policy) {
             markCaptured(policy)
-            installTtSharing(name, policy, nativeCreatePolicy)
+            installTtSharing(name, policy, nativeCreateTrustedTypePolicy)
             return
           }
         }
@@ -412,17 +425,17 @@
   /**
    * @param {string} name
    * @param {object} policy
-   * @param {Function} nativeCreatePolicy
+   * @param {Function} nativeCreateTrustedTypePolicy
    * @returns {void}
    */
-  function installTtSharing(name, policy, nativeCreatePolicy) {
+  function installTtSharing(name, policy, nativeCreateTrustedTypePolicy) {
     let usedOnce = false
     trustedTypes.createPolicy = function (claimedName, pageRules) {
       if (claimedName === name && !usedOnce) {
         usedOnce = true
         return makeWrappedPolicy(policy, name, pageRules)
       }
-      return nativeCreatePolicy(claimedName, pageRules)
+      return nativeCreateTrustedTypePolicy(claimedName, pageRules)
     }
     ttFactory = (url) => policy.createScriptURL(url)
   }
@@ -454,8 +467,11 @@
   let nextReqId = 0
   /** @type {{object}} */
   const pending = {}
+  if (!nativeCryptoRandomUUID) {
+    throw new Error('WebHID polyfill requires crypto.randomUUID (secure context)')
+  }
   /** @type {string} */
-  const frameNonce = crypto.randomUUID()
+  const frameNonce = nativeCryptoRandomUUID()
 
   /** @type {MessagePort|null} */
   let bridgePort = null
@@ -547,7 +563,7 @@
       let settled = false
       let timer = null
       if (timeoutMs > 0) {
-        timer = setTimeout(() => {
+        timer = nativeSetTimeout(() => {
           if (settled) return
           settled = true
           delete pending[id]
@@ -558,7 +574,7 @@
       pending[id] = (result) => {
         if (settled) return
         settled = true
-        if (timer) clearTimeout(timer)
+        if (timer) nativeClearTimeout(timer)
         delete pending[id]
         resolve(result)
       }
@@ -701,9 +717,9 @@
         resolve: (data) => resolve(opts.mapResolve(data)),
         reject: (e) => {
           if (e && e.blocked) {
-            reject(new DOMException('Report is blocked', 'NotAllowedError'))
+            reject(new NativeDOMException('Report is blocked', 'NotAllowedError'))
           } else {
-            reject(new DOMException((e && e.message) || e || opts.failMessage, 'NetworkError'))
+            reject(new NativeDOMException((e && e.message) || e || opts.failMessage, 'NetworkError'))
           }
         }
       })
@@ -797,11 +813,11 @@
       /** @returns {Promise<void>} */
       value: async function () {
         const state = devState.get(this)
-        if (!state) throw new DOMException('Invalid state', 'InvalidStateError')
+        if (!state) throw new NativeDOMException('Invalid state', 'InvalidStateError')
         if (state.forgotten)
-          throw new DOMException('Device has been forgotten', 'InvalidStateError')
-        if (state.opened) throw new DOMException('Device is already open', 'InvalidStateError')
-        if (state.opening) throw new DOMException('Device is already open', 'InvalidStateError')
+          throw new NativeDOMException('Device has been forgotten', 'InvalidStateError')
+        if (state.opened) throw new NativeDOMException('Device is already open', 'InvalidStateError')
+        if (state.opening) throw new NativeDOMException('Device is already open', 'InvalidStateError')
         state.opening = true
         try {
           const response = await sendRequest('open', {
@@ -810,25 +826,25 @@
           })
           if (state.forgotten) {
             sendRequest('close', { deviceId: state.deviceId }).catch(() => {})
-            throw new DOMException('Device has been forgotten', 'InvalidStateError')
+            throw new NativeDOMException('Device has been forgotten', 'InvalidStateError')
           }
           if (http.isOk(response.s)) {
             await bridgeReady
             if (state.forgotten) {
               sendRequest('close', { deviceId: state.deviceId }).catch(() => {})
-              throw new DOMException('Device has been forgotten', 'InvalidStateError')
+              throw new NativeDOMException('Device has been forgotten', 'InvalidStateError')
             }
             wireDevicePort(state)
             state.opened = true
             logger.info('open deviceId=' + state.deviceId)
-            this.dispatchEvent(new Event('open'))
+            this.dispatchEvent(new NativeEvent('open'))
           } else {
             throw new Error('Open failed: ' + http.name(response.s || 0))
           }
         } catch (error) {
-          throw error instanceof DOMException
+          throw error instanceof NativeDOMException
             ? error
-            : new DOMException(error.message, 'NetworkError')
+            : new NativeDOMException(error.message, 'NetworkError')
         } finally {
           state.opening = false
         }
@@ -843,7 +859,7 @@
         const state = devState.get(this)
         if (!state) return
         if (state.forgotten)
-          throw new DOMException('Device has been forgotten', 'InvalidStateError')
+          throw new NativeDOMException('Device has been forgotten', 'InvalidStateError')
         if (!state.opened) return
         logger.debug('close deviceId=' + state.deviceId)
         try {
@@ -852,7 +868,7 @@
           })
           if (http.isOk(response.s)) {
             state.opened = false
-            rejectPendingReports(state, new DOMException('Device closed', 'AbortError'))
+            rejectPendingReports(state, new NativeDOMException('Device closed', 'AbortError'))
             if (state.dataPort) {
               if (state.dataPortHandler) {
                 nativeMessagePortRemoveEventListener.call(
@@ -865,12 +881,12 @@
               nativeMessagePortClose.call(state.dataPort)
               state.dataPort = null
             }
-            this.dispatchEvent(new Event('close'))
+            this.dispatchEvent(new NativeEvent('close'))
           } else {
             throw new Error('Failed to close device')
           }
         } catch (error) {
-          throw new DOMException(error.message, 'InvalidStateError')
+          throw new NativeDOMException(error.message, 'InvalidStateError')
         }
       },
       enumerable: false,
@@ -885,8 +901,8 @@
        */
       value: async function (reportId, data) {
         const state = devState.get(this)
-        if (!state) throw new DOMException('Invalid state', 'InvalidStateError')
-        if (!state.opened) throw new DOMException('Device is not open', 'InvalidStateError')
+        if (!state) throw new NativeDOMException('Invalid state', 'InvalidStateError')
+        if (!state.opened) throw new NativeDOMException('Device is not open', 'InvalidStateError')
         validateReportId(reportId, state.collections)
         const view =
           data instanceof ArrayBuffer
@@ -904,7 +920,7 @@
             failMessage: 'send failed'
           })
         } catch (error) {
-          throw new DOMException(error.message, 'NetworkError')
+          throw new NativeDOMException(error.message, 'NetworkError')
         }
       },
       enumerable: false,
@@ -918,8 +934,8 @@
        */
       value: async function (reportId) {
         const state = devState.get(this)
-        if (!state) throw new DOMException('Invalid state', 'InvalidStateError')
-        if (!state.opened) throw new DOMException('Device is not open', 'InvalidStateError')
+        if (!state) throw new NativeDOMException('Invalid state', 'InvalidStateError')
+        if (!state.opened) throw new NativeDOMException('Device is not open', 'InvalidStateError')
         validateReportId(reportId, state.collections)
         try {
           return sendDeviceRequest(state, {
@@ -935,7 +951,7 @@
             failMessage: 'receive failed'
           })
         } catch (error) {
-          throw new DOMException(error.message, 'NetworkError')
+          throw new NativeDOMException(error.message, 'NetworkError')
         }
       },
       enumerable: false,
@@ -950,8 +966,8 @@
        */
       value: async function (reportId, data) {
         const state = devState.get(this)
-        if (!state) throw new DOMException('Invalid state', 'InvalidStateError')
-        if (!state.opened) throw new DOMException('Device is not open', 'InvalidStateError')
+        if (!state) throw new NativeDOMException('Invalid state', 'InvalidStateError')
+        if (!state.opened) throw new NativeDOMException('Device is not open', 'InvalidStateError')
         validateReportId(reportId, state.collections)
         const view =
           data instanceof ArrayBuffer
@@ -969,7 +985,7 @@
             failMessage: 'send failed'
           })
         } catch (error) {
-          throw new DOMException(error.message, 'NetworkError')
+          throw new NativeDOMException(error.message, 'NetworkError')
         }
       },
       enumerable: false,
@@ -1154,7 +1170,7 @@
    */
   async function teardownForgottenDevice(device, state) {
     state.forgotten = true
-    rejectPendingReports(state, new DOMException('Device forgotten', 'AbortError'))
+    rejectPendingReports(state, new NativeDOMException('Device forgotten', 'AbortError'))
     if (state.opened) {
       state.opened = false
       try {
@@ -1177,7 +1193,7 @@
         nativeMessagePortClose.call(state.dataPort)
         state.dataPort = null
       }
-      device.dispatchEvent(new Event('close'))
+      device.dispatchEvent(new NativeEvent('close'))
     }
     pairedDevices = null
     deviceInfoCache = null
@@ -1483,11 +1499,11 @@
    */
   async function requestDeviceImpl(options = {}) {
     if (isWorker) {
-      throw new DOMException('Not allowed in worker context', 'NotSupportedError')
+      throw new NativeDOMException('Not allowed in worker context', 'NotSupportedError')
     }
     const policy = await getPolicy()
     if (policy && policy.hid === 'none') {
-      throw new DOMException('Access to HID is blocked by Permissions Policy', 'SecurityError')
+      throw new NativeDOMException('Access to HID is blocked by Permissions Policy', 'SecurityError')
     }
     if (
       !isCalledFromConsole() &&
@@ -1495,7 +1511,7 @@
       navigator.userActivation &&
       !navigator.userActivation.isActive
     ) {
-      throw new DOMException(
+      throw new NativeDOMException(
         'Must be handling a user gesture to perform a hid.requestDevice() call.',
         'SecurityError'
       )
@@ -1512,7 +1528,7 @@
       const id = frameNonce + ':' + ++nextReqId
       pending[id] = (result) => {
         grantRequestedDevices(result).then(resolve, (e) =>
-          reject(new DOMException(e != null ? e.message : 'requestDevice failed', 'NetworkError'))
+          reject(new NativeDOMException(e != null ? e.message : 'requestDevice failed', 'NetworkError'))
         )
       }
       nativeMessagePortPostMessage.call(bridgePort, {
@@ -1529,7 +1545,7 @@
       value: async function () {
         const policy = await getPolicy()
         if (policy && policy.hid === 'none') {
-          throw new DOMException('Access to HID is blocked by Permissions Policy', 'SecurityError')
+          throw new NativeDOMException('Access to HID is blocked by Permissions Policy', 'SecurityError')
         }
         try {
           const pairedHashes = await getPairedDevices()
@@ -1679,7 +1695,6 @@
   }
   installNavigatorHid()
 
-  const NativeWorker = globalThis.Worker
   /**
    * @param {string|URL} url
    * @param {object} [opts]
