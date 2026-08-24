@@ -92,17 +92,15 @@ async fn handle_websocket(
 
     let event_rx = event_tx.subscribe();
 
-    let ws_gen = device_mgr.ws_connect(device_id, &session_token);
-    if ws_gen == 0 {
+    let Some(grant) = device_mgr.ws_connect(device_id, &session_token) else {
         log::warn!("[ws] session for device {device_id:#x} closed during handshake; closing");
         let _ = send_close(ws_stream, WS_CLOSE_UNKNOWN_TOKEN, "session closed").await;
         return Ok(());
-    }
+    };
+    let ws_gen = grant.generation;
+    let mut cancel = grant.cancel.clone();
 
     let (mut ws_sender, mut ws_receiver) = ws_stream.split();
-    // Bounded queues: a saturated authenticated page can fill the outbound
-    // or frame queue; when full, the connection is torn down instead of
-    // growing memory without limit (the worker reconnects).
     let (tx, mut rx) = mpsc::channel::<Message>(1024);
 
     let mut outgoing_task = tokio::spawn(async move {
@@ -119,17 +117,34 @@ async fn handle_websocket(
     let (frame_tx, mut frame_rx) = mpsc::channel::<Bytes>(1024);
     let mgr_for_worker = Arc::clone(&device_mgr);
     let device_id_for_worker = device_id;
+    let session_token_for_worker = session_token.clone();
+    let mut cancel_for_worker = grant.cancel.clone();
     let mut frame_worker = tokio::spawn(async move {
-        while let Some(frame) = frame_rx.recv().await {
-            batching::handle_client_message(
+        loop {
+            let frame = tokio::select! {
+                frame = frame_rx.recv() => {
+                    match frame {
+                        Some(f) => f,
+                        None => break,
+                    }
+                }
+                _ = cancel_for_worker.changed() => break,
+            };
+            if !batching::handle_client_message(
                 &frame,
                 &mgr_for_worker,
                 device_id_for_worker,
+                &session_token_for_worker,
+                ws_gen,
+                crate::device_mgr::MODE_WS,
                 |resp| {
                     let _ = tx_for_worker.try_send(Message::Binary(resp.into()));
                 },
             )
-            .await;
+            .await
+            {
+                break;
+            }
         }
     });
 
@@ -143,11 +158,23 @@ async fn handle_websocket(
 
     let tx_for_sender = tx.clone();
     let device_id_for_sender = device_id;
+    let mgr_for_sender = Arc::clone(&device_mgr);
+    let session_token_for_sender = session_token.clone();
+    let cancel_for_sender = grant.cancel.clone();
 
     let mut sender_task = tokio::spawn(batching::run_sender(
         event_rx,
         device_id_for_sender,
-        move |frame: Vec<u8>| tx_for_sender.try_send(Message::Binary(frame.into())).is_ok(),
+        mgr_for_sender,
+        session_token_for_sender,
+        ws_gen,
+        crate::device_mgr::MODE_WS,
+        cancel_for_sender,
+        move |frame: Vec<u8>| {
+            tx_for_sender
+                .try_send(Message::Binary(frame.into()))
+                .is_ok()
+        },
     ));
 
     tokio::select! {
@@ -155,6 +182,9 @@ async fn handle_websocket(
         _ = &mut receiver_task => {},
         _ = &mut sender_task => {},
         _ = &mut frame_worker => {},
+        _ = cancel.changed() => {
+            log::info!("[ws] session for {device_id:#x} closed; tearing down transport");
+        },
     }
     outgoing_task.abort();
     receiver_task.abort();
@@ -176,7 +206,6 @@ fn is_loopback_host(host: &str) -> bool {
         return false;
     }
     if let Some(rest) = h.strip_prefix('[') {
-        // IPv6 literal, optionally with a port: [::1] / [::1]:port
         let end = rest.find(']').unwrap_or(rest.len());
         return &rest[..end] == "::1";
     }
@@ -192,9 +221,6 @@ fn ws_accept_callback(
     res: Response,
     hash_ref: &Arc<std::sync::Mutex<Option<String>>>,
 ) -> Result<Response, tokio_tungstenite::tungstenite::http::Response<Option<String>>> {
-    // Origin-form request URIs carry no host; the actual target is the
-    // `Host` header. Reject anything that does not target loopback so a
-    // rebinding-style request can never reach the daemon.
     let host_header = req
         .headers()
         .get("host")
@@ -234,8 +260,6 @@ async fn ws_authenticate(
     let hash_holder: Arc<std::sync::Mutex<Option<String>>> = Arc::new(std::sync::Mutex::new(None));
     let hash_ref = Arc::clone(&hash_holder);
 
-    // Cap inbound message/frame size at the native-messaging ceiling so an
-    // authenticated page cannot buffer unbounded frames in tungstenite.
     let config = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default()
         .max_message_size(Some(webhid::protocol::MAX_NM_FRAME))
         .max_frame_size(Some(webhid::protocol::MAX_NM_FRAME));

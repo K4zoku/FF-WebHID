@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, watch};
 
 use crate::blocklist::ReportType;
 use crate::device_mgr::DeviceManager;
@@ -73,18 +73,23 @@ impl RateGate {
 
 /// Writes the batch to one frame and flushes it, advancing the rate-gate
 /// counters when provided. Returns false when the flush callback reports
-/// failure and the sender must stop.
-fn flush_batch<F>(
+/// failure or the session is no longer active (the sender must stop).
+fn flush_batch<F, A>(
     batch: &mut Vec<(u8, Bytes)>,
     frame_buf: &mut Vec<u8>,
     flush: &mut F,
     rate: Option<&mut RateGate>,
+    alive: &mut A,
 ) -> bool
 where
     F: FnMut(Vec<u8>) -> bool,
+    A: FnMut() -> bool,
 {
     if batch.is_empty() {
         return true;
+    }
+    if !alive() {
+        return false;
     }
     write_batch_frame(frame_buf, batch);
     let flushed = batch.len() as u32;
@@ -98,15 +103,17 @@ where
     true
 }
 
-fn handle_event<F>(
+fn handle_event<F, A>(
     event_result: Result<webhid::IpcResponse, broadcast::error::RecvError>,
     device_id: u32,
     batch: &mut Vec<(u8, Bytes)>,
     frame_buf: &mut Vec<u8>,
     flush: &mut F,
+    alive: &mut A,
 ) -> bool
 where
     F: FnMut(Vec<u8>) -> bool,
+    A: FnMut() -> bool,
 {
     match event_result {
         Ok(webhid::IpcResponse::InputReport {
@@ -128,7 +135,7 @@ where
         Ok(_) => {}
         Err(broadcast::error::RecvError::Lagged(n)) => {
             log::warn!("[sender] broadcast lagged by {n} events, flushing batch");
-            if !flush_batch(batch, frame_buf, flush, None) {
+            if !flush_batch(batch, frame_buf, flush, None, alive) {
                 return false;
             }
         }
@@ -137,19 +144,21 @@ where
     true
 }
 
-fn drain_available<F>(
+fn drain_available<F, A>(
     rx: &mut broadcast::Receiver<webhid::IpcResponse>,
     device_id: u32,
     batch: &mut Vec<(u8, Bytes)>,
     frame_buf: &mut Vec<u8>,
     flush: &mut F,
+    alive: &mut A,
 ) where
     F: FnMut(Vec<u8>) -> bool,
+    A: FnMut() -> bool,
 {
     loop {
         match rx.try_recv() {
             Ok(ev) => {
-                if !handle_event(Ok(ev), device_id, batch, frame_buf, flush) {
+                if !handle_event(Ok(ev), device_id, batch, frame_buf, flush, alive) {
                     break;
                 }
             }
@@ -157,7 +166,7 @@ fn drain_available<F>(
             Err(broadcast::error::TryRecvError::Closed) => break,
             Err(broadcast::error::TryRecvError::Lagged(n)) => {
                 log::warn!("[sender] drain lagged by {n} events");
-                if !flush_batch(batch, frame_buf, flush, None) {
+                if !flush_batch(batch, frame_buf, flush, None, alive) {
                     break;
                 }
             }
@@ -166,18 +175,22 @@ fn drain_available<F>(
 }
 
 /// Waits out the coalesce window, folding further input reports into the
-/// batch. Returns false when the flush callback failed or the broadcast
-/// closed and the sender must stop.
-async fn coalesce_window<F>(
+/// batch. Returns false when the flush callback failed, the broadcast
+/// closed, the session was cancelled, or the sender must stop.
+#[allow(clippy::too_many_arguments)]
+async fn coalesce_window<F, A>(
     event_rx: &mut broadcast::Receiver<webhid::IpcResponse>,
     device_id: u32,
     batch: &mut Vec<(u8, Bytes)>,
     frame_buf: &mut Vec<u8>,
     flush: &mut F,
     window: Duration,
+    alive: &mut A,
+    cancel: &mut watch::Receiver<bool>,
 ) -> bool
 where
     F: FnMut(Vec<u8>) -> bool,
+    A: FnMut() -> bool,
 {
     let deadline = tokio::time::Instant::now() + window;
     loop {
@@ -187,23 +200,36 @@ where
         }
         tokio::select! {
             _ = tokio::time::sleep(remaining) => return true,
+            _ = cancel.changed() => return false,
             event_result = event_rx.recv() => {
-                if !handle_event(event_result, device_id, batch, frame_buf, flush) {
+                if !handle_event(event_result, device_id, batch, frame_buf, flush, alive) {
                     return false;
                 }
-                drain_available(event_rx, device_id, batch, frame_buf, flush);
+                drain_available(event_rx, device_id, batch, frame_buf, flush, alive);
             }
         }
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn run_sender<F>(
     mut event_rx: broadcast::Receiver<webhid::IpcResponse>,
     device_id: u32,
+    device_mgr: Arc<DeviceManager>,
+    session_token: String,
+    generation: u64,
+    kind: &'static str,
+    mut cancel: watch::Receiver<bool>,
     mut flush: F,
 ) where
     F: FnMut(Vec<u8>) -> bool + Send + 'static,
 {
+    let mut alive =
+        || device_mgr.session_transport_active(device_id, &session_token, kind, generation);
+    if *cancel.borrow() {
+        return;
+    }
+
     let batch_ms = env_int::<u64>("WEBHID_WS_BATCH_MS", DEFAULT_BATCH_FLUSH_MS);
 
     let mut batch: Vec<(u8, Bytes)> = Vec::with_capacity(8);
@@ -214,12 +240,13 @@ pub async fn run_sender<F>(
         loop {
             tokio::select! {
                 _ = flush_interval.tick() => {
-                    if !flush_batch(&mut batch, &mut frame_buf, &mut flush, None) {
+                    if !flush_batch(&mut batch, &mut frame_buf, &mut flush, None, &mut alive) {
                         break;
                     }
                 }
+                _ = cancel.changed() => break,
                 event_result = event_rx.recv() => {
-                    if !handle_event(event_result, device_id, &mut batch, &mut frame_buf, &mut flush) {
+                    if !handle_event(event_result, device_id, &mut batch, &mut frame_buf, &mut flush, &mut alive) {
                         break;
                     }
                 }
@@ -242,13 +269,17 @@ pub async fn run_sender<F>(
         window: rate_window,
     };
     loop {
-        let event_result = event_rx.recv().await;
+        let event_result = tokio::select! {
+            _ = cancel.changed() => break,
+            event_result = event_rx.recv() => event_result,
+        };
         if !handle_event(
             event_result,
             device_id,
             &mut batch,
             &mut frame_buf,
             &mut flush,
+            &mut alive,
         ) {
             break;
         }
@@ -258,6 +289,7 @@ pub async fn run_sender<F>(
             &mut batch,
             &mut frame_buf,
             &mut flush,
+            &mut alive,
         );
 
         if batch.len() > 1
@@ -272,13 +304,21 @@ pub async fn run_sender<F>(
                 } else {
                     coalesce
                 },
+                &mut alive,
+                &mut cancel,
             )
             .await
         {
             break;
         }
 
-        if !flush_batch(&mut batch, &mut frame_buf, &mut flush, Some(&mut rate_gate)) {
+        if !flush_batch(
+            &mut batch,
+            &mut frame_buf,
+            &mut flush,
+            Some(&mut rate_gate),
+            &mut alive,
+        ) {
             break;
         }
     }
@@ -347,12 +387,16 @@ fn precheck_report(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_send_report_msg<F>(
     msg_type: u8,
     payload: &[u8],
     req_id: u32,
     device_mgr: &Arc<DeviceManager>,
     device_id: u32,
+    session_token: &str,
+    generation: u64,
+    kind: &str,
     emit: &mut F,
 ) where
     F: FnMut(Vec<u8>),
@@ -360,6 +404,10 @@ async fn handle_send_report_msg<F>(
     let (resp_type, report_type) = send_kind(msg_type);
     let report_id = payload.first().copied().unwrap_or(0);
     let payload_len = payload.len().saturating_sub(1);
+    if !transport_alive(device_mgr, device_id, session_token, generation, kind) {
+        emit(make_status_resp(resp_type, req_id, 1));
+        return;
+    }
     match precheck_report(
         device_mgr,
         device_id,
@@ -406,15 +454,23 @@ async fn handle_send_report_msg<F>(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_receive_feature_report_msg<F>(
     payload: &[u8],
     req_id: u32,
     device_mgr: &Arc<DeviceManager>,
     device_id: u32,
+    session_token: &str,
+    generation: u64,
+    kind: &str,
     emit: &mut F,
 ) where
     F: FnMut(Vec<u8>),
 {
+    if !transport_alive(device_mgr, device_id, session_token, generation, kind) {
+        emit(make_feature_read_resp(req_id, 1, &[]));
+        return;
+    }
     match precheck_report(device_mgr, device_id, payload, ReportType::Feature, None) {
         SendPrecheck::Blocked => emit(make_feature_read_resp(req_id, 2, &[])),
         SendPrecheck::Rejected => emit(make_feature_read_resp(req_id, 1, &[])),
@@ -439,17 +495,39 @@ async fn handle_receive_feature_report_msg<F>(
     }
 }
 
+/// Whether this transport's session is still active and current for
+/// inbound HID operations. A closed or superseded session must not be able
+/// to keep sending reports through an established connection.
+#[inline]
+fn transport_alive(
+    device_mgr: &DeviceManager,
+    device_id: u32,
+    session_token: &str,
+    generation: u64,
+    kind: &str,
+) -> bool {
+    device_mgr.session_transport_active(device_id, session_token, kind, generation)
+}
+
 pub async fn handle_client_message<F>(
     frame: &[u8],
     device_mgr: &Arc<DeviceManager>,
     device_id: u32,
+    session_token: &str,
+    generation: u64,
+    kind: &str,
     mut emit: F,
-) where
+) -> bool
+where
     F: FnMut(Vec<u8>),
 {
+    if !transport_alive(device_mgr, device_id, session_token, generation, kind) {
+        log::warn!("[sender] rejecting frame for {device_id:#x}: session no longer active");
+        return false;
+    }
     if frame.is_empty() {
         log::warn!("[sender] empty binary frame from client");
-        return;
+        return true;
     }
     let msg_type = frame[0];
 
@@ -458,7 +536,7 @@ pub async fn handle_client_message<F>(
             "[sender] short frame (len={}, need ≥5 for type+req_id)",
             frame.len()
         );
-        return;
+        return true;
     }
     let req_id = u32::from_le_bytes([frame[1], frame[2], frame[3], frame[4]]);
 
@@ -470,17 +548,30 @@ pub async fn handle_client_message<F>(
                 req_id,
                 device_mgr,
                 device_id,
+                session_token,
+                generation,
+                kind,
                 &mut emit,
             )
             .await
         }
         MSG_RECEIVE_FEATURE_REPORT => {
-            handle_receive_feature_report_msg(&frame[5..], req_id, device_mgr, device_id, &mut emit)
-                .await
+            handle_receive_feature_report_msg(
+                &frame[5..],
+                req_id,
+                device_mgr,
+                device_id,
+                session_token,
+                generation,
+                kind,
+                &mut emit,
+            )
+            .await
         }
         other => {
             log::warn!("[sender] rejecting unknown binary msg_type=0x{other:02x}");
             emit(make_status_resp(0xFF, req_id, 1));
         }
     }
+    true
 }

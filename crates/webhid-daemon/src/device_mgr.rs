@@ -6,7 +6,7 @@ use bytes::Bytes;
 use hidapi::HidDevice;
 use sha2::{Digest, Sha256};
 
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, watch};
 use tokio::task::JoinHandle;
 
 use anyhow::anyhow;
@@ -62,6 +62,23 @@ struct Session {
     active: bool,
     ws_generation: u64,
     wt_generation: u64,
+    /// Set to `true` when the session is closed or revoked. Every WS/WT
+    /// transport derived from this session holds a `watch::Receiver` on it
+    /// (see `TransportGrant`), so a closed session can never keep using the
+    /// physical device through a stale data-plane connection. A watch
+    /// channel (not a bare Notify) so a transport that subscribes after the
+    /// close still observes the closed state.
+    cancel: watch::Sender<bool>,
+}
+
+/// A WS/WT transport grant: the per-session transport generation plus the
+/// session's cancellation signal. The transport must select on `cancel` and
+/// verify `session_transport_active` before touching the device, so a closed
+/// session can never keep operating through an established connection.
+#[derive(Clone)]
+pub struct TransportGrant {
+    pub generation: u64,
+    pub cancel: watch::Receiver<bool>,
 }
 
 struct Entry {
@@ -195,7 +212,11 @@ impl DeviceManager {
             .collect())
     }
 
-    pub async fn open(&self, device_id: u32, owner_client_id: u64) -> anyhow::Result<(u32, String)> {
+    pub async fn open(
+        &self,
+        device_id: u32,
+        owner_client_id: u64,
+    ) -> anyhow::Result<(u32, String)> {
         let session_token = random_hex_token(16)?;
         let ws_auth_hash = compute_ws_auth_hash(&session_token, &self.ws_nonce);
 
@@ -259,18 +280,14 @@ impl DeviceManager {
         owner_client_id: u64,
         ws_auth_hash: &str,
     ) -> anyhow::Result<(u32, String)> {
-        let (info, uses_numbered_reports, device) =
-            tokio::task::spawn_blocking({
-                let opener = Arc::clone(&self.opener);
-                move || (opener)(device_id)
-            })
-            .await
-            .map_err(|e| anyhow!("open task join failed: {e}"))??;
+        let (info, uses_numbered_reports, device) = tokio::task::spawn_blocking({
+            let opener = Arc::clone(&self.opener);
+            move || (opener)(device_id)
+        })
+        .await
+        .map_err(|e| anyhow!("open task join failed: {e}"))??;
         let id = info.device_id;
 
-        // Fail closed: a device whose report descriptor is missing or failed
-        // to parse has no collections to classify reports against, so the
-        // page-facing path must not open it (see prune_device_info).
         if info.descriptor_parse_failed {
             return Err(anyhow!(
                 "device '{device_id:#x}' has no parsed report descriptor; refusing to open (fail closed)"
@@ -283,9 +300,9 @@ impl DeviceManager {
         let declared_input_ids = Arc::new(blocking.declared_input_ids());
         let max_payload = crate::descriptor::max_input_report_size(&info.collections)
             .max(crate::descriptor::max_output_report_size(&info.collections))
-            .max(crate::descriptor::max_feature_report_size(&info.collections));
-        // Largest declared report payload + the report-id byte, floored at
-        // 64 and capped defensively at the fixed 4096 ceiling.
+            .max(crate::descriptor::max_feature_report_size(
+                &info.collections,
+            ));
         let read_buf_size = (max_payload as usize + 1).clamp(64, crate::hid::MAX_READ_BUFFER);
 
         let stop_flag = Arc::new(AtomicBool::new(false));
@@ -373,6 +390,7 @@ impl DeviceManager {
                     active: true,
                     ws_generation: 0,
                     wt_generation: 0,
+                    cancel: watch::channel(false).0,
                 },
             );
         self.ws_auth_hashes
@@ -418,29 +436,27 @@ impl DeviceManager {
                     .remove(&dev_id)
                     .is_some();
                 if removed {
-                    let tokens: Vec<String> = {
-                        let sessions = sessions_for_task
-                            .lock()
-                            .unwrap_or_else(|e| e.into_inner());
+                    let (tokens, cancels): (Vec<String>, Vec<watch::Sender<bool>>) = {
+                        let sessions = sessions_for_task.lock().unwrap_or_else(|e| e.into_inner());
                         sessions
                             .values()
                             .filter(|s| s.device_id == dev_id)
-                            .map(|s| s.token.clone())
-                            .collect()
+                            .map(|s| (s.token.clone(), s.cancel.clone()))
+                            .unzip()
                     };
                     {
-                        let mut sessions = sessions_for_task
-                            .lock()
-                            .unwrap_or_else(|e| e.into_inner());
+                        let mut sessions =
+                            sessions_for_task.lock().unwrap_or_else(|e| e.into_inner());
                         for t in &tokens {
                             sessions.remove(t);
                         }
                     }
                     {
-                        let mut hashes = hashes_for_task
-                            .lock()
-                            .unwrap_or_else(|e| e.into_inner());
+                        let mut hashes = hashes_for_task.lock().unwrap_or_else(|e| e.into_inner());
                         hashes.retain(|_, token| !tokens.contains(token));
+                    }
+                    for cancel in cancels {
+                        let _ = cancel.send(true);
                     }
                     let _ = tx.send(IpcResponse::DeviceDisconnected {
                         device: info_for_task.clone(),
@@ -510,8 +526,13 @@ impl DeviceManager {
     /// with it, and the physical device is torn down only when no other
     /// session holds it. Closing an already-closed/unknown session is a
     /// no-op success so browser-side cleanup that races a revoke is safe.
-    pub fn close(&self, device_id: u32, session_token: &str, owner_client_id: u64) -> anyhow::Result<()> {
-        let (hash, last_session) = {
+    pub fn close(
+        &self,
+        device_id: u32,
+        session_token: &str,
+        owner_client_id: u64,
+    ) -> anyhow::Result<()> {
+        let (hash, cancel_tx, last_session) = {
             let mut sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
             let Some(session) = sessions.get_mut(session_token) else {
                 return Ok(());
@@ -532,16 +553,18 @@ impl DeviceManager {
             }
             session.active = false;
             let hash = session.ws_auth_hash.clone();
+            let cancel_tx = session.cancel.clone();
             sessions.remove(session_token);
             let last_session = !sessions
                 .values()
                 .any(|s| s.device_id == device_id && s.active);
-            (hash, last_session)
+            (hash, cancel_tx, last_session)
         };
         self.ws_auth_hashes
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .remove(&hash);
+        let _ = cancel_tx.send(true);
         if last_session {
             let mut map = self.devices.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(mut entry) = map.remove(&device_id) {
@@ -633,7 +656,9 @@ impl DeviceManager {
             return Err(anyhow!("session is closed"));
         }
         if session.device_id != device_id {
-            return Err(anyhow!("session token does not match device {device_id:#x}"));
+            return Err(anyhow!(
+                "session token does not match device {device_id:#x}"
+            ));
         }
         if session.owner_client_id != owner_client_id {
             return Err(anyhow!(
@@ -647,20 +672,77 @@ impl DeviceManager {
     }
 
     /// Marks the session's data plane as WS. Returns the per-session
-    /// generation, or 0 when the session is not active (the caller must
-    /// treat 0 as "not connected").
-    pub fn ws_connect(&self, device_id: u32, session_token: &str) -> u64 {
+    /// generation and the session's cancellation signal, or None when the
+    /// session is not active (the caller must treat None as "not connected").
+    pub fn ws_connect(&self, device_id: u32, session_token: &str) -> Option<TransportGrant> {
         let mut sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
         let Some(session) = sessions.get_mut(session_token) else {
-            return 0;
+            return None;
         };
         if !session.active || session.device_id != device_id {
-            return 0;
+            return None;
         }
         session.ws_generation += 1;
         session.mode = MODE_WS.to_string();
-        log::info!("[device_mgr] {device_id:#x} WS connect gen={}", session.ws_generation);
-        session.ws_generation
+        let grant = TransportGrant {
+            generation: session.ws_generation,
+            cancel: session.cancel.subscribe(),
+        };
+        log::info!(
+            "[device_mgr] {device_id:#x} WS connect gen={}",
+            session.ws_generation
+        );
+        Some(grant)
+    }
+
+    /// Marks the session's data plane as WT. Returns the per-session
+    /// generation and the session's cancellation signal, or None when the
+    /// session is not active.
+    pub fn wt_connect(&self, device_id: u32, session_token: &str) -> Option<TransportGrant> {
+        let mut sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(session) = sessions.get_mut(session_token) else {
+            return None;
+        };
+        if !session.active || session.device_id != device_id {
+            return None;
+        }
+        session.wt_generation += 1;
+        session.mode = MODE_WT.to_string();
+        let grant = TransportGrant {
+            generation: session.wt_generation,
+            cancel: session.cancel.subscribe(),
+        };
+        log::info!(
+            "[device_mgr] {device_id:#x} WT connect gen={}",
+            session.wt_generation
+        );
+        Some(grant)
+    }
+
+    /// Whether the transport identified by `(session_token, kind,
+    /// generation)` still belongs to an active session on `device_id`. An
+    /// established WS/WT connection must verify this before performing any
+    /// inbound HID operation and before delivering any outbound report, so
+    /// a closed session can never keep driving the physical device.
+    pub fn session_transport_active(
+        &self,
+        device_id: u32,
+        session_token: &str,
+        kind: &str,
+        generation: u64,
+    ) -> bool {
+        let sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(session) = sessions.get(session_token) else {
+            return false;
+        };
+        if !session.active || session.device_id != device_id {
+            return false;
+        }
+        match kind {
+            MODE_WS => session.ws_generation == generation,
+            MODE_WT => session.wt_generation == generation,
+            _ => false,
+        }
     }
 
     pub fn ws_disconnect(&self, device_id: u32, session_token: &str, generation: u64) {
@@ -680,22 +762,6 @@ impl DeviceManager {
                 session.ws_generation
             );
         }
-    }
-
-    /// Marks the session's data plane as WT. Returns the per-session
-    /// generation, or 0 when the session is not active.
-    pub fn wt_connect(&self, device_id: u32, session_token: &str) -> u64 {
-        let mut sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
-        let Some(session) = sessions.get_mut(session_token) else {
-            return 0;
-        };
-        if !session.active || session.device_id != device_id {
-            return 0;
-        }
-        session.wt_generation += 1;
-        session.mode = MODE_WT.to_string();
-        log::info!("[device_mgr] {device_id:#x} WT connect gen={}", session.wt_generation);
-        session.wt_generation
     }
 
     pub fn wt_disconnect(&self, device_id: u32, session_token: &str, generation: u64) {
@@ -741,13 +807,13 @@ impl DeviceManager {
             handle.abort();
         }
         drop(map);
-        let tokens: Vec<String> = {
+        let (tokens, cancels): (Vec<String>, Vec<watch::Sender<bool>>) = {
             let sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
             sessions
                 .values()
                 .filter(|s| s.device_id == device_id)
-                .map(|s| s.token.clone())
-                .collect()
+                .map(|s| (s.token.clone(), s.cancel.clone()))
+                .unzip()
         };
         {
             let mut sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
@@ -756,8 +822,14 @@ impl DeviceManager {
             }
         }
         {
-            let mut hashes = self.ws_auth_hashes.lock().unwrap_or_else(|e| e.into_inner());
+            let mut hashes = self
+                .ws_auth_hashes
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             hashes.retain(|_, token| !tokens.contains(token));
+        }
+        for cancel in cancels {
+            let _ = cancel.send(true);
         }
         log::info!("[device_mgr] {device_id:#x} force-closed (hotplug removal)");
     }
@@ -811,6 +883,7 @@ impl DeviceManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
     use tokio::sync::broadcast;
 
     fn test_token(seed: u8) -> String {
@@ -867,7 +940,9 @@ mod tests {
         let mut tasks = Vec::new();
         for client in 2..=4u64 {
             let mgr_b = Arc::clone(&mgr);
-            tasks.push(tokio::spawn(async move { mgr_b.open(0x1234, client).await }));
+            tasks.push(tokio::spawn(
+                async move { mgr_b.open(0x1234, client).await },
+            ));
         }
         tokio::task::yield_now().await;
 
@@ -878,8 +953,18 @@ mod tests {
             assert!(task.await.unwrap().is_err());
         }
         assert_eq!(calls.load(Ordering::SeqCst), 1);
-        assert!(mgr.opening.lock().unwrap_or_else(|e| e.into_inner()).is_empty());
-        assert!(mgr.sessions.lock().unwrap_or_else(|e| e.into_inner()).is_empty());
+        assert!(
+            mgr.opening
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .is_empty()
+        );
+        assert!(
+            mgr.sessions
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .is_empty()
+        );
     }
 
     #[test]
@@ -907,12 +992,17 @@ mod tests {
                     active: true,
                     ws_generation: 0,
                     wt_generation: 0,
+                    cancel: watch::channel(false).0,
                 },
             );
         let err = mgr.close(0x1234, "tok", 2).unwrap_err();
         assert!(err.to_string().contains("owned by another"));
-        // Session survives a rejected close.
-        assert!(mgr.sessions.lock().unwrap_or_else(|e| e.into_inner()).contains_key("tok"));
+        assert!(
+            mgr.sessions
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .contains_key("tok")
+        );
     }
 
     #[test]
@@ -933,6 +1023,7 @@ mod tests {
                     active: true,
                     ws_generation: 0,
                     wt_generation: 0,
+                    cancel: watch::channel(false).0,
                 },
             );
         let err = mgr.close(0x5678, "tok", 1).unwrap_err();
@@ -957,6 +1048,7 @@ mod tests {
                     active: true,
                     ws_generation: 0,
                     wt_generation: 0,
+                    cancel: watch::channel(false).0,
                 },
             );
         mgr.ws_auth_hashes
@@ -964,7 +1056,12 @@ mod tests {
             .unwrap_or_else(|e| e.into_inner())
             .insert("a".repeat(64), "tok".to_string());
         assert!(mgr.close(0x1234, "tok", 1).is_ok());
-        assert!(mgr.sessions.lock().unwrap_or_else(|e| e.into_inner()).is_empty());
+        assert!(
+            mgr.sessions
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .is_empty()
+        );
         assert!(
             mgr.ws_auth_hashes
                 .lock()
@@ -991,15 +1088,12 @@ mod tests {
                     active: true,
                     ws_generation: 0,
                     wt_generation: 0,
+                    cancel: watch::channel(false).0,
                 },
             );
-        // Unknown mode rejected.
         assert!(mgr.set_dataplane_mode(0x1234, "tok", "quic", 1).is_err());
-        // Unknown token rejected.
         assert!(mgr.set_dataplane_mode(0x1234, "nope", "ws", 1).is_err());
-        // Wrong owner rejected.
         assert!(mgr.set_dataplane_mode(0x1234, "tok", "ws", 2).is_err());
-        // Valid transition applies.
         assert!(mgr.set_dataplane_mode(0x1234, "tok", "wt", 1).is_ok());
         let sessions = mgr.sessions.lock().unwrap_or_else(|e| e.into_inner());
         assert_eq!(sessions.get("tok").unwrap().mode, MODE_WT);
@@ -1009,8 +1103,7 @@ mod tests {
     fn test_ws_connect_requires_active_session() {
         let (tx, _) = broadcast::channel(16);
         let mgr = DeviceManager::new(tx);
-        // No session at all.
-        assert_eq!(mgr.ws_connect(0x1234, "missing"), 0);
+        assert!(mgr.ws_connect(0x1234, "missing").is_none());
         mgr.sessions
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -1022,14 +1115,207 @@ mod tests {
                     owner_client_id: 1,
                     mode: MODE_NM.to_string(),
                     ws_auth_hash: "a".repeat(64),
-                    active: false, // closed session must not reconnect
+                    active: false,
                     ws_generation: 0,
                     wt_generation: 0,
+                    cancel: watch::channel(false).0,
                 },
             );
-        assert_eq!(mgr.ws_connect(0x1234, "tok"), 0);
-        // Wrong device also rejected.
-        assert_eq!(mgr.ws_connect(0x5678, "tok"), 0);
+        assert!(mgr.ws_connect(0x1234, "tok").is_none());
+        assert!(mgr.ws_connect(0x5678, "tok").is_none());
+    }
+
+    #[test]
+    fn test_ws_connect_returns_generation_and_cancel() {
+        let (tx, _) = broadcast::channel(16);
+        let mgr = DeviceManager::new(tx);
+        mgr.sessions
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(
+                "tok".to_string(),
+                Session {
+                    token: "tok".to_string(),
+                    device_id: 0x1234,
+                    owner_client_id: 1,
+                    mode: MODE_NM.to_string(),
+                    ws_auth_hash: "a".repeat(64),
+                    active: true,
+                    ws_generation: 0,
+                    wt_generation: 0,
+                    cancel: watch::channel(false).0,
+                },
+            );
+        let g1 = mgr
+            .ws_connect(0x1234, "tok")
+            .expect("active session connects");
+        assert_eq!(g1.generation, 1);
+        let g2 = mgr
+            .ws_connect(0x1234, "tok")
+            .expect("reconnect bumps generation");
+        assert_eq!(g2.generation, 2);
+        assert!(!*g1.cancel.borrow());
+        assert!(!*g2.cancel.borrow());
+    }
+
+    #[tokio::test]
+    async fn test_session_transport_active_tracks_close() {
+        let (tx, _) = broadcast::channel(16);
+        let mgr = DeviceManager::new(tx);
+        for (tok, owner) in [("tokA", 1u64), ("tokB", 2u64)] {
+            mgr.sessions
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(
+                    tok.to_string(),
+                    Session {
+                        token: tok.to_string(),
+                        device_id: 0x1234,
+                        owner_client_id: owner,
+                        mode: MODE_NM.to_string(),
+                        ws_auth_hash: "a".repeat(64),
+                        active: true,
+                        ws_generation: 0,
+                        wt_generation: 0,
+                        cancel: watch::channel(false).0,
+                    },
+                );
+        }
+        let grant_a = mgr.ws_connect(0x1234, "tokA").expect("A connects");
+        let grant_b = mgr.ws_connect(0x1234, "tokB").expect("B connects");
+        assert!(mgr.session_transport_active(0x1234, "tokA", MODE_WS, grant_a.generation));
+        assert!(mgr.session_transport_active(0x1234, "tokB", MODE_WS, grant_b.generation));
+
+        mgr.close(0x1234, "tokA", 1).expect("close A");
+        assert!(!mgr.session_transport_active(0x1234, "tokA", MODE_WS, grant_a.generation));
+        assert!(mgr.session_transport_active(0x1234, "tokB", MODE_WS, grant_b.generation));
+        let mut cancel_a = grant_a.cancel.clone();
+        tokio::time::timeout(Duration::from_secs(1), cancel_a.changed())
+            .await
+            .expect("A transport cancelled on session close")
+            .expect("cancel channel still open");
+        let grant_b2 = mgr.ws_connect(0x1234, "tokB").expect("B reconnects");
+        assert_eq!(grant_b2.generation, grant_b.generation + 1);
+        assert!(!mgr.session_transport_active(0x1234, "tokB", MODE_WS, grant_b.generation));
+        assert!(mgr.session_transport_active(0x1234, "tokB", MODE_WS, grant_b2.generation));
+    }
+
+    #[tokio::test]
+    async fn test_wt_transport_cancelled_by_close() {
+        let (tx, _) = broadcast::channel(16);
+        let mgr = DeviceManager::new(tx);
+        mgr.sessions
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(
+                "tok".to_string(),
+                Session {
+                    token: "tok".to_string(),
+                    device_id: 0x1234,
+                    owner_client_id: 1,
+                    mode: MODE_NM.to_string(),
+                    ws_auth_hash: "a".repeat(64),
+                    active: true,
+                    ws_generation: 0,
+                    wt_generation: 0,
+                    cancel: watch::channel(false).0,
+                },
+            );
+        let grant = mgr.wt_connect(0x1234, "tok").expect("WT connects");
+        assert!(mgr.session_transport_active(0x1234, "tok", MODE_WT, grant.generation));
+        mgr.close(0x1234, "tok", 1).expect("close");
+        assert!(!mgr.session_transport_active(0x1234, "tok", MODE_WT, grant.generation));
+        let mut cancel = grant.cancel.clone();
+        tokio::time::timeout(Duration::from_secs(1), cancel.changed())
+            .await
+            .expect("WT transport cancelled on session close")
+            .expect("cancel channel still open");
+    }
+
+    /// Audit regression (HIGH): a closed session's established transport
+    /// must stop delivering input reports even while another session keeps
+    /// the device open, and the surviving session keeps working.
+    #[tokio::test]
+    async fn test_sender_stops_delivery_after_session_close() {
+        use bytes::Bytes as ReportBytes;
+        use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+        let (tx, mut _keepalive_rx) = broadcast::channel(64);
+        let mgr = Arc::new(DeviceManager::new(tx.clone()));
+        for (tok, owner) in [("tokA", 1u64), ("tokB", 2u64)] {
+            mgr.sessions
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(
+                    tok.to_string(),
+                    Session {
+                        token: tok.to_string(),
+                        device_id: 0x1234,
+                        owner_client_id: owner,
+                        mode: MODE_NM.to_string(),
+                        ws_auth_hash: "a".repeat(64),
+                        active: true,
+                        ws_generation: 0,
+                        wt_generation: 0,
+                        cancel: watch::channel(false).0,
+                    },
+                );
+        }
+        let grant_a = mgr.ws_connect(0x1234, "tokA").expect("A connects");
+        let grant_b = mgr.ws_connect(0x1234, "tokB").expect("B connects");
+
+        let flushed = Arc::new(AtomicUsize::new(0));
+        let flushed_for_sender = Arc::clone(&flushed);
+        let mgr_for_sender = Arc::clone(&mgr);
+        let sender = tokio::spawn(crate::batching::run_sender(
+            tx.subscribe(),
+            0x1234,
+            mgr_for_sender,
+            "tokA".to_string(),
+            grant_a.generation,
+            MODE_WS,
+            grant_a.cancel.clone(),
+            move |_frame: Vec<u8>| {
+                flushed_for_sender.fetch_add(1, AtomicOrdering::SeqCst);
+                true
+            },
+        ));
+
+        tx.send(webhid::IpcResponse::InputReport {
+            device_id: 0x1234,
+            report_id: 1,
+            data: ReportBytes::from(&[0xAA][..]),
+        })
+        .expect("broadcast");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(
+            flushed.load(AtomicOrdering::SeqCst) > 0,
+            "A should receive reports while its session is open"
+        );
+
+        mgr.close(0x1234, "tokA", 1).expect("close A");
+        assert!(!mgr.session_transport_active(0x1234, "tokA", MODE_WS, grant_a.generation));
+        assert!(mgr.session_transport_active(0x1234, "tokB", MODE_WS, grant_b.generation));
+
+        tokio::time::timeout(Duration::from_secs(2), sender)
+            .await
+            .expect("sender task exits after session close")
+            .expect("sender task does not panic");
+        let flushed_after = flushed.load(AtomicOrdering::SeqCst);
+
+        tx.send(webhid::IpcResponse::InputReport {
+            device_id: 0x1234,
+            report_id: 1,
+            data: ReportBytes::from(&[0xBB][..]),
+        })
+        .expect("broadcast");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(
+            flushed.load(AtomicOrdering::SeqCst),
+            flushed_after,
+            "A must not receive reports after its session closed"
+        );
+
+        assert!(mgr.session_transport_active(0x1234, "tokB", MODE_WS, grant_b.generation));
     }
 
     #[test]
@@ -1055,6 +1341,7 @@ mod tests {
                     active: true,
                     ws_generation: 0,
                     wt_generation: 0,
+                    cancel: watch::channel(false).0,
                 },
             );
         assert_eq!(
@@ -1087,6 +1374,7 @@ mod tests {
                     active: false,
                     ws_generation: 0,
                     wt_generation: 0,
+                    cancel: watch::channel(false).0,
                 },
             );
         assert!(mgr.get_device_by_ws_auth(&hash).is_none());

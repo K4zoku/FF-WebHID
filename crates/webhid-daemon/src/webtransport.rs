@@ -204,22 +204,26 @@ async fn handle_session(
     };
     log::info!("[wt] authenticated for device_id={device_id:#x}");
     let conn = req.accept().await?;
-    let wt_gen = device_mgr.wt_connect(device_id, &session_token);
-    if wt_gen == 0 {
+    let Some(grant) = device_mgr.wt_connect(device_id, &session_token) else {
         log::warn!("[wt] session for device {device_id:#x} closed during handshake; closing");
         return Ok(());
-    }
-    let result = run_session(conn, event_tx, Arc::clone(&device_mgr), device_id).await;
-    device_mgr.wt_disconnect(device_id, &session_token, wt_gen);
+    };
+    let result = run_session(
+        conn,
+        event_tx,
+        Arc::clone(&device_mgr),
+        device_id,
+        &session_token,
+        grant.clone(),
+    )
+    .await;
+    device_mgr.wt_disconnect(device_id, &session_token, grant.generation);
     result
 }
 
 /// Drain the outbound frame channel and write each frame to the session's
 /// send stream, length-prefixed (u32 LE). Stops on the first write error.
-fn spawn_writer_task(
-    mut send: SendStream,
-    mut frame_rx: mpsc::Receiver<Bytes>,
-) -> JoinHandle<()> {
+fn spawn_writer_task(mut send: SendStream, mut frame_rx: mpsc::Receiver<Bytes>) -> JoinHandle<()> {
     tokio::spawn(async move {
         while let Some(frame) = frame_rx.recv().await {
             let mut header = [0u8; 4];
@@ -235,13 +239,16 @@ fn spawn_writer_task(
 }
 
 /// Read length-prefixed client frames off the bidirectional stream until
-/// EOF, an oversized frame, or a full response queue, dispatching each
-/// non-empty frame to the batching message handler.
+/// EOF, an oversized frame, a full response queue, or the session's
+/// transport is no longer active, dispatching each non-empty frame to the
+/// batching message handler.
 async fn read_inbound_frames(
     recv: &mut RecvStream,
     frame_tx: &mpsc::Sender<Bytes>,
     device_mgr: &Arc<DeviceManager>,
     device_id: u32,
+    session_token: &str,
+    generation: u64,
 ) {
     let mut len_buf = [0u8; 4];
     loop {
@@ -258,14 +265,24 @@ async fn read_inbound_frames(
             break;
         }
         let mut queue_full = false;
-        batching::handle_client_message(&frame, device_mgr, device_id, |resp| {
-            // Response queue full: the client is saturating the session;
-            // end it rather than queue without bound.
-            if frame_tx.try_send(Bytes::from(resp)).is_err() {
-                queue_full = true;
-            }
-        })
+        let alive = batching::handle_client_message(
+            &frame,
+            device_mgr,
+            device_id,
+            session_token,
+            generation,
+            crate::device_mgr::MODE_WT,
+            |resp| {
+                if frame_tx.try_send(Bytes::from(resp)).is_err() {
+                    queue_full = true;
+                }
+            },
+        )
         .await;
+        if !alive {
+            log::warn!("[wt] session for {device_id:#x} no longer active; ending session");
+            break;
+        }
         if queue_full {
             log::warn!("[wt] response queue full; ending session");
             break;
@@ -278,11 +295,11 @@ async fn run_session(
     event_tx: broadcast::Sender<webhid::IpcResponse>,
     device_mgr: Arc<DeviceManager>,
     device_id: u32,
+    session_token: &str,
+    grant: crate::device_mgr::TransportGrant,
 ) -> anyhow::Result<()> {
     let (send, mut recv) = conn.accept_bi().await?;
 
-    // Bounded response/input queue; when full, the session is torn down
-    // instead of growing memory (the worker reconnects).
     let (frame_tx, frame_rx) = mpsc::channel::<Bytes>(1024);
     let writer_task = spawn_writer_task(send, frame_rx);
 
@@ -291,10 +308,21 @@ async fn run_session(
     let sender_task = tokio::spawn(batching::run_sender(
         event_rx,
         device_id,
+        Arc::clone(&device_mgr),
+        session_token.to_string(),
+        grant.generation,
+        crate::device_mgr::MODE_WT,
+        grant.cancel.clone(),
         move |frame: Vec<u8>| flush_tx.try_send(Bytes::from(frame)).is_ok(),
     ));
 
-    read_inbound_frames(&mut recv, &frame_tx, &device_mgr, device_id).await;
+    let mut cancel = grant.cancel.clone();
+    tokio::select! {
+        _ = read_inbound_frames(&mut recv, &frame_tx, &device_mgr, device_id, session_token, grant.generation) => {},
+        _ = cancel.changed() => {
+            log::warn!("[wt] session for {device_id:#x} closed; tearing down transport");
+        },
+    }
 
     drop(frame_tx);
     sender_task.abort();
