@@ -5,7 +5,7 @@
 # `npm run refresh:pins` after each release.
 
 pkgname=webhid-addon
-pkgver=3.1.0
+pkgver=3.2.0
 pkgrel=0
 pkgdesc="WebHID browser extension for Firefox and Zen (system-wide installation)"
 arch="noarch"

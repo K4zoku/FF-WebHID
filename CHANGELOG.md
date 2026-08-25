@@ -2,6 +2,104 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [3.2.0](https://github.com/K4zoku/FF-WebHID/compare/v3.1.0...v3.2.0) (2026-08-25)
+
+### Features
+
+* add chromium testbed benchmark ([3975e55](https://github.com/K4zoku/FF-WebHID/commit/3975e55b0789d7fcf6142505207a74b67c12ed8e))
+* device filter inside daemon ([91e74e4](https://github.com/K4zoku/FF-WebHID/commit/91e74e410e02743d60d66547a11d8ec66e76817c))
+
+### Bug Fixes
+
+* **addon:** abort stale open after forget ([b0d95b5](https://github.com/K4zoku/FF-WebHID/commit/b0d95b51c4757c77b5c64999762affda760a6e54))
+* **addon:** allow injected main world script under strict csp ([a10852e](https://github.com/K4zoku/FF-WebHID/commit/a10852eede94ba1a36246b494589684a0e0aff94))
+* **addon:** apply windows daemon-as-nm-host default ([20b26cd](https://github.com/K4zoku/FF-WebHID/commit/20b26cdd5f9060f4580e3faad90930af14230d18))
+* **addon:** bind grant authority to identity key ([f212412](https://github.com/K4zoku/FF-WebHID/commit/f212412db1ec6626adcdaeca5765168150ce0fc6))
+* **addon:** chromium structured clone ([929788d](https://github.com/K4zoku/FF-WebHID/commit/929788d13d1ebfd5bc6926cf72571774b69aa76c))
+* **addon:** data plane token refresh out of scope ([7177820](https://github.com/K4zoku/FF-WebHID/commit/717782025c67cd56e07cdc32b9eff7f1d147e33e))
+* **addon:** explicit worker spawn states ([6cc31bb](https://github.com/K4zoku/FF-WebHID/commit/6cc31bb167f9186d0a899b2fa9caaeaf119521a2))
+* **addon:** grant identity from picker selection ([94ac29a](https://github.com/K4zoku/FF-WebHID/commit/94ac29ad9cc9e3b0c247c44d3185addcd45af776))
+* **addon:** inherit permissions policy from frame ancestry ([7f20a28](https://github.com/K4zoku/FF-WebHID/commit/7f20a28c702f99a07bf1423ba320fb93a532b797))
+* **addon:** inject mv2 main world synchronously ([d171cd3](https://github.com/K4zoku/FF-WebHID/commit/d171cd3ffeebe7a4656835327b859dab3e9ea184))
+* **addon:** make browser-side session bookkeeping principal-aware ([16b0600](https://github.com/K4zoku/FF-WebHID/commit/16b06009b920bc82e3c6250a8da8be1d79c583af))
+* **addon:** MV2 missing logger ([28d46a4](https://github.com/K4zoku/FF-WebHID/commit/28d46a4c72d7cc7b64c089ea06568a1b513f047e))
+* **addon:** origin-scoped session ownership registry ([1792cbf](https://github.com/K4zoku/FF-WebHID/commit/1792cbfc355ada633f6c0fc8d5c50e52ade04cfe))
+* **addon:** per-origin bridge device cache ([924be19](https://github.com/K4zoku/FF-WebHID/commit/924be1923a27d4a8fd9e5ddb8dc50b46c28b316a))
+* **addon:** retry failed cleanup closes ([c94257a](https://github.com/K4zoku/FF-WebHID/commit/c94257aff57c0e8778de5b88491afc12e8c5fd83))
+* **addon:** theme-aware page action icons via prefers-color-scheme ([c473784](https://github.com/K4zoku/FF-WebHID/commit/c4737846111d607da314483ac03b600e260351d8))
+* **addon:** track one session token per open ([eaeface](https://github.com/K4zoku/FF-WebHID/commit/eaefacef0e2dac553d585a997d4fdbd005ae5267))
+* **addon:** wt transport failure state ([8c24d62](https://github.com/K4zoku/FF-WebHID/commit/8c24d629083ab61353320b14353fa9e5d70c7324))
+* bound data-plane queues and request deadlines ([60ce0bd](https://github.com/K4zoku/FF-WebHID/commit/60ce0bd0d2a6243de17e568a56495161ff1c2008))
+* **build:** libc and unix gating for macos/windows ([34484a1](https://github.com/K4zoku/FF-WebHID/commit/34484a1d7dda780771e31f7d059ba27b4ee46465))
+* **build:** msi build ([3425d25](https://github.com/K4zoku/FF-WebHID/commit/3425d25af4adafa464d72d1479ed549b59f333d8))
+* cancel WS/WT transports when their session closes ([16d5f7a](https://github.com/K4zoku/FF-WebHID/commit/16d5f7aac05e168728f43d9223fd04ba46276b6f))
+* cleanup deadcode, fix some bugs ([24fc0ee](https://github.com/K4zoku/FF-WebHID/commit/24fc0ee938e031c01e25bb4d09c57322ac5f870b))
+* **daemon:** add verbose info for report error ([6cb6a3b](https://github.com/K4zoku/FF-WebHID/commit/6cb6a3b16b6b8b78742af5a94598fc7fcc8d0397))
+* **daemon:** bind permissions to physical identity ([b6f5751](https://github.com/K4zoku/FF-WebHID/commit/b6f5751ed37c2e8e8cacc3a6730f5af34a5bc887))
+* **daemon:** close first-open notify lost wakeup ([aae1b48](https://github.com/K4zoku/FF-WebHID/commit/aae1b485a52445b477ce388c0767d9352ecd3158))
+* **daemon:** end wt session on full response queue ([9629df1](https://github.com/K4zoku/FF-WebHID/commit/9629df1e85af97535a7bd8ac42bf237fb0959bf1))
+* **daemon:** fail closed on descriptor parse failure ([fce79a8](https://github.com/K4zoku/FF-WebHID/commit/fce79a8063089dde51fbcda132a9a5ae48e1f86c))
+* **daemon:** first-class per-client sessions ([426ad49](https://github.com/K4zoku/FF-WebHID/commit/426ad49ead5026f64e52d13bcc2e1819bd7671cb))
+* **daemon:** keep distinct no-serial devices separate ([f9189f3](https://github.com/K4zoku/FF-WebHID/commit/f9189f3a91a4e8982fe97dd0bd4630d7bd39f4fe))
+* **daemon:** non-lossy report projection per collection ([4cd0de3](https://github.com/K4zoku/FF-WebHID/commit/4cd0de3d7a42033e4da527101a4702a8c7059e70))
+* **daemon:** refuse ambiguous 32-bit device ids ([005bac3](https://github.com/K4zoku/FF-WebHID/commit/005bac376b0769e0631e65d14b2748ea891edcb0))
+* **daemon:** serialize concurrent first open ([fa72eed](https://github.com/K4zoku/FF-WebHID/commit/fa72eed00c2fa8cf8a83d1f55cfe5bf27469cd5a))
+* **daemon:** size HID buffers from descriptor ([2f7eb08](https://github.com/K4zoku/FF-WebHID/commit/2f7eb081dd544833d88a99a06f0298ca5df54b92))
+* **daemon:** validate ws host header ([b0f3454](https://github.com/K4zoku/FF-WebHID/commit/b0f3454c7cca6d7c975e38aa3f200f53e2d2f56b))
+* **daemon:** windows named pipe first instance only once ([a33ba91](https://github.com/K4zoku/FF-WebHID/commit/a33ba91901c1ce5c29173c24c39865a004d97573))
+* **daemon:** windows short write ([7134a3d](https://github.com/K4zoku/FF-WebHID/commit/7134a3df2b765bace1b9f872b34fc5c226a82bce))
+* **forwarder:** authenticate daemon endpoint via peer creds ([9aa6d97](https://github.com/K4zoku/FF-WebHID/commit/9aa6d9732b2edfdcc248956cc3c49e90c37e5666))
+* harden MAIN-world trust boundary for picker and worker spawn ([f85ff00](https://github.com/K4zoku/FF-WebHID/commit/f85ff00a7d70df7dcaebdf7882311039e380b09d))
+* multi fields report ([06d5568](https://github.com/K4zoku/FF-WebHID/commit/06d556806a201bee21b648f04baaf032f382688c))
+* **packaging:** repair macOS Homebrew install ([#8](https://github.com/K4zoku/FF-WebHID/issues/8)) ([2bbdee2](https://github.com/K4zoku/FF-WebHID/commit/2bbdee22447662bde9d2f6ba4657ebe1adf6bc28))
+* **protocol:** fatal oversized frames, strict ints ([b5142d8](https://github.com/K4zoku/FF-WebHID/commit/b5142d8b2ff46ff4beaa84144d9809a33608afd7))
+* update chromium compat ([deb745f](https://github.com/K4zoku/FF-WebHID/commit/deb745fc9e3d3e24b39e2b119337b56676c56c0c))
+
+### Code Refactoring
+
+* **addon:** remove dead code and dedupe js modules ([dd062da](https://github.com/K4zoku/FF-WebHID/commit/dd062dab099f463193d751cf6eedf30e9f6bcd23))
+* **addon:** unify chromium detection logic ([92382bf](https://github.com/K4zoku/FF-WebHID/commit/92382bf4838fc211e21edcfb9c3895490ae2f8cf))
+* **addon:** use logger instead of console ([d83a9f9](https://github.com/K4zoku/FF-WebHID/commit/d83a9f9ab65a97ed0ee622e57763c20962d88c72))
+* cleanup comment ([efb3239](https://github.com/K4zoku/FF-WebHID/commit/efb3239599b5304cc11acf734740a061e6bb0c8c))
+* **daemon:** share device io executor and socket path ([94d8697](https://github.com/K4zoku/FF-WebHID/commit/94d8697811eadb46380b1d686e961e1d01238cce))
+* **nm:** use shared socket candidates ([38446ac](https://github.com/K4zoku/FF-WebHID/commit/38446ac3a36045538213e6ac4a05099c1a69be7b))
+* **webhid:** add shared socket path resolution ([f548a13](https://github.com/K4zoku/FF-WebHID/commit/f548a13a83121db89e1031fef983dffd396d41ea))
+
+### Documentation
+
+* add contributor onboarding to CONTRIBUTING ([7f096da](https://github.com/K4zoku/FF-WebHID/commit/7f096da1e17a4dd79677b57aa0de2c1780be1de9))
+* declare packaging profiles per platform ([84d627e](https://github.com/K4zoku/FF-WebHID/commit/84d627ef99877ef764d8360dd42dc4b74bd9f31f))
+* document 128-bit identity key ([9a0e311](https://github.com/K4zoku/FF-WebHID/commit/9a0e311a63b22cf90e49f3edaff8166d516611d7))
+* merge chr benchmark series into shared charts ([27e52e2](https://github.com/K4zoku/FF-WebHID/commit/27e52e2cfe9f4f1f1f9b8bc14c9efafa8bb1b220))
+* update AGENT doc ([5dff04c](https://github.com/K4zoku/FF-WebHID/commit/5dff04c34591153f1f4e006356bd4fad9401e9f7))
+* update BENCHMARK doc with latest number ([17d890a](https://github.com/K4zoku/FF-WebHID/commit/17d890aa6d8ed8213d8c3010359cdfb47c8c893d))
+* update info for windows installation ([248cdf6](https://github.com/K4zoku/FF-WebHID/commit/248cdf600f4089508cc7101a438805e6b696d839))
+* update rationale about chromium ([14d7273](https://github.com/K4zoku/FF-WebHID/commit/14d7273a03ef2f11a6cf939d3e4cc3e291a302da))
+* update session model and policy docs ([feec816](https://github.com/K4zoku/FF-WebHID/commit/feec8163adc8d72bdef641d12d1f4f3a33d54068))
+* update stale info ([c077456](https://github.com/K4zoku/FF-WebHID/commit/c0774569fd0e873a7791e16e740268dbbeeff41f))
+
+### CI/CD
+
+* attach release notes to AMO submission ([f41aa92](https://github.com/K4zoku/FF-WebHID/commit/f41aa926dd5819488a3d986b7b5ff5277829198e))
+* attach signed xpi with versioned asset name ([a1464ef](https://github.com/K4zoku/FF-WebHID/commit/a1464efc50ae813bc64e434990bd976c055a3698))
+* **build:** fix udev rule dir for rpm build ([e5e58ea](https://github.com/K4zoku/FF-WebHID/commit/e5e58eaf8f016af25a4676702da14e4a026c4068))
+* generate release notes from features and bug fixes ([cf73d10](https://github.com/K4zoku/FF-WebHID/commit/cf73d10f01917a89a5606794aab0db6b1e448671))
+
+### Chores
+
+* add crowdin configuration ([2156365](https://github.com/K4zoku/FF-WebHID/commit/2156365611d5c2781435720abaafa25b28cb279f))
+* add ko-fi to FUNDING ([9657343](https://github.com/K4zoku/FF-WebHID/commit/9657343e5c84715f59643394451fdbee2df63752))
+* add pre-commit conventional commit hook ([cfda617](https://github.com/K4zoku/FF-WebHID/commit/cfda617260376e70b51eb0b94f2a2b4ce69c077b))
+* **addon:** set default daemon as nm host to true on mac ([f05da4d](https://github.com/K4zoku/FF-WebHID/commit/f05da4de56f30059f55640bb8bae79ab3e0d3b38))
+* **addon:** sync translations from Crowdin ([859806b](https://github.com/K4zoku/FF-WebHID/commit/859806bbe08f7d66862ad4af6aa3b71403bcd218))
+* **build:** add automatic commit scope hook ([291a3c2](https://github.com/K4zoku/FF-WebHID/commit/291a3c28db4913f7f4e005b3232d17d9e4d1457e))
+* **build:** map _locales to l10n scope ([a66d014](https://github.com/K4zoku/FF-WebHID/commit/a66d014a7ee0cc438fefebf285aa1a5c80ff9f04))
+* **l10n:** drop legacy 2-letter locale dir ([44c9c41](https://github.com/K4zoku/FF-WebHID/commit/44c9c4100b89f92883a1a07d9422e0a67699f81c))
+* **l10n:** point crowdin source at en_US ([7704093](https://github.com/K4zoku/FF-WebHID/commit/77040930452f82e7ca51873c09568001d67e3fd8))
+* **l10n:** rename locale source to en_US ([6ffedaf](https://github.com/K4zoku/FF-WebHID/commit/6ffedafab2b723e0027a38397ff1a2629349ac8f))
+* migrate to husky git hook ([0837ae1](https://github.com/K4zoku/FF-WebHID/commit/0837ae1975e6f14745eb55b0a18e94f4978d8700))
+* use two-letter locale codes in crowdin config ([6dff12e](https://github.com/K4zoku/FF-WebHID/commit/6dff12ef0139fa3dec55be6269593110640e77fc))
+* use underscore locale codes for regional targets ([a48dab6](https://github.com/K4zoku/FF-WebHID/commit/a48dab6cb35be6dfadf5bdd433714627c6fc18b0))
 ## [3.1.0](https://github.com/K4zoku/FF-WebHID/compare/v3.0.1...v3.1.0) (2026-08-11)
 
 ### Features

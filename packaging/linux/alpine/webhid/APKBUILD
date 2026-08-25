@@ -18,7 +18,7 @@
 # Then the standard 72-webhid.rules (udev format) will work.
 
 pkgname=webhid
-pkgver=3.1.0
+pkgver=3.2.0
 pkgrel=0
 pkgdesc="WebHID implementation for Firefox via native-messaging bridge and hidraw daemon"
 url="https://github.com/K4zoku/FF-WebHID"
