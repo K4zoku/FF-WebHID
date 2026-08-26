@@ -10,6 +10,7 @@
   const loadSiteSettings = webhid.import('loadSiteSettings')
   const parseSettingsKey = webhid.import('parseSettingsKey')
   const WebHidDevicePicker = webhid.import('WebHidDevicePicker')
+  const forwardInputReportToPorts = webhid.import('forwardInputReportToPorts')
   logger.initLogger('bridge')
 
   const devicePicker = new WebHidDevicePicker()
@@ -1284,25 +1285,7 @@
   function forwardInputReportToPage(messageEvent) {
     const ports = dataPorts.get(messageEvent.deviceId)
     if (!ports || ports.size === 0) return false
-    const bytes = messageEvent.data
-    const buffer = bytes ? bytes.buffer : null
-    let handled = false
-    for (const port of ports) {
-      try {
-        port.postMessage(
-          {
-            type: 'inputReport',
-            reportId: messageEvent.reportId,
-            data: buffer
-          },
-          buffer ? [buffer] : []
-        )
-        handled = true
-      } catch (e) {
-        logger.debug('forward inputReport to page failed', e)
-      }
-    }
-    return handled
+    return forwardInputReportToPorts(ports, messageEvent, logger)
   }
 
   /**

@@ -91,6 +91,7 @@
         "js/utils/settings.js",
         "js/utils/theme-sync.js",
         "js/content/isolated/picker/index.js",
+        "js/utils/input-report.js",
         "js/content/isolated/bridge.js"
       ],
       "world": "ISOLATED",
