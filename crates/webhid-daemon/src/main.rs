@@ -281,10 +281,8 @@ async fn main() -> anyhow::Result<()> {
 
         loop {
             server.connect().await?;
-            let connected = std::mem::replace(
-                &mut server,
-                ServerOptions::new().create(&pipe_name)?,
-            );
+            let connected =
+                std::mem::replace(&mut server, ServerOptions::new().create(&pipe_name)?);
             let mgr = Arc::clone(&device_mgr);
             let rx = event_tx.subscribe();
             let wt_state_for_client = Arc::clone(&wt_state);

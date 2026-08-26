@@ -19,6 +19,7 @@ pub async fn handle(
 ) -> anyhow::Result<()> {
     let mut reader = BufReader::new(reader);
     let (tx, mut rx) = mpsc::channel::<NmMessage>(1024);
+    device_mgr.register_nm_sink(client_id, tx.clone());
 
     let writer_task = tokio::spawn(async move {
         let mut writer = tokio::io::BufWriter::new(writer);
@@ -36,8 +37,7 @@ pub async fn handle(
         loop {
             match event_rx.recv().await {
                 Ok(ev) => {
-                    if !relay_client_event(ev, &device_mgr_for_events, client_id, &tx_events).await
-                    {
+                    if !relay_client_event(ev, &device_mgr_for_events, &tx_events).await {
                         break;
                     }
                 }
@@ -61,6 +61,7 @@ pub async fn handle(
 
     event_task.abort();
     writer_task.abort();
+    device_mgr.unregister_nm_sink(client_id);
     device_mgr.close_all_for_client(client_id);
     Ok(())
 }
@@ -72,15 +73,12 @@ pub async fn handle(
 async fn relay_client_event(
     ev: IpcResponse,
     device_mgr: &DeviceManager,
-    client_id: u64,
     tx: &mpsc::Sender<NmMessage>,
 ) -> bool {
     if let webhid::IpcResponse::DeviceDisconnected { device, .. } = &ev {
         device_mgr.force_close(device.device_id);
     }
-    if let webhid::IpcResponse::InputReport { device_id, .. } = &ev
-        && !device_mgr.has_nm_session_for_client(*device_id, client_id)
-    {
+    if let webhid::IpcResponse::InputReport { .. } = &ev {
         return true;
     }
     if tx.send(ipc_event_to_nm(ev)).await.is_err() {
@@ -141,7 +139,9 @@ async fn dispatch(
             session_token,
             ..
         } => handle_close(device_mgr, device_id, session_token, client_id),
-        NmRequest::SendReport { packed, .. } => handle_send_report(device_mgr, packed).await,
+        NmRequest::SendReport { packed, .. } => {
+            handle_send_report(device_mgr, client_id, packed).await
+        }
         NmRequest::ReceiveFeatureReport {
             device_id,
             report_id,
@@ -231,22 +231,36 @@ fn handle_close(
     }
 }
 
-async fn handle_send_report(device_mgr: &DeviceManager, packed: Vec<u8>) -> NmResponse {
+async fn handle_send_report(
+    device_mgr: &DeviceManager,
+    client_id: u64,
+    packed: Vec<u8>,
+) -> NmResponse {
     let Ok((req_id, device_id, report_id, data)) = parse_packed_send(&packed) else {
         return NmResponse::err(422);
     };
-    let mut resp = match report_precheck(
-        device_mgr,
+    let mut resp = match device_mgr.nm_report_send_allowed(
+        client_id,
         device_id,
         report_id,
         ReportType::Output,
         Some(data.len()),
     ) {
-        Ok(()) => match write_blocking(device_mgr, device_id, report_id, data, false).await {
+        Ok(()) => match device_mgr
+            .enqueue_nm_output(client_id, device_id, report_id, data.to_vec())
+            .await
+        {
             Ok(()) => NmResponse::ok(),
-            Err(e) => e,
+            Err(e) => {
+                log::warn!(
+                    "[nm] output worker failed dev={device_id:#x} report={report_id} len={}: {e}",
+                    data.len()
+                );
+                NmResponse::err(500)
+            }
         },
-        Err(e) => e,
+        Err(crate::device_mgr::SendReject::Blocked) => NmResponse::err(403),
+        Err(crate::device_mgr::SendReject::Invalid) => NmResponse::err(500),
     };
     resp.id = Some(req_id);
     resp
@@ -279,10 +293,12 @@ async fn handle_send_feature_report(
         ReportType::Feature,
         Some(data.len()),
     ) {
-        Ok(()) => match write_blocking(device_mgr, device_id, report_id, &data, true).await {
-            Ok(()) => NmResponse::ok(),
-            Err(e) => e,
-        },
+        Ok(()) => {
+            match write_feature_report_blocking(device_mgr, device_id, report_id, &data).await {
+                Ok(()) => NmResponse::ok(),
+                Err(e) => e,
+            }
+        }
         Err(e) => e,
     }
 }
@@ -370,28 +386,23 @@ fn open_device(
         .ok_or_else(|| NmResponse::err(404))
 }
 
-async fn write_blocking(
+async fn write_feature_report_blocking(
     device_mgr: &DeviceManager,
     device_id: u32,
     report_id: u8,
     data: &[u8],
-    feature: bool,
 ) -> Result<(), NmResponse> {
     let dev_arc = open_device(device_mgr, device_id)?;
     let data_owned = data.to_vec();
     match crate::device_mgr::run_device_op(dev_arc, move |d| {
-        if feature {
-            hid::write_feature_report(d, report_id, &data_owned)
-        } else {
-            hid::write_report(d, report_id, &data_owned)
-        }
+        hid::write_feature_report(d, report_id, &data_owned)
     })
     .await
     {
         Ok(()) => Ok(()),
         Err(e) => {
             log::warn!(
-                "[nm] write failed dev={device_id:#x} report={report_id} len={} feature={feature}: {e}",
+                "[nm] feature write failed dev={device_id:#x} report={report_id} len={}: {e}",
                 data.len()
             );
             Err(NmResponse::err(500))

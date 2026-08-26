@@ -469,7 +469,13 @@ mod tests {
     #[test]
     fn test_report_id_spans_multiple_collections() {
         let mut desc = Vec::new();
-        desc.extend(app_input_collection(VENDOR_PAGE_BYTES, 0x01, Some(5), 0x02, 8));
+        desc.extend(app_input_collection(
+            VENDOR_PAGE_BYTES,
+            0x01,
+            Some(5),
+            0x02,
+            8,
+        ));
         desc.extend(app_input_collection(GD_PAGE_BYTES, 0x06, None, 0x07, 16));
         let tree = parse_report_descriptor(&desc).expect("descriptor parses");
         assert_eq!(tree.len(), 2);
@@ -493,7 +499,13 @@ mod tests {
     #[test]
     fn test_report_tree_field_order_independent() {
         let mut vendor_first = Vec::new();
-        vendor_first.extend(app_input_collection(VENDOR_PAGE_BYTES, 0x01, Some(5), 0x02, 8));
+        vendor_first.extend(app_input_collection(
+            VENDOR_PAGE_BYTES,
+            0x01,
+            Some(5),
+            0x02,
+            8,
+        ));
         vendor_first.extend(app_input_collection(GD_PAGE_BYTES, 0x06, None, 0x07, 16));
 
         let mut keyboard_first = Vec::new();

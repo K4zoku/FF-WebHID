@@ -2,9 +2,9 @@ use std::io;
 
 use base64::Engine;
 use bytes::BytesMut;
+use serde::Serialize;
 #[cfg(test)]
 use serde::de::DeserializeOwned;
-use serde::Serialize;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::NmRequest;
@@ -140,9 +140,14 @@ fn read_json_request(v: &serde_json::Value) -> io::Result<NmRequest> {
     let id = v
         .get("n")
         .and_then(|x| x.as_u64())
-        .map(|n| u32::try_from(n).map_err(|_| {
-            io::Error::new(io::ErrorKind::InvalidData, format!("request id {n} out of range"))
-        }))
+        .map(|n| {
+            u32::try_from(n).map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("request id {n} out of range"),
+                )
+            })
+        })
         .transpose()?;
     let filter = v
         .get("f")
@@ -403,13 +408,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_read_nm_request_device_id_out_of_range() {
-        let err = read_json(serde_json::json!({"a": 2, "i": 4294967296u64})).await.unwrap_err();
+        let err = read_json(serde_json::json!({"a": 2, "i": 4294967296u64}))
+            .await
+            .unwrap_err();
         assert!(matches!(err, FrameReadError::Malformed(_)));
     }
 
     #[tokio::test]
     async fn test_read_nm_request_report_id_out_of_range() {
-        let err = read_json(serde_json::json!({"a": 5, "i": 1, "r": 257})).await.unwrap_err();
+        let err = read_json(serde_json::json!({"a": 5, "i": 1, "r": 257}))
+            .await
+            .unwrap_err();
         assert!(matches!(err, FrameReadError::Malformed(_)));
     }
 

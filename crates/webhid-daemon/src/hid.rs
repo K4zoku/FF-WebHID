@@ -145,11 +145,17 @@ pub fn enumerate_with_filter(filter: Option<&EnumerateFilter>) -> anyhow::Result
 
     let mut devices = Vec::new();
     for ifaces in groups.values() {
-        let mut seen_descriptors: std::collections::HashMap<&String, std::collections::HashSet<Vec<u8>>> =
-            std::collections::HashMap::new();
+        let mut seen_descriptors: std::collections::HashMap<
+            &String,
+            std::collections::HashSet<Vec<u8>>,
+        > = std::collections::HashMap::new();
         for (phys, info) in ifaces {
             let desc = read_raw_report_descriptor_with_api(&api, info);
-            if !seen_descriptors.entry(phys).or_default().insert(desc.clone()) {
+            if !seen_descriptors
+                .entry(phys)
+                .or_default()
+                .insert(desc.clone())
+            {
                 continue;
             }
             if let Some(d) = info_from_hidapi_pub_with_desc(info, desc) {

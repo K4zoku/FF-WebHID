@@ -151,7 +151,9 @@ async fn try_connect_candidates(
         match connect_to_path(path).await {
             Ok(s) => {
                 if !verify_daemon_peer(&s) {
-                    log::warn!("[forwarder] daemon socket at {path} failed peer verification; trying next candidate");
+                    log::warn!(
+                        "[forwarder] daemon socket at {path} failed peer verification; trying next candidate"
+                    );
                     last_err = Some(std::io::Error::new(
                         std::io::ErrorKind::PermissionDenied,
                         "daemon socket peer verification failed",
