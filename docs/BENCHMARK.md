@@ -133,6 +133,9 @@ dataset tables.
 
 Init time per mode, stacked:
 
+<!-- Mermaid xychart has no true stacked bars; cumulative values below are
+     intentional for visualization. Raw benchmark values are in the table. -->
+     
 ```mermaid
 ---
 config:
@@ -145,7 +148,7 @@ xychart
     x-axis [nm, ws, wt-inpage, wt, native, chr-nm, chr-ws, chr-wt-inpage, chr-wt]
     y-axis "ms" 0 --> 400
     bar "total" [261.6, 137.9, 117.0, 126.1, 23.9, 131.6, 74.9, 103.4, 109.8]
-    bar "warmup (open + warmup)" [256.9, 132.6, 112.7, 120.6, 19.6, 124.7, 71.3, 98.7, 105.2]
+    bar "warmup" [256.9, 132.6, 112.7, 120.6, 19.6, 124.7, 71.3, 98.7, 105.2] 
     bar "open" [9.9, 17.6, 20.7, 12.6, 0.6, 8.7, 12.3, 17.7, 14.2]
 ```
 
