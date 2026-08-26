@@ -1,0 +1,48 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Input Report Fan-out Frame</title>
+  </head>
+  <body>
+    <script>
+      ;(function () {
+        function reportFromEvent(event) {
+          const view = new Uint8Array(
+            event.data.buffer,
+            event.data.byteOffset,
+            event.data.byteLength
+          )
+          return { reportId: event.reportId, bytes: Array.from(view) }
+        }
+
+        window.addEventListener('message', async (event) => {
+          if (event.source !== window.parent || !event.data || event.data.type !== 'start') return
+          const id = event.data.id
+          try {
+            const devices = await navigator.hid.getDevices()
+            const device = devices[0]
+            if (!device) throw new Error('no paired device for ' + id)
+            device.oninputreport = (reportEvent) => {
+              window.parent.postMessage(
+                { type: 'report', id, value: reportFromEvent(reportEvent) },
+                event.origin
+              )
+            }
+            await device.open()
+            window.parent.postMessage({ type: 'ready', id }, event.origin)
+          } catch (error) {
+            window.parent.postMessage(
+              {
+                type: 'error',
+                id,
+                message: error instanceof Error ? error.message : String(error)
+              },
+              event.origin
+            )
+          }
+        })
+      })()
+    </script>
+  </body>
+</html>

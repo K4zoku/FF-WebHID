@@ -1,0 +1,121 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Input Report Fan-out</title>
+  </head>
+  <body>
+    <script>
+      ;(function () {
+        const origin = location.origin
+        const remoteConsumers = new Map()
+
+        function reportFromEvent(event) {
+          const view = new Uint8Array(
+            event.data.buffer,
+            event.data.byteOffset,
+            event.data.byteLength
+          )
+          return { reportId: event.reportId, bytes: Array.from(view) }
+        }
+
+        function createRemoteConsumer(id) {
+          const ready = Promise.withResolvers()
+          const report = Promise.withResolvers()
+          remoteConsumers.set(id, { ready, report })
+          return { ready: ready.promise, report: report.promise }
+        }
+
+        window.addEventListener('message', (event) => {
+          const message = event.data
+          if (!message || typeof message.id !== 'string') return
+          const consumer = remoteConsumers.get(message.id)
+          if (!consumer) return
+          if (message.type === 'ready') consumer.ready.resolve()
+          else if (message.type === 'report') consumer.report.resolve(message.value)
+          else if (message.type === 'error') {
+            const error = new Error(message.message)
+            consumer.ready.reject(error)
+            consumer.report.reject(error)
+          }
+        })
+
+        function createPageConsumer(id) {
+          const ready = Promise.withResolvers()
+          const report = Promise.withResolvers()
+          void navigator.hid
+            .getDevices()
+            .then(async (devices) => {
+              const device = devices[0]
+              if (!device) throw new Error('no paired device for ' + id)
+              device.oninputreport = (event) => report.resolve(reportFromEvent(event))
+              await device.open()
+              ready.resolve()
+            })
+            .catch((error) => {
+              ready.reject(error)
+              report.reject(error)
+            })
+          return { ready: ready.promise, report: report.promise }
+        }
+
+        let started = false
+
+        async function startFanout(iframeCount, includeWorker) {
+          const consumers = [createPageConsumer('page')]
+          for (let i = 0; i < iframeCount; i++) {
+            const id = 'iframe-' + i
+            const consumer = createRemoteConsumer(id)
+            const frame = document.createElement('iframe')
+            frame.src = '/tests/pages/input-report-fanout-frame.html'
+            frame.onload = () => {
+              frame.contentWindow.postMessage({ type: 'start', id }, origin)
+            }
+            document.body.appendChild(frame)
+            consumers.push(consumer)
+          }
+
+          if (includeWorker) {
+            const id = 'worker'
+            const consumer = createRemoteConsumer(id)
+            const worker = new Worker('/tests/pages/input-report-fanout-worker.js')
+            worker.onmessage = (event) => {
+              window.postMessage(event.data, origin)
+            }
+            worker.onerror = (event) => {
+              window.postMessage(
+                { type: 'error', id, message: event.message || 'worker failed' },
+                origin
+              )
+            }
+            worker.postMessage({ type: 'start', id })
+            consumer.report.then(() => worker.terminate())
+            consumers.push(consumer)
+          }
+
+          await Promise.all(consumers.map((consumer) => consumer.ready))
+          Promise.all(consumers.map((consumer) => consumer.report)).then((reports) => {
+            window.tests.results.fanoutReports = reports
+          })
+        }
+
+        window.tests = window.tests || { helper: {}, results: {} }
+        window.tests.helper = window.tests.helper || {}
+        window.tests.results = window.tests.results || {}
+        window.tests.results.fanoutReady = false
+        window.addEventListener('message', (event) => {
+          const message = event.data
+          if (!message || message.type !== 'startFanout' || started) return
+          started = true
+          void startFanout(message.iframeCount, message.includeWorker)
+            .then(() => {
+              window.tests.results.fanoutReady = true
+            })
+            .catch((error) => {
+              window.tests.results.fanoutError = error.message
+            })
+        })
+      })()
+    </script>
+  </body>
+</html>
