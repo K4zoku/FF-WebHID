@@ -8,7 +8,7 @@ use tokio::sync::{broadcast, mpsc};
 use webhid::{IpcResponse, NmMessage, NmRequest, NmResponse, parse_packed_send, protocol};
 
 use crate::device_mgr::DeviceManager;
-use crate::{hid, webtransport::WtState};
+use crate::webtransport::WtState;
 
 enum WriterTask {
     Async(tokio::task::JoinHandle<()>),
@@ -355,13 +355,13 @@ async fn dispatch(
             device_id,
             report_id,
             ..
-        } => handle_receive_feature_report(device_mgr, device_id, report_id).await,
+        } => handle_receive_feature_report(device_mgr, client_id, device_id, report_id).await,
         NmRequest::SendFeatureReport {
             device_id,
             report_id,
             data,
             ..
-        } => handle_send_feature_report(device_mgr, device_id, report_id, data).await,
+        } => handle_send_feature_report(device_mgr, client_id, device_id, report_id, data).await,
         NmRequest::SetDataPlane {
             device_id,
             mode,
@@ -477,13 +477,17 @@ async fn handle_send_report(
 
 async fn handle_receive_feature_report(
     device_mgr: &DeviceManager,
+    client_id: u64,
     device_id: u32,
     report_id: u8,
 ) -> NmResponse {
     match report_precheck(device_mgr, device_id, report_id, ReportType::Feature, None) {
-        Ok(()) => match read_feature_report_blocking(device_mgr, device_id, report_id).await {
+        Ok(()) => match device_mgr
+            .enqueue_nm_feature_read(client_id, device_id, report_id)
+            .await
+        {
             Ok(data) => NmResponse::ok_with_data(data),
-            Err(e) => e,
+            Err(_) => NmResponse::err(500),
         },
         Err(e) => e,
     }
@@ -491,6 +495,7 @@ async fn handle_receive_feature_report(
 
 async fn handle_send_feature_report(
     device_mgr: &DeviceManager,
+    client_id: u64,
     device_id: u32,
     report_id: u8,
     data: Vec<u8>,
@@ -502,13 +507,33 @@ async fn handle_send_feature_report(
         ReportType::Feature,
         Some(data.len()),
     ) {
-        Ok(()) => {
-            match write_feature_report_blocking(device_mgr, device_id, report_id, &data).await {
-                Ok(()) => NmResponse::ok(),
-                Err(e) => e,
+        Ok(()) => match device_mgr
+            .enqueue_nm_feature_write(client_id, device_id, report_id, data)
+            .await
+        {
+            Ok(()) => NmResponse::ok(),
+            Err(e) => {
+                log::warn!("[nm] feature write failed dev={device_id:#x} report={report_id}: {e}");
+                NmResponse::err(500)
             }
-        }
+        },
         Err(e) => e,
+    }
+}
+
+fn handle_handshake(device_mgr: &DeviceManager, ws_port: u16, wt_state: &WtState) -> NmResponse {
+    let (wt_port, wt_cert_hash) = match wt_state.ensure_current() {
+        Some((port, hash)) => (Some(port), Some(hash)),
+        None => (None, None),
+    };
+    NmResponse {
+        status: Some(200),
+        ws_port: Some(ws_port),
+        ws_nonce: Some(device_mgr.ws_nonce().to_string()),
+        wt_port,
+        wt_cert_hash,
+        hid_permission: Some(crate::hid::hid_permission()),
+        ..Default::default()
     }
 }
 
@@ -539,25 +564,8 @@ fn handle_set_data_plane(
     }
 }
 
-fn handle_handshake(device_mgr: &DeviceManager, ws_port: u16, wt_state: &WtState) -> NmResponse {
-    let (wt_port, wt_cert_hash) = match wt_state.ensure_current() {
-        Some((port, hash)) => (Some(port), Some(hash)),
-        None => (None, None),
-    };
-    NmResponse {
-        status: Some(200),
-        ws_port: Some(ws_port),
-        ws_nonce: Some(device_mgr.ws_nonce().to_string()),
-        wt_port,
-        wt_cert_hash,
-        hid_permission: Some(crate::hid::hid_permission()),
-        ..Default::default()
-    }
-}
-
 /// Shared report pre-checks: blocklist first, then Chromium-style
-/// validation. Ok(()) means the report may proceed; Err carries the
-/// response to return instead.
+/// validation. Ok(()) means the report may proceed; Err carries the response.
 #[allow(clippy::result_large_err)]
 fn report_precheck(
     device_mgr: &DeviceManager,
@@ -582,58 +590,6 @@ fn report_precheck(
                 NmResponse::err(500)
             }
         })
-}
-
-/// Resolves the open device handle, mapping a missing device to a 404.
-#[allow(clippy::result_large_err)]
-fn open_device(
-    device_mgr: &DeviceManager,
-    device_id: u32,
-) -> Result<crate::device_mgr::DeviceHandle, NmResponse> {
-    device_mgr
-        .get_file_logged(device_id)
-        .ok_or_else(|| NmResponse::err(404))
-}
-
-async fn write_feature_report_blocking(
-    device_mgr: &DeviceManager,
-    device_id: u32,
-    report_id: u8,
-    data: &[u8],
-) -> Result<(), NmResponse> {
-    let dev_arc = open_device(device_mgr, device_id)?;
-    let data_owned = data.to_vec();
-    match crate::device_mgr::run_device_op(dev_arc, move |d| {
-        hid::write_feature_report(d, report_id, &data_owned)
-    })
-    .await
-    {
-        Ok(()) => Ok(()),
-        Err(e) => {
-            log::warn!(
-                "[nm] feature write failed dev={device_id:#x} report={report_id} len={}: {e}",
-                data.len()
-            );
-            Err(NmResponse::err(500))
-        }
-    }
-}
-
-async fn read_feature_report_blocking(
-    device_mgr: &DeviceManager,
-    device_id: u32,
-    report_id: u8,
-) -> Result<Vec<u8>, NmResponse> {
-    let dev_arc = open_device(device_mgr, device_id)?;
-    let buf_size = device_mgr.read_buf_size(device_id);
-    match crate::device_mgr::run_device_op(dev_arc, move |d| {
-        hid::read_feature_report(d, report_id, buf_size)
-    })
-    .await
-    {
-        Ok(data) => Ok(data),
-        Err(_) => Err(NmResponse::err(500)),
-    }
 }
 
 fn ipc_event_to_nm(ev: IpcResponse) -> NmMessage {

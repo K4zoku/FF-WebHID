@@ -6,7 +6,6 @@ use tokio::sync::{broadcast, watch};
 
 use crate::blocklist::ReportType;
 use crate::device_mgr::DeviceManager;
-use crate::hid;
 
 pub const MSG_SEND_REPORT: u8 = 0x01;
 pub const MSG_SEND_FEATURE_REPORT: u8 = 0x02;
@@ -356,16 +355,13 @@ fn send_kind(msg_type: u8) -> (u8, ReportType) {
 }
 
 enum SendPrecheck {
-    Proceed {
-        report_id: u8,
-        dev: crate::device_mgr::DeviceHandle,
-    },
+    Proceed { report_id: u8 },
     Blocked,
     Rejected,
 }
 
 /// Shared pre-checks for send/feature-read requests: empty payload,
-/// blocklist, Chromium-style validation, and device handle resolution.
+/// blocklist, and Chromium-style validation.
 fn precheck_report(
     device_mgr: &Arc<DeviceManager>,
     device_id: u32,
@@ -380,10 +376,7 @@ fn precheck_report(
     match device_mgr.report_send_allowed(device_id, report_id, report_type, payload_len) {
         Err(crate::device_mgr::SendReject::Blocked) => SendPrecheck::Blocked,
         Err(crate::device_mgr::SendReject::Invalid) => SendPrecheck::Rejected,
-        Ok(()) => match device_mgr.get_file_logged(device_id) {
-            Some(dev) => SendPrecheck::Proceed { report_id, dev },
-            None => SendPrecheck::Rejected,
-        },
+        Ok(()) => SendPrecheck::Proceed { report_id },
     }
 }
 
@@ -427,21 +420,33 @@ async fn handle_send_report_msg<F>(
             );
             emit(make_status_resp(resp_type, req_id, 1))
         }
-        SendPrecheck::Proceed {
-            report_id,
-            dev: dev_arc,
-        } => {
-            let report_data: Arc<[u8]> = Arc::from(&payload[1..]);
-            let result = crate::device_mgr::run_device_op(dev_arc, move |dev| {
-                if msg_type == MSG_SEND_REPORT {
-                    hid::write_report(dev, report_id, &report_data)
-                } else {
-                    hid::write_feature_report(dev, report_id, &report_data)
-                }
-            })
-            .await;
+        SendPrecheck::Proceed { report_id } => {
+            let report_data = payload[1..].to_vec();
+            let result = if msg_type == MSG_SEND_REPORT {
+                device_mgr
+                    .enqueue_transport_output(
+                        device_id,
+                        session_token,
+                        kind,
+                        generation,
+                        report_id,
+                        report_data,
+                    )
+                    .await
+            } else {
+                device_mgr
+                    .enqueue_transport_feature_write(
+                        device_id,
+                        session_token,
+                        kind,
+                        generation,
+                        report_id,
+                        report_data,
+                    )
+                    .await
+            };
             let status = match result {
-                Ok(_) => 0u8,
+                Ok(()) => 0u8,
                 Err(e) => {
                     log::warn!(
                         "[sender] write failed dev={device_id:#x} report={report_id} type={report_type:?} len={payload_len}: {e}"
@@ -474,15 +479,16 @@ async fn handle_receive_feature_report_msg<F>(
     match precheck_report(device_mgr, device_id, payload, ReportType::Feature, None) {
         SendPrecheck::Blocked => emit(make_feature_read_resp(req_id, 2, &[])),
         SendPrecheck::Rejected => emit(make_feature_read_resp(req_id, 1, &[])),
-        SendPrecheck::Proceed {
-            report_id,
-            dev: dev_arc,
-        } => {
-            let buf_size = device_mgr.read_buf_size(device_id);
-            let result = crate::device_mgr::run_device_op(dev_arc, move |d| {
-                hid::read_feature_report(d, report_id, buf_size)
-            })
-            .await;
+        SendPrecheck::Proceed { report_id } => {
+            let result = device_mgr
+                .enqueue_transport_feature_read(
+                    device_id,
+                    session_token,
+                    kind,
+                    generation,
+                    report_id,
+                )
+                .await;
             match result {
                 Ok(data) => {
                     emit(make_feature_read_resp(req_id, 0, &data));

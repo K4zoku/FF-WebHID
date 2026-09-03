@@ -1,5 +1,5 @@
-use std::io;
 use std::borrow::Cow;
+use std::io;
 
 use base64::Engine;
 use bytes::BytesMut;

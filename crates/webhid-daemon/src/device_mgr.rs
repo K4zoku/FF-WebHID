@@ -37,14 +37,115 @@ pub(crate) fn with_device<R>(handle: &DeviceHandle, f: impl FnOnce(&HidDevice) -
     f(&*handle.lock().unwrap_or_else(|e| e.into_inner()))
 }
 
-pub(crate) async fn run_device_op<T, F>(handle: DeviceHandle, op: F) -> std::io::Result<T>
-where
-    F: FnOnce(&HidDevice) -> std::io::Result<T> + Send + 'static,
-    T: Send + 'static,
-{
-    tokio::task::spawn_blocking(move || with_device(&handle, op))
-        .await
-        .unwrap_or_else(|e| Err(std::io::Error::other(format!("device op join failed: {e}"))))
+/// Run one HID operation on the persistent per-device I/O worker.
+trait DeviceIo: Send + 'static {
+    fn output(&self, report_id: u8, data: &[u8]) -> std::io::Result<()>;
+    fn feature_write(&self, report_id: u8, data: &[u8]) -> std::io::Result<()>;
+    fn feature_read(&self, report_id: u8, buf_size: usize) -> std::io::Result<Vec<u8>>;
+}
+
+struct HidDeviceIo(DeviceHandle);
+
+impl DeviceIo for HidDeviceIo {
+    fn output(&self, report_id: u8, data: &[u8]) -> std::io::Result<()> {
+        with_device(&self.0, |dev| hid::write_report(dev, report_id, data))
+    }
+
+    fn feature_write(&self, report_id: u8, data: &[u8]) -> std::io::Result<()> {
+        with_device(&self.0, |dev| {
+            hid::write_feature_report(dev, report_id, data)
+        })
+    }
+
+    fn feature_read(&self, report_id: u8, buf_size: usize) -> std::io::Result<Vec<u8>> {
+        with_device(&self.0, |dev| {
+            hid::read_feature_report(dev, report_id, buf_size)
+        })
+    }
+}
+
+enum IoValidity {
+    Atomic(Arc<AtomicBool>),
+    Transport {
+        device_mgr: Arc<DeviceManager>,
+        device_id: u32,
+        session_token: String,
+        kind: String,
+        generation: u64,
+    },
+}
+
+impl IoValidity {
+    fn is_valid(&self) -> bool {
+        match self {
+            Self::Atomic(valid) => valid.load(Ordering::SeqCst),
+            Self::Transport {
+                device_mgr,
+                device_id,
+                session_token,
+                kind,
+                generation,
+            } => device_mgr.session_transport_active(*device_id, session_token, kind, *generation),
+        }
+    }
+}
+
+enum IoCommand {
+    Output {
+        report_id: u8,
+        data: Vec<u8>,
+        reply: oneshot::Sender<std::io::Result<()>>,
+        epoch: u64,
+        validity: IoValidity,
+    },
+    FeatureWrite {
+        report_id: u8,
+        data: Vec<u8>,
+        reply: oneshot::Sender<std::io::Result<()>>,
+        epoch: u64,
+        validity: IoValidity,
+    },
+    FeatureRead {
+        report_id: u8,
+        buf_size: usize,
+        reply: oneshot::Sender<std::io::Result<Vec<u8>>>,
+        epoch: u64,
+        validity: IoValidity,
+    },
+}
+
+impl IoCommand {
+    fn is_current(&self, epoch: &AtomicU64) -> bool {
+        match self {
+            Self::Output {
+                epoch: command_epoch,
+                validity,
+                ..
+            }
+            | Self::FeatureWrite {
+                epoch: command_epoch,
+                validity,
+                ..
+            }
+            | Self::FeatureRead {
+                epoch: command_epoch,
+                validity,
+                ..
+            } => validity.is_valid() && *command_epoch == epoch.load(Ordering::SeqCst),
+        }
+    }
+
+    fn reject(self) {
+        let error = || std::io::Error::new(std::io::ErrorKind::BrokenPipe, "device session closed");
+        match self {
+            Self::Output { reply, .. } | Self::FeatureWrite { reply, .. } => {
+                let _ = reply.send(Err(error()));
+            }
+            Self::FeatureRead { reply, .. } => {
+                let _ = reply.send(Err(error()));
+            }
+        }
+    }
 }
 
 /// One logical `HIDDevice.open()` session, owned by exactly one IPC client.
@@ -80,17 +181,9 @@ pub struct TransportGrant {
     pub generation: u64,
     pub cancel: watch::Receiver<bool>,
 }
-
-struct OutputCommand {
-    report_id: u8,
-    data: Vec<u8>,
-    reply: oneshot::Sender<std::io::Result<()>>,
-    epoch: u64,
-    valid: Arc<AtomicBool>,
-}
 #[derive(Clone)]
 struct NmHotSession {
-    output_tx: mpsc::Sender<OutputCommand>,
+    io_tx: mpsc::Sender<IoCommand>,
     epoch: Arc<AtomicU64>,
     valid: Arc<AtomicBool>,
     blocking: Arc<crate::report_blocking::DeviceReportBlocking>,
@@ -100,11 +193,10 @@ struct NmHotSession {
 }
 
 struct Entry {
-    device: DeviceHandle,
     stop_flag: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
-    output_tx: Option<mpsc::Sender<OutputCommand>>,
-    output_handle: Option<JoinHandle<()>>,
+    io_tx: Option<mpsc::Sender<IoCommand>>,
+    io_handle: Option<JoinHandle<()>>,
     io_epoch: Arc<AtomicU64>,
     vendor_id: u16,
     product_id: u16,
@@ -185,47 +277,75 @@ struct ReaderConfig {
     ws_auth_hashes: Arc<Mutex<HashMap<String, String>>>,
     device_info: DeviceInfo,
 }
-fn spawn_output_writer(
-    device: DeviceHandle,
+fn spawn_io_worker<D>(
+    device: D,
     epoch: Arc<AtomicU64>,
-    mut receiver: mpsc::Receiver<OutputCommand>,
-) -> JoinHandle<()> {
+    mut receiver: mpsc::Receiver<IoCommand>,
+) -> JoinHandle<()>
+where
+    D: DeviceIo,
+{
     thread::spawn(move || {
         while let Some(command) = receiver.blocking_recv() {
-            if !command.valid.load(Ordering::SeqCst)
-                || command.epoch != epoch.load(Ordering::SeqCst)
-            {
-                let _ = command.reply.send(Err(std::io::Error::new(
-                    std::io::ErrorKind::BrokenPipe,
-                    "device session closed",
-                )));
+            if !command.is_current(&epoch) {
+                command.reject();
                 continue;
             }
-            let result = with_device(&device, |hid| {
-                hid::write_report(hid, command.report_id, &command.data)
-            });
-            let _ = command.reply.send(result);
+            match command {
+                IoCommand::Output {
+                    report_id,
+                    data,
+                    reply,
+                    ..
+                } => {
+                    let _ = reply.send(device.output(report_id, &data));
+                }
+                IoCommand::FeatureWrite {
+                    report_id,
+                    data,
+                    reply,
+                    ..
+                } => {
+                    let _ = reply.send(device.feature_write(report_id, &data));
+                }
+                IoCommand::FeatureRead {
+                    report_id,
+                    buf_size,
+                    reply,
+                    ..
+                } => {
+                    let _ = reply.send(device.feature_read(report_id, buf_size));
+                }
+            }
         }
     })
+}
+
+fn spawn_device_io_worker(
+    device: DeviceHandle,
+    epoch: Arc<AtomicU64>,
+    receiver: mpsc::Receiver<IoCommand>,
+) -> JoinHandle<()> {
+    spawn_io_worker(HidDeviceIo(device), epoch, receiver)
 }
 
 fn stop_entry(mut entry: Entry) {
     entry.stop_flag.store(true, Ordering::SeqCst);
     entry.io_epoch.fetch_add(1, Ordering::SeqCst);
-    drop(entry.output_tx.take());
+    drop(entry.io_tx.take());
     if let Some(handle) = entry.handle.take() {
         let _ = handle.join();
     }
-    if let Some(handle) = entry.output_handle.take() {
+    if let Some(handle) = entry.io_handle.take() {
         let _ = handle.join();
     }
 }
 
-fn stop_entry_output_worker(mut entry: Entry) {
+fn stop_entry_io_worker(mut entry: Entry) {
     entry.stop_flag.store(true, Ordering::SeqCst);
     entry.io_epoch.fetch_add(1, Ordering::SeqCst);
-    drop(entry.output_tx.take());
-    if let Some(handle) = entry.output_handle.take() {
+    drop(entry.io_tx.take());
+    if let Some(handle) = entry.io_handle.take() {
         let _ = handle.join();
     }
 }
@@ -354,7 +474,7 @@ impl DeviceManager {
             let devices = self.devices.lock().unwrap_or_else(|e| e.into_inner());
             devices.get(&device_id).and_then(|entry| {
                 Some(NmHotSession {
-                    output_tx: entry.output_tx.as_ref()?.clone(),
+                    io_tx: entry.io_tx.as_ref()?.clone(),
                     epoch: Arc::clone(&entry.io_epoch),
                     valid: Arc::new(AtomicBool::new(true)),
                     blocking: Arc::clone(&entry.blocking),
@@ -423,20 +543,218 @@ impl DeviceManager {
                 std::io::Error::new(std::io::ErrorKind::PermissionDenied, "NM session inactive")
             })?;
         let (reply, result) = oneshot::channel();
-        hot.output_tx
-            .send(OutputCommand {
+        hot.io_tx
+            .send(IoCommand::Output {
                 report_id,
                 data,
                 reply,
                 epoch: hot.epoch.load(Ordering::SeqCst),
-                valid: Arc::clone(&hot.valid),
+                validity: IoValidity::Atomic(Arc::clone(&hot.valid)),
             })
             .await
             .map_err(|_| {
-                std::io::Error::new(std::io::ErrorKind::BrokenPipe, "output worker stopped")
+                std::io::Error::new(std::io::ErrorKind::BrokenPipe, "device I/O worker stopped")
             })?;
         result.await.map_err(|_| {
-            std::io::Error::new(std::io::ErrorKind::BrokenPipe, "output worker stopped")
+            std::io::Error::new(std::io::ErrorKind::BrokenPipe, "device I/O worker stopped")
+        })?
+    }
+
+    pub async fn enqueue_nm_feature_write(
+        &self,
+        client_id: u64,
+        device_id: u32,
+        report_id: u8,
+        data: Vec<u8>,
+    ) -> std::io::Result<()> {
+        let hot = self
+            .nm_hot
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&(client_id, device_id))
+            .cloned()
+            .ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::PermissionDenied, "NM session inactive")
+            })?;
+        let (reply, result) = oneshot::channel();
+        hot.io_tx
+            .send(IoCommand::FeatureWrite {
+                report_id,
+                data,
+                reply,
+                epoch: hot.epoch.load(Ordering::SeqCst),
+                validity: IoValidity::Atomic(Arc::clone(&hot.valid)),
+            })
+            .await
+            .map_err(|_| {
+                std::io::Error::new(std::io::ErrorKind::BrokenPipe, "device I/O worker stopped")
+            })?;
+        result.await.map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::BrokenPipe, "device I/O worker stopped")
+        })?
+    }
+
+    pub async fn enqueue_nm_feature_read(
+        &self,
+        client_id: u64,
+        device_id: u32,
+        report_id: u8,
+    ) -> std::io::Result<Vec<u8>> {
+        let hot = self
+            .nm_hot
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&(client_id, device_id))
+            .cloned()
+            .ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::PermissionDenied, "NM session inactive")
+            })?;
+        let buf_size = self.read_buf_size(device_id);
+        let (reply, result) = oneshot::channel();
+        hot.io_tx
+            .send(IoCommand::FeatureRead {
+                report_id,
+                buf_size,
+                reply,
+                epoch: hot.epoch.load(Ordering::SeqCst),
+                validity: IoValidity::Atomic(Arc::clone(&hot.valid)),
+            })
+            .await
+            .map_err(|_| {
+                std::io::Error::new(std::io::ErrorKind::BrokenPipe, "device I/O worker stopped")
+            })?;
+        result.await.map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::BrokenPipe, "device I/O worker stopped")
+        })?
+    }
+
+    fn transport_io_context(
+        &self,
+        device_id: u32,
+        session_token: &str,
+        kind: &str,
+        generation: u64,
+    ) -> std::io::Result<(mpsc::Sender<IoCommand>, Arc<AtomicU64>)> {
+        if !self.session_transport_active(device_id, session_token, kind, generation) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "transport inactive",
+            ));
+        }
+        let devices = self.devices.lock().unwrap_or_else(|e| e.into_inner());
+        let entry = devices
+            .get(&device_id)
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "device not open"))?;
+        Ok((
+            entry.io_tx.as_ref().cloned().ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::BrokenPipe, "device I/O worker stopped")
+            })?,
+            Arc::clone(&entry.io_epoch),
+        ))
+    }
+    fn transport_validity(
+        self: &Arc<Self>,
+        device_id: u32,
+        session_token: &str,
+        kind: &str,
+        generation: u64,
+    ) -> IoValidity {
+        IoValidity::Transport {
+            device_mgr: Arc::clone(self),
+            device_id,
+            session_token: session_token.to_string(),
+            kind: kind.to_string(),
+            generation,
+        }
+    }
+
+    pub async fn enqueue_transport_output(
+        self: &Arc<Self>,
+        device_id: u32,
+        session_token: &str,
+        kind: &str,
+        generation: u64,
+        report_id: u8,
+        data: Vec<u8>,
+    ) -> std::io::Result<()> {
+        let (io_tx, epoch) =
+            self.transport_io_context(device_id, session_token, kind, generation)?;
+        let validity = self.transport_validity(device_id, session_token, kind, generation);
+        let (reply, result) = oneshot::channel();
+        io_tx
+            .send(IoCommand::Output {
+                report_id,
+                data,
+                reply,
+                epoch: epoch.load(Ordering::SeqCst),
+                validity,
+            })
+            .await
+            .map_err(|_| {
+                std::io::Error::new(std::io::ErrorKind::BrokenPipe, "device I/O worker stopped")
+            })?;
+        result.await.map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::BrokenPipe, "device I/O worker stopped")
+        })?
+    }
+
+    pub async fn enqueue_transport_feature_write(
+        self: &Arc<Self>,
+        device_id: u32,
+        session_token: &str,
+        kind: &str,
+        generation: u64,
+        report_id: u8,
+        data: Vec<u8>,
+    ) -> std::io::Result<()> {
+        let (io_tx, epoch) =
+            self.transport_io_context(device_id, session_token, kind, generation)?;
+        let validity = self.transport_validity(device_id, session_token, kind, generation);
+        let (reply, result) = oneshot::channel();
+        io_tx
+            .send(IoCommand::FeatureWrite {
+                report_id,
+                data,
+                reply,
+                epoch: epoch.load(Ordering::SeqCst),
+                validity,
+            })
+            .await
+            .map_err(|_| {
+                std::io::Error::new(std::io::ErrorKind::BrokenPipe, "device I/O worker stopped")
+            })?;
+        result.await.map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::BrokenPipe, "device I/O worker stopped")
+        })?
+    }
+
+    pub async fn enqueue_transport_feature_read(
+        self: &Arc<Self>,
+        device_id: u32,
+        session_token: &str,
+        kind: &str,
+        generation: u64,
+        report_id: u8,
+    ) -> std::io::Result<Vec<u8>> {
+        let (io_tx, epoch) =
+            self.transport_io_context(device_id, session_token, kind, generation)?;
+        let validity = self.transport_validity(device_id, session_token, kind, generation);
+        let buf_size = self.read_buf_size(device_id);
+        let (reply, result) = oneshot::channel();
+        io_tx
+            .send(IoCommand::FeatureRead {
+                report_id,
+                buf_size,
+                reply,
+                epoch: epoch.load(Ordering::SeqCst),
+                validity,
+            })
+            .await
+            .map_err(|_| {
+                std::io::Error::new(std::io::ErrorKind::BrokenPipe, "device I/O worker stopped")
+            })?;
+        result.await.map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::BrokenPipe, "device I/O worker stopped")
         })?
     }
 
@@ -564,7 +882,7 @@ impl DeviceManager {
 
         let stop_flag = Arc::new(AtomicBool::new(false));
         let io_epoch = Arc::new(AtomicU64::new(0));
-        let (output_tx, output_rx) = mpsc::channel(128);
+        let (io_tx, io_rx) = mpsc::channel(128);
 
         #[cfg(target_os = "linux")]
         let device_arc: DeviceHandle = Arc::new(device);
@@ -578,11 +896,10 @@ impl DeviceManager {
         }
 
         let entry = Entry {
-            device: Arc::clone(&device_arc),
             stop_flag: Arc::clone(&stop_flag),
             handle: None,
-            output_tx: Some(output_tx),
-            output_handle: None,
+            io_tx: Some(io_tx),
+            io_handle: None,
             io_epoch: Arc::clone(&io_epoch),
             vendor_id: info.vendor_id,
             product_id: info.product_id,
@@ -613,7 +930,7 @@ impl DeviceManager {
             ws_auth_hashes: Arc::clone(&self.ws_auth_hashes),
             device_info: info.clone(),
         });
-        let output_handle = spawn_output_writer(device_arc, io_epoch, output_rx);
+        let io_handle = spawn_device_io_worker(device_arc, io_epoch, io_rx);
         if let Some(e) = self
             .devices
             .lock()
@@ -621,7 +938,7 @@ impl DeviceManager {
             .get_mut(&id)
         {
             e.handle = Some(handle);
-            e.output_handle = Some(output_handle);
+            e.io_handle = Some(io_handle);
         }
 
         Ok((id, session_token.to_string()))
@@ -702,7 +1019,7 @@ impl DeviceManager {
                     .unwrap_or_else(|e| e.into_inner())
                     .remove(&dev_id);
                 if let Some(entry) = removed {
-                    stop_entry_output_worker(entry);
+                    stop_entry_io_worker(entry);
                     nm_hot.lock().unwrap_or_else(|e| e.into_inner()).retain(
                         |(_, hot_device_id), hot| {
                             if *hot_device_id == dev_id {
@@ -887,14 +1204,6 @@ impl DeviceManager {
         }
     }
 
-    pub fn get_file(&self, device_id: u32) -> anyhow::Result<DeviceHandle> {
-        let map = self.devices.lock().unwrap_or_else(|e| e.into_inner());
-        let entry = map
-            .get(&device_id)
-            .ok_or_else(|| anyhow!("'{device_id:#x}' not open"))?;
-        Ok(Arc::clone(&entry.device))
-    }
-
     /// Descriptor-derived read buffer size for the device (report payload +
     /// report-id byte, floored and capped). Used for feature-report reads.
     pub fn read_buf_size(&self, device_id: u32) -> usize {
@@ -902,17 +1211,6 @@ impl DeviceManager {
         map.get(&device_id)
             .map(|e| e.read_buf_size)
             .unwrap_or(crate::hid::MAX_READ_BUFFER)
-    }
-
-    /// Resolves the open device handle, logging on failure.
-    pub fn get_file_logged(&self, device_id: u32) -> Option<DeviceHandle> {
-        match self.get_file(device_id) {
-            Ok(f) => Some(f),
-            Err(e) => {
-                log::warn!("[device_mgr] get_file '{device_id:#x}': {e}");
-                None
-            }
-        }
     }
 
     /// Validates and applies a data-plane mode change for exactly one
@@ -1225,6 +1523,181 @@ mod tests {
         hex::encode([seed; 16])
     }
 
+    #[derive(Debug, PartialEq)]
+    enum IoCall {
+        Output(u8, Vec<u8>),
+        FeatureWrite(u8, Vec<u8>),
+        FeatureRead(u8, usize),
+    }
+
+    #[derive(Clone)]
+    struct MockDeviceIo {
+        calls: Arc<Mutex<Vec<IoCall>>>,
+    }
+
+    impl DeviceIo for MockDeviceIo {
+        fn output(&self, report_id: u8, data: &[u8]) -> std::io::Result<()> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(IoCall::Output(report_id, data.to_vec()));
+            Ok(())
+        }
+
+        fn feature_write(&self, report_id: u8, data: &[u8]) -> std::io::Result<()> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(IoCall::FeatureWrite(report_id, data.to_vec()));
+            Ok(())
+        }
+
+        fn feature_read(&self, report_id: u8, buf_size: usize) -> std::io::Result<Vec<u8>> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(IoCall::FeatureRead(report_id, buf_size));
+            Ok(vec![report_id, buf_size as u8])
+        }
+    }
+
+    fn atomic_validity() -> (IoValidity, Arc<AtomicBool>) {
+        let valid = Arc::new(AtomicBool::new(true));
+        (IoValidity::Atomic(Arc::clone(&valid)), valid)
+    }
+
+    #[test]
+    fn test_io_worker_executes_output_and_feature_commands() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let epoch = Arc::new(AtomicU64::new(7));
+        let (tx, rx) = mpsc::channel(4);
+        let worker = spawn_io_worker(
+            MockDeviceIo {
+                calls: Arc::clone(&calls),
+            },
+            Arc::clone(&epoch),
+            rx,
+        );
+        let (validity, _) = atomic_validity();
+        let (output_reply, output_result) = oneshot::channel();
+        tx.blocking_send(IoCommand::Output {
+            report_id: 1,
+            data: vec![2, 3],
+            reply: output_reply,
+            epoch: 7,
+            validity,
+        })
+        .unwrap();
+        assert!(output_result.blocking_recv().unwrap().is_ok());
+
+        let (validity, _) = atomic_validity();
+        let (write_reply, write_result) = oneshot::channel();
+        tx.blocking_send(IoCommand::FeatureWrite {
+            report_id: 4,
+            data: vec![5],
+            reply: write_reply,
+            epoch: 7,
+            validity,
+        })
+        .unwrap();
+        assert!(write_result.blocking_recv().unwrap().is_ok());
+
+        let (validity, _) = atomic_validity();
+        let (read_reply, read_result) = oneshot::channel();
+        tx.blocking_send(IoCommand::FeatureRead {
+            report_id: 6,
+            buf_size: 32,
+            reply: read_reply,
+            epoch: 7,
+            validity,
+        })
+        .unwrap();
+        assert_eq!(read_result.blocking_recv().unwrap().unwrap(), vec![6, 32]);
+
+        drop(tx);
+        worker.join().unwrap();
+        assert_eq!(
+            *calls.lock().unwrap(),
+            vec![
+                IoCall::Output(1, vec![2, 3]),
+                IoCall::FeatureWrite(4, vec![5]),
+                IoCall::FeatureRead(6, 32),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_io_worker_rejects_stale_commands_without_touching_device() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let epoch = Arc::new(AtomicU64::new(2));
+        let (tx, rx) = mpsc::channel(2);
+        let worker = spawn_io_worker(
+            MockDeviceIo {
+                calls: Arc::clone(&calls),
+            },
+            epoch,
+            rx,
+        );
+        let (validity, valid) = atomic_validity();
+        valid.store(false, Ordering::SeqCst);
+        let (reply, result) = oneshot::channel();
+        tx.blocking_send(IoCommand::FeatureRead {
+            report_id: 1,
+            buf_size: 8,
+            reply,
+            epoch: 2,
+            validity,
+        })
+        .unwrap();
+        assert_eq!(
+            result.blocking_recv().unwrap().unwrap_err().kind(),
+            std::io::ErrorKind::BrokenPipe
+        );
+        let (validity, _) = atomic_validity();
+        let (reply, result) = oneshot::channel();
+        tx.blocking_send(IoCommand::Output {
+            report_id: 2,
+            data: vec![3],
+            reply,
+            epoch: 1,
+            validity,
+        })
+        .unwrap();
+        assert!(result.blocking_recv().unwrap().is_err());
+        drop(tx);
+        worker.join().unwrap();
+        assert!(calls.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_io_worker_shutdown_resolves_queued_request() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let (tx, rx) = mpsc::channel(1);
+        let epoch = Arc::new(AtomicU64::new(0));
+        let worker = spawn_io_worker(
+            MockDeviceIo {
+                calls: Arc::clone(&calls),
+            },
+            epoch,
+            rx,
+        );
+        let (validity, valid) = atomic_validity();
+        valid.store(false, Ordering::SeqCst);
+        let (reply, result) = oneshot::channel();
+        tx.blocking_send(IoCommand::FeatureWrite {
+            report_id: 9,
+            data: vec![10],
+            reply,
+            epoch: 0,
+            validity,
+        })
+        .unwrap();
+        drop(tx);
+        assert!(result.blocking_recv().unwrap().is_err());
+        worker.join().unwrap();
+        assert!(calls.lock().unwrap().is_empty());
+    }
+
     #[test]
     fn test_has_nm_session_no_device() {
         let (tx, _) = broadcast::channel(16);
@@ -1253,14 +1726,14 @@ mod tests {
             raw_descriptor: Vec::new(),
         };
         let blocking = Arc::new(DeviceReportBlocking::new(&info, true));
-        let (output_tx, _output_rx) = mpsc::channel(1);
-        let (other_output_tx, _other_output_rx) = mpsc::channel(1);
+        let (io_tx, _io_rx) = mpsc::channel(1);
+        let (other_io_tx, _other_io_rx) = mpsc::channel(1);
         let epoch = Arc::new(AtomicU64::new(0));
         mgr.nm_hot.lock().unwrap().extend([
             (
                 (1, 7),
                 NmHotSession {
-                    output_tx,
+                    io_tx,
                     epoch: Arc::clone(&epoch),
                     blocking: Arc::clone(&blocking),
                     valid: Arc::new(AtomicBool::new(true)),
@@ -1272,7 +1745,7 @@ mod tests {
             (
                 (2, 8),
                 NmHotSession {
-                    output_tx: other_output_tx,
+                    io_tx: other_io_tx,
                     epoch,
                     blocking,
                     valid: Arc::new(AtomicBool::new(true)),
@@ -1293,14 +1766,12 @@ mod tests {
     #[test]
     fn test_route_nm_input_stops_when_sink_is_invalidated() {
         let (nm_tx, _nm_rx) = mpsc::channel(1);
-        nm_tx
-            .try_send(NmMessage::PackedData(vec![0]))
-            .unwrap();
+        nm_tx.try_send(NmMessage::PackedData(vec![0])).unwrap();
         let valid = Arc::new(AtomicBool::new(true));
         let map: NmHotMap = Arc::new(Mutex::new(HashMap::from([(
             (1, 7),
             NmHotSession {
-                output_tx: mpsc::channel(1).0,
+                io_tx: mpsc::channel(1).0,
                 epoch: Arc::new(AtomicU64::new(0)),
                 blocking: Arc::new(DeviceReportBlocking::new(
                     &DeviceInfo {
