@@ -4,8 +4,8 @@
     "dockerfile": "Dockerfile",
     "context": ".."
   },
-  "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/ff-webhid,type=bind",
-  "workspaceFolder": "/workspaces/ff-webhid",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/FF-WebHID,type=bind",
+  "workspaceFolder": "/workspaces/FF-WebHID",
   "remoteUser": "node",
   "runArgs": ["--userns=keep-id"],
   "containerEnv": {
@@ -13,5 +13,5 @@
     "PLAYWRIGHT_BROWSERS_PATH": "/ms-playwright",
     "npm_config_cache": "/home/node/.npm"
   },
-  "postCreateCommand": "npm ci"
+  "postCreateCommand": "npm ci --ignore-scripts"
 }
