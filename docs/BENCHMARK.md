@@ -2,12 +2,7 @@
 
 ## Automated image-pipeline benchmark
 
-A Playwright-driven end-to-end benchmark measuring the full data-plane
-round-trip automatically. The Firefox project (`firefox-benchmark`) runs
-all four data planes (nm, ws, wt, wt-inpage); the Chromium projects run
-native WebHID (`chromium-benchmark`) and the addon on the same Chromium
-build across the same four planes (`chromium-addon-benchmark`, the
-same-engine overhead measurement).
+A Playwright-driven end-to-end benchmark measuring the full data-plane round-trip automatically. The Firefox project (`firefox-benchmark`) exercises the three production modes, nm, ws, and worker wt, plus `wt-inpage`, a benchmark-only WT configuration. `wt-inpage` sets `dataPlane: 'wt'` with `useWorker: false`, so the hostile MAIN world owns the transport and can see daemon bearer credentials. The settings UI hides it, and it is not a supported user-facing data plane. The Chromium projects run native WebHID (`chromium-benchmark`) and the addon on the same Chromium build (`chromium-addon-benchmark`) across the same benchmark modes.
 
 **Scenario**: a benchmark page fetches a small PNG fixture
 (`tests/fixtures/images/sample.png`, the project icon, ~32KB), chunks it into
@@ -52,17 +47,7 @@ not a transport-only number.
 npm run test:benchmark
 ```
 
-Standalone project, `daemonMode: 'daemon-nm'`, Firefox only. The ws, wt and nm
-modes are separate specs (`benchmark-ws.spec.ts` / `benchmark-wt.spec.ts` /
-`benchmark-nm.spec.ts`),
-each running in its own worker, so each gets an identical cold start (fresh
-Firefox, profile, daemon, grant) with no mid-session toggle. The project
-disables `privacy.reduceTimerPrecision` (the harness Firefox otherwise
-quantizes `performance.now()` to 1ms), so per-report latency timestamps are
-true floats. The data plane is selected by writing `settings :: dataPlane`
-(global + site-scoped) to storage before the benchmark page loads, so the
-bridge handshakes with the target mode from the start instead of racing a
-mid-session `storage.onChanged` update.
+Standalone project, `daemonMode: 'daemon-nm'`, Firefox only. The production modes are separate specs (`benchmark-ws.spec.ts`, `benchmark-wt.spec.ts`, and `benchmark-nm.spec.ts`), each running in its own worker, so each gets an identical cold start (fresh Firefox, profile, daemon, grant) with no mid-session toggle. `benchmark-wt-inpage.spec.ts` separately exercises the benchmark-only in-page configuration. The project disables `privacy.reduceTimerPrecision` (the harness Firefox otherwise quantizes `performance.now()` to 1ms), so per-report latency timestamps are true floats. The data plane is selected by writing `settings :: dataPlane` (global and site-scoped) to storage before the benchmark page loads, so the bridge handshakes with the target mode from the start instead of racing a mid-session `storage.onChanged` update.
 
 A separate **Chromium project** (`chromium-benchmark`) benchmarks native
 WebHID (no addon, no daemon; the mock talks straight to `/dev/hidraw`). It
@@ -79,20 +64,7 @@ install path). Chromium coarsens
 benchmark page is served cross-origin-isolated (COOP/COEP, `tests/serve.ts`)
 to get 5us timestamps instead.
 
-The **addon Chromium project** (`chromium-addon-benchmark`,
-`npm run test:benchmark:chromium:addon`) runs the same page on the same
-Chromium build with the addon loaded unpacked (`TARGET=chromium` build,
-`--disable-features=WebHID` removes native `navigator.hid`). All four data
-planes run (nm, ws, wt, wt-inpage). The page has no CSP, so ws/wt spawn
-their worker via the blob path; run this project on its own (the config pins
-`workers: 1`), an early wt execution alongside other benchmarks showed
-~4.7ms p50 while sequential runs are stable at ~0.6ms. Init `total` is
-measured from the device `open` mark (run #1 send-start minus open-start)
-for every series, so the modal-picker pairing that precedes open in the
-addon flow is excluded and totals stay comparable across modes; per-report
-and whole-run numbers are measured identically for every mode. Harness
-conventions live in
-`tests/helpers/chromium-addon.ts` and AGENTS.md.
+The **addon Chromium project** (`chromium-addon-benchmark`, `npm run test:benchmark:chromium:addon`) runs the same page on the same Chromium build with the addon loaded unpacked (`TARGET=chromium` build, `--disable-features=WebHID` removes native `navigator.hid`). It exercises three production modes and the benchmark-only `wt-inpage` mode. The page has no CSP, so ws/wt spawn their worker via the blob path; run this project on its own (the config pins `workers: 1`), an early wt execution alongside other benchmarks showed ~4.7ms p50 while sequential runs are stable at ~0.6ms. Init `total` is measured from the device `open` mark (run #1 send-start minus open-start) for every series, so the modal-picker pairing that precedes open in the addon flow is excluded and totals stay comparable across modes; per-report and whole-run numbers are measured identically for every mode. Harness conventions live in `tests/helpers/chromium-addon.ts` and AGENTS.md.
 
 All modes run
 one unmeasured warm-up (no painting; the page shows "Warming up..."), an
@@ -106,17 +78,7 @@ default 5 runs p90 and p95 collapse onto max).
 
 ## Input-report loss benchmark (8000Hz, render-saturated page)
 
-The plain image-pipeline benchmark never drops reports (idle pages do not
-exercise the loss path), so a dedicated suite (`tests/benchmark/loss/`,
-project `firefox-benchmark-loss`, `npm run test:benchmark:loss`) measures
-delivery loss at 8000Hz: 6000 reports per run
-(`BENCHMARK_LOSS_RATE` / `BENCHMARK_LOSS_COUNT` overridable), across all four
-data-plane variants (nm, ws, wt, wt-inpage), on a page whose main thread is
-busy with a fixed per-frame compute + canvas load. Each run prints
-received/lost/loss%/gaps/maxGap/firstGap. The rate-gated WS batching
-(12 reports per 4ms window widens the coalesce to 8ms) exists because of this
-measurement: before it, render-load loss ran 1.6-4.3% at 8000Hz; after, the
-worst run is ~0.6%. See AGENTS.md for the design record.
+The plain image-pipeline benchmark never drops reports (idle pages do not exercise the loss path), so a dedicated suite (`tests/benchmark/loss/`, project `firefox-benchmark-loss`, `npm run test:benchmark:loss`) measures delivery loss at 8000Hz: 6000 reports per run (`BENCHMARK_LOSS_RATE` / `BENCHMARK_LOSS_COUNT` overridable), across nm, ws, worker wt, and the benchmark-only `wt-inpage` variant. The page's main thread is busy with fixed per-frame compute and canvas work. Each run prints received/lost/loss%/gaps/maxGap/firstGap. The rate-gated WS batching (12 reports per 4ms window widens the coalesce to 8ms) exists because of this measurement: before it, render-load loss ran 1.6-4.3% at 8000Hz; after, the worst run is ~0.6%. See AGENTS.md for the design record.
 
 ---
 
@@ -135,7 +97,7 @@ Init time per mode, stacked:
 
 <!-- Mermaid xychart has no true stacked bars; cumulative values below are
      intentional for visualization. Raw benchmark values are in the table. -->
-     
+
 ```mermaid
 ---
 config:
@@ -148,7 +110,7 @@ xychart
     x-axis [nm, ws, wt-inpage, wt, native, chr-nm, chr-ws, chr-wt-inpage, chr-wt]
     y-axis "ms" 0 --> 400
     bar "total" [261.6, 137.9, 117.0, 126.1, 23.9, 131.6, 74.9, 103.4, 109.8]
-    bar "warmup" [256.9, 132.6, 112.7, 120.6, 19.6, 124.7, 71.3, 98.7, 105.2] 
+    bar "warmup" [256.9, 132.6, 112.7, 120.6, 19.6, 124.7, 71.3, 98.7, 105.2]
     bar "open" [9.9, 17.6, 20.7, 12.6, 0.6, 8.7, 12.3, 17.7, 14.2]
 ```
 
@@ -340,7 +302,7 @@ radar-beta
 | #9  | 0.60 | 0.94 | 1.28 | 1.56 | 6.28  | 415.4    |
 | #10 | 0.56 | 0.96 | 1.36 | 1.62 | 6.42  | 416.9    |
 
-**wt-inpage** (Firefox, daemon-nm deployment, WebTransport in-page)
+**wt-inpage, benchmark-only** (Firefox, daemon-nm deployment, WebTransport in the page, `useWorker: false`)
 
 | run | min  | p50  | p90  | p95  | max  | walltime |
 | --- | ---- | ---- | ---- | ---- | ---- | -------- |
@@ -415,7 +377,7 @@ radar-beta
 | #9  | 0.17 | 0.39 | 0.52 | 0.65 | 4.84  | 154.5    |
 | #10 | 0.17 | 0.40 | 0.75 | 2.45 | 10.03 | 154.6    |
 
-**chr-wt-inpage** (Chromium, addon, wt data plane in the page, `useWorker: false`)
+**chr-wt-inpage, benchmark-only** (Chromium addon, WT in the page, `useWorker: false`)
 
 | run | min  | p50  | p90  | p95  | max  | walltime |
 | --- | ---- | ---- | ---- | ---- | ---- | -------- |

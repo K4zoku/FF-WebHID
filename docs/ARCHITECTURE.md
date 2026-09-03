@@ -5,459 +5,311 @@
 ```mermaid
 graph TB
     subgraph "Firefox tab"
-        Page["Web page (MAIN world)<br/>content/main/index.js<br/>navigator.hid"]
-        Bridge["content/isolated/bridge.js<br/>(content script, isolated world)"]
-        Worker["content/isolated/worker/index.js<br/>(Web Worker, per-device)"]
+        Page["Web page, MAIN world<br/>navigator.hid polyfill"]
+        Bridge["bridge.js<br/>isolated content script"]
+        Worker["per-device data worker<br/>WS or WT"]
     end
 
     subgraph "Firefox background"
-        BG["background/index.js<br/>(extension background)"]
+        BG["background.js"]
     end
 
-    subgraph "OS processes"
-        NM["NM host<br/>(forwarder or daemon-as-NM-host)"]
-        Daemon["webhid-daemon (Rust)"]
-        HID["HID device<br/>(hidraw / IOHIDManager / HidD_*)"]
+    subgraph "Native Messaging deployment, choose one"
+        Direct["webhid-daemon<br/>Native Messaging host"]
+        Forwarder["webhid-native-messaging<br/>thin forwarder"]
+        Daemon["webhid-daemon<br/>persistent daemon"]
     end
 
-    Page -- "control: MessageChannel port" --> Bridge
-    Page -- "data: MessageChannel port (transferred)" --> Worker
-    Bridge -- "runtime.sendMessage" --> BG
-    BG -- "nativeMessaging (stdio)" --> NM
-    NM -- "Unix socket / named pipe" --> Daemon
-    Worker -- "binary WebSocket / WebTransport (loopback)" --> Daemon
+    HID["HID device"]
+
+    Page -- "control MessagePort" --> Bridge
+    Bridge -- "persistent runtime Port: webhid-control" --> BG
+    Page -- "transferred per-device MessagePort" --> Worker
+    Bridge -- "persistent runtime Port: webhid-data:<deviceId>, NM only" --> BG
+    Worker -- "persistent WS or WT" --> Daemon
+    BG -- "persistent Native Messaging Port" --> Direct
+    BG -- "persistent Native Messaging Port" --> Forwarder
+    Forwarder -- "Unix socket or Windows named pipe" --> Daemon
+    Direct -- "hidapi" --> HID
     Daemon -- "hidapi" --> HID
-
-    linkStyle 0 stroke:#4a90d9
-    linkStyle 1 stroke:#d94a4a
-    linkStyle 5 stroke:#d94a4a
 ```
 
-The project has a single switchable plane:
+The Native Messaging branches are deployment alternatives, not consecutive hops:
 
-- **Data Plane** (`sendReport`, input reports, feature reports): WT over QUIC via per-device data worker (default; DataPipe shared-memory reads, no main-thread delivery gate; self-signed cert pinned via `serverCertificateHashes`; falls back to WS on Firefox < 114), WS binary via per-device data worker, or NM. Controlled by the `dataPlane` setting (`wt`, `ws`, or `nm`).
+1. **Daemon as Native Messaging host:** `background → Native Messaging stdio → webhid-daemon`.
+2. **Persistent daemon plus forwarder:** `background → Native Messaging stdio → webhid-native-messaging → Unix socket or Windows named pipe → webhid-daemon`.
 
-Control operations (`enumerate`, `open`, `close`, `handshake`, `getPolicy`, `requestDevice`, `forget`) always go via NM.
+`browser.runtime.connectNative()` establishes a persistent Native Messaging Port. Subsequent `postMessage()` calls reuse that Port and do not start another host process.
+
+The `dataPlane` setting selects report transport: `wt` is the preferred default where available, `ws` is the alternate worker transport, and `nm` is the compatibility path. Control operations always use Native Messaging.
+
+## Browser communication surfaces
+
+### Persistent bridge Ports
+
+The normal bridge to background path is Port-based:
+
+- On load, `bridge.js` creates `browser.runtime.connect({name: 'webhid-control'})`. It queues ordinary bridge control requests and completes one pending request from each Port response.
+- When an open device uses NM, the bridge creates or reuses `browser.runtime.connect({name: 'webhid-data:<deviceId>'})`. `sendReport`, `sendFeatureReport`, and `receiveFeatureReport` go through that per-device Port.
+- Background receives both through `runtime.onConnect`, registers them with `registerContentPort`, and dispatches their requests through the same handlers as other callers. A response carries the request id back on the originating Port.
+
+This replaces the old normal `bridge → runtime.sendMessage → background → sendResponse → bridge` model. `runtime.sendMessage` remains valid for one-shot cold or internal traffic, including extension-page interactions, picker operations, and MV2 resource fetches. It is not the normal bridge control or NM report path.
+
+### Direct page to worker data path
+
+For production WS and WT, `open()` creates a per-device `MessageChannel`. The page retains port1 and transfers port2 through the bridge during setup. The bridge transfers that port to the data worker. After setup, normal report traffic is:
+
+```text
+Page data MessagePort <-> data worker <-> persistent WS or WT <-> daemon
+```
+
+The bridge participates in worker spawn, port transfer, lifecycle, fallback, and data-plane control. It is not on the normal per-report page to worker hot path. If transferring the page port to the worker fails, the bridge uses its explicit fallback path instead.
 
 ## Components
 
-| Component                                | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `content/main/index.js`                  | Polyfills `navigator.hid` in MAIN world; guards on `isSecureContext`; communicates with bridge via a MessageChannel port (port1) using a per-frame `frameNonce` for request origin tracking; per-device data channel is a separate MessageChannel created on `open()` (port1 kept, port2 transferred to bridge then to worker); receives input reports via the data port (direct from worker, zero-copy); sendReport/sendFeatureReport resolve on ack from worker; zero-copy DataView on transferred ArrayBuffer for input reports; `requestDevice` checks `navigator.userActivation.isActive` unless called from devtools console (`isCalledFromConsole`); wraps `navigator.permissions.query` for `hid` descriptor via `getPolicy`; pre-claims pristine `MessagePort`/`MessageChannel`/`Worker.prototype.postMessage`/`window.postMessage` natives at document_start so page prototype patches cannot capture the bridge port; pairing is not done here (the bridge persists grants after chooser selection), `grantRequestedDevices` only maps granted devices to instances. Also runs inside page-created workers when `workerPolyfillEnabled` (see Worker polyfill injection below): in worker context it exposes the same constructors + `navigator.hid` on `self`, `requestDevice` throws `NotSupportedError`, `getDevices()` resolves with an empty list via the relayed bridge port (patched `Worker` constructor, see below) |
-| `content/isolated/bridge.js`             | Content script (ISOLATED world); routes control/data actions; spawns per-device data worker in `shadow`, `blob`, or `nm` mode; caches `wtPort`/`wtCertHash` from the handshake; picks `createWsTransport` vs `createWtTransport` via the `dataPlane` setting (`ws`/`wt`) (see Worker spawn below); relays data MessagePort page↔worker; sends NM handshake on init to get wsPort + wsNonce; computes WS auth hash via `crypto.subtle.digest("SHA-256", token + wsNonce)`; in-memory `allowedDeviceIds` Set (synced via `getAllowedDevices` message + `allowedDevicesChanged` broadcast); `dataPort` auth check is sync (`Set.has`) not async; `SettingsStore` observer for live settings propagation; tracks open devices via `openDevices` Set; per-port origin tracking via `portOrigin` map (populated from browser-verified `MessageEvent.origin`); `getPolicy` checks iframe `allow="hid"` attribute for cross-origin frames; `globalReset` handler clears state on NM disconnect; consent gate: blocks privileged actions from page ports (`PAGE_BLOCKED_ACTIONS`: pairDevice, recordGrantGroup, getGrantGroups, getAllPairedDevices, revokeDevice, getDeviceCache, getDeviceInfo, showPicker, pickerResult), rewrites page `enumerate` to `enumeratePaired`, and persists grants bridge-side after chooser selection (`grantSelectedDevices`)                                                                                   |
-| `content/isolated/worker/index.js`       | Web Worker (per-device, WS or WT data plane); binary frames to daemon via `createWsTransport` (WS) or `createWtTransport` (WT, persistent QUIC stream); input reports forwarded via transferred MessagePort (direct to page, zero-copy, no Xray); sendReport/sendFeatureReport sent as binary WS frames, resolved on WS ack (`handleControlResponse`); receiveFeatureReport via WS; auto-reconnect with exponential backoff; detects WS auth-failure close code 4401/4402 and triggers token refresh via bridge                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `content/main/index.js` (worker context) | Worker polyfill (dual-context): when `workerPolyfillEnabled` is true (global or per-site), background serves the same polyfill bundle into page-created Web Worker scripts (see Worker polyfill injection below), where it exposes HID, HIDDevice, HIDInputReportEvent, HIDConnectionEvent + `navigator.hid` on the worker scope. `requestDevice` throws `NotSupportedError`; `getDevices()` resolves with an empty list via the bridge port relayed into the worker.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `background/index.js`                    | Extension background entry (`background.scripts` event page). Wires `runtime.onMessage` routing to the handlers in `messages.js`, initializes NM/storage/settings/webRequest/CSP modules, broadcasts `globalReset` to all tabs on NM disconnect. The per-action handlers (enumerate, enumeratePaired, open/close, pairDevice (bridge-internal only), send/feature reports, pickerResult with sender validation) live in `messages.js`; NM connect/send/parse in `nm.js`; Permissions-Policy parsing + worker-bundle/CSP interception in `webrequest.js`; packed TLV builders in `packed.js`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `background/state.js`                    | Shared mutable state: `deviceCache`, `deviceTabMap`, `permissionsPolicy`, `allowedCrossOrigin`, `pendingPicker`, `workerPolyfillSites`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| `background/storage.js`                  | IndexedDB `webhid-store`: `deviceInfo` store (keyPath: `deviceId`) + `origins` store (compound key `[origin, deviceId]`); `getAllowedDevices`/`addAllowedDevice`/`removeAllowedDevice` use per-record atomic ops (no read-modify-write)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `background/nm.js`                       | `NativeMessaging` singleton: connect/reconnect/sendRequest/sendPacked; packed TLV event decode; `onPackedData`/`onControlEvent` handlers                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `background/bundle.js`                   | `ensureWorkerBundle` + `ensureWorkerPolyfillBundle`: fetch + concatenate JS files into a single string for StreamFilter injection                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `background/packed.js`                   | NM constants (ACT, EVT, PKG) + `buildPackedSend` binary TLV builder                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `background/state_ops.js`                | Tab tracking: `registerDeviceTab`/`unregisterDeviceTab`/`isTabAuthorizedForDevice`/`purgeTab`; `broadcastGlobalReset`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `background/messages.js`                 | `runtime.onMessage` HANDLERS map: enumerate (full, chooser + extension pages), enumeratePaired (origin-filtered for page ports), open/close/sendReport/sendFeatureReport/receiveFeatureReport (tab-authorized), getPairedDevices/getAllowedDevices, pairDevice (bridge-internal only, never page-reachable), unpairDevice (forget), revokeDevice (grant-group cascade), pickerResult (sender.url validated against the picker page), getPolicy, getDeviceInfo (page callers gated on paired/tab authorization)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `background/webrequest.js`               | Permissions-Policy header parsing into the `permissionsPolicy` map (`onHeadersReceived`, main_frame/sub_frame); CSP pre-flight + meta/header rewriting for blob workers; worker bundle + worker-polyfill injection via `filterResponseData`; `storeFrameCspInfo` per tab/frame                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `background/csp.js`                      | CSP helpers used by webrequest: `parseCspForWorkerSpawn`, `rewriteCspValue`, `rewriteCspForBlob`, `urlOrigin`, `frameKey`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `content/isolated/picker/index.js`       | `WebHidDevicePicker` class (ISOLATED world); closed-mode Shadow DOM (`attachShadow({mode:'closed'})`); three modes via `devicePickerMode` setting: `modal` (default, inline dialog), `pageAction` (url-bar popup), `window` (separate popup window)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `internal/pages/settings/`               | Settings UI (colocated HTML+CSS+JS): data plane (WS/WT/NM), worker spawn mode (shadow/blob), log level, daemon-as-NM-host, device picker mode, worker polyfill toggle                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `internal/pages/popup/`                  | Popup UI (colocated HTML+CSS+JS): per-site device list + settings overrides                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `content/isolated/inject.js`             | MV2-only MAIN-world injector. Fetches scripts via `runtime.sendMessage` `fetchResource`, injects as one `<script>`. Referenced only in `manifest.v2.json`. Not used in MV3 (content scripts use `"world": "MAIN"`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `utils/base64.js`                        | Polyfills `Uint8Array.fromBase64` + `Uint8Array.prototype.toBase64` if absent. Used by background for NM packed TLV base64.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `utils/bootstrap.js`                     | Module registry: `globalThis.webhid` with `export(name, value)` / `import(name)` backed by a Map. Polyfills `globalThis` if absent.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `utils/websocket.js`                     | `createWsTransport` factory: WS connect/reconnect/backoff/auth-failure-handling. Reconnect 500ms→5s exponential backoff. Close codes 4401/4402 → `onAuthFailed` (halts reconnect). Subprotocol `webhid.<hash>` where hash is `SHA-256(sessionToken + wsNonce)`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `utils/webtransport.js`                  | `createWtTransport` factory: WT connect over `serverCertificateHashes`-pinned QUIC; one persistent bidirectional stream, every frame length-prefixed, one `onBinary` per frame; auth-failure detection via ready rejection or early close; auto-reconnect with exponential backoff (500ms→5s) after the stream was ready, `onClosed({willReconnect:true})` before each retry                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `utils/descriptor-tlv.js`                | `decodeCollectionsTlv(base64)`: decodes TLV binary + base64 wire format for `DeviceInfo.collections` into JS `HIDCollectionInfo[]` objects. Called once at cache time in background.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `utils/i18n.js`                          | `t(key, subs)` wrapper around `browser.i18n.getMessage` + `localizeHTML(root)` for `data-i18n` attribute scanning. Works on document + shadow DOM.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `webhid.forwarder_nm_host`               | Thin byte-pipe NM host (forwarder mode): stdin ↔ Unix socket/named pipe via vectored I/O (`write_vectored`) on all platforms                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `webhid.daemon_nm_host`                  | Daemon-as-NM-host mode: daemon speaks NM directly on stdin/stdout (auto-detected via Firefox's 2 positional args)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `webhid-daemon`                          | Long-running service; hidapi device handles; WS server (data only, loopback-only, port 0 by default); rate-gated batching (25µs adaptive, 8ms high-rate); Arc<[u8]> broadcast; explicit per-client sessions (`session_token -> {device_id, owner_client_id, mode, ws_auth_hash, active}`); per-client NM event forwarding (`has_nm_session_for_client`); udev hot-plug; FIDO/U2F per-product blocklist (`hid.rs`) + collection/report-level blocklist (`blocklist.rs`: mouse/keyboard/keypad/System Control/Jabra/OnlyKey); report-level blocking via `is_report_blocked` on send/feature paths; abstract socket `@webhid` (Linux root); SO_PEERCRED + webhid group check; seccomp BPF + prctl hardening (Linux, release-only); WS/WT session auth via `ws_auth_hashes` lookup (HashMap<token, (device_id, nonce)>)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `crates/webhid`                          | Shared Rust library: message types (NmRequest, NmResponse, IpcRequest, IpcResponse), protocol framing, base64 serde, FNV-1a device ID hash, `collections_tlv` module (TLV binary + base64 serde for `DeviceInfo.collections`). NM wire uses single-char field names + HTTP status codes; packed binary TLVs for hot-path messages + collections.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Component                                                  | Responsibility                                                                                                                                                                                                                                             |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `content/main/index.js`                                    | MAIN-world WebHID polyfill. Uses the control MessagePort for general requests and a per-device data MessagePort for reports. Transfers report payload buffers where possible. Receives worker input batches directly and dispatches `HIDInputReportEvent`. |
+| `content/isolated/bridge.js`                               | Owns persistent `webhid-control` and per-device `webhid-data:<deviceId>` runtime Ports, data-plane setup, worker lifecycle, settings propagation, consent enforcement, and NM fallback.                                                                    |
+| `content/isolated/worker/index.js`                         | Per-device production WS or WT worker. Owns the persistent network transport and communicates directly with the page through the transferred data MessagePort.                                                                                             |
+| `background/messages.js` and `background/content-ports.js` | Registers `runtime.onConnect` Ports with `registerContentPort`, routes their requests through the handler set, and replies on the same Port. Also retains the one-shot `runtime.onMessage` handler for legitimate extension and internal callers.          |
+| `background/nm.js`                                         | Maintains one reconnecting `connectNative` Port, routes requests, decodes packed NM input, delivers first through matching `webhid-data:<deviceId>` Ports, then uses `tabs.sendMessage` only for target tabs not reached through those Ports.              |
+| `webhid-native-messaging`                                  | Thin stdio to daemon socket/pipe forwarder. Used only in the persistent-daemon deployment.                                                                                                                                                                 |
+| `webhid-daemon`                                            | Owns logical sessions and physical HID entries, Native Messaging client connections, WS/WT servers, reader, persistent per-device I/O worker, report blocking, and transport authority.                                                                    |
 
-## Control plane (NM only)
+## Control plane
 
-All control operations use length-prefixed JSON over NM stdio (Firefox ↔ NM host) and Unix socket/named pipe (NM host ↔ daemon):
+Control requests such as `enumerate`, `open`, `close`, `handshake`, `setDataPlane`, `getPolicy`, and paired-device operations travel:
 
-- `enumerate` (page ports get `enumeratePaired`, filtered to the origin's paired devices; the chooser and extension pages call `enumerate` directly), `open`, `close`, `handshake`, `setDataPlane`, `requestDevice` (chooser), `forget`/`unpairDevice`, `getPolicy`, `getPairedDevices`
-- Pairing (`pairDevice`, `recordGrantGroup`) runs bridge-side only, after the user selects in the chooser; a page port can never send it
-- `open()` returns sessionToken + wsPort (and the daemon's wsNonce is obtained via handshake)
-- `handshake` returns wsPort + wsNonce (one-time, on bridge init)
-
-## Data plane
-
-### WT and WS modes (WT default, worker + MessagePort)
-
-High-frequency operations use the selected persistent transport, either a WebTransport bidirectional stream or a WebSocket, in a per-device Web Worker:
-
-**sendReport (page → daemon):** polyfill posts to its data MessagePort (port1) with transfer; worker receives, builds a binary frame, sends it, and awaits the transport acknowledgement (`handleControlResponse`), then posts `sendResult` back to the data port. The polyfill resolves the Promise on receipt. Wire format:
-
+```text
+Page MessagePort → Bridge → persistent webhid-control runtime Port → Background
+→ persistent Native Messaging Port → daemon or forwarder → daemon
 ```
+
+The chooser and extension pages may use their own one-shot internal messaging where appropriate. Pairing remains bridge-side only after chooser selection. A page port cannot invoke the privileged pairing and cache-management actions.
+
+## Production data planes
+
+### WS and WT
+
+The worker owns one persistent per-device transport. Output and feature operations use binary frames:
+
+```text
 [type:u8][reqId:u32 LE][reportId:u8][...payload]
 ```
 
-Types: `0x01` sendReport, `0x02` sendFeatureReport, `0x03` receiveFeatureReport. Responses: `0x81` sendReport ack, `0x82` sendFeatureReport ack, `0x83` receiveFeatureReport response. The 6-byte header has no device ID because each WS or WT transport is per-device.
+Types are `0x01` for `sendReport`, `0x02` for `sendFeatureReport`, and `0x03` for `receiveFeatureReport`. The transport response types are `0x81`, `0x82`, and `0x83`. A device id is unnecessary because each WS or WT connection is bound to one device session.
 
-**Input reports (daemon → page):** rate-gated batching. A single report flushes immediately (0µs added latency); sparse bursts coalesce with a 25µs window; once ~12+ reports are flushed within a 4ms window, the coalesce window widens to 8ms. The worker parses the batch and forwards the frame to the page in one `dataPort.postMessage({type:'inputReportBatch', reports}, transfers)`. The gate exists because render-saturated Firefox pages can otherwise lose reports while queued WebSocket IPC is delivered late. Wire format, one type-prefixed frame per WS message:
+Input reports are rate-gated into batches. A sparse report flushes immediately, sparse bursts coalesce briefly, and sustained high-rate traffic uses the configured high-rate window. The worker parses a batch and transfers its report buffers directly to the page data MessagePort. The bridge is bypassed after setup.
 
+### Native Messaging
+
+NM report operations use persistent interaction surfaces:
+
+```text
+Page data MessagePort
+→ Bridge
+→ persistent webhid-data:<deviceId> runtime Port
+→ Background
+→ persistent Native Messaging Port
+→ daemon
+→ persistent per-device IoCommand queue
+→ persistent HID handle
 ```
-[type:0x00][len:u16 LE][reportId:u8][...payload][len:u16 LE][reportId:u8][...payload]...
+
+`sendReport` and `sendFeatureReport` use packed binary TLVs encoded in the single JSON field `{"d":"<base64>"}`. `receiveFeatureReport` uses the NM JSON action. All three receive their acknowledgement or feature data on the same per-device runtime Port and then the bridge replies to the page data MessagePort.
+
+The packed formats use little-endian integers:
+
+| Message       | Direction       | Layout                                                                  |
+| ------------- | --------------- | ----------------------------------------------------------------------- |
+| input report  | daemon to addon | `[0x01][deviceId:u32]([reportId:u8][payloadLen:u16][payload])*`         |
+| output report | addon to daemon | `[0x02][reqId:u32][deviceId:u32][reportId:u8][payloadLen:u16][payload]` |
+| feature write | addon to daemon | `[0x04][reqId:u32][deviceId:u32][reportId:u8][payloadLen:u16][payload]` |
+
+### NM input delivery
+
+The primary NM input path is client-bound and Port-first:
+
+```text
+HID reader
+→ active client-bound nm_hot sink
+→ Native Messaging
+→ Background
+→ matching webhid-data:<deviceId> runtime Port
+→ Bridge
+→ Page data MessagePort
 ```
 
-**MessagePort direct delivery:** on `open()`, polyfill creates a `MessageChannel`, keeps port1 as `dataPort`, and transfers port2 to bridge via the control port. Bridge transfers port2 to the worker (`setPort` message). The worker posts one `inputReportBatch` message per frame with every report's ArrayBuffer transferred; it arrives directly at page's port1 `onmessage`, where the polyfill dispatches one `HIDInputReportEvent` per report. This bypasses the bridge entirely for input reports, eliminating Xray unwrap allocations and reducing context hops. If the port transfer fails, bridge falls back to forwarding via `onDataPortMessage` (NM path).
+The reader sends a packed input report to each active, valid NM hot binding. The generic broadcast channel remains necessary for non-NM sessions and lifecycle events, but it is not the primary NM report delivery path. Background first calls `postToContentPorts` for target tabs and the matching data-Port name. It calls `tabs.sendMessage` only for target tabs that were not reached through a persistent data Port. That fallback remains needed for authorized targets without a registered Port.
 
-**Zero-copy polyfill:** Polyfill creates `DataView` directly on the transferred `ArrayBuffer`, with no intermediate `new Uint8Array` copy. This eliminates ~70% of per-event allocations and prevents GCMajor from triggering during benchmarks.
+## Daemon sessions and physical entries
 
-### NM mode (optional)
+A logical `Session` is not a physical device lifetime. `DeviceManager` shares one physical `Entry` per open device. An Entry contains the persistent HID handle, blocking reader, persistent I/O worker and queue, `io_epoch`, reader-start gate, report-blocking state, and teardown authority.
 
-All data routes via NM: `sendReport` → bridge → background → NM host → daemon. NM wire is JSON + base64 (Firefox spec requires UTF-8 JSON, binary framing is not allowed). Hot-path messages use packed binary TLVs encoded as base64 inside a single JSON field `{"d":"<b64>"}` to minimize wire overhead.
+The first open performs a serialized physical-lifetime transition:
 
-**Packed TLV formats** (all multi-byte integers little-endian):
+```text
+OpenReservation → physical HID open → publish Entry → register Session → release reader-start gate
+```
 
-| msgType | Direction      | Layout                                                               | Used for                          |
-| ------- | -------------- | -------------------------------------------------------------------- | --------------------------------- |
-| 0x01    | daemon → addon | `[0x01][devId u32]([reportId u8][payloadLen u16][payload])*`         | input_report (multi-report batch) |
-| 0x02    | addon → daemon | `[0x02][reqId u32][devId u32][reportId u8][payloadLen u16][payload]` | sendReport                        |
-| 0x04    | addon → daemon | `[0x04][reqId u32][devId u32][reportId u8][payloadLen u16][payload]` | sendFeatureReport                 |
+Concurrent or later opens find the published Entry and only register another logical Session. They do not necessarily call hidapi open again or create another reader or I/O worker.
 
-The NM sendReport/sendFeatureReport TLV includes a device ID (12-byte header) because the NM connection is shared across all devices, unlike the per-device WS connection. `receiveFeatureReport` uses JSON (not packed) with action code 5.
+Closing one Session invalidates that session's NM or transport authority and removes its auth mapping. The Entry is removed and its reader, I/O worker, and HID handle are stopped only when its last active Session ends, a device failure force-closes the lifetime, or equivalent lifetime teardown occurs.
 
-For packed messages, `reqId` lives inside the TLV (not the JSON `n` field), so the JSON wrapper is just `{"d":"<b64>"}` with no `a`/`n`/`i`/`r` fields. Non-packed messages (enumerate, open, close, receiveFeatureReport, setDataPlane, handshake) use JSON with numeric action codes (`"a":1..8`) and single-char field names.
+### Authority model
 
-**Responses** use HTTP status codes in the `s` field (200/201/204/4xx/5xx) instead of separate `ok`/`err` fields. Error responses contain only `{"n":N,"s":<code>}`: no error message string on the wire (the daemon logs it).
+Documentation intentionally describes the model rather than mirroring a Rust struct layout:
 
-**bg→tab IPC:** background.js decodes the base64 TLV and sends the payload as a `Uint8Array` to the tab via `tabs.sendMessage` (structured clone, not zero-copy: `tabs.sendMessage` has no transfer list). Polyfill receives `Uint8Array` directly, no re-decode needed.
+- A Session owns a device id, IPC client ownership, current mode, cancellation authority, and separate WS and WT generations.
+- `ws_auth_hashes` maps **`ws_auth_hash → session_token`**. An auth hash dies with its logical Session.
+- A WS or WT connection receives a generation-scoped `TransportGrant` containing a revocable `TransportCapability` and cancellation receiver.
+- An active NM Session has a client-bound `nm_hot` binding that carries the output/feature queue authority and the input sink.
+- Every queued output or feature command captures capability validity and the current `io_epoch`. The persistent I/O worker checks both before touching the HID handle.
+- `OpenReservation`, lifecycle serialization, and the reader-start gate prevent a physical lifetime from being observed or revived during an invalidated open or teardown race.
 
-sendReport/sendFeatureReport via NM resolve on the NM ack. Input reports come via NM events → `tabs.sendMessage` → bridge → page (or directly via the data port if a worker is present).
+Output, feature writes, and feature reads from NM, WS, and WT are all `IoCommand` values on the persistent per-device worker. There is no per-report blocking-task dispatch.
 
-## Daemon HID I/O lifecycle
+## Security and deployment notes
 
-Each physical device has one persistent HID handle, one blocking input-reader thread, and one persistent per-device I/O worker. Output reports and feature reads/writes from NM, WS, and WT are converted into `IoCommand` values and queued to that worker. The worker owns the serialized HID operations, so feature reports no longer use a per-request `spawn_blocking()` task or a separate thread-pool dispatch.
+### WebSocket and WebTransport authentication
 
-The physical lifetime is shared by logical sessions. A session records its owner IPC client, current data-plane mode, authentication hash, cancellation signal, and transport generations. Closing one session invalidates only its transport and NM binding. The HID handle, reader, and I/O worker stop only after the last active session closes, the owning IPC client disconnects, or the reader detects a device failure.
+The daemon binds loopback transports only. The bridge derives `SHA-256(sessionToken || wsNonce)`. WS presents the hash in the `webhid.<hash>` subprotocol; WT presents it in the URL path. Both resolve through the `ws_auth_hash → session_token` mapping.
 
-Every WS/WT connection receives a generation-scoped `TransportGrant` with a revocable capability. Mode changes, close, disconnect, and device failure revoke the previous capability. Both transport handlers and the I/O worker check capability validity and the I/O epoch before executing a command, so stale or cross-plane requests cannot reach the HID handle. Teardown explicitly wakes and joins the reader and I/O worker, including when stale sender clones still exist.
+WT uses a pinned self-signed ECDSA certificate, a persistent bidirectional stream, and length-prefixed frames. Certificate renewal creates a new generation and lets existing connections drain.
 
-NM input forwarding is also bound to the active client session. The reader checks each NM binding's validity before enqueueing an event, so a stale disconnect cannot deliver reports to a new session or alter its data-plane mode.
-
-## Daemon optimizations
-
-| Optimization                                    | Effect                                                                                                                                                                                                                                                    |
-| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Arc<[u8]>` for broadcast data                  | Zero-clone broadcast (refcount bump, not memcpy)                                                                                                                                                                                                          |
-| Persistent per-device I/O worker                | Serializes output and feature-report operations on the persistent HID handle; removes per-request thread-pool dispatch and keeps feature I/O on the same worker                                                                                           |
-| Batch Vec stores `(u8, Arc<[u8]>)`              | No per-report `full_report` alloc; reportId prepended in `write_batch_frame`                                                                                                                                                                              |
-| Rate-gated flush (25µs adaptive, 8ms high-rate) | 0 latency for sparse, ≤25µs for bursts, 8ms coalescing above ~12 reports/4ms (kills render-load report loss at 8kHz)                                                                                                                                      |
-| Explicit per-client sessions                    | One `session_token -> {device_id, owner_client_id, mode, ws_auth_hash, active}` record per open; device lifetime = active sessions; auth hashes die with their session; IPC disconnect closes only that client's sessions; NM events forwarded per client |
-| Thread-local `WRITE_BUF` / `READ_BUF`           | Avoids per-call allocation in hot path                                                                                                                                                                                                                    |
-| NM packed TLVs (0x01/0x02/0x04)                 | Hot-path messages use `{"d":"<b64>"}` wrapper, reqId inside TLV: saves 7-14 bytes vs JSON fields                                                                                                                                                          |
-| NM bg→tab Uint8Array transfer                   | Background decodes base64 once, sends Uint8Array to tab (structured clone): saves 1 encode + 1 decode per input report                                                                                                                                    |
-| WS close code 4401/4402                         | Auth-failure close codes let workers distinguish stale token from network error, trigger token refresh instead of blind retry                                                                                                                             |
-| Abstract socket `@webhid` (Linux root)          | No filesystem entry, no symlink attack surface                                                                                                                                                                                                            |
-| SO_PEERCRED + webhid group check                | Verifies connecting process is in the `webhid` group (Linux, non-abstract sockets)                                                                                                                                                                        |
-
-## Security
-
-### HID blocklist
-
-Two independent mechanisms:
-
-1. **Per-product blocklist** (`hid.rs` `BLOCKED_DEVICES`): FIDO/U2F security keys (YubiKey, Feitian, OnlyKey, Nitrokey, Google Titan, HID Global, U2F Zero, Mooltipass, VASCO, Keydo, Thetis, JaCarta, Happlink, Bluink) blocked by (vendorId, productId) tuple. Also blocks any device with `usage_page == 0xF1D0` (FIDO usage page). Matches Chromium's `hid_blocklist.cc`.
-
-2. **Rule blocklist** (`blocklist.rs`): rule-based blocking. Device-level rules match vendor/product only (OnlyKey `0x1d50/0x60fc`); usage-based rules (Generic Desktop Mouse `0x0001/0x0002`, Keyboard `0x0001/0x0006`, Keypad `0x0001/0x0007`, System Control `0x0001/0x0080`, FIDO `0xF1D0`, Jabra `0x0b0e`/`0xff00` reportId `0x05` output) are enforced per report: input reports are dropped at the reader, output/feature writes are rejected at send. This matches the WICG spec (`blocklist.txt`) and Chromium: consumer-input devices stay enumerable, only their reports are blocked. The Generic Desktop consumer-input rules (mouse/keyboard/keypad/system control) are enforced unconditionally, matching Chromium's always-on blocklist (no cargo-feature gate); mouse/keyboard/keypad access is additionally gated by the OS layer (udev on Linux, HID API on Windows, Input Monitoring/TCC on macOS), not by the daemon alone.
-
-### Consent model
-
-A page cannot grant itself a device, see the full inventory, or spoof the chooser:
-
-- **Pairing is bridge-side only.** The bridge blocks privileged actions from page ports (`PAGE_BLOCKED_ACTIONS`) and persists the grant itself (`grantSelectedDevices`) after the user picks in the chooser (modal, pageAction, or window mode). `pairDevice` is never reachable from a page port.
-- **Chooser filtering is daemon-side.** `requestDevice()` sends the optional inclusion and exclusion filters with the existing `enumerate` action. The daemon prefilters VID/PID before descriptor I/O, then applies usage filters after blocklist pruning. Unfiltered `enumerate` still refreshes the complete background cache.
-- **The chooser result is sender-validated.** `pickerResult` is rejected unless `sender.url` is the extension's picker page; `getDeviceInfo` from a page caller is gated on the device being paired for the origin (or tab-authorized).
-- **The page cannot intercept the bridge channel.** The polyfill (MAIN world) shares the page's JS realm, so it pre-claims pristine `MessagePort`/`MessageChannel`/`Worker.prototype.postMessage`/`window.postMessage` natives at document_start; page prototype patches cannot capture the bridge port.
-- Regression coverage: `tests/e2e/picker-bypass.spec.ts` attempts the prototype-patch capture and asserts the chooser flow still grants.
-
-### WebSocket security
-
-- Daemon binds WS server to `127.0.0.1` only; rejects non-loopback `Host` headers (403)
-- Every WS connection is authenticated via a per-device auth hash: `SHA-256(sessionToken || wsNonce)` presented as WS subprotocol `webhid.<hash>`
-- No separate control token; the daemon has no text-frame or control-connection path
-
-### WebTransport data plane
-
-- WT server binds `127.0.0.1:0` at daemon startup (like the WS server); the certificate is a self-signed ECDSA P-256 cert with SAN `127.0.0.1` and a validity of at most 14 days, generated once at boot (or on renewal). The bridge pins it via `serverCertificateHashes` (SHA-256 of the DER), which is why the handshake returns `wt_port` (`W`) + `wt_cert_hash` (`H`) alongside the WS info.
-- Auth reuses the WS scheme: the same `SHA-256(sessionToken || wsNonce)` hash is placed in the WT URL path (`https://127.0.0.1:<port>/<hash>`), and the daemon resolves it against the same `ws_auth_hashes` map (WebTransport has no subprotocol).
-- One persistent bidirectional stream per session: every frame (batch flush or control response) is written with an explicit `[len_u32 LE]` prefix so message boundaries are unambiguous on the continuous stream (the batch format itself is not self-delimiting: a report id of 0 is legal). The JS transport buffers and reassembles, delivering one `onBinary` per frame; the same framing carries page-to-daemon messages on the other half of the stream. Benchmark results are in docs/BENCHMARK.md.
-- Renewal (only reachable when a daemon runs past 14 days): on `handshake`, `ensure_current` checks the current generation's expiry; expired certs trigger a new generation on a new UDP port with a fresh cert. The old generation keeps serving existing connections (drain) and rejects new ones (`404`), then releases its port once active sessions reach zero. Pages holding a stale port fall back to NM via the bridge's ready-timeout path.
-- The daemon-side mode guard (`has_nm_session_for_client` / `MODE_WT`) prevents NM double-delivery while a WT session is active, mirroring the WS mode lifecycle.
-- CPU cost on loopback is higher than WS/NM (TLS/QUIC encryption); this is the cost being measured in the benchmark, not a gain (see AGENTS.md).
-
-### Local Network Access (observed Firefox 154 behavior)
+### Local Network Access, observed Firefox 154 behavior
 
 Firefox 154 applies Local Network Access enforcement to WebSocket and WebTransport connections created in a worker. Worker-context networking is not categorically exempt. A WebSocket worker attempt can surface the browser's LNA permission UI, while the WebTransport worker path retries without showing an LNA prompt until permission has been granted. In practice, granting LNA after a WS worker attempt can allow WT in the worker to work afterward. This is an observed Firefox 154 implementation detail, not a stable browser contract.
 
-The bridge treats WS, WT, and worker-spawn failures as data-plane setup failures, not WebHID failures. If the selected network path cannot start, it switches the session to the NM data plane, so WebHID remains usable. WT is still the preferred default where available, WS is an alternate network path, and NM is the compatibility and failsafe path. CSP, worker-spawn failure, LNA, and other network setup failures can all reach the automatic NM fallback.
+The bridge treats WS, WT, and worker-spawn failures as data-plane setup failures, not WebHID failures. It switches the session to NM when the selected network path cannot start. CSP, worker-spawn failure, LNA, and other network setup failures can all reach the automatic NM fallback.
 
-For troubleshooting, `network.lna.blocking=false` is the narrower observed workaround; `network.lna.enabled=false` disables the broader mechanism. Firefox also exposes `network.lna.websocket.enabled`. There is no documented `network.lna.webtransport.enabled` preference to use here. WebExtensions cannot inspect arbitrary `about:config` preferences, and skip-domain configuration did not resolve this case.
+For troubleshooting, `network.lna.blocking=false` is the narrower observed workaround; `network.lna.enabled=false` disables the broader mechanism. Firefox also exposes `network.lna.websocket.enabled`. There is no documented `network.lna.webtransport.enabled` preference to use here.
 
-### Token authentication
+### HID access, consent, and socket protection
 
-- **Device session token**: generated per `open()`, 128-bit hex. The bridge computes `SHA-256(sessionToken + wsNonce)` and the worker presents it as the WS subprotocol.
-- **wsNonce**: generated once per daemon instance (128-bit hex), returned in the `handshake` NM response. Combined with the session token to produce the WS auth hash so the raw token never leaves the NM channel.
+The daemon blocks FIDO devices at enumeration and applies report-level blocking to protected usages. Blocked input reports are dropped by the reader; blocked output and feature requests are rejected before they reach the I/O worker. The page cannot grant itself a device, enumerate the full inventory, or invoke picker-result and grant-management actions through its bridge Port. The bridge persists a chooser selection, and picker results are accepted only from the extension picker page.
 
-### IPC socket permissions (Linux)
+For a root Linux daemon, the forwarder connects through the abstract `@webhid` socket and the daemon checks `SO_PEERCRED` against the `webhid` group. A user daemon instead uses a mode-`0600` runtime-directory socket. Daemon-as-NM-host mode has no forwarder socket because the daemon itself owns Native Messaging stdio.
 
-- **Root daemon** (systemd system service): abstract socket `@webhid` (no filesystem entry). SO_PEERCRED is checked on every accepted Unix stream: the connecting process's GID must match the `webhid` group, with a fallback to `/proc/<pid>/status` supplementary groups. Users must be in the `webhid` group to connect via the thin forwarder:
+### Device identity and reconnect
 
-```sh
-sudo usermod -aG webhid $USER
-# log out + log back in for group change to take effect
-```
+Device ids are FNV-1a 32-bit hashes of the platform device path. Linux uses the resolved sysfs path, Windows uses the device interface path, and macOS uses the IOService path. The value is carried as an unsigned JSON number and as a four-byte little-endian value in packed TLVs.
 
-- **User daemon**: filesystem socket under `$XDG_RUNTIME_DIR/webhid/webhid.sock` or `/run/user/<uid>/webhid/webhid.sock` with mode `0o600`. No peer-cred check needed (abstract-socket-only check; user socket is protected by directory permissions).
+The background reconnects its Native Messaging Port with backoff. A forwarder separately retries its daemon socket or named-pipe connection. WS and WT workers reconnect their persistent transport after ready-state failures, while authentication failures ask bridge to attach a live Session token. A Native Messaging disconnect rejects pending requests, broadcasts `globalReset`, and closes the disconnected client's logical Sessions without affecting Sessions owned by another client.
 
-Alternatively, users with direct hidraw access (via udev `uaccess` rule) can skip the forwarder entirely by enabling **Daemon as NM host** in addon settings: the daemon speaks NM directly on stdin/stdout, no socket needed.
+### Worker spawning and worker polyfill
 
-## Device IDs
+The production data worker is created in page context. `workerSpawnMode` selects shadow URL or blob spawning. Background pre-flights the page CSP; when a worker transport cannot be created because of CSP, spawn failure, LNA, or transport setup failure, bridge falls back to NM. On Chromium, blob spawning is the functional mode and the normal worker-spawn selector is hidden.
 
-Stable, platform-independent hashes (FNV-1a 32-bit):
+When `workerPolyfillEnabled` is enabled, background injects the worker polyfill into page-created workers. It exposes the specified WebHID surface but does not create a functional worker data plane. `requestDevice()` remains unavailable in that context.
 
-```
-deviceId = fnv1a_32(path_bytes)
-```
+### Valid one-shot runtime messages
 
-- **Linux**: the `path` is the resolved syspath (canonicalized `/sys/class/hidraw/<name>/device` parent directory), not the raw `/dev/hidrawN` path.
-- **Windows**: device interface path. **macOS**: IOService path.
+The persistent bridge Ports do not replace every one-shot message. Current intentional `runtime.sendMessage` users are the isolated picker for enumeration and paired-device lookup, extension picker, device, and popup pages, and `utils/resource.js` for MV2 resource fetching. These are extension-page or cold/internal operations, not the normal bridge control or report paths.
 
-Same physical device in same USB port produces the same hash across reboots. Two devices with identical vid/pid/serial but different physical ports have different paths → different hashes.
+### Settings
 
-The hash is sent as a JSON number in wire fields and as a 4-byte little-endian u32 in packed binary TLVs. On the JS side, the unsigned right shift `>>> 0` is mandatory when decoding to avoid signed int32 wraparound for hashes ≥ 0x80000000.
+User-facing settings include `dataPlane`, `workerSpawnMode`, `daemonAsNmHost`, `hidePageAction`, `logLevel`, `devicePickerMode`, `workerPolyfillEnabled`, and `allowActivationlessRequestDevice`. `daemonAsNmHost` defaults to `true` on macOS and Windows and `false` elsewhere. `daemonAsNmHost` and `hidePageAction` are global-only; the other user-facing settings support site overrides.
 
-## Reconnect
+`allowActivationlessRequestDevice` skips the user-activation check for `requestDevice()`. It is a spec deviation, but the chooser still requires explicit user selection and Permissions Policy still applies.
 
-All layers auto-reconnect with exponential backoff:
+### Benchmark-only WT in-page mode
 
-- **NM host → daemon:** retry socket connect (100ms → 2s cap, 5s total timeout). On timeout, writes `{"s":503,"E":"..."}` error frame to stdout before exiting so the addon logs the reason.
-- **background.js → NM host:** retry `connectNative` (1s → 10s). On disconnect, resolves all pending with `{s:503}` and broadcasts `globalReset` to all tabs.
-- **Data worker → daemon WS/WT:** retry WebSocket/WebTransport (500ms → 5s). On auth-failure (WS close code 4401/4402, WT ready rejection or pre-ready close), halts auto-reconnect and asks the bridge to select a live session token via `auth-failed`; the bridge re-attaches the plane without opening a new daemon session and respawns the worker. Post-ready drops suppress the terminal `closed` signal while a reconnect is pending, so the page plane survives transient blips.
-- **Daemon:** detects NM disconnect, closes devices; page receives `disconnect` event, re-opens on `connect` event.
+Production architecture covers only NM, worker WS, and worker WT. The code retains `dataPlane: 'wt'` with `useWorker: false` for benchmark and test runs. This in-page WT variant exposes daemon bearer credentials to the hostile MAIN world, so the normal settings UI hides it and normal user-facing documentation does not offer it as a data-plane option. `BENCHMARK.md` preserves its measured `wt-inpage` datasets and labels them benchmark-only.
 
-## Settings
+## Message flows
 
-Settings are stored in `browser.storage.local` with per-key format: global settings use key `settings :: <name>`, site overrides use `settings :: <origin> :: <name>` (separator `" :: "` with spaces to avoid collision with IPv6 origin literals). The `SettingsStore` factory + key helpers (`globalSettingKey`, `siteSettingKey`, `parseSettingsKey`, `loadGlobalSettings`, `loadSiteSettings`, `saveGlobalSetting`, `saveSiteSetting`) live in `js/utils/settings.js`. A schema version key `meta :: storage :: version` prevents re-migration.
-
-Device info cache and origin device allowlists are stored in IndexedDB (`webhid-store`), not `storage.local`. Object stores: `deviceInfo` (keyPath: `deviceId`) and `origins` (compound key `[origin, deviceId]`). Content scripts maintain an in-memory `allowedDeviceIds` Set synced via `getAllowedDevices` message + `allowedDevicesChanged` broadcast from background.
-
-| Setting                            | Values                            | Default                               | Description                                                                                                                                                                                                                                                                    |
-| ---------------------------------- | --------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `dataPlane`                        | `ws` / `wt` / `nm`                | `wt` when available, otherwise `ws`   | Data plane: WT (QUIC, pinned self-signed cert, preferred default), WS, or NM via bridge                                                                                                                                                                                        |
-| `workerSpawnMode`                  | `shadow` / `blob`                 | `shadow` (MV3) / `blob` (MV2)         | Data worker spawn strategy (see Worker spawn below). `shadow` = `new Worker(location.href)` served by webRequest interception; `blob` = blob URL from the worker bundle, requires page CSP rewrite. Falls back to the other mode, then to NM, based on CSP pre-flight.         |
-| `daemonAsNmHost`                   | bool                              | `false` (`true` on macOS and Windows) | Use daemon-as-NM-host (skip forwarder + socket)                                                                                                                                                                                                                                |
-| `hidePageAction`                   | bool                              | `false`                               | Keep the Firefox page-action icon hidden even after a page uses WebHID; the browser action still opens the device view                                                                                                                                                         |
-| `logLevel`                         | 0 to 3                            | `1`                                   | 0=error, 1=warn, 2=info, 3=debug                                                                                                                                                                                                                                               |
-| `devicePickerMode`                 | `modal` / `pageAction` / `window` | `modal`                               | Device picker UI mode                                                                                                                                                                                                                                                          |
-| `workerPolyfillEnabled`            | bool                              | `false`                               | Inject WebHID polyfill into page-created Web Workers                                                                                                                                                                                                                           |
-| `allowActivationlessRequestDevice` | bool                              | `false`                               | Skip the user-activation check in `requestDevice()` (spec deviation). Workaround for sites that call `requestDevice()` without a live user gesture (e.g. async after a fetch). The device chooser still requires explicit user selection; Permissions Policy check unaffected. |
-
-Each consumer (background, bridge, polyfill, worker) creates its own `SettingsStore` instance: a Proxy-backed observer that fires listeners only when a value actually changes. Reads are direct property access (`settings.dataPlane`); writes are either assignment (`settings.logLevel = 2`) or bulk (`settings.set({...})`). Subscriptions via `settings.on('key', cb)` or `settings.on(['k1','k2'], cb)`.
-
-The bridge's `storage.onChanged` listener extracts `changes[k].newValue` from Firefox storage events and calls `settings.set(patch)`: the store handles the diffing internally. The daemon-as-NM-host setting defaults to `true` on macOS and Windows, and is auto-detected in `loadNmHostSetting`.
-
-`daemonAsNmHost` and `hidePageAction` are global-only: neither can be overridden per site. Every other user-facing setting (`dataPlane`, `workerSpawnMode`, `logLevel`, `devicePickerMode`, `workerPolyfillEnabled`, `allowActivationlessRequestDevice`) is per-site overridable from the popup. Changes propagate live through the `storage.onChanged` → `settings.set` path. The bridge re-routes open devices when `dataPlane` changes, resets spawn-mode state when `workerSpawnMode` changes, re-levels its logger when `logLevel` changes, and re-reads `devicePickerMode` at the next `requestDevice()` call. `workerPolyfillEnabled` affects future page-created workers after reload.
-
-## Worker spawn (shadow URL / blob / NM)
-
-Firefox MV3 content scripts cannot spawn Web Workers from extension URLs in page context, and pages may have CSPs that block worker sources. The data worker is spawned in page context using one of two modes, chosen per site by the `workerSpawnMode` setting (shadow is the MV3 default, blob the MV2 default):
-
-- **Shadow URL** (default on MV3): `new Worker(location.href)`. Background's `webRequest.onBeforeRequest` detects the synthetic self-request (`details.url === details.documentUrl` modulo fragment) and serves the worker bundle (bootstrap + logger + settings + websocket + worker) via `filterResponseData`; `onHeadersReceived` rewrites the `Content-Type` to `application/javascript` and strips CSP/length headers. Touches nothing about the page except one synthetic request. Fails if the server rejects that request or under `require-trusted-types-for 'script'` with a restrictive allow-list.
-- **Blob + CSP rewrite** (default on MV2): the bridge fetches the worker bundle (`getWorkerBundle`), creates `URL.createObjectURL(new Blob([text]))`, and spawns from the blob URL through a `trustedTypes` policy (`webhid-worker`). Background rewrites `<meta http-equiv="content-security-policy">` and (MV2 only) header CSP to add `blob:` to `worker-src` and `ws://127.0.0.1:*` to `connect-src`, plus the `trusted-types` allow-list entry when `require-trusted-types-for` is active.
-
-**CSP pre-flight**: background parses the page's header + meta CSP at navigation time (`parseCspForWorkerSpawn`) and stores the verdict in `storage.session` under `csp:<tabId>:<frameId>` (`workerSrc`, `connectSrc`, `shadowBlocked`, `needsBlobFallback`, `headerShadowBlocked`, ...). The bridge queries it via the `getCspInfo` message and picks the mode:
-
-1. setting says `blob` → blob
-2. shadow blocked but blob viable → blob (`needsBlobFallback`)
-3. MV3 + header CSP blocks shadow and blob rewrite is impossible (MV3 is strengthen-only, header CSP cannot be relaxed) → **NM** (`workerSpawnMode` effectively `nm`; the worker is never spawned and the data plane uses NM)
-4. otherwise → shadow
-
-If the shadow spawn itself throws at runtime (e.g. the server rejected the self-request), the bridge retries once with blob, then falls back to NM.
-
-## Worker polyfill injection (opt-in)
-
-When `workerPolyfillEnabled` is true (globally or per-site), background.js prefixes the worker-polyfill bundle (bootstrap + logger + http + settings + device + content/main/index.js) into page-created worker scripts via `webRequest.filterResponseData`. The bundle is injected after any leading `"use strict"` directive so the polyfill's `globalThis.webhid` registry is available before the page's worker script runs.
-
-Inside the worker, `content/main/index.js` detects the worker context (`isWorker`) and exposes `HID`, `HIDDevice`, `HIDInputReportEvent`, `HIDConnectionEvent` on `self` plus `navigator.hid` on the worker navigator. `requestDevice()` throws `NotSupportedError` (spec: `[Exposed=Window]` only), `new HID()`/`new HIDDevice()` throw `TypeError` (illegal constructor). `getDevices()` resolves with an empty list: the polyfill patches the page's `Worker` constructor to relay a bridge MessagePort into each worker it spawns, so the worker's requests reach the background (and return no paired devices for a worker origin).
-
-This gives spec-compliance coverage of the worker exposure surface (constructors exist, SameObject holds, requestDevice correctly refuses) without a functional worker data plane.
-
-## Message flow examples
-
-### `navigator.hid.getDevices()`
+### `getDevices()` through the control Port
 
 ```mermaid
 sequenceDiagram
-    participant P as page
-    participant B as bridge.js
-    participant G as background.js
-    participant N as NM host
-    participant D as daemon
+    participant P as Page
+    participant B as Bridge
+    participant G as Background
+    participant N as Native Messaging Port
+    participant D as Daemon
 
-    P->>B: port.postMessage(enumerate)
-    B->>G: runtime.sendMessage(enumeratePaired)
-    G->>N: NM write
-    N->>D: socket
-    D->>D: hidapi enumerate
-    D-->>N: socket response
-    N-->>G: NM read
-    G-->>B: sendResponse (filtered to origin's paired devices)
-    B-->>P: port.postMessage(res)
+    P->>B: control MessagePort request
+    B->>G: webhid-control runtime Port
+    G->>N: persistent Native Messaging Port
+    N->>D: direct stdio, or forwarder then socket/pipe
+    D-->>N: response
+    N-->>G: response
+    G-->>B: same runtime Port
+    B-->>P: control MessagePort response
 ```
 
-### `sendReport()` WS (ack-wait)
+### `sendReport()` through WS or WT
 
 ```mermaid
 sequenceDiagram
-    participant P as page
-    participant B as bridge.js
-    participant W as worker.js
-    participant D as daemon
+    participant P as Page
+    participant W as Data worker
+    participant D as Daemon
+    participant I as Persistent I/O worker
 
-    P->>P: dataPending.set(reqId, promise)
-    P->>B: dataPort.postMessage(send, [buffer])
-    B->>W: postMessage (transfer)
-    W->>D: selected WS/WT transport sends binary frame
-    D->>D: enqueue IoCommand on persistent per-device I/O worker
-    D->>D: HID write
-    D-->>W: ws ack
-    W-->>B: sendResult
-    B-->>P: dataPort.onmessage(res)
-    P->>P: Promise resolves
+    P->>W: transferred data MessagePort, payload buffer
+    W->>D: persistent WS or WT frame
+    D->>I: IoCommand with capability and epoch
+    I->>I: validate authority, write HID
+    D-->>W: transport acknowledgement
+    W-->>P: transferred data MessagePort result
 ```
 
-### Input report via MessagePort (WS data plane)
+### `sendReport()` through NM
 
 ```mermaid
 sequenceDiagram
-    participant D as daemon
-    participant W as worker.js
-    participant P as page (port1)
+    participant P as Page
+    participant B as Bridge
+    participant G as Background
+    participant N as Native Messaging Port
+    participant D as Daemon
+    participant I as Persistent I/O worker
 
-    D->>W: WS binary batch ([0x00][len][reportId][payload]...)
-    W->>W: parse batch into reports
-    W->>P: port.postMessage(inputReportBatch, [buffers])
-    Note over W,P: one message per frame, zero-copy transfers, no Xray unwrap
-    P->>P: DataView per report on transferred ArrayBuffer
-    P->>P: dispatch HIDInputReportEvent per report
+    P->>B: data MessagePort request
+    B->>G: webhid-data:<deviceId> runtime Port
+    G->>N: persistent Native Messaging Port
+    N->>D: direct stdio, or forwarder then socket/pipe
+    D->>I: IoCommand with nm_hot authority and epoch
+    I->>I: validate authority, write HID
+    D-->>N: acknowledgement
+    N-->>G: acknowledgement
+    G-->>B: same webhid-data:<deviceId> Port
+    B-->>P: data MessagePort result
 ```
 
-### `sendReport()` NM (ack-wait)
+### NM input report
 
 ```mermaid
 sequenceDiagram
-    participant P as page
-    participant B as bridge.js
-    participant G as background.js
-    participant N as NM host
-    participant D as daemon
+    participant R as HID reader
+    participant D as Daemon NM hot sink
+    participant G as Background
+    participant B as Bridge
+    participant P as Page
 
-    P->>P: pending in polyfill
-    P->>B: port.postMessage
-    B->>G: runtime.sendMessage
-    G->>N: NM write (packed TLV)
-    N->>D: socket
-    D->>D: enqueue IoCommand on persistent per-device I/O worker
-    D->>D: HID write
-    D-->>N: socket response
-    N-->>G: NM read
-    G-->>B: sendResponse
-    B-->>P: port.postMessage(res)
+    R->>D: packed report through active nm_hot binding
+    D->>G: persistent Native Messaging Port
+    G->>B: matching webhid-data:<deviceId> Port
+    B->>P: page data MessagePort
+    Note over G,B: tabs.sendMessage only reaches remaining target tabs without that Port
 ```
 
-### `open()` (NM control + WS data plane setup)
+### First and additional open
 
 ```mermaid
 sequenceDiagram
-    participant P as page
-    participant B as bridge.js
-    participant G as background.js
-    participant N as NM host
-    participant D as daemon
-    participant W as worker.js
+    participant B as Bridge
+    participant D as DeviceManager
+    participant E as Physical Entry
 
-    P->>B: port.postMessage(open)
-    B->>G: runtime.sendMessage
-    G->>N: NM write
-    N->>D: socket
-    D->>D: hidapi open + reader thread + persistent I/O worker
-    D-->>N: socket response (sessionToken + wsPort)
-    N-->>G: NM read
-    G-->>B: sendResponse
-    B->>B: computeWsAuthHash(SHA-256(token + wsNonce))
-    B->>W: spawn worker (shadow URL or blob mode)
-    P->>B: dataPort transfer (MessageChannel port2)
-    B->>W: setPort (transfer port to worker)
-    W->>D: WS connect (subprotocol: webhid.<hash>)
-    D-->>W: WS open
-    B-->>P: port.postMessage(res)
-    Note over P,W: data port now direct W→P for input reports
-```
-
-### `requestDevice()` (picker UI + pairing)
-
-```mermaid
-sequenceDiagram
-    participant P as page
-    participant B as bridge.js
-    participant Picker as picker.js
-    participant G as background.js
-    participant N as NM host
-    participant D as daemon
-
-    P->>B: port.postMessage(requestDevice)
-    B->>Picker: devicePicker.show(filters)
-    Picker->>G: runtime.sendMessage(enumerate + optional filters)
-    G->>N: NM write (same enumerate action)
-    N->>D: socket
-    D->>D: VID/PID prefilter, then deep usage filter after pruning
-    D-->>N: filtered device list
-    N-->>G: NM read
-    G-->>Picker: sendResponse(filtered devices)
-    Picker->>Picker: render list
-    Note over Picker: user selects device, clicks Connect
-    Picker-->>B: webhid-device-selected event
-    B->>G: runtime.sendMessage(pairDevice, per device)
-    B->>G: runtime.sendMessage(recordGrantGroup, when more than one)
-    G->>G: IndexedDB origins store (origin, deviceId) + grantGroups
-    B-->>P: port.postMessage(res, devices)
-```
-
-### `handshake()` (NM, one-time on bridge init)
-
-```mermaid
-sequenceDiagram
-    participant B as bridge.js
-    participant G as background.js
-    participant N as NM host
-    participant D as daemon
-
-    B->>G: runtime.sendMessage(handshake)
-    G->>N: NM write
-    N->>D: socket
-    D->>D: generate wsNonce (once per instance)
-    D-->>N: socket response (wsPort + wsNonce)
-    N-->>G: NM read
-    G-->>B: sendResponse
-    B->>B: store wsPort + wsNonce for WS auth hash derivation
-```
-
-### NM disconnect → global reset
-
-```mermaid
-sequenceDiagram
-    participant G as background.js
-    participant B as bridge.js
-    participant P as page
-
-    G->>G: NM port disconnect detected
-    G->>G: resolve all pending with {s:503}
-    G->>B: broadcast globalReset (tabs.sendMessage)
-    B->>B: clear openDevices + per-open token stacks
-    B->>B: despawn all data workers
-    B-->>P: event: disconnect (per device)
-    P->>P: dispatch HIDConnectionEvent("disconnect")
+    B->>D: first logical open
+    D->>D: reserve physical lifetime
+    D->>E: open HID, create reader and I/O worker
+    D->>D: publish Entry, register Session, release reader gate
+    B->>D: later logical open
+    D->>D: register Session against existing Entry
+    Note over E: one Entry remains until its last Session ends
 ```
