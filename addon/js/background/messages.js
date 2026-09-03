@@ -741,25 +741,29 @@
   }
 
   /**
-   * Restores the page action state and popup after a page-action picker closes.
-   * @param {object|null} req
+   * Restores the page action visibility and popup after a picker closes.
    * @param {number} tabId
    * @returns {void}
    */
-  function restorePageAction(req, tabId) {
+  function restorePageAction(tabId) {
     if (isChromium || !browser.pageAction || tabId == null) return
-    const visibility =
-      req && req.pageActionWasShown === true
-        ? browser.pageAction.show(tabId)
-        : browser.pageAction.hide(tabId)
-    Promise.all([
-      visibility,
-      browser.pageAction.setIcon({ tabId, path: 'icons/gamepad.svg' }),
-      browser.pageAction.setPopup({
-        tabId,
-        popup: 'js/internal/pages/popup/index.html'
+    const key = globalSettingKey('hidePageAction')
+    browser.storage.local
+      .get(key)
+      .then((values) => {
+        const visibility = values[key]
+          ? browser.pageAction.hide(tabId)
+          : browser.pageAction.show(tabId)
+        return Promise.all([
+          visibility,
+          browser.pageAction.setIcon({ tabId, path: 'icons/gamepad.svg' }),
+          browser.pageAction.setPopup({
+            tabId,
+            popup: 'js/internal/pages/popup/index.html'
+          })
+        ])
       })
-    ]).catch((e) => logger.debug('restore pageAction failed', e))
+      .catch((e) => logger.debug('restore pageAction failed', e))
   }
 
   /**
@@ -770,15 +774,10 @@
    * @param {string} origin
    * @returns {void}
    */
-  function openPickerPageAction(req, tabId, origin) {
+  function openPickerPageAction(tabId, origin) {
     if (isChromium) return
     browser.pageAction
-      .isShown({ tabId })
-      .catch(() => false)
-      .then((wasShown) => {
-        req.pageActionWasShown = wasShown
-        return browser.pageAction.show(tabId)
-      })
+      .show(tabId)
       .then(() =>
         Promise.all([
           browser.pageAction.setIcon({
@@ -824,7 +823,7 @@
     if (req && req.requestId === request.requestId) {
       pendingPicker.delete(tabId)
       if (req.mode === 'pageAction') {
-        restorePageAction(req, tabId)
+        restorePageAction(tabId)
         if (browser.notifications) browser.notifications.clear('webhid-picker').catch(() => {})
       }
     }
@@ -856,7 +855,7 @@
     if (req.mode === 'window') {
       openPickerWindow()
     } else {
-      openPickerPageAction(req, tabId, request.origin)
+      openPickerPageAction(tabId, request.origin)
     }
     sendResponse({ ok: true })
     return false
@@ -999,7 +998,7 @@
     const req = tabId != null ? pendingPicker.get(tabId) : null
     if (tabId != null) pendingPicker.delete(tabId)
     if (req?.mode === 'pageAction' && !isChromium) {
-      restorePageAction(req, tabId)
+      restorePageAction(tabId)
       if (browser.notifications) browser.notifications.clear('webhid-picker').catch(() => {})
     }
     if (request.windowId != null) browser.windows.remove(request.windowId).catch(() => {})

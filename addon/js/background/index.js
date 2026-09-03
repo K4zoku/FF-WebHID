@@ -268,7 +268,9 @@
       .query({})
       .then((tabs) =>
         Promise.all(
-          tabs.filter((tab) => tab.id != null).map((tab) => browser.pageAction.hide(tab.id))
+          tabs
+            .filter((tab) => tab.id != null && pendingPicker.get(tab.id)?.mode !== 'pageAction')
+            .map((tab) => browser.pageAction.hide(tab.id))
         )
       )
       .catch((e) => logger.debug('pageAction.hide failed', e))
