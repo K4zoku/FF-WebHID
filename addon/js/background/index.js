@@ -258,6 +258,22 @@
     else shadowArms.set(key, { count: existing.count - 1, at: existing.at })
   })
 
+  /**
+   * Hides page actions from every open tab.
+   * @returns {void}
+   */
+  function hidePageActions() {
+    if (!browser.pageAction) return
+    browser.tabs
+      .query({})
+      .then((tabs) =>
+        Promise.all(
+          tabs.filter((tab) => tab.id != null).map((tab) => browser.pageAction.hide(tab.id))
+        )
+      )
+      .catch((e) => logger.debug('pageAction.hide failed', e))
+  }
+
   browser.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return
     let hasSiteChange = false
@@ -274,6 +290,7 @@
     if (hasSiteChange) refreshWorkerPolyfillSites()
     if (Object.keys(patch).length === 0) return
     settings.set(patch)
+    if (patch.hidePageAction) hidePageActions()
   })
 
   browser.tabs.onRemoved.addListener((tabId) => {

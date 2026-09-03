@@ -129,7 +129,7 @@
    * @returns {void}
    */
   function markPageActionUsed() {
-    if (pageActionMarked) return
+    if (pageActionMarked || settings.hidePageAction) return
     pageActionMarked = true
     sendBackgroundRequest({ action: 'showPageAction' }).catch(() => {
       pageActionMarked = false
@@ -358,6 +358,9 @@
   /** @type {import("./types.js").SettingsStore} */
   const settings = createSettingsStore(webhid.import('GLOBAL_DEFAULTS'))
   logger.bindSettings(settings)
+  settings.on('hidePageAction', (hidden) => {
+    if (!hidden) pageActionMarked = false
+  })
   /** @type {Map<Window, MessagePort>} */
   const pagePorts = new Map()
   /** @type {Map<MessagePort, Window>} */
@@ -1208,6 +1211,11 @@
       })
         .catch((e) => logger.debug('showPicker send failed', e))
       const pickerTimeout = setTimeout(() => {
+        browser.runtime.onMessage.removeListener(onPickerResult)
+        sendBackgroundRequest({
+          action: 'cancelPicker',
+          requestId: data.id
+        }).catch((e) => logger.debug('cancelPicker send failed', e))
         replyToPage({
           type: 'response',
           id: data.id,

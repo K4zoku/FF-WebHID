@@ -12,6 +12,7 @@
     dataPlane: typeof WebTransport !== 'undefined' ? 'wt' : 'ws',
     logLevel: 1,
     daemonAsNmHost: false,
+    hidePageAction: false,
     devicePickerMode: 'modal',
     workerPolyfillEnabled: false,
     workerSpawnMode: isChromium || isMv2 ? 'blob' : 'shadow',
@@ -149,10 +150,11 @@
   const SETTING_NAMES = Object.keys(GLOBAL_DEFAULTS)
 
   /**
-   * Settings that can be overridden per site, except the global-only
-   * `daemonAsNmHost`.
+   * Settings that can be overridden per site, except global-only settings.
    */
-  const SITE_SETTING_NAMES = SETTING_NAMES.filter((n) => n !== 'daemonAsNmHost')
+  const SITE_SETTING_NAMES = SETTING_NAMES.filter(
+    (n) => n !== 'daemonAsNmHost' && n !== 'hidePageAction'
+  )
 
   /**
    * Builds the storage key for a global setting.

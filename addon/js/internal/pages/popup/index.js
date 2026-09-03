@@ -5,6 +5,7 @@
   const groupDevices = webhid.import('groupDevices')
   const t = webhid.import('t')
   const localizeHTML = webhid.import('localizeHTML')
+  const loadGlobalSettings = webhid.import('loadGlobalSettings')
   const loadEffectiveSettings = webhid.import('loadEffectiveSettings')
   const GLOBAL_DEFAULTS = webhid.import('GLOBAL_DEFAULTS')
   const settingsUi = webhid.import('settingsUi')
@@ -18,6 +19,7 @@
 
   localizeHTML(document)
   initInfoPopovers(document)
+  const globalSettings = await loadGlobalSettings()
 
   /** @type {object|undefined} */
   let tab
@@ -235,7 +237,7 @@
   const viewDevices = document.getElementById('view-devices')
   const viewSettings = document.getElementById('view-settings')
   const btnSettings = document.getElementById('btn-settings')
-  const startsInSettings = window.location.hash === '#settings'
+  const startsInSettings = window.location.hash === '#settings' && !globalSettings.hidePageAction
   viewDevices.hidden = startsInSettings
   viewSettings.hidden = !startsInSettings
   btnSettings.classList.toggle('active', startsInSettings)
