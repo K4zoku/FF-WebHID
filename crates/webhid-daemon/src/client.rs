@@ -481,7 +481,14 @@ async fn handle_receive_feature_report(
     device_id: u32,
     report_id: u8,
 ) -> NmResponse {
-    match report_precheck(device_mgr, device_id, report_id, ReportType::Feature, None) {
+    match report_precheck(
+        device_mgr,
+        client_id,
+        device_id,
+        report_id,
+        ReportType::Feature,
+        None,
+    ) {
         Ok(()) => match device_mgr
             .enqueue_nm_feature_read(client_id, device_id, report_id)
             .await
@@ -502,6 +509,7 @@ async fn handle_send_feature_report(
 ) -> NmResponse {
     match report_precheck(
         device_mgr,
+        client_id,
         device_id,
         report_id,
         ReportType::Feature,
@@ -569,13 +577,14 @@ fn handle_set_data_plane(
 #[allow(clippy::result_large_err)]
 fn report_precheck(
     device_mgr: &DeviceManager,
+    client_id: u64,
     device_id: u32,
     report_id: u8,
     report_type: ReportType,
     payload_len: Option<usize>,
 ) -> Result<(), NmResponse> {
     device_mgr
-        .report_send_allowed(device_id, report_id, report_type, payload_len)
+        .nm_report_send_allowed(client_id, device_id, report_id, report_type, payload_len)
         .map_err(|reason| match reason {
             crate::device_mgr::SendReject::Blocked => {
                 log::warn!(

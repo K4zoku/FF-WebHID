@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
@@ -249,6 +249,7 @@ async fn read_inbound_frames(
     device_id: u32,
     session_token: &str,
     generation: u64,
+    validity: &Arc<AtomicBool>,
 ) {
     let mut len_buf = [0u8; 4];
     loop {
@@ -271,6 +272,7 @@ async fn read_inbound_frames(
             device_id,
             session_token,
             generation,
+            validity,
             crate::device_mgr::MODE_WT,
             |resp| {
                 if frame_tx.try_send(Bytes::from(resp)).is_err() {
@@ -311,6 +313,7 @@ async fn run_session(
         Arc::clone(&device_mgr),
         session_token.to_string(),
         grant.generation,
+        Arc::clone(&grant.valid),
         crate::device_mgr::MODE_WT,
         grant.cancel.clone(),
         move |frame: Vec<u8>| flush_tx.try_send(Bytes::from(frame)).is_ok(),
@@ -318,7 +321,15 @@ async fn run_session(
 
     let mut cancel = grant.cancel.clone();
     tokio::select! {
-        _ = read_inbound_frames(&mut recv, &frame_tx, &device_mgr, device_id, session_token, grant.generation) => {},
+        _ = read_inbound_frames(
+            &mut recv,
+            &frame_tx,
+            &device_mgr,
+            device_id,
+            session_token,
+            grant.generation,
+            &grant.valid,
+        ) => {},
         _ = cancel.changed() => {
             log::warn!("[wt] session for {device_id:#x} closed; tearing down transport");
         },

@@ -118,6 +118,7 @@ async fn handle_websocket(
     let mgr_for_worker = Arc::clone(&device_mgr);
     let device_id_for_worker = device_id;
     let session_token_for_worker = session_token.clone();
+    let validity_for_worker = Arc::clone(&grant.valid);
     let mut cancel_for_worker = grant.cancel.clone();
     let mut frame_worker = tokio::spawn(async move {
         loop {
@@ -136,6 +137,7 @@ async fn handle_websocket(
                 device_id_for_worker,
                 &session_token_for_worker,
                 ws_gen,
+                &validity_for_worker,
                 crate::device_mgr::MODE_WS,
                 |resp| {
                     let _ = tx_for_worker.try_send(Message::Binary(resp.into()));
@@ -168,6 +170,7 @@ async fn handle_websocket(
         mgr_for_sender,
         session_token_for_sender,
         ws_gen,
+        Arc::clone(&grant.valid),
         crate::device_mgr::MODE_WS,
         cancel_for_sender,
         move |frame: Vec<u8>| {

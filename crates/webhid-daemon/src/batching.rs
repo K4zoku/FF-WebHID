@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -217,14 +218,17 @@ pub async fn run_sender<F>(
     device_mgr: Arc<DeviceManager>,
     session_token: String,
     generation: u64,
+    validity: Arc<AtomicBool>,
     kind: &'static str,
     mut cancel: watch::Receiver<bool>,
     mut flush: F,
 ) where
     F: FnMut(Vec<u8>) -> bool + Send + 'static,
 {
-    let mut alive =
-        || device_mgr.session_transport_active(device_id, &session_token, kind, generation);
+    let mut alive = || {
+        validity.load(std::sync::atomic::Ordering::SeqCst)
+            && device_mgr.session_transport_active(device_id, &session_token, kind, generation)
+    };
     if *cancel.borrow() {
         return;
     }
@@ -389,6 +393,7 @@ async fn handle_send_report_msg<F>(
     device_id: u32,
     session_token: &str,
     generation: u64,
+    validity: &Arc<AtomicBool>,
     kind: &str,
     emit: &mut F,
 ) where
@@ -397,7 +402,14 @@ async fn handle_send_report_msg<F>(
     let (resp_type, report_type) = send_kind(msg_type);
     let report_id = payload.first().copied().unwrap_or(0);
     let payload_len = payload.len().saturating_sub(1);
-    if !transport_alive(device_mgr, device_id, session_token, generation, kind) {
+    if !transport_alive(
+        device_mgr,
+        device_id,
+        session_token,
+        generation,
+        validity,
+        kind,
+    ) {
         emit(make_status_resp(resp_type, req_id, 1));
         return;
     }
@@ -431,6 +443,7 @@ async fn handle_send_report_msg<F>(
                         generation,
                         report_id,
                         report_data,
+                        Arc::clone(validity),
                     )
                     .await
             } else {
@@ -442,6 +455,7 @@ async fn handle_send_report_msg<F>(
                         generation,
                         report_id,
                         report_data,
+                        Arc::clone(validity),
                     )
                     .await
             };
@@ -467,12 +481,20 @@ async fn handle_receive_feature_report_msg<F>(
     device_id: u32,
     session_token: &str,
     generation: u64,
+    validity: &Arc<AtomicBool>,
     kind: &str,
     emit: &mut F,
 ) where
     F: FnMut(Vec<u8>),
 {
-    if !transport_alive(device_mgr, device_id, session_token, generation, kind) {
+    if !transport_alive(
+        device_mgr,
+        device_id,
+        session_token,
+        generation,
+        validity,
+        kind,
+    ) {
         emit(make_feature_read_resp(req_id, 1, &[]));
         return;
     }
@@ -487,6 +509,7 @@ async fn handle_receive_feature_report_msg<F>(
                     kind,
                     generation,
                     report_id,
+                    Arc::clone(validity),
                 )
                 .await;
             match result {
@@ -510,9 +533,11 @@ fn transport_alive(
     device_id: u32,
     session_token: &str,
     generation: u64,
+    validity: &AtomicBool,
     kind: &str,
 ) -> bool {
-    device_mgr.session_transport_active(device_id, session_token, kind, generation)
+    validity.load(std::sync::atomic::Ordering::SeqCst)
+        && device_mgr.session_transport_active(device_id, session_token, kind, generation)
 }
 
 pub async fn handle_client_message<F>(
@@ -521,13 +546,21 @@ pub async fn handle_client_message<F>(
     device_id: u32,
     session_token: &str,
     generation: u64,
+    validity: &Arc<AtomicBool>,
     kind: &str,
     mut emit: F,
 ) -> bool
 where
     F: FnMut(Vec<u8>),
 {
-    if !transport_alive(device_mgr, device_id, session_token, generation, kind) {
+    if !transport_alive(
+        device_mgr,
+        device_id,
+        session_token,
+        generation,
+        validity,
+        kind,
+    ) {
         log::warn!("[sender] rejecting frame for {device_id:#x}: session no longer active");
         return false;
     }
@@ -556,6 +589,7 @@ where
                 device_id,
                 session_token,
                 generation,
+                validity,
                 kind,
                 &mut emit,
             )
@@ -569,6 +603,7 @@ where
                 device_id,
                 session_token,
                 generation,
+                validity,
                 kind,
                 &mut emit,
             )
