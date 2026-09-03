@@ -23,6 +23,46 @@
 sudo pacman -S rust systemd pkgconf zip nodejs
 ```
 
+
+## Dev Container
+
+The repository includes a lightweight Debian `node:22-bookworm-slim` devcontainer, which works with Zed's Dev Container support. Open the repository in Zed and choose the devcontainer environment. Creation runs `npm ci`; it does not run a build or test suite.
+
+The configuration keeps the shell as the non-root `node` user and uses the container runtime's `keep-id` user namespace mapping so mounted files remain writable with rootless Podman, as used by the Zed setup. Use the equivalent host-UID mapping when using another runtime.
+
+The image includes Rust stable with `rustfmt` and `clippy`, Node/npm, the native Linux build dependencies, and Firefox installed through the repository's Playwright dependency. These workflows are supported inside the container:
+
+```sh
+npm run build:rs:debug
+npm run build:addon
+npm run test:rs
+npm run lint
+npm run lint:js
+npm run lint:rs
+npm run test:browser:src
+```
+
+The existing `.cargo/config.toml` rustc wrapper remains active. Check Linux E2E device access from inside the container with:
+
+```sh
+.devcontainer/check-uhid.sh
+```
+
+Linux E2E additionally requires the host kernel's `/dev/uhid`, permission to open it, and access to the `hidraw` nodes created by `webhid-mock`. The image does not load kernel modules, pass devices by default, or request `--privileged`. If the check reports `UHID unavailable` or `UHID present but not writable`, normal development and browser tests remain usable.
+
+The standard devcontainer intentionally does not advertise E2E support. Docker and Podman device flags can expose `/dev/uhid`, but they do not mount the dynamically created `/dev/hidraw*` nodes into the container. A device-cgroup rule alone is not sufficient, and a broad `/dev` bind mount or `--privileged` would unnecessarily weaken isolation. Do not add either to the normal Zed configuration.
+
+For the supported Linux E2E path, run the suite on the host after applying the existing rule and joining the `webhid` group:
+
+```sh
+sudo make install-e2e-udev-rule
+newgrp webhid
+npm run test:e2e:daemon
+npm run test:e2e:forwarder
+```
+
+If a separate container runtime integration can explicitly pass each newly created VID `0x16C0` `hidraw` node, it must also preserve the `webhid` group permissions and the host-assigned device major/minor values. Do not guess those values. This is intentionally outside the default devcontainer because dynamic device passthrough is runtime-specific.
+
 ## Building
 
 ```sh

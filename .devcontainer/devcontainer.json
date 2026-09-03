@@ -1,0 +1,17 @@
+{
+  "name": "FF-WebHID",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/ff-webhid,type=bind",
+  "workspaceFolder": "/workspaces/ff-webhid",
+  "remoteUser": "node",
+  "runArgs": ["--userns=keep-id"],
+  "containerEnv": {
+    "CARGO_HOME": "/home/node/.cargo",
+    "PLAYWRIGHT_BROWSERS_PATH": "/ms-playwright",
+    "npm_config_cache": "/home/node/.npm"
+  },
+  "postCreateCommand": "npm ci"
+}
