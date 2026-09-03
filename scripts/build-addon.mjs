@@ -72,12 +72,15 @@ function collectScripts(manifest, add) {
 }
 
 function collectPages(manifest, add) {
-  for (const key of ['page_action', 'action', 'browser_action']) {
-    if (manifest[key]) add(manifest[key].default_popup)
+  const addPage = (page) => {
+    if (typeof page === 'string') add(page.split(/[?#]/, 1)[0])
   }
-  add(manifest.options_ui && manifest.options_ui.page)
-  add(manifest.sidebar_action && manifest.sidebar_action.default_panel)
-  add(manifest.devtools_page)
+  for (const key of ['page_action', 'action', 'browser_action']) {
+    if (manifest[key]) addPage(manifest[key].default_popup)
+  }
+  addPage(manifest.options_ui && manifest.options_ui.page)
+  addPage(manifest.sidebar_action && manifest.sidebar_action.default_panel)
+  addPage(manifest.devtools_page)
 }
 
 function collectIcons(manifest, add) {

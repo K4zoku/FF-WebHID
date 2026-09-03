@@ -42,13 +42,10 @@
   },
   "page_action": {
     "default_popup": "js/internal/pages/popup/index.html",
-    "default_icon": "icons/gamepad.svg",
-    "show_matches": [
-      "http://*/*",
-      "https://*/*"
-    ]
+    "default_icon": "icons/gamepad.svg"
   },
   "browser_action": {
+    "default_popup": "js/internal/pages/popup/index.html#settings",
     "default_icon": "icons/icon.svg",
     "default_title": "WebHID"
   },

@@ -19,6 +19,7 @@
  * @property {string} dataPlane
  * @property {number} logLevel
  * @property {boolean} daemonAsNmHost
+ * @property {boolean} hidePageAction
  * @property {string} devicePickerMode
  * @property {boolean} workerPolyfillEnabled
  * @property {boolean} allowActivationlessRequestDevice

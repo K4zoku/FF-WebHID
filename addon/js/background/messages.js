@@ -4,6 +4,7 @@
   const http = webhid.import('http')
   const logger = webhid.import('logger')
   const isChromium = webhid.import('isChromium')
+  const globalSettingKey = webhid.import('globalSettingKey')
   const decodeDeviceCollections = webhid.import('decodeDeviceCollections')
   const { deviceCache, pendingPicker, permissionsPolicy, allowedCrossOrigin } =
     webhid.import('bgState')
@@ -574,6 +575,31 @@
   }
 
   /**
+   * Shows the page action for a tab that has used the WebHID API.
+   * @param {object} request
+   * @param {object} sender
+   * @param {function(*): void} sendResponse
+   * @returns {boolean}
+   */
+  function handleShowPageAction(request, sender, sendResponse) {
+    const tabId = sender.tab != null ? sender.tab.id : undefined
+    if (isChromium || !browser.pageAction || tabId == null) {
+      sendResponse({})
+      return false
+    }
+    browser.storage.local
+      .get(globalSettingKey('hidePageAction'))
+      .then((values) => {
+        if (!values[globalSettingKey('hidePageAction')]) {
+          return browser.pageAction.show(tabId)
+        }
+      })
+      .catch((e) => logger.debug('pageAction.show failed', e))
+      .finally(() => sendResponse({}))
+    return true
+  }
+
+  /**
    * @param {object} request
    * @param {object} sender
    * @param {function(*): void} sendResponse
@@ -715,6 +741,32 @@
   }
 
   /**
+   * Restores the page action visibility and popup after a picker closes.
+   * @param {number} tabId
+   * @returns {void}
+   */
+  function restorePageAction(tabId) {
+    if (isChromium || !browser.pageAction || tabId == null) return
+    const key = globalSettingKey('hidePageAction')
+    browser.storage.local
+      .get(key)
+      .then((values) => {
+        const visibility = values[key]
+          ? browser.pageAction.hide(tabId)
+          : browser.pageAction.show(tabId)
+        return Promise.all([
+          visibility,
+          browser.pageAction.setIcon({ tabId, path: 'icons/gamepad.svg' }),
+          browser.pageAction.setPopup({
+            tabId,
+            popup: 'js/internal/pages/popup/index.html'
+          })
+        ])
+      })
+      .catch((e) => logger.debug('restore pageAction failed', e))
+  }
+
+  /**
    * Opens the picker as a pageAction popup, alerting the user via a
    * notification when the requesting tab is not the active one.
    * @param {object} req
@@ -722,17 +774,26 @@
    * @param {string} origin
    * @returns {void}
    */
-  function openPickerPageAction(req, tabId, origin) {
+  function openPickerPageAction(tabId, origin) {
     if (isChromium) return
-    browser.pageAction.setIcon({
-      tabId,
-      path: 'icons/gamepad.alert.svg'
-    })
-    browser.pageAction.setPopup({
-      tabId,
-      popup: 'js/internal/pages/picker/index.html'
-    })
-    if (browser.pageAction.openPopup) browser.pageAction.openPopup().catch(() => {})
+    browser.pageAction
+      .show(tabId)
+      .then(() =>
+        Promise.all([
+          browser.pageAction.setIcon({
+            tabId,
+            path: 'icons/gamepad.alert.svg'
+          }),
+          browser.pageAction.setPopup({
+            tabId,
+            popup: 'js/internal/pages/picker/index.html'
+          })
+        ])
+      )
+      .then(() => {
+        if (browser.pageAction.openPopup) return browser.pageAction.openPopup()
+      })
+      .catch((e) => logger.debug('openPickerPageAction failed', e))
     browser.tabs
       .query({ active: true, currentWindow: true })
       .then((tabs) => {
@@ -747,6 +808,27 @@
         }
       })
       .catch(() => {})
+  }
+
+  /**
+   * Cancels a page-action picker after the requesting page times out.
+   * @param {object} request
+   * @param {object} sender
+   * @param {function(*): void} sendResponse
+   * @returns {boolean}
+   */
+  function handleCancelPicker(request, sender, sendResponse) {
+    const tabId = sender.tab != null ? sender.tab.id : undefined
+    const req = tabId != null ? pendingPicker.get(tabId) : null
+    if (req && req.requestId === request.requestId) {
+      pendingPicker.delete(tabId)
+      if (req.mode === 'pageAction') {
+        restorePageAction(tabId)
+        if (browser.notifications) browser.notifications.clear('webhid-picker').catch(() => {})
+      }
+    }
+    sendResponse({ ok: true })
+    return false
   }
 
   /**
@@ -773,7 +855,7 @@
     if (req.mode === 'window') {
       openPickerWindow()
     } else {
-      openPickerPageAction(req, tabId, request.origin)
+      openPickerPageAction(tabId, request.origin)
     }
     sendResponse({ ok: true })
     return false
@@ -915,13 +997,8 @@
     if (tabId == null && pendingPicker.size > 0) tabId = [...pendingPicker.keys()][0]
     const req = tabId != null ? pendingPicker.get(tabId) : null
     if (tabId != null) pendingPicker.delete(tabId)
-    const reqMode = req?.mode
-    if (reqMode === 'pageAction' && !isChromium) {
-      browser.pageAction.setIcon({ tabId, path: 'icons/gamepad.svg' })
-      browser.pageAction.setPopup({
-        tabId,
-        popup: 'js/internal/pages/popup/index.html'
-      })
+    if (req?.mode === 'pageAction' && !isChromium) {
+      restorePageAction(tabId)
       if (browser.notifications) browser.notifications.clear('webhid-picker').catch(() => {})
     }
     if (request.windowId != null) browser.windows.remove(request.windowId).catch(() => {})
@@ -959,6 +1036,7 @@
     unpairDevice: handleUnpairDevice,
     getAllowedDevices: handleGetAllowedDevices,
     deviceCountChanged: handleDeviceCountChanged,
+    showPageAction: handleShowPageAction,
     getDeviceCache: handleGetDeviceCache,
     getDeviceInfo: handleGetDeviceInfo,
     fetchResource: handleFetchResource,
@@ -966,6 +1044,7 @@
     getFrameOrigins: handleGetFrameOrigins,
     getWorkerBundle: handleGetWorkerBundle,
     showPicker: handleShowPicker,
+    cancelPicker: handleCancelPicker,
     getPendingPicker: handleGetPendingPicker,
     getPolicy: handleGetPolicy,
     armShadowSpawn: handleArmShadowSpawn,

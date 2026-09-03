@@ -110,6 +110,32 @@
     'pickerResult'
   ])
 
+  const PAGE_ACTION_API_ACTIONS = new Set([
+    'getPolicy',
+    'getPairedDevices',
+    'enumerate',
+    'requestDevice',
+    'open',
+    'close',
+    'sendReport',
+    'receiveFeatureReport',
+    'sendFeatureReport',
+    'unpairDevice'
+  ])
+  let pageActionMarked = false
+
+  /**
+   * Marks the current tab as using WebHID so its page action becomes visible.
+   * @returns {void}
+   */
+  function markPageActionUsed() {
+    if (pageActionMarked || settings.hidePageAction) return
+    pageActionMarked = true
+    sendBackgroundRequest({ action: 'showPageAction' }).catch(() => {
+      pageActionMarked = false
+    })
+  }
+
   /** @type {Set<string>} */
   const openDevices = new Set()
   /** @type {Map<string, Map<string, string[]>>} deviceId -> origin -> LIFO
@@ -332,6 +358,9 @@
   /** @type {import("./types.js").SettingsStore} */
   const settings = createSettingsStore(webhid.import('GLOBAL_DEFAULTS'))
   logger.bindSettings(settings)
+  settings.on('hidePageAction', (hidden) => {
+    if (!hidden) pageActionMarked = false
+  })
   /** @type {Map<Window, MessagePort>} */
   const pagePorts = new Map()
   /** @type {Map<MessagePort, Window>} */
@@ -1182,6 +1211,11 @@
       })
         .catch((e) => logger.debug('showPicker send failed', e))
       const pickerTimeout = setTimeout(() => {
+        browser.runtime.onMessage.removeListener(onPickerResult)
+        sendBackgroundRequest({
+          action: 'cancelPicker',
+          requestId: data.id
+        }).catch((e) => logger.debug('cancelPicker send failed', e))
         replyToPage({
           type: 'response',
           id: data.id,
@@ -1400,6 +1434,7 @@
     if (!data || data.id === undefined) return
 
     logger.debug('req action=' + data.action + ' id=' + data.id)
+    if (PAGE_ACTION_API_ACTIONS.has(data.action)) markPageActionUsed()
 
     const handler = REQUEST_HANDLERS[data.action]
     if (handler) {
@@ -1561,6 +1596,7 @@
           : msg.type === 'sendFeature'
             ? 'sendFeatureReport'
             : 'receiveFeatureReport'
+      markPageActionUsed()
       const payload = { deviceId, reportId: msg.reportId }
       if (msg.type === 'send' || msg.type === 'sendFeature') payload.data = msg.data
       const reqId = allocateDataReqId()

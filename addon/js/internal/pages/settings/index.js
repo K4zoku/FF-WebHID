@@ -18,6 +18,7 @@
 
   for (const key of [
     'daemonAsNmHost',
+    'hidePageAction',
     'workerPolyfillEnabled',
     'allowActivationlessRequestDevice'
   ]) {
@@ -48,6 +49,7 @@
 
   for (const key of [
     'daemonAsNmHost',
+    'hidePageAction',
     'workerPolyfillEnabled',
     'allowActivationlessRequestDevice'
   ]) {
