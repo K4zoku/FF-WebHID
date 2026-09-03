@@ -377,7 +377,9 @@ Then install the [browser extension](https://addons.mozilla.org/en-US/firefox/ad
 - **Device picker shows "No HID devices found"**: daemon running but no HID devices detected. Check `hidapi` can enumerate: `ls /dev/hidraw*` (Linux).
 - **Badge counter not showing**: ensure the device is opened via `navigator.hid.requestDevice()`, the counter tracks open devices, not paired ones.
 - **NM data plane is slow**: switch Data Plane to WebTransport when available (the default), or WebSocket otherwise. Use NM when the site's security policy blocks both worker transports.
-- **WebTransport or worker WebSocket retries on Firefox 154**: Local Network Access can affect both worker WebSocket and page-context WebTransport. WebSocket is the practical path that can surface the browser permission UI; after granting it, WebTransport may work. If the network data plane still cannot start, FF-WebHID falls back to Native Messaging. `network.lna.blocking=false` is the narrower workaround; `network.lna.enabled=false` disables LNA more broadly.
+- **Firefox 154 Local Network Access**: worker WebSocket and WebTransport connections require local-network permission. WebSocket can trigger the LNA permission prompt, but WebTransport keeps retrying without showing one.
+  - To use **WebTransport**, switch **Data Plane** to **WebSocket**, reconnect, choose **Remember my choice for this site** and **Allow**, then switch back to **WebTransport**.
+  - **about:config workaround**: set `network.lna.blocking` to `false` to disable LNA blocking. As a broader fallback, set `network.lna.enabled` to `false` to disable LNA entirely.
 - **Daemon restart causes input report freeze**: workers detect WS close code 4401 (unknown token); the bridge refreshes the data plane by reusing a live session token when possible instead of opening a new HID session solely for transport refresh.
 - **Settings change doesn't take effect**: `SettingsStore` Proxy observer fires listeners only on actual value change.
 
@@ -404,12 +406,12 @@ Then install the [browser extension](https://addons.mozilla.org/en-US/firefox/ad
 
 ### macOS
 
-| Setting           | Recommended  | Reason                                                                                                                                              |
-| ----------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Daemon as NM host | ON           | Recommended mode: no forwarder / Unix socket, one less hop                                                                                          |
-| Data Plane        | WT (default) | WebTransport in a worker keeps page rendering isolated; use WebSocket when WT is unavailable, or NM when site policy blocks both worker transports. |
+| Setting           | Recommended  | Reason                                                                                                                                                       |
+| ----------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Daemon as NM host | ON (default) | Recommended mode: daemon speaks NM directly, no forwarder / Unix socket, one less hop. macOS has no special daemon permission setup beyond Input Monitoring. |
+| Data Plane        | WT (default) | WebTransport in a worker keeps page rendering isolated; use WebSocket when WT is unavailable, or NM when site policy blocks both worker transports.          |
 
-**Setup**: Install via Homebrew (`brew install webhid`) or manual. Recommended: stop the `brew services` daemon and enable "Daemon as NM host" in the addon settings. Grant HID permissions in System Settings → Privacy & Security → Input Monitoring if prompted.
+**Setup**: Install via Homebrew (`brew install webhid`) or manual. On macOS, `daemonAsNmHost` defaults to `true`; the recommended mode stops the `brew services` daemon and enables "Daemon as NM host" in the addon settings. Grant HID permissions in System Settings → Privacy & Security → Input Monitoring if prompted.
 
 ### Benchmarking / Debugging
 

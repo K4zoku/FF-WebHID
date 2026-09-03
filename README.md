@@ -40,6 +40,13 @@ Step-by-step instructions for Linux, macOS, and Windows: [docs/INSTALLATION.md](
 2. Open a website that uses WebHID and click its device or connect button.
 3. Pick your device in the chooser and connect.
 
+**Firefox 154 Local Network Access**: worker WebSocket and WebTransport connections require local-network permission. WebSocket can trigger the LNA permission prompt, but WebTransport keeps retrying without showing one.
+
+If you want to use **WebTransport**, there are two workarounds:
+
+- Switch **Data Plane** to **WebSocket**, reconnect, choose **Remember my choice for this site** and **Allow**, then switch back to **WebTransport**.
+- **about:config workaround**: set `network.lna.blocking` to `false` to disable LNA blocking. As a broader fallback, set `network.lna.enabled` to `false` to disable LNA entirely.
+
 When a site actually uses WebHID, its gamepad page-action icon appears in the address bar and shows which devices the site can access; it also lets you revoke access. The browser action opens the device view even when the page action is hidden. Per-site settings live behind the gear icon in the same popup.
 
 ## Settings
@@ -54,9 +61,8 @@ Click the gamepad icon in the address bar, then the gear icon. Changes here appl
 
 - **Data Plane**: how the addon moves data between the site and the daemon.
   - **WebTransport** (default where available): the preferred fast path; runs in a background worker so pages stay smooth. Keep it unless a site has problems.
-  - **WebTransport (in-page)**: connects directly in the page; fine at normal report rates, uses a bit more of the page's CPU. Use it when a site blocks background workers (CSP) but still allows the connection. On Firefox 154, Local Network Access can apply to page-context WebTransport and may make it fail or retry without showing a prompt. Trying WebSocket first can surface the LNA permission UI, after which WebTransport may work. If WS or WT cannot start because of LNA or another setup problem, the addon falls back to Native Messaging instead of making WebHID unusable. This behavior is observed and may change as Firefox's implementation evolves. Reload the page after changing this setting.
-  - **WebSocket**: fallback when WebTransport is not available, for example on older Firefox.
-  - **Native Messaging**: the slowest but most compatible option; use it when a site's security policy blocks the other three.
+  - **WebSocket**: alternate network path when WebTransport is unavailable or when Firefox needs a WebSocket attempt to surface the Local Network Access permission UI.
+  - **Native Messaging**: the compatibility and failsafe option; use it when a site's security policy or network conditions block the other network paths.
 - **Worker Spawn Mode**: how the addon creates the worker in the page. Only shown when a worker is actually used (Data Plane is WebTransport or WebSocket). If the site's security policy (CSP) blocks worker creation, the addon falls back to Native Messaging instead.
   - **Shadow URL** (default): uses the page's own URL for the worker, so it respects the page's security settings and changes (almost) nothing about the page.
   - **Blob + CSP rewrite**: creates the worker from a blob URL and relaxes the page's worker policy. Works fully on the MV2 build; on the MV3 build only a CSP set in a meta tag can be rewritten, so header-based policies still block it.
@@ -84,7 +90,7 @@ Open `about:addons → WebHID → Options`. Site settings are overridden from th
 - **Daemon as NM host**: how the daemon is launched.
 
   - **On** (recommended): Firefox spawns the daemon on demand, so no system service is needed; requires the setup described in the Recommended setup note above.
-  - **Off** (default; on by default on Windows): the daemon runs as a system service.
+  - **Off** (default on Linux; on by default on macOS and Windows): the daemon runs as a system service.
 
 ## Privacy and security
 
@@ -99,6 +105,6 @@ The technical side of this project lives in the docs:
 - [Architecture](docs/ARCHITECTURE.md): system design, data plane, security, reconnect
 - [Spec Compliance](docs/SPECIFICATION.md): WebHID spec compliance report with item-level evidence
 - [Data Path Analysis](docs/DATA_PATH.md): per-path copy/hop/latency breakdown, cost model, optimization inventory
-- [Benchmark Report](docs/BENCHMARK.md): automated image-pipeline and 8000Hz loss benchmarks (ws/nm/wt/wt-inpage, Chromium native), per-report latency + walltime results, RDP profiling
+- [Benchmark Report](docs/BENCHMARK.md): automated image-pipeline and 8000Hz loss benchmarks for the supported data planes and Chromium native WebHID, with per-report latency, walltime results, and RDP profiling
 - [Development Guide](docs/DEVELOPMENT.md): building, testing, debugging, packaging
 - [Installation Guide](docs/INSTALLATION.md): platform-specific install instructions and recommended settings

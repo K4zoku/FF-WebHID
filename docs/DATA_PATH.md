@@ -39,30 +39,28 @@ Control ops (enumerate/open/close/handshake/setDataPlane) are NM-only, handled b
 
 ## 3. Path Inventory
 
-| Path | Message                      | Mode                | Sub-path                                                                                              |
-| ---- | ---------------------------- | ------------------- | ----------------------------------------------------------------------------------------------------- |
-| A    | `sendReport`                 | WS                  | P→B→W→WS→D→hidraw→WS→W→B→P (ack-wait)                                                                 |
-| C    | `sendReport`                 | NM                  | P→B→G→NM→D→hidraw→NM→G→B→P (ack-wait)                                                                 |
-| U    | `sendReport`                 | WT worker           | P→B→W→WT stream→D→hidraw→WT→W→B→P (ack-wait, same frame as WS)                                        |
-| V    | `sendReport` (in-page)       | WT, `useWorker` off | P (in-page plane) → WT stream→D→hidraw→WT→P (ack-wait; full hot path in-page)                         |
-| E    | `sendFeatureReport`          | WS                  | Same as A (WS frame type 0x02)                                                                        |
-| F    | `sendFeatureReport`          | NM                  | Same as C (NM packed TLV 0x04)                                                                        |
-| G    | `receiveFeatureReport`       | WS                  | P→B→W→WS→D→hidraw→WS→W→B→P                                                                            |
-| H    | `receiveFeatureReport`       | NM                  | P→B→G→NM→D→hidraw→NM→G→B→P (JSON, action 5)                                                           |
-| I    | Input report                 | WS + MessagePort    | hidraw→D→WS→W→MessagePort→P (direct, bypass bridge)                                                   |
-| J    | Input report                 | WS, port fallback   | hidraw→D→WS→W→postMessage→B→control port→P                                                            |
-| K    | Input report                 | NM                  | hidraw→D→NM→G→B→P (tab-targeted, or via data port)                                                    |
-| W    | Input report                 | WT worker           | hidraw→D→WT→W→MessagePort→P (direct, bypass bridge)                                                   |
-| X    | Input report                 | WT in-page          | hidraw→D→WT→P (main-thread parse, no worker; `useWorker` off)                                         |
-| L    | `enumerate`                  | NM                  | P→B→G→NM→D→hidapi→NM→G→B→P                                                                            |
-| M    | `open`                       | NM                  | P→B→G→NM→D→hidapi→NM→G→B→P + persistent reader/I/O workers + data worker setup + MessagePort transfer |
-| N    | `close`                      | NM                  | P→B→G→NM→D→NM→G→B→P + reader/I/O worker teardown + data worker terminate + port return                |
-| O    | `requestDevice`              | NM                  | P→B (picker UI) → enumerate → user select → B pairs (bridge-side) → B→P                               |
-| P    | `getDevices`                 | NM                  | P→B→G→storage + enumeratePaired (or cache hit)                                                        |
-| Q    | `handshake` (NM)             | NM                  | B→G→NM→D→NM→G→B (returns wsPort + wsNonce)                                                            |
-| R    | `connect`/`disconnect` event | NM                  | D→NM→G→B→P (tab-targeted)                                                                             |
-| S    | `getPolicy`                  | NM                  | P→B→G (Permissions-Policy header cache + iframe `allow` attr check)                                   |
-| T    | `globalReset`                | NM→G→B              | G broadcasts to all tabs on NM disconnect: B clears state, emits disconnect per device                |
+| Path | Message                      | Mode              | Sub-path                                                                                              |
+| ---- | ---------------------------- | ----------------- | ----------------------------------------------------------------------------------------------------- |
+| A    | `sendReport`                 | WS                | P→B→W→WS→D→hidraw→WS→W→B→P (ack-wait)                                                                 |
+| C    | `sendReport`                 | NM                | P→B→G→NM→D→hidraw→NM→G→B→P (ack-wait)                                                                 |
+| U    | `sendReport`                 | WT                | P→B→W→WT stream→D→hidraw→WT→W→B→P (ack-wait, same frame as WS)                                        |
+| E    | `sendFeatureReport`          | WS                | Same as A (WS frame type 0x02)                                                                        |
+| F    | `sendFeatureReport`          | NM                | Same as C (NM packed TLV 0x04)                                                                        |
+| G    | `receiveFeatureReport`       | WS                | P→B→W→WS→D→hidraw→WS→W→B→P                                                                            |
+| H    | `receiveFeatureReport`       | NM                | P→B→G→NM→D→hidraw→NM→G→B→P (JSON, action 5)                                                           |
+| I    | Input report                 | WS + MessagePort  | hidraw→D→WS→W→MessagePort→P (direct, bypass bridge)                                                   |
+| J    | Input report                 | WS, port fallback | hidraw→D→WS→W→postMessage→B→control port→P                                                            |
+| K    | Input report                 | NM                | hidraw→D→NM→G→B→P (tab-targeted, or via data port)                                                    |
+| W    | Input report                 | WT                | hidraw→D→WT→W→MessagePort→P (direct, bypass bridge)                                                   |
+| L    | `enumerate`                  | NM                | P→B→G→NM→D→hidapi→NM→G→B→P                                                                            |
+| M    | `open`                       | NM                | P→B→G→NM→D→hidapi→NM→G→B→P + persistent reader/I/O workers + data worker setup + MessagePort transfer |
+| N    | `close`                      | NM                | P→B→G→NM→D→NM→G→B→P + reader/I/O worker teardown + data worker terminate + port return                |
+| O    | `requestDevice`              | NM                | P→B (picker UI) → enumerate → user select → B pairs (bridge-side) → B→P                               |
+| P    | `getDevices`                 | NM                | P→B→G→storage + enumeratePaired (or cache hit)                                                        |
+| Q    | `handshake` (NM)             | NM                | B→G→NM→D→NM→G→B (returns wsPort + wsNonce)                                                            |
+| R    | `connect`/`disconnect` event | NM                | D→NM→G→B→P (tab-targeted)                                                                             |
+| S    | `getPolicy`                  | NM                | P→B→G (Permissions-Policy header cache + iframe `allow` attr check)                                   |
+| T    | `globalReset`                | NM→G→B            | G broadcasts to all tabs on NM disconnect: B clears state, emits disconnect per device                |
 
 All send/sendFeature paths are ack-wait (resolve on daemon response).
 
@@ -115,7 +113,7 @@ All send/sendFeature paths are ack-wait (resolve on daemon response).
 
 ---
 
-### Path U - `sendReport` WT worker (ack-wait)
+### Path U - `sendReport` WT (ack-wait)
 
 Identical to Path A with the transport leg swapped: the worker writes the same
 `[0x01][reqId:u32 LE][reportId][payload]` frame over the persistent WT
@@ -123,34 +121,6 @@ bidirectional stream (each frame length-prefixed `[len:u32 LE]`; QUIC/TLS
 encode + kernel UDP instead of WS encode + TCP). Same totals as Path A:
 **8 copies, 6 hops**. Latency **3 to 8 ms** (benchmark per-report round-trip
 p50 ≈ 0.85ms vs ws 0.78ms: QUIC/TLS loopback costs ~+0.07ms per report).
-
----
-
-### Path V - `sendReport` WT in-page (`useWorker` off)
-
-The in-page WT plane carries the full hot path: `sendReport`/
-`sendFeatureReport`/`receiveFeatureReport` build the same binary frames as the
-worker (`[0x01|0x02|0x03][reqId:u32 LE][reportId][payload]`) and write them
-over the in-page plane's persistent WT stream (`plane.wt.send`, length-prefixed
-like every stream frame); acks (0x81/0x82/0x83) return on the same stream and
-resolve the promise (`handleInPageControlResponse`). The bridge data-port (NM)
-path remains only as the fallback while the plane is not open.
-
-| Step      | Location                        | Operation                                                                                | Copies                               | Hops               |
-| --------- | ------------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------ | ------------------ |
-| 1         | `content/main/index.js`         | `view.slice()` own-buffer copy                                                           | 1                                    | 0                  |
-| 2         | `content/main/index.js`         | `inPageRequest` builds `[0x01][reqId][reportId][payload]` frame                          | 1 (alloc+copy)                       | 0                  |
-| 3         | `content/main/index.js`         | `plane.wt.send(frame)` → P→D over WT stream                                              | 1 (QUIC/TLS encode) + 1 (kernel UDP) | 1                  |
-| 4         | `batching.rs` / `device_mgr.rs` | `payload[1..].to_vec()` then enqueue `IoCommand` on the persistent per-device I/O worker | 1 (payload copy)                     | 1 (worker handoff) |
-| 5         | `device_mgr.rs`                 | I/O worker calls `hid::write_report` using its thread-local write buffer                 | 1 (report-id + payload copy)         | 0                  |
-| 6         | `hid.rs`                        | `dev.write(&buf)` → hidraw                                                               | 1 (kernel)                           | 1                  |
-| 7         | `webtransport.rs`               | ack frame → D→P over WT stream                                                           | 1 (QUIC/TLS encode) + 1 (kernel UDP) | 1                  |
-| 8         | `content/main/index.js`         | `handleInPageControlResponse` → resolve                                                  | 0                                    | 0                  |
-| **Total** |                                 |                                                                                          | **9**                                | **4**              |
-
-The extra copy versus the worker path is the in-page frame payload copy at the
-daemon boundary. Latency **3 to 8 ms** (ack-wait over WT; benchmark per-report
-round-trip p50 ≈ 0.85ms vs ws 0.78ms).
 
 ---
 
@@ -177,7 +147,7 @@ round-trip p50 ≈ 0.85ms vs ws 0.78ms).
 
 ---
 
-### Path W - Input report WT worker (rate-gated batching)
+### Path W - Input report WT (rate-gated batching)
 
 Same shape as Path I with the transport leg swapped: `batching.rs` runs the
 same `batching::run_sender` and `write_batch_frame`; the frame crosses as a
@@ -199,29 +169,6 @@ UDP instead of WS encode + TCP).
 Latency: **1 to 5 ms** (same as Path I; +~0.07ms per report QUIC/TLS loopback cost, benchmark-measured).
 
 ---
-
-### Path X - Input report WT in-page (`useWorker` off)
-
-No worker and no MessagePort: the daemon writes the same type-prefixed batch
-frame to the persistent WT stream, and the polyfill's `createWtTransport`
-`onBinary` parses it in-page (`pushInPageBatch`) and dispatches
-`HIDInputReportEvent` directly. One hop fewer than Path I/W (no worker, no
-MessagePort), but the parse runs on the page's main thread, sharing CPU with
-rendering: the exact contention the data worker exists to avoid (see the
-profiler-confirmed loss numbers in AGENTS.md Section 3).
-
-| Step                 | Location                | Operation                                                                                     | Copies                                    | Hops  |
-| -------------------- | ----------------------- | --------------------------------------------------------------------------------------------- | ----------------------------------------- | ----- |
-| 1                    | `device_mgr.rs`         | `dev.read_timeout` → `Arc::from(&buf[1..])`                                                   | 1 (kernel) + 0 (Arc)                      | 1     |
-| 2                    | `device_mgr.rs`         | `tx.send(IpcResponse::InputReport{data: Arc})` → broadcast                                    | 0 (Arc move)                              | 1     |
-| 3                    | `batching.rs`           | `event_rx.recv()` → `batch.push((reportId, data))`                                            | 0 (Arc clone)                             | 0     |
-| 4                    | `batching.rs`           | `write_batch_frame` prepend reportId + extend data                                            | 1 (alloc+N×copy)                          | 0     |
-| 5                    | `webtransport.rs`       | `frame_tx.send` → D→P over WT stream                                                          | 1 (QUIC/TLS encode) + 1 (kernel UDP)      | 1     |
-| 6                    | `content/main/index.js` | `onBinary` → `pushInPageBatch`: parse batch → per-report `new ArrayBuffer(payloadLen)` + copy | 1 (kernel→JS) + 1 (alloc+copy per report) | 0     |
-| 7                    | `content/main/index.js` | `new DataView` + dispatch `HIDInputReportEvent`                                               | 0                                         | 0     |
-| **Total (1 report)** |                         |                                                                                               | **6**                                     | **3** |
-
-Latency: **1 to 6 ms** (same frame path as W, one hop less; main-thread parse adds render-contention risk at high polling rates, not per-report latency).
 
 ---
 
@@ -291,19 +238,19 @@ Bridge sends `handshake` on init. The response contains `wsPort` (the daemon's W
 
 ## 5. Summary Table - Latency per Message Type
 
-| Message                         | WS (ack-wait)                                               | WT                                                                  | NM (ack-wait)       |
-| ------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------- | ------------------- |
-| `sendReport` (page-side)        | **5 to 10 ms**                                              | **5 to 10 ms** (worker / in-page)                                   | **8 to 20 ms**      |
-| `sendReport` (end-to-end)       | 3 to 8 ms                                                   | 3 to 8 ms (worker / in-page)                                        | 8 to 20 ms          |
-| `sendFeatureReport` (page-side) | **5 to 10 ms**                                              | **5 to 10 ms** (worker / in-page)                                   | **8 to 20 ms**      |
-| `receiveFeatureReport`          | **6 to 12 ms**                                              | **6 to 12 ms** (worker / in-page)                                   | **15 to 30 ms**     |
-| Input report (delivery)         | **1 to 5 ms** (MessagePort) / **2 to 6 ms** (port fallback) | **1 to 5 ms** (worker) / **1 to 6 ms** (in-page, main-thread parse) | **8 to 18 ms** (NM) |
-| `enumerate` (NM)                | --                                                          | --                                                                  | **15 to 40 ms**     |
-| `close` (NM)                    | --                                                          | --                                                                  | **10 to 20 ms**     |
-| `open` (always NM)              | --                                                          | --                                                                  | **15 to 45 ms**     |
-| `handshake` (NM)                | --                                                          | --                                                                  | **5 to 10 ms**      |
-| `getDevices` (cache hit)        | **<0.1 ms**                                                 | **<0.1 ms**                                                         | **<0.1 ms**         |
-| `getDevices` (cache miss)       | --                                                          | --                                                                  | **15 to 40 ms**     |
+| Message                         | WS (ack-wait)                                               | WT                          | NM (ack-wait)       |
+| ------------------------------- | ----------------------------------------------------------- | --------------------------- | ------------------- |
+| `sendReport` (page-side)        | **5 to 10 ms**                                              | **5 to 10 ms**              | **8 to 20 ms**      |
+| `sendReport` (end-to-end)       | 3 to 8 ms                                                   | 3 to 8 ms                   | 8 to 20 ms          |
+| `sendFeatureReport` (page-side) | **5 to 10 ms**                                              | **5 to 10 ms**              | **8 to 20 ms**      |
+| `receiveFeatureReport`          | **6 to 12 ms**                                              | **6 to 12 ms**              | **15 to 30 ms**     |
+| Input report (delivery)         | **1 to 5 ms** (MessagePort) / **2 to 6 ms** (port fallback) | **1 to 5 ms** (MessagePort) | **8 to 18 ms** (NM) |
+| `enumerate` (NM)                | --                                                          | --                          | **15 to 40 ms**     |
+| `close` (NM)                    | --                                                          | --                          | **10 to 20 ms**     |
+| `open` (always NM)              | --                                                          | --                          | **15 to 45 ms**     |
+| `handshake` (NM)                | --                                                          | --                          | **5 to 10 ms**      |
+| `getDevices` (cache hit)        | **<0.1 ms**                                                 | **<0.1 ms**                 | **<0.1 ms**         |
+| `getDevices` (cache miss)       | --                                                          | --                          | **15 to 40 ms**     |
 
 ---
 
@@ -317,9 +264,7 @@ Bridge sends `handshake` on init. The response contains `wsPort` (the daemon's W
 | J: Input port fallback | 7      | 6    | Transfer eliminates 2 clones                          |
 | K: Input NM            | 10     | 7    | JSON + base64 + tabs.sendMessage                      |
 | U: sendReport WT       | 8      | 6    | Persistent I/O worker + QUIC/TLS + hidraw syscall     |
-| V: sendReport in-page  | 9      | 4    | QUIC/TLS + persistent I/O worker, no MessagePort hops |
-| W: Input WT worker     | 6      | 4    | QUIC/TLS encode + per-report alloc                    |
-| X: Input WT in-page    | 6      | 3    | No worker hop, but main-thread parse (CPU contention) |
+| W: Input WT            | 6      | 4    | QUIC/TLS encode + per-report alloc                    |
 | L: enumerate (NM)      | 14     | 10   | hidapi scan                                           |
 | M: open                | 14     | 13   | hidapi open + worker spawn + WS + setdataplane        |
 | N: close (NM)          | 10     | 10   | NM roundtrip                                          |
@@ -345,7 +290,7 @@ Bridge sends `handshake` on init. The response contains `wsPort` (the daemon's W
 
 8. **Control ops are NM-only.** enumerate/open/close/handshake always go via NM.
 
-9. **WT is a full data plane in both shapes.** The WT worker path (W) is Path I with the QUIC/TLS stream in place of the TCP/WS leg (benchmark-measured ~+0.07ms per report on loopback). The WT in-page path (X, `useWorker` off) drops the worker + MessagePort hop (3 vs 4) but parses batches on the page's main thread, the exact CPU contention the worker exists to avoid. Sends are in-page too: `sendReport`/`sendFeatureReport`/`receiveFeatureReport` write the same frames over the same in-page stream (Path V, 4 hops vs 6), so in-page WT is a complete data plane, not an input-only hybrid.
+9. **WT is a worker data plane.** Path W mirrors Path I with the QUIC/TLS stream in place of the TCP/WS leg. Sends and input reports use the persistent WT transport, while the worker keeps parsing off the page's main thread.
 
 ---
 
@@ -422,7 +367,7 @@ sequenceDiagram
     end
 ```
 
-### Path W: Input report WT worker (rate-gated batching)
+### Path W: Input report WT (rate-gated batching)
 
 ```mermaid
 sequenceDiagram
@@ -441,39 +386,6 @@ sequenceDiagram
         P->>P: DataView on transferred ArrayBuffer
         P->>P: dispatch HIDInputReportEvent
     end
-```
-
-### Path X: Input report WT in-page (`useWorker` off)
-
-```mermaid
-sequenceDiagram
-    participant D as Daemon (D)
-    participant P as Page (P)
-
-    D->>D: dev.read_timeout → Arc::from(&buf[1..])
-    D->>D: tx.send(InputReport) broadcast
-    D->>D: batch.push (25µs coalesce, 8ms at high rate)
-    D->>P: WT stream frame ([len u32 LE][type 0x00][reports...])
-    P->>P: onBinary → pushInPageBatch parse → per-report ArrayBuffer
-    P->>P: DataView + dispatch HIDInputReportEvent
-    Note over P: main-thread parse, no worker (render CPU contention risk)
-```
-
-### Path V: `sendReport` WT in-page (`useWorker` off)
-
-```mermaid
-sequenceDiagram
-    participant P as Page (P)
-    participant D as Daemon (D)
-
-    P->>P: view.slice() own-buffer copy
-    P->>P: inPageRequest builds frame ([0x01][reqId][reportId][payload])
-    P->>D: plane.wt.send(frame) over WT stream
-    D->>D: payload copy + enqueue IoCommand on persistent I/O worker
-    D->>D: I/O worker uses thread-local write buffer
-    D->>D: hidraw write
-    D-->>P: ack frame over WT stream (0x81/0x82/0x83)
-    P->>P: handleInPageControlResponse → resolve
 ```
 
 ### Path J: Input report WS port fallback
