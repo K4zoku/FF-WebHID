@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
@@ -213,7 +213,6 @@ async fn handle_session(
         event_tx,
         Arc::clone(&device_mgr),
         device_id,
-        &session_token,
         grant.clone(),
     )
     .await;
@@ -239,17 +238,13 @@ fn spawn_writer_task(mut send: SendStream, mut frame_rx: mpsc::Receiver<Bytes>) 
 }
 
 /// Read length-prefixed client frames off the bidirectional stream until
-/// EOF, an oversized frame, a full response queue, or the session's
-/// transport is no longer active, dispatching each non-empty frame to the
-/// batching message handler.
+/// EOF, an oversized frame, a full response queue, or transport revocation.
 async fn read_inbound_frames(
     recv: &mut RecvStream,
     frame_tx: &mpsc::Sender<Bytes>,
     device_mgr: &Arc<DeviceManager>,
     device_id: u32,
-    session_token: &str,
-    generation: u64,
-    validity: &Arc<AtomicBool>,
+    transport: &crate::device_mgr::TransportGrant,
 ) {
     let mut len_buf = [0u8; 4];
     loop {
@@ -266,23 +261,15 @@ async fn read_inbound_frames(
             break;
         }
         let mut queue_full = false;
-        let alive = batching::handle_client_message(
-            &frame,
-            device_mgr,
-            device_id,
-            session_token,
-            generation,
-            validity,
-            crate::device_mgr::MODE_WT,
-            |resp| {
+        let alive =
+            batching::handle_client_message(&frame, device_mgr, device_id, transport, |resp| {
                 if frame_tx.try_send(Bytes::from(resp)).is_err() {
                     queue_full = true;
                 }
-            },
-        )
-        .await;
+            })
+            .await;
         if !alive {
-            log::warn!("[wt] session for {device_id:#x} no longer active; ending session");
+            log::warn!("[wt] transport for {device_id:#x} revoked; ending session");
             break;
         }
         if queue_full {
@@ -297,9 +284,11 @@ async fn run_session(
     event_tx: broadcast::Sender<webhid::IpcResponse>,
     device_mgr: Arc<DeviceManager>,
     device_id: u32,
-    session_token: &str,
     grant: crate::device_mgr::TransportGrant,
 ) -> anyhow::Result<()> {
+    if !grant.capability.is_valid() {
+        return Ok(());
+    }
     let (send, mut recv) = conn.accept_bi().await?;
 
     let (frame_tx, frame_rx) = mpsc::channel::<Bytes>(1024);
@@ -310,28 +299,33 @@ async fn run_session(
     let sender_task = tokio::spawn(batching::run_sender(
         event_rx,
         device_id,
-        Arc::clone(&device_mgr),
-        session_token.to_string(),
-        grant.generation,
-        Arc::clone(&grant.valid),
-        crate::device_mgr::MODE_WT,
+        grant.capability.validity(),
+        grant.capability.subscribe_revocation(),
         grant.cancel.clone(),
         move |frame: Vec<u8>| flush_tx.try_send(Bytes::from(frame)).is_ok(),
     ));
 
     let mut cancel = grant.cancel.clone();
+    let mut revocation = grant.capability.subscribe_revocation();
+    if !grant.capability.is_valid() {
+        sender_task.abort();
+        drop(frame_tx);
+        writer_task.await.ok();
+        return Ok(());
+    }
     tokio::select! {
         _ = read_inbound_frames(
             &mut recv,
             &frame_tx,
             &device_mgr,
             device_id,
-            session_token,
-            grant.generation,
-            &grant.valid,
+            &grant,
         ) => {},
         _ = cancel.changed() => {
             log::warn!("[wt] session for {device_id:#x} closed; tearing down transport");
+        },
+        _ = revocation.changed() => {
+            log::warn!("[wt] transport for {device_id:#x} revoked; tearing down connection");
         },
     }
 

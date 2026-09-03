@@ -97,8 +97,17 @@ async fn handle_websocket(
         let _ = send_close(ws_stream, WS_CLOSE_UNKNOWN_TOKEN, "session closed").await;
         return Ok(());
     };
+    if !grant.capability.is_valid() {
+        device_mgr.ws_disconnect(device_id, &session_token, grant.generation);
+        return Ok(());
+    }
     let ws_gen = grant.generation;
     let mut cancel = grant.cancel.clone();
+    let mut revocation = grant.capability.subscribe_revocation();
+    if !grant.capability.is_valid() {
+        device_mgr.ws_disconnect(device_id, &session_token, grant.generation);
+        return Ok(());
+    }
 
     let (mut ws_sender, mut ws_receiver) = ws_stream.split();
     let (tx, mut rx) = mpsc::channel::<Message>(1024);
@@ -116,10 +125,9 @@ async fn handle_websocket(
     let tx_for_worker = tx.clone();
     let (frame_tx, mut frame_rx) = mpsc::channel::<Bytes>(1024);
     let mgr_for_worker = Arc::clone(&device_mgr);
-    let device_id_for_worker = device_id;
-    let session_token_for_worker = session_token.clone();
-    let validity_for_worker = Arc::clone(&grant.valid);
+    let transport_for_worker = grant.clone();
     let mut cancel_for_worker = grant.cancel.clone();
+    let mut revoke_for_worker = grant.capability.subscribe_revocation();
     let mut frame_worker = tokio::spawn(async move {
         loop {
             let frame = tokio::select! {
@@ -130,15 +138,13 @@ async fn handle_websocket(
                     }
                 }
                 _ = cancel_for_worker.changed() => break,
+                _ = revoke_for_worker.changed() => break,
             };
             if !batching::handle_client_message(
                 &frame,
                 &mgr_for_worker,
-                device_id_for_worker,
-                &session_token_for_worker,
-                ws_gen,
-                &validity_for_worker,
-                crate::device_mgr::MODE_WS,
+                device_id,
+                &transport_for_worker,
                 |resp| {
                     let _ = tx_for_worker.try_send(Message::Binary(resp.into()));
                 },
@@ -159,20 +165,12 @@ async fn handle_websocket(
     });
 
     let tx_for_sender = tx.clone();
-    let device_id_for_sender = device_id;
-    let mgr_for_sender = Arc::clone(&device_mgr);
-    let session_token_for_sender = session_token.clone();
-    let cancel_for_sender = grant.cancel.clone();
-
     let mut sender_task = tokio::spawn(batching::run_sender(
         event_rx,
-        device_id_for_sender,
-        mgr_for_sender,
-        session_token_for_sender,
-        ws_gen,
-        Arc::clone(&grant.valid),
-        crate::device_mgr::MODE_WS,
-        cancel_for_sender,
+        device_id,
+        grant.capability.validity(),
+        grant.capability.subscribe_revocation(),
+        grant.cancel.clone(),
         move |frame: Vec<u8>| {
             tx_for_sender
                 .try_send(Message::Binary(frame.into()))
@@ -187,6 +185,9 @@ async fn handle_websocket(
         _ = &mut frame_worker => {},
         _ = cancel.changed() => {
             log::info!("[ws] session for {device_id:#x} closed; tearing down transport");
+        },
+        _ = revocation.changed() => {
+            log::info!("[ws] transport for {device_id:#x} revoked; tearing down connection");
         },
     }
     outgoing_task.abort();

@@ -1,12 +1,12 @@
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use bytes::Bytes;
 use tokio::sync::{broadcast, watch};
 
 use crate::blocklist::ReportType;
-use crate::device_mgr::DeviceManager;
+use crate::device_mgr::{DeviceManager, TransportGrant};
 
 pub const MSG_SEND_REPORT: u8 = 0x01;
 pub const MSG_SEND_FEATURE_REPORT: u8 = 0x02;
@@ -176,7 +176,7 @@ fn drain_available<F, A>(
 
 /// Waits out the coalesce window, folding further input reports into the
 /// batch. Returns false when the flush callback failed, the broadcast
-/// closed, the session was cancelled, or the sender must stop.
+/// closed, the transport was revoked, or the sender must stop.
 #[allow(clippy::too_many_arguments)]
 async fn coalesce_window<F, A>(
     event_rx: &mut broadcast::Receiver<webhid::IpcResponse>,
@@ -187,6 +187,7 @@ async fn coalesce_window<F, A>(
     window: Duration,
     alive: &mut A,
     cancel: &mut watch::Receiver<bool>,
+    revoked: &mut watch::Receiver<bool>,
 ) -> bool
 where
     F: FnMut(Vec<u8>) -> bool,
@@ -201,6 +202,7 @@ where
         tokio::select! {
             _ = tokio::time::sleep(remaining) => return true,
             _ = cancel.changed() => return false,
+            _ = revoked.changed() => return false,
             event_result = event_rx.recv() => {
                 if !handle_event(event_result, device_id, batch, frame_buf, flush, alive) {
                     return false;
@@ -215,21 +217,15 @@ where
 pub async fn run_sender<F>(
     mut event_rx: broadcast::Receiver<webhid::IpcResponse>,
     device_id: u32,
-    device_mgr: Arc<DeviceManager>,
-    session_token: String,
-    generation: u64,
     validity: Arc<AtomicBool>,
-    kind: &'static str,
+    mut revoked: watch::Receiver<bool>,
     mut cancel: watch::Receiver<bool>,
     mut flush: F,
 ) where
     F: FnMut(Vec<u8>) -> bool + Send + 'static,
 {
-    let mut alive = || {
-        validity.load(std::sync::atomic::Ordering::SeqCst)
-            && device_mgr.session_transport_active(device_id, &session_token, kind, generation)
-    };
-    if *cancel.borrow() {
+    let mut alive = || validity.load(Ordering::SeqCst);
+    if !validity.load(Ordering::SeqCst) || *cancel.borrow() || *revoked.borrow() {
         return;
     }
 
@@ -248,6 +244,7 @@ pub async fn run_sender<F>(
                     }
                 }
                 _ = cancel.changed() => break,
+                _ = revoked.changed() => break,
                 event_result = event_rx.recv() => {
                     if !handle_event(event_result, device_id, &mut batch, &mut frame_buf, &mut flush, &mut alive) {
                         break;
@@ -274,6 +271,7 @@ pub async fn run_sender<F>(
     loop {
         let event_result = tokio::select! {
             _ = cancel.changed() => break,
+            _ = revoked.changed() => break,
             event_result = event_rx.recv() => event_result,
         };
         if !handle_event(
@@ -309,6 +307,7 @@ pub async fn run_sender<F>(
                 },
                 &mut alive,
                 &mut cancel,
+                &mut revoked,
             )
             .await
         {
@@ -367,7 +366,7 @@ enum SendPrecheck {
 /// Shared pre-checks for send/feature-read requests: empty payload,
 /// blocklist, and Chromium-style validation.
 fn precheck_report(
-    device_mgr: &Arc<DeviceManager>,
+    device_mgr: &DeviceManager,
     device_id: u32,
     payload: &[u8],
     report_type: ReportType,
@@ -391,10 +390,7 @@ async fn handle_send_report_msg<F>(
     req_id: u32,
     device_mgr: &Arc<DeviceManager>,
     device_id: u32,
-    session_token: &str,
-    generation: u64,
-    validity: &Arc<AtomicBool>,
-    kind: &str,
+    transport: &TransportGrant,
     emit: &mut F,
 ) where
     F: FnMut(Vec<u8>),
@@ -402,14 +398,7 @@ async fn handle_send_report_msg<F>(
     let (resp_type, report_type) = send_kind(msg_type);
     let report_id = payload.first().copied().unwrap_or(0);
     let payload_len = payload.len().saturating_sub(1);
-    if !transport_alive(
-        device_mgr,
-        device_id,
-        session_token,
-        generation,
-        validity,
-        kind,
-    ) {
+    if !transport.capability.is_valid() {
         emit(make_status_resp(resp_type, req_id, 1));
         return;
     }
@@ -438,24 +427,18 @@ async fn handle_send_report_msg<F>(
                 device_mgr
                     .enqueue_transport_output(
                         device_id,
-                        session_token,
-                        kind,
-                        generation,
+                        transport.capability.validity(),
                         report_id,
                         report_data,
-                        Arc::clone(validity),
                     )
                     .await
             } else {
                 device_mgr
                     .enqueue_transport_feature_write(
                         device_id,
-                        session_token,
-                        kind,
-                        generation,
+                        transport.capability.validity(),
                         report_id,
                         report_data,
-                        Arc::clone(validity),
                     )
                     .await
             };
@@ -479,22 +462,12 @@ async fn handle_receive_feature_report_msg<F>(
     req_id: u32,
     device_mgr: &Arc<DeviceManager>,
     device_id: u32,
-    session_token: &str,
-    generation: u64,
-    validity: &Arc<AtomicBool>,
-    kind: &str,
+    transport: &TransportGrant,
     emit: &mut F,
 ) where
     F: FnMut(Vec<u8>),
 {
-    if !transport_alive(
-        device_mgr,
-        device_id,
-        session_token,
-        generation,
-        validity,
-        kind,
-    ) {
+    if !transport.capability.is_valid() {
         emit(make_feature_read_resp(req_id, 1, &[]));
         return;
     }
@@ -505,63 +478,30 @@ async fn handle_receive_feature_report_msg<F>(
             let result = device_mgr
                 .enqueue_transport_feature_read(
                     device_id,
-                    session_token,
-                    kind,
-                    generation,
+                    transport.capability.validity(),
                     report_id,
-                    Arc::clone(validity),
                 )
                 .await;
             match result {
-                Ok(data) => {
-                    emit(make_feature_read_resp(req_id, 0, &data));
-                }
-                Err(_) => {
-                    emit(make_feature_read_resp(req_id, 1, &[]));
-                }
+                Ok(data) => emit(make_feature_read_resp(req_id, 0, &data)),
+                Err(_) => emit(make_feature_read_resp(req_id, 1, &[])),
             }
         }
     }
-}
-
-/// Whether this transport's session is still active and current for
-/// inbound HID operations. A closed or superseded session must not be able
-/// to keep sending reports through an established connection.
-#[inline]
-fn transport_alive(
-    device_mgr: &DeviceManager,
-    device_id: u32,
-    session_token: &str,
-    generation: u64,
-    validity: &AtomicBool,
-    kind: &str,
-) -> bool {
-    validity.load(std::sync::atomic::Ordering::SeqCst)
-        && device_mgr.session_transport_active(device_id, session_token, kind, generation)
 }
 
 pub async fn handle_client_message<F>(
     frame: &[u8],
     device_mgr: &Arc<DeviceManager>,
     device_id: u32,
-    session_token: &str,
-    generation: u64,
-    validity: &Arc<AtomicBool>,
-    kind: &str,
+    transport: &TransportGrant,
     mut emit: F,
 ) -> bool
 where
     F: FnMut(Vec<u8>),
 {
-    if !transport_alive(
-        device_mgr,
-        device_id,
-        session_token,
-        generation,
-        validity,
-        kind,
-    ) {
-        log::warn!("[sender] rejecting frame for {device_id:#x}: session no longer active");
+    if !transport.capability.is_valid() {
+        log::warn!("[sender] rejecting frame for {device_id:#x}: transport revoked");
         return false;
     }
     if frame.is_empty() {
@@ -587,10 +527,7 @@ where
                 req_id,
                 device_mgr,
                 device_id,
-                session_token,
-                generation,
-                validity,
-                kind,
+                transport,
                 &mut emit,
             )
             .await
@@ -601,10 +538,7 @@ where
                 req_id,
                 device_mgr,
                 device_id,
-                session_token,
-                generation,
-                validity,
-                kind,
+                transport,
                 &mut emit,
             )
             .await
