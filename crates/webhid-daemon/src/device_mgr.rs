@@ -404,9 +404,9 @@ fn request_io_shutdown(io_tx: mpsc::Sender<IoCommand>) {
 }
 
 fn stop_entry(mut entry: Entry) {
-    release_reader_start(&entry.reader_start);
     entry.stop_flag.store(true, Ordering::SeqCst);
     entry.io_epoch.fetch_add(1, Ordering::SeqCst);
+    release_reader_start(&entry.reader_start);
     if let Some(io_tx) = entry.io_tx.take() {
         request_io_shutdown(io_tx);
     }
@@ -419,8 +419,9 @@ fn stop_entry(mut entry: Entry) {
 }
 
 fn stop_entry_io_worker(mut entry: Entry) {
-    release_reader_start(&entry.reader_start);
     entry.stop_flag.store(true, Ordering::SeqCst);
+    entry.io_epoch.fetch_add(1, Ordering::SeqCst);
+    release_reader_start(&entry.reader_start);
     if let Some(io_tx) = entry.io_tx.take() {
         request_io_shutdown(io_tx);
     }
@@ -1930,10 +1931,17 @@ mod tests {
     #[test]
     fn test_abandoned_reader_releases_start_gate_on_teardown() {
         let gate: ReaderStartGate = Arc::new((Mutex::new(false), Condvar::new()));
+        let stop_flag = Arc::new(AtomicBool::new(false));
+        let would_read = Arc::new(AtomicBool::new(false));
         let (done_tx, done_rx) = std::sync::mpsc::channel();
         let reader_gate = Arc::clone(&gate);
+        let reader_stop_flag = Arc::clone(&stop_flag);
+        let would_read_for_reader = Arc::clone(&would_read);
         let reader = thread::spawn(move || {
             wait_reader_start(reader_gate);
+            if !reader_stop_flag.load(Ordering::SeqCst) {
+                would_read_for_reader.store(true, Ordering::SeqCst);
+            }
             done_tx.send(()).unwrap();
         });
         let calls = Arc::new(Mutex::new(Vec::new()));
@@ -1965,8 +1973,8 @@ mod tests {
         ));
         stop_entry(Entry {
             reader_start: gate,
-            stop_flag: Arc::new(AtomicBool::new(false)),
             handle: Some(reader),
+            stop_flag: Arc::clone(&stop_flag),
             io_tx: Some(io_tx),
             io_handle: Some(io_handle),
             io_epoch,
@@ -1979,6 +1987,8 @@ mod tests {
             .recv_timeout(Duration::from_secs(1))
             .expect("abandoned reader released");
         assert!(calls.lock().unwrap_or_else(|e| e.into_inner()).is_empty());
+        assert!(stop_flag.load(Ordering::SeqCst));
+        assert!(!would_read.load(Ordering::SeqCst));
     }
     #[test]
     fn test_dead_reader_cleanup_removes_published_lifetime() {
@@ -1997,6 +2007,11 @@ mod tests {
         let (sink_tx, _sink_rx) = mpsc::channel(1);
         mgr.register_nm_sink(1, sink_tx);
         let ws = mgr.ws_connect(0x1234, "tok-ws").expect("WS connects");
+        let io_epoch = {
+            let devices = mgr.devices.lock().unwrap_or_else(|e| e.into_inner());
+            Arc::clone(&devices.get(&0x1234).unwrap().io_epoch)
+        };
+        let old_epoch = io_epoch.load(Ordering::SeqCst);
 
         let (entry, cancels, non_nm_count) = detach_dead_reader_lifetime(
             &mgr.lifecycle,
@@ -2016,6 +2031,7 @@ mod tests {
         for cancel in cancels {
             let _ = cancel.send(true);
         }
+        assert_eq!(io_epoch.load(Ordering::SeqCst), old_epoch + 1);
 
         assert!(!ws.capability.is_valid());
         assert!(
