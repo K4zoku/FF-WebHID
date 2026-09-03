@@ -1,0 +1,65 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>NM report request IDs</title>
+  </head>
+  <body>
+    <script>
+      ;(function () {
+        let started = false
+        const frames = []
+        let firstResult = null
+        let secondResult = null
+
+        function finish() {
+          if (firstResult === null || secondResult === null) return
+          window.tests.results.reportResults = { first: firstResult, second: secondResult }
+        }
+
+        window.addEventListener('message', (event) => {
+          if (!event.data || event.origin !== location.origin) return
+          const index = event.data.index
+          if (index !== 0 && index !== 1) return
+          if (event.source !== frames[index].contentWindow) return
+          if (event.data.type === 'frameReady') {
+            frames[index].ready = true
+            if (!frames.every((item) => item.ready)) return
+            for (const item of frames)
+              item.contentWindow.postMessage({ type: 'send' }, location.origin)
+          } else if (event.data.type === 'frameResult') {
+            if (index === 0) firstResult = event.data.value
+            else secondResult = event.data.value
+            finish()
+          }
+        })
+
+        async function start() {
+          if (started) return
+          started = true
+          for (let index = 0; index < 2; index++) {
+            const frame = document.createElement('iframe')
+            const item = { contentWindow: null, ready: false }
+            frame.src = '/tests/pages/nm-report-reqid-frame.html'
+            frame.onload = () =>
+              frame.contentWindow.postMessage({ type: 'open', index }, location.origin)
+            frames.push(item)
+            document.body.appendChild(frame)
+            item.contentWindow = frame.contentWindow
+          }
+        }
+
+        window.tests = window.tests || { helper: {}, results: {} }
+        window.tests.helper = window.tests.helper || {}
+        window.tests.results = window.tests.results || {}
+        window.addEventListener('message', (event) => {
+          if (event.source !== window || !event.data || event.data.type !== 'start') return
+          void start().catch((error) => {
+            window.tests.results.reportError =
+              error instanceof Error ? error.message : String(error)
+          })
+        })
+      })()
+    </script>
+  </body>
+</html>

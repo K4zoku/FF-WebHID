@@ -1,5 +1,6 @@
 ;(function () {
   const webhid = globalThis.webhid
+  const { registerContentPort } = webhid.import('content-ports')
   const http = webhid.import('http')
   const logger = webhid.import('logger')
   const isChromium = webhid.import('isChromium')
@@ -984,6 +985,31 @@
       const handler = HANDLERS[request.action]
       if (!handler) return false
       return handler(request, sender, sendResponse)
+    })
+    browser.runtime.onConnect.addListener((port) => {
+      registerContentPort(port)
+      port.onMessage.addListener((request) => {
+        const handler = HANDLERS[request.action]
+        if (!handler) return
+        let responded = false
+        const sendPortResponse = (response) => {
+          if (responded) return
+          responded = true
+          const responseMessage = { ...(response || {}) }
+          if (request.reqId != null) responseMessage.reqId = request.reqId
+          port.postMessage(responseMessage)
+        }
+        try {
+          const result = handler(request, port.sender, sendPortResponse)
+          if (result && typeof result.then === 'function') {
+            result.catch(() => sendPortResponse({ s: 500 }))
+          } else if (result !== true && !responded) {
+            sendPortResponse(result || {})
+          }
+        } catch {
+          sendPortResponse({ s: 500 })
+        }
+      })
     })
   }
 

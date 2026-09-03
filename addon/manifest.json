@@ -31,6 +31,7 @@
       "js/background/state.js",
       "js/background/storage.js",
       "js/background/packed.js",
+      "js/background/content-ports.js",
       "js/background/state_ops.js",
       "js/utils/bundle-files.js",
       "js/background/bundle.js",

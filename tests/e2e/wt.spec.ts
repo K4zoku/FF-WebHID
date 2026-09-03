@@ -19,6 +19,7 @@ import {
   type VendorCtx
 } from '../helpers/e2e-reports.js'
 import type { DeviceFilter } from '../helpers/e2e-types.js'
+import type { FirefoxBgPage } from '../helpers/harness.js'
 
 const VENDOR = mockIdFor('vendor')
 
@@ -73,6 +74,23 @@ async function waitForLog(
     if (logContains(daemon, needle)) return true
     if (Date.now() - start > timeoutMs) return false
     await sleep(200)
+  }
+}
+async function waitForNmPlane(backgroundPage: FirefoxBgPage, timeoutMs = 10000): Promise<void> {
+  const start = Date.now()
+  for (;;) {
+    const status = (await backgroundPage.evaluate(async () => {
+      const tabs = await browser.tabs.query({ active: true, currentWindow: true })
+      const tab = tabs[0]
+      if (!tab) return null
+      const response: unknown = await browser.tabs.sendMessage(tab.id, {
+        action: 'getDataPlaneStatus'
+      })
+      return response
+    })) as { planes?: Array<{ plane?: string }> } | null
+    if (status?.planes?.some((plane) => plane.plane === 'nm')) return
+    if (Date.now() - start > timeoutMs) throw new Error('NM data plane was not observed')
+    await sleep(50)
   }
 }
 
@@ -444,6 +462,65 @@ test.describe.serial('WebHID E2E (WebTransport data plane)', () => {
     if (daemon) {
       expect(await waitForLog(daemon, 'WT connect gen=2')).toBe(true)
     }
+  })
+  test('switching an open device to NM delivers one immediate input report', async ({
+    sharedPage,
+    vendorDevice,
+    backgroundPage
+  }) => {
+    const origin = new URL(sharedPage.url()).origin
+    await backgroundPage.evaluate(
+      (key) => browser.storage.local.set({ [key]: 'wt' }),
+      `settings :: ${origin} :: dataPlane`
+    )
+    await sleep(2500)
+    await sharedPage.evaluate(async () => {
+      const device = (await navigator.hid.getDevices())[0]
+      if (!device) throw new Error('no paired device')
+      if (!device.opened) await device.open()
+    })
+    const observedPromise = sharedPage.evaluate(() => {
+      return navigator.hid.getDevices().then((devices) => {
+        const device = devices[0]
+        if (!device) throw new Error('no paired device')
+        return new Promise<number>((resolve) => {
+          let count = 0
+          let finishTimer: number | null = null
+          let timeoutId: number | null = null
+          const onInput = () => {
+            count += 1
+            if (finishTimer === null) {
+              finishTimer = window.setTimeout(() => {
+                if (timeoutId !== null) window.clearTimeout(timeoutId)
+                device.removeEventListener('inputreport', onInput)
+                resolve(count)
+              }, 300)
+            }
+          }
+          timeoutId = window.setTimeout(() => {
+            device.removeEventListener('inputreport', onInput)
+            resolve(count)
+          }, 5000)
+          device.addEventListener('inputreport', onInput)
+        })
+      })
+    })
+
+    await backgroundPage.evaluate(
+      (key) => browser.storage.local.set({ [key]: 'nm' }),
+      `settings :: ${origin} :: dataPlane`
+    )
+    await waitForNmPlane(backgroundPage)
+    const packet = new Array<number>(VENDOR_INPUT_SIZE).fill(0)
+    packet[1] = 0xc1
+    sendInput(vendorDevice, 1, packet)
+    await expect(observedPromise).resolves.toBe(1)
+
+    await backgroundPage.evaluate(
+      (key) => browser.storage.local.set({ [key]: 'wt' }),
+      `settings :: ${origin} :: dataPlane`
+    )
+    await sleep(2500)
   })
 
   test('WT data plane runs in-page when useWorker is off (per-site)', async ({

@@ -52,6 +52,14 @@
           setTimeout(resolve, ms)
           return promise
         }
+        async function awaitDeviceAck() {
+          if (typeof window.webhidDeviceAck === 'function') {
+            const timeout = new Promise((_, reject) =>
+              setTimeout(() => reject(new Error('mock device ACK timeout')), 2500)
+            )
+            await Promise.race([window.webhidDeviceAck(), timeout])
+          }
+        }
 
         async function loadImage() {
           statusEl.textContent = 'Loading...'
@@ -194,6 +202,7 @@
               } finally {
                 clearTimeout(ackTimer)
               }
+              await awaitDeviceAck()
               break
             } catch (err) {
               const msg = String(err && err.message)
@@ -232,6 +241,7 @@
             for (let i = 1; i < chunks.length; i++) {
               sendTimes.set(i, performance.now())
               await Promise.race([device.sendReport(1, chunks[i]), burstGate.promise])
+              await awaitDeviceAck()
             }
           } finally {
             clearTimeout(burstTimer)
@@ -270,6 +280,7 @@
               } finally {
                 clearTimeout(ackTimer)
               }
+              await awaitDeviceAck()
               break
             } catch (err) {
               const msg = String(err && err.message)
@@ -298,6 +309,7 @@
               await Promise.race([device.sendReport(1, chunks[i]), gate.promise])
             } finally {
               clearTimeout(t)
+              await awaitDeviceAck()
             }
           }
           const confirmGate = Promise.withResolvers()

@@ -76,11 +76,36 @@ pub async fn read_nm_request<R: AsyncRead + Unpin>(
         .read_exact(&mut buf)
         .await
         .map_err(FrameReadError::Io)?;
-    let v: serde_json::Value = serde_json::from_slice(&buf)
-        .map_err(|e| FrameReadError::Malformed(format!("JSON decode: {e}")))?;
-    if let Some(req) = try_read_packed(&v).map_err(|e| FrameReadError::Malformed(e.to_string()))? {
+    if let Some(req) =
+        try_read_packed(&buf).map_err(|e| FrameReadError::Malformed(e.to_string()))?
+    {
         return Ok(req);
     }
+    let v: serde_json::Value = serde_json::from_slice(&buf)
+        .map_err(|e| FrameReadError::Malformed(format!("JSON decode: {e}")))?;
+    read_json_request(&v).map_err(|e| FrameReadError::Malformed(e.to_string()))
+}
+
+/// Synchronously read one Native Messaging request frame.
+pub fn read_nm_request_sync<R: io::Read>(reader: &mut R) -> Result<NmRequest, FrameReadError> {
+    let mut len_buf = [0u8; 4];
+    reader
+        .read_exact(&mut len_buf)
+        .map_err(FrameReadError::Io)?;
+    let len = u32::from_le_bytes(len_buf) as usize;
+    if len > MAX_NM_FRAME {
+        return Err(FrameReadError::Oversized { declared: len });
+    }
+    let mut buf = BytesMut::with_capacity(len);
+    buf.resize(len, 0);
+    reader.read_exact(&mut buf).map_err(FrameReadError::Io)?;
+    if let Some(req) =
+        try_read_packed(&buf).map_err(|e| FrameReadError::Malformed(e.to_string()))?
+    {
+        return Ok(req);
+    }
+    let v: serde_json::Value = serde_json::from_slice(&buf)
+        .map_err(|e| FrameReadError::Malformed(format!("JSON decode: {e}")))?;
     read_json_request(&v).map_err(|e| FrameReadError::Malformed(e.to_string()))
 }
 
@@ -88,11 +113,25 @@ pub async fn read_nm_request<R: AsyncRead + Unpin>(
 /// TLV discriminates send_report (0x02) vs send_feature_report (0x04).
 /// reqId is inside the TLV, not the JSON "n" field.
 /// Returns `None` when the message is not a packed frame.
-fn try_read_packed(v: &serde_json::Value) -> io::Result<Option<NmRequest>> {
-    let Some(d) = v.get("d").and_then(|x| x.as_str()) else {
+#[derive(serde::Deserialize)]
+struct PackedEnvelope<'a> {
+    #[serde(borrow)]
+    d: Option<&'a str>,
+    #[serde(default, deserialize_with = "mark_field_present")]
+    a: bool,
+}
+
+fn mark_field_present<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {
+    <serde::de::IgnoredAny as serde::Deserialize>::deserialize(deserializer).map(|_| true)
+}
+fn try_read_packed(buf: &[u8]) -> io::Result<Option<NmRequest>> {
+    let Ok(envelope) = serde_json::from_slice::<PackedEnvelope<'_>>(buf) else {
         return Ok(None);
     };
-    if v.get("a").is_some() {
+    let Some(d) = envelope.d else {
+        return Ok(None);
+    };
+    if envelope.a {
         return Ok(None);
     }
     let packed = base64::engine::general_purpose::STANDARD
@@ -240,6 +279,30 @@ where
     writer.write_all(&buf).await?;
     writer.flush().await
 }
+/// Synchronously serialise `value` as JSON, prefix with its length, and write
+/// to a blocking writer.
+pub fn write_message_sync<W, T>(writer: &mut W, value: &T) -> io::Result<()>
+where
+    W: io::Write,
+    T: Serialize,
+{
+    let json = serde_json::to_vec(value)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("JSON encode: {e}")))?;
+    let buf = BytesMut::from(&json[..]);
+
+    let len = buf.len() as u32;
+    writer.write_all(&len.to_le_bytes())?;
+    writer.write_all(&buf)?;
+    writer.flush()
+}
+
+#[test]
+fn test_write_message_sync() {
+    let mut buf = Vec::new();
+    write_message_sync(&mut buf, &42u32).unwrap();
+    assert_eq!(&buf[..4], &(2u32.to_le_bytes()));
+    assert_eq!(&buf[4..], b"42");
+}
 
 #[cfg(test)]
 mod tests {
@@ -308,6 +371,13 @@ mod tests {
         write_message(&mut buf, &json).await.unwrap();
         let mut r: &[u8] = &buf;
         read_nm_request(&mut r).await
+    }
+
+    fn read_json_sync(json: serde_json::Value) -> Result<NmRequest, FrameReadError> {
+        let mut buf = Vec::new();
+        write_message_sync(&mut buf, &json).unwrap();
+        let mut reader: &[u8] = &buf;
+        read_nm_request_sync(&mut reader)
     }
 
     #[tokio::test]
@@ -438,6 +508,26 @@ mod tests {
                 assert_eq!(id, None);
                 assert_eq!(packed[0], 0x02);
                 assert_eq!(packed.len(), tlv.len());
+            }
+            _ => panic!("expected SendReport"),
+        }
+    }
+
+    #[test]
+    fn test_read_nm_request_sync_packed_send_report() {
+        use base64::Engine;
+        let mut tlv = vec![0x02u8];
+        tlv.extend_from_slice(&42u32.to_le_bytes());
+        tlv.extend_from_slice(&0xCAFEBABEu32.to_le_bytes());
+        tlv.push(7);
+        tlv.extend_from_slice(&3u16.to_le_bytes());
+        tlv.extend_from_slice(&[0xAA, 0xBB, 0xCC]);
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&tlv);
+        let req = read_json_sync(serde_json::json!({"d": b64})).unwrap();
+        match req {
+            NmRequest::SendReport { id, packed } => {
+                assert_eq!(id, None);
+                assert_eq!(packed, tlv);
             }
             _ => panic!("expected SendReport"),
         }

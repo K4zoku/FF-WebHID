@@ -1,0 +1,57 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>NM report request ID frame</title>
+  </head>
+  <body>
+    <script>
+      ;(function () {
+        let device
+        let frameIndex
+        let sent = false
+
+        window.addEventListener('message', async (event) => {
+          if (event.source !== window.parent || !event.data) return
+          if (event.data.type === 'open') {
+            frameIndex = event.data.index
+            try {
+              const devices = await navigator.hid.getDevices()
+              device = devices[0]
+              if (!device) throw new Error('no paired device in frame')
+              await device.open()
+              window.parent.postMessage({ type: 'frameReady', index: frameIndex }, event.origin)
+            } catch (error) {
+              window.parent.postMessage(
+                {
+                  type: 'frameResult',
+                  index: frameIndex,
+                  value: error instanceof Error ? error.name : String(error)
+                },
+                event.origin
+              )
+            }
+          } else if (event.data.type === 'send' && !sent) {
+            sent = true
+            try {
+              await device.sendReport(1, new Uint8Array(64).fill(0x42 + frameIndex))
+              window.parent.postMessage(
+                { type: 'frameResult', index: frameIndex, value: 'ok' },
+                event.origin
+              )
+            } catch (error) {
+              window.parent.postMessage(
+                {
+                  type: 'frameResult',
+                  index: frameIndex,
+                  value: error instanceof Error ? error.name : String(error)
+                },
+                event.origin
+              )
+            }
+          }
+        })
+      })()
+    </script>
+  </body>
+</html>

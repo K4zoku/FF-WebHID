@@ -162,13 +162,9 @@ async fn main() -> anyhow::Result<()> {
         log::info!("started by add-on '{addon_id}' (manifest: {manifest_path})");
         log::info!("WebSocket server on port {actual_ws_port} (random)");
 
-        let stdin = tokio::io::stdin();
-        let stdout = tokio::io::stdout();
         let rx = event_tx.subscribe();
         let client_id = device_mgr.new_client_id();
-        client::handle(
-            stdin,
-            stdout,
+        client::handle_nm_host(
             device_mgr,
             client_id,
             rx,

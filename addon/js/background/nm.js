@@ -14,6 +14,7 @@
   const { saveDeviceInfo } = webhid.import('bgStorage')
   const { tabsForEvent, broadcastGlobalReset, forTabsOfOrigin } = webhid.import('bgStateOps')
   const http = webhid.import('http')
+  const { postToContentPorts } = webhid.import('content-ports')
 
   const NM_HOST_FORWARDER = 'webhid.forwarder_nm_host'
   const NM_HOST_DAEMON = 'webhid.daemon_nm_host'
@@ -293,10 +294,13 @@
             reportId,
             data: payload
           }
+          const message = { action: 'webhidDeviceEvent', event }
+          const reached = postToContentPorts(targets, message, `webhid-data:${deviceId}`)
           for (const tabId of targets) {
+            if (reached.has(tabId)) continue
             browser.tabs
-              .sendMessage(tabId, { action: 'webhidDeviceEvent', event })
-              .catch((e) => logger.debug('event forward to tab failed', e))
+              .sendMessage(tabId, message)
+              .catch((e) => logger.debug('event forward to target tab failed', e))
           }
         }
       } catch (e) {

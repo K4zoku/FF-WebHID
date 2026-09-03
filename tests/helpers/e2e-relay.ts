@@ -19,7 +19,7 @@ function makeLineScanner(onLine: (line: string) => void): (data: Buffer) => void
   }
 }
 
-export function startStreamingRelay(mock: WebhidMockProcess): RelayHandle {
+export function startStreamingRelay(mock: WebhidMockProcess, onAck?: () => void): RelayHandle {
   const chunks: number[][] = []
   const onData = makeLineScanner((line) => {
     try {
@@ -27,6 +27,8 @@ export function startStreamingRelay(mock: WebhidMockProcess): RelayHandle {
       if (parsed.event === 'output_report' && Array.isArray(parsed.data)) {
         chunks.push(parsed.data)
         sendInput(mock, 1, parsed.data.slice(1))
+      } else if (parsed.event === 'input_sent') {
+        onAck?.()
       }
     } catch {}
   })

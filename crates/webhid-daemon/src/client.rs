@@ -1,4 +1,6 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
 
 use crate::blocklist::ReportType;
 use tokio::io::{AsyncRead, BufReader};
@@ -8,28 +10,165 @@ use webhid::{IpcResponse, NmMessage, NmRequest, NmResponse, parse_packed_send, p
 use crate::device_mgr::DeviceManager;
 use crate::{hid, webtransport::WtState};
 
+enum WriterTask {
+    Async(tokio::task::JoinHandle<()>),
+    Sync {
+        task: thread::JoinHandle<()>,
+        cancel: Arc<AtomicBool>,
+    },
+}
+
+impl WriterTask {
+    fn stop(self) {
+        match self {
+            WriterTask::Async(task) => task.abort(),
+            WriterTask::Sync { cancel, task } => {
+                cancel.store(true, Ordering::Release);
+                drop(task);
+            }
+        }
+    }
+}
+
+fn run_sync_writer<W: std::io::Write>(
+    writer: &mut W,
+    rx: &mut mpsc::Receiver<NmMessage>,
+    cancel: &AtomicBool,
+) {
+    loop {
+        let Some(msg) = rx.blocking_recv() else {
+            break;
+        };
+        if cancel.load(Ordering::Acquire) {
+            break;
+        }
+        if let Err(e) = protocol::write_message_sync(writer, &msg) {
+            log::warn!("[client] write error: {e}");
+            break;
+        }
+    }
+}
+
+fn spawn_sync_writer(rx: mpsc::Receiver<NmMessage>) -> WriterTask {
+    let cancel = Arc::new(AtomicBool::new(false));
+    let writer_cancel = Arc::clone(&cancel);
+    let task = thread::spawn(move || {
+        let stdout = std::io::stdout();
+        let mut writer = stdout.lock();
+        let mut rx = rx;
+        run_sync_writer(&mut writer, &mut rx, &writer_cancel);
+    });
+    WriterTask::Sync { task, cancel }
+}
+
+fn spawn_sync_request_reader() -> mpsc::Receiver<Result<NmRequest, protocol::FrameReadError>> {
+    let (tx, rx) = mpsc::channel(1024);
+    let _ = thread::spawn(move || {
+        let stdin = std::io::stdin();
+        let mut reader = stdin.lock();
+        loop {
+            let result = protocol::read_nm_request_sync(&mut reader);
+            let fatal = !matches!(result, Ok(_) | Err(protocol::FrameReadError::Malformed(_)));
+            if tx.blocking_send(result).is_err() || fatal {
+                break;
+            }
+        }
+    });
+    rx
+}
+
 pub async fn handle(
     reader: impl AsyncRead + Unpin + Send + 'static,
     writer: impl tokio::io::AsyncWrite + Unpin + Send + 'static,
     device_mgr: Arc<DeviceManager>,
     client_id: u64,
-    mut event_rx: broadcast::Receiver<IpcResponse>,
+    event_rx: broadcast::Receiver<IpcResponse>,
     ws_port: u16,
     wt_state: Arc<WtState>,
 ) -> anyhow::Result<()> {
-    let mut reader = BufReader::new(reader);
-    let (tx, mut rx) = mpsc::channel::<NmMessage>(1024);
+    let device_mgr_for_requests = Arc::clone(&device_mgr);
+    let wt_state_for_requests = Arc::clone(&wt_state);
+    handle_with_writer(
+        reader,
+        device_mgr,
+        client_id,
+        event_rx,
+        move |rx: mpsc::Receiver<NmMessage>| {
+            WriterTask::Async(tokio::spawn(async move {
+                let mut writer = tokio::io::BufWriter::new(writer);
+                let mut rx = rx;
+                while let Some(msg) = rx.recv().await {
+                    if let Err(e) = protocol::write_message(&mut writer, &msg).await {
+                        log::warn!("[client] write error: {e}");
+                        break;
+                    }
+                }
+            }))
+        },
+        move |reader, tx| async move {
+            run_async_request_loop(
+                reader,
+                device_mgr_for_requests,
+                client_id,
+                tx,
+                ws_port,
+                wt_state_for_requests,
+            )
+            .await;
+        },
+    )
+    .await
+}
+
+pub async fn handle_nm_host(
+    device_mgr: Arc<DeviceManager>,
+    client_id: u64,
+    event_rx: broadcast::Receiver<IpcResponse>,
+    ws_port: u16,
+    wt_state: Arc<WtState>,
+) -> anyhow::Result<()> {
+    let device_mgr_for_requests = Arc::clone(&device_mgr);
+    let wt_state_for_requests = Arc::clone(&wt_state);
+    handle_with_writer(
+        (),
+        device_mgr,
+        client_id,
+        event_rx,
+        spawn_sync_writer,
+        move |(), tx| async move {
+            let mut requests = spawn_sync_request_reader();
+            run_sync_request_loop(
+                &mut requests,
+                device_mgr_for_requests,
+                client_id,
+                tx,
+                ws_port,
+                wt_state_for_requests,
+            )
+            .await;
+        },
+    )
+    .await
+}
+
+async fn handle_with_writer<R, W, L, Fut>(
+    reader: R,
+    device_mgr: Arc<DeviceManager>,
+    client_id: u64,
+    mut event_rx: broadcast::Receiver<IpcResponse>,
+    writer_factory: W,
+    request_loop_factory: L,
+) -> anyhow::Result<()>
+where
+    R: Send + 'static,
+    W: FnOnce(mpsc::Receiver<NmMessage>) -> WriterTask,
+    L: FnOnce(R, mpsc::Sender<NmMessage>) -> Fut,
+    Fut: Future<Output = ()> + Send,
+{
+    let (tx, rx) = mpsc::channel::<NmMessage>(1024);
     device_mgr.register_nm_sink(client_id, tx.clone());
 
-    let writer_task = tokio::spawn(async move {
-        let mut writer = tokio::io::BufWriter::new(writer);
-        while let Some(msg) = rx.recv().await {
-            if let Err(e) = protocol::write_message(&mut writer, &msg).await {
-                log::warn!("[client] write error: {e}");
-                break;
-            }
-        }
-    });
+    let writer_task = writer_factory(rx);
 
     let tx_events = tx.clone();
     let device_mgr_for_events = Arc::clone(&device_mgr);
@@ -49,21 +188,88 @@ pub async fn handle(
         }
     });
 
+    request_loop_factory(reader, tx.clone()).await;
+
+    event_task.abort();
+    device_mgr.unregister_nm_sink(client_id);
+    drop(tx);
+    writer_task.stop();
+    device_mgr.close_all_for_client(client_id);
+    Ok(())
+}
+
+async fn run_async_request_loop<R>(
+    reader: R,
+    device_mgr: Arc<DeviceManager>,
+    client_id: u64,
+    tx: mpsc::Sender<NmMessage>,
+    ws_port: u16,
+    wt_state: Arc<WtState>,
+) where
+    R: AsyncRead + Unpin,
+{
+    let mut reader = BufReader::new(reader);
     loop {
         let Some(request) = read_next_request(&mut reader, &tx).await else {
             break;
         };
-        let response = dispatch(&device_mgr, client_id, request, ws_port, &wt_state).await;
-        if tx.send(response).await.is_err() {
+        if !dispatch_request(&device_mgr, client_id, request, &tx, ws_port, &wt_state).await {
             break;
         }
     }
+}
 
-    event_task.abort();
-    writer_task.abort();
-    device_mgr.unregister_nm_sink(client_id);
-    device_mgr.close_all_for_client(client_id);
-    Ok(())
+async fn run_sync_request_loop(
+    requests: &mut mpsc::Receiver<Result<NmRequest, protocol::FrameReadError>>,
+    device_mgr: Arc<DeviceManager>,
+    client_id: u64,
+    tx: mpsc::Sender<NmMessage>,
+    ws_port: u16,
+    wt_state: Arc<WtState>,
+) {
+    while let Some(result) = requests.recv().await {
+        let request = match result {
+            Ok(request) => request,
+            Err(protocol::FrameReadError::Oversized { declared }) => {
+                log::warn!(
+                    "[client] oversized NM frame ({declared} bytes); closing connection (stream desync)"
+                );
+                break;
+            }
+            Err(protocol::FrameReadError::Malformed(e)) => {
+                log::warn!("[client] malformed NM frame dropped: {e}");
+                if tx
+                    .send(NmMessage::Control(NmResponse::err(400)))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+                continue;
+            }
+            Err(protocol::FrameReadError::Io(e)) => {
+                if e.kind() != std::io::ErrorKind::UnexpectedEof {
+                    log::warn!("[client] read error: {e}");
+                }
+                break;
+            }
+        };
+        if !dispatch_request(&device_mgr, client_id, request, &tx, ws_port, &wt_state).await {
+            break;
+        }
+    }
+}
+
+async fn dispatch_request(
+    device_mgr: &DeviceManager,
+    client_id: u64,
+    request: NmRequest,
+    tx: &mpsc::Sender<NmMessage>,
+    ws_port: u16,
+    wt_state: &WtState,
+) -> bool {
+    let response = dispatch(device_mgr, client_id, request, ws_port, wt_state).await;
+    tx.send(response).await.is_ok()
 }
 
 /// Forwards one broadcast event to the client stream, force-closing
@@ -466,6 +672,80 @@ mod tests {
             max_input_report_size: 64,
             raw_descriptor: Vec::new(),
         }
+    }
+
+    struct DisconnectedWriter;
+
+    impl std::io::Write for DisconnectedWriter {
+        fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "NM peer disconnected",
+            ))
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "NM peer disconnected",
+            ))
+        }
+    }
+
+    struct CountingWriter(usize);
+
+    impl std::io::Write for CountingWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0 += 1;
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_sync_writer_drops_queued_messages_after_cancel() {
+        let (tx, mut rx) = mpsc::channel(1);
+        tx.try_send(NmMessage::Control(NmResponse::err(500)))
+            .unwrap();
+        drop(tx);
+        let cancel = AtomicBool::new(true);
+        let mut writer = CountingWriter(0);
+        run_sync_writer(&mut writer, &mut rx, &cancel);
+        assert_eq!(writer.0, 0);
+    }
+
+    #[test]
+    fn test_sync_writer_handles_disconnect() {
+        let (tx, mut rx) = mpsc::channel(1);
+        tx.try_send(NmMessage::Control(NmResponse::err(500)))
+            .unwrap();
+        drop(tx);
+        let mut writer = DisconnectedWriter;
+        run_sync_writer(&mut writer, &mut rx, &AtomicBool::new(false));
+    }
+
+    #[test]
+    fn test_sync_writer_shutdown_does_not_join_blocked_writer() {
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let task = WriterTask::Sync {
+            task: thread::spawn({
+                move || {
+                    started_tx.send(()).unwrap();
+                    let _ = release_rx.recv();
+                }
+            }),
+            cancel,
+        };
+        started_rx.recv().unwrap();
+        let started = std::time::Instant::now();
+        task.stop();
+        assert!(started.elapsed() < std::time::Duration::from_millis(100));
+        release_tx.send(()).unwrap();
     }
 
     #[test]

@@ -128,6 +128,29 @@ function numEnv(name: string): number | null {
   const n = Number(raw)
   return Number.isFinite(n) ? n : null
 }
+interface DeviceAckGate {
+  wait: () => Promise<void>
+  signal: () => void
+}
+
+function createDeviceAckGate(): DeviceAckGate {
+  let queued = 0
+  const waiters: Array<() => void> = []
+  return {
+    wait: () => {
+      if (queued > 0) {
+        queued--
+        return Promise.resolve()
+      }
+      return new Promise((resolve) => waiters.push(resolve))
+    },
+    signal: () => {
+      const resolve = waiters.shift()
+      if (resolve) resolve()
+      else queued++
+    }
+  }
+}
 
 async function runOnce(
   page: Page,
@@ -135,9 +158,10 @@ async function runOnce(
   warmup: boolean,
   runNumber: number,
   attempt: number,
-  maxAttempts: number
+  maxAttempts: number,
+  ack: DeviceAckGate
 ): Promise<{ duration: number; latencies: number[] }> {
-  const relay = startStreamingRelay(mock)
+  const relay = startStreamingRelay(mock, ack.signal)
   try {
     const runPromise = page.evaluate(
       (a: { warmup: boolean; runNumber: number; attempt: number; maxAttempts: number }) =>
@@ -171,12 +195,13 @@ async function runOnceWithRetry(
   page: Page,
   mock: WebhidMockProcess,
   warmup: boolean,
-  runNumber: number
+  runNumber: number,
+  ack: DeviceAckGate
 ): Promise<{ duration: number; latencies: number[] }> {
   let lastErr: unknown
   for (let attempt = 0; attempt < RUN_RETRIES; attempt++) {
     try {
-      return await runOnce(page, mock, warmup, runNumber, attempt + 1, RUN_RETRIES)
+      return await runOnce(page, mock, warmup, runNumber, attempt + 1, RUN_RETRIES, ack)
     } catch (err) {
       lastErr = err
     }
@@ -184,10 +209,14 @@ async function runOnceWithRetry(
   throw lastErr instanceof Error ? lastErr : new Error(String(lastErr))
 }
 
-async function runWarmupWithRetry(page: Page, mock: WebhidMockProcess): Promise<void> {
+async function runWarmupWithRetry(
+  page: Page,
+  mock: WebhidMockProcess,
+  ack: DeviceAckGate
+): Promise<void> {
   let lastErr: unknown
   for (let attempt = 0; attempt < RUN_RETRIES; attempt++) {
-    const relay = startStreamingRelay(mock)
+    const relay = startStreamingRelay(mock, ack.signal)
     try {
       await page.evaluate(() =>
         (
@@ -355,6 +384,8 @@ export async function runBenchmark(
   opts: { inPage?: boolean } = {}
 ): Promise<BenchmarkResult> {
   const watch = watchConsole(page)
+  const ack = createDeviceAckGate()
+  await page.exposeFunction('webhidDeviceAck', ack.wait)
   try {
     await page.evaluate(() =>
       (window.tests!.helper as unknown as { webhidBenchmark?: BenchApi }).webhidBenchmark!.open()
@@ -363,7 +394,7 @@ export async function runBenchmark(
     let warmup: number | null = null
     try {
       const warmupStart = Date.now()
-      await runWarmupWithRetry(page, mock)
+      await runWarmupWithRetry(page, mock, ack)
       warmup = Date.now() - warmupStart
     } catch {}
 
@@ -391,7 +422,7 @@ export async function runBenchmark(
     let failures = 0
     for (let run = 0; run < runs; run++) {
       try {
-        const { duration, latencies } = await runOnceWithRetry(page, mock, false, run + 1)
+        const { duration, latencies } = await runOnceWithRetry(page, mock, false, run + 1, ack)
         const marks = await page.evaluate(() =>
           (
             window.tests!.helper as unknown as { webhidBenchmark?: BenchApi }
