@@ -216,7 +216,12 @@ async fn handle_session(
         grant.clone(),
     )
     .await;
-    device_mgr.wt_disconnect(device_id, &session_token, grant.generation);
+    device_mgr.wt_disconnect(
+        device_id,
+        &session_token,
+        grant.generation,
+        &grant.capability,
+    );
     result
 }
 

@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 
 use bytes::Bytes;
@@ -204,6 +204,7 @@ struct NmHotSession {
 }
 
 struct Entry {
+    reader_start: Arc<(Mutex<bool>, Condvar)>,
     stop_flag: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
     io_tx: Option<mpsc::Sender<IoCommand>>,
@@ -247,6 +248,11 @@ type DeviceOpener = dyn Fn(u32) -> anyhow::Result<(DeviceInfo, bool, HidDevice)>
 type NmSinkMap = Arc<Mutex<HashMap<u64, mpsc::Sender<NmMessage>>>>;
 type NmHotMap = Arc<Mutex<HashMap<(u64, u32), NmHotSession>>>;
 type TransportValidityMap = Arc<Mutex<HashMap<String, TransportCapability>>>;
+struct OpenReservation {
+    generation: u64,
+    invalidated: Arc<AtomicBool>,
+    notify: Arc<tokio::sync::Notify>,
+}
 
 pub struct DeviceManager {
     /// Serializes cold-path physical and logical lifetime transitions.
@@ -261,10 +267,10 @@ pub struct DeviceManager {
     ws_auth_hashes: Arc<Mutex<HashMap<String, String>>>,
     /// Capability tokens for currently established WS/WT transports.
     transport_validity: TransportValidityMap,
-    /// `device_id -> Notify` for in-flight first opens. Exactly one opener
-    /// performs the physical open per device; concurrent openers wait on the
-    /// notify and register their session against the resulting entry.
-    opening: Mutex<HashMap<u32, Arc<tokio::sync::Notify>>>,
+    /// Per-device first-open reservations. A reservation remains until its
+    /// opener publishes or abandons the lifetime, even if force_close
+    /// invalidates it while physical open is in progress.
+    opening: Mutex<HashMap<u32, Arc<OpenReservation>>>,
     /// Physical HID opener. Injectable for tests that must control and
     /// observe the first-open path.
     opener: Arc<DeviceOpener>,
@@ -273,6 +279,7 @@ pub struct DeviceManager {
     nm_sinks: NmSinkMap,
     non_nm_sessions: Arc<AtomicUsize>,
     nm_hot: NmHotMap,
+    next_lifetime_generation: AtomicU64,
     next_client_id: AtomicU64,
 }
 
@@ -291,6 +298,7 @@ struct ReaderConfig {
     interface_protected_input: bool,
     devices: Arc<Mutex<HashMap<u32, Entry>>>,
     sessions: Arc<Mutex<HashMap<String, Session>>>,
+    start_gate: Arc<(Mutex<bool>, Condvar)>,
     transport_validity: TransportValidityMap,
     lifecycle: Arc<Mutex<()>>,
     ws_auth_hashes: Arc<Mutex<HashMap<String, String>>>,
@@ -364,6 +372,22 @@ where
         std::io::Error::new(std::io::ErrorKind::BrokenPipe, "device I/O worker stopped")
     })?
 }
+type ReaderStartGate = Arc<(Mutex<bool>, Condvar)>;
+
+fn release_reader_start(gate: &ReaderStartGate) {
+    let (started, wake) = &**gate;
+    let mut started = started.lock().unwrap_or_else(|e| e.into_inner());
+    *started = true;
+    wake.notify_one();
+}
+
+fn wait_reader_start(gate: ReaderStartGate) {
+    let (started, wake) = &*gate;
+    let mut started = started.lock().unwrap_or_else(|e| e.into_inner());
+    while !*started {
+        started = wake.wait(started).unwrap_or_else(|e| e.into_inner());
+    }
+}
 
 /// Explicitly wakes the worker even if stale sender clones still exist.
 /// The fallback sender thread is teardown-only and never runs per report.
@@ -380,6 +404,7 @@ fn request_io_shutdown(io_tx: mpsc::Sender<IoCommand>) {
 }
 
 fn stop_entry(mut entry: Entry) {
+    release_reader_start(&entry.reader_start);
     entry.stop_flag.store(true, Ordering::SeqCst);
     entry.io_epoch.fetch_add(1, Ordering::SeqCst);
     if let Some(io_tx) = entry.io_tx.take() {
@@ -394,8 +419,8 @@ fn stop_entry(mut entry: Entry) {
 }
 
 fn stop_entry_io_worker(mut entry: Entry) {
+    release_reader_start(&entry.reader_start);
     entry.stop_flag.store(true, Ordering::SeqCst);
-    entry.io_epoch.fetch_add(1, Ordering::SeqCst);
     if let Some(io_tx) = entry.io_tx.take() {
         request_io_shutdown(io_tx);
     }
@@ -428,6 +453,68 @@ fn route_nm_input(sinks: &NmHotMap, device_id: u32, report_id: u8, data: &Bytes)
         }
     }
 }
+fn detach_dead_reader_lifetime(
+    lifecycle: &Arc<Mutex<()>>,
+    devices: &Arc<Mutex<HashMap<u32, Entry>>>,
+    sessions: &Arc<Mutex<HashMap<String, Session>>>,
+    transport_validity: &TransportValidityMap,
+    nm_hot: &NmHotMap,
+    ws_auth_hashes: &Arc<Mutex<HashMap<String, String>>>,
+    device_id: u32,
+) -> Option<(Entry, Vec<watch::Sender<bool>>, usize)> {
+    let _lifecycle = lifecycle.lock().unwrap_or_else(|e| e.into_inner());
+    let entry = devices
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&device_id)?;
+    let (tokens, cancels, non_nm_count) = {
+        let sessions = sessions.lock().unwrap_or_else(|e| e.into_inner());
+        let mut tokens = Vec::new();
+        let mut cancels = Vec::new();
+        let mut non_nm_count = 0;
+        for session in sessions.values().filter(|s| s.device_id == device_id) {
+            if session.mode != MODE_NM {
+                non_nm_count += 1;
+            }
+            tokens.push(session.token.clone());
+            cancels.push(session.cancel.clone());
+        }
+        (tokens, cancels, non_nm_count)
+    };
+    {
+        let mut sessions = sessions.lock().unwrap_or_else(|e| e.into_inner());
+        for token in &tokens {
+            sessions.remove(token);
+        }
+    }
+    {
+        let mut hashes = ws_auth_hashes.lock().unwrap_or_else(|e| e.into_inner());
+        hashes.retain(|_, token| !tokens.contains(token));
+    }
+    {
+        let mut validity = transport_validity.lock().unwrap_or_else(|e| e.into_inner());
+        validity.retain(|token, capability| {
+            if tokens.contains(token) {
+                capability.revoke();
+                false
+            } else {
+                true
+            }
+        });
+    }
+    nm_hot
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .retain(|(_, hot_device_id), hot| {
+            if *hot_device_id == device_id {
+                hot.valid.store(false, Ordering::SeqCst);
+                false
+            } else {
+                true
+            }
+        });
+    Some((entry, cancels, non_nm_count))
+}
 
 impl DeviceManager {
     pub fn new(event_tx: broadcast::Sender<IpcResponse>) -> Self {
@@ -452,6 +539,7 @@ impl DeviceManager {
             non_nm_sessions: Arc::new(AtomicUsize::new(0)),
             nm_sinks: Mutex::new(HashMap::new()).into(),
             nm_hot: Mutex::new(HashMap::new()).into(),
+            next_lifetime_generation: AtomicU64::new(0),
             next_client_id: AtomicU64::new(0),
         }
     }
@@ -520,6 +608,17 @@ impl DeviceManager {
         {
             capability.revoke();
         }
+    }
+    fn transport_capability_current(
+        &self,
+        session_token: &str,
+        capability: &TransportCapability,
+    ) -> bool {
+        self.transport_validity
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(session_token)
+            .is_some_and(|current| Arc::ptr_eq(&current.valid, &capability.valid))
     }
 
     fn invalidate_nm_hot_for_device_locked(&self, device_id: u32) {
@@ -844,8 +943,8 @@ impl DeviceManager {
         let session_token = random_hex_token(16)?;
         let ws_auth_hash = compute_ws_auth_hash(&session_token, &self.ws_nonce);
 
-        loop {
-            let wait = {
+        let reservation = loop {
+            let (wait, reservation) = {
                 let _lifecycle = self.lifecycle.lock().unwrap_or_else(|e| e.into_inner());
                 if self.register_session_locked(
                     device_id,
@@ -858,17 +957,27 @@ impl DeviceManager {
                 }
                 let mut opening = self.opening.lock().unwrap_or_else(|e| e.into_inner());
                 match opening.get(&device_id) {
-                    Some(n) => Some(Arc::clone(n).notified_owned()),
+                    Some(reservation) => {
+                        (Some(Arc::clone(&reservation.notify).notified_owned()), None)
+                    }
                     None => {
-                        opening.insert(device_id, Arc::new(tokio::sync::Notify::new()));
-                        None
+                        let reservation = Arc::new(OpenReservation {
+                            generation: self
+                                .next_lifetime_generation
+                                .fetch_add(1, Ordering::SeqCst)
+                                + 1,
+                            invalidated: Arc::new(AtomicBool::new(false)),
+                            notify: Arc::new(tokio::sync::Notify::new()),
+                        });
+                        opening.insert(device_id, Arc::clone(&reservation));
+                        (None, Some(reservation))
                     }
                 }
             };
-            let Some(wait) = wait else {
-                break;
-            };
-            wait.await;
+            if let Some(reservation) = reservation {
+                break reservation;
+            }
+            wait.expect("waiter must hold a notification future").await;
             let _lifecycle = self.lifecycle.lock().unwrap_or_else(|e| e.into_inner());
             if self.register_session_locked(
                 device_id,
@@ -879,30 +988,44 @@ impl DeviceManager {
                 self.refresh_nm_hot_locked(device_id, owner_client_id);
                 return Ok((device_id, session_token));
             }
-            let opening_in_progress = self
+            if !self
                 .opening
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
-                .contains_key(&device_id);
-            if !opening_in_progress {
+                .contains_key(&device_id)
+            {
                 return Err(anyhow!(
                     "device '{device_id:#x}' could not be opened by the concurrent opener"
                 ));
             }
-        }
+        };
 
         let result = self
-            .open_physical(device_id, &session_token, owner_client_id, &ws_auth_hash)
+            .open_physical(
+                device_id,
+                &session_token,
+                owner_client_id,
+                &ws_auth_hash,
+                Arc::clone(&reservation),
+            )
             .await;
         let notify = {
             let _lifecycle = self.lifecycle.lock().unwrap_or_else(|e| e.into_inner());
-            self.opening
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .remove(&device_id)
-                .expect("opener sentinel must be present")
+            let mut opening = self.opening.lock().unwrap_or_else(|e| e.into_inner());
+            match opening.get(&device_id) {
+                Some(current) if current.generation == reservation.generation => Some(
+                    opening
+                        .remove(&device_id)
+                        .expect("reservation is present")
+                        .notify
+                        .clone(),
+                ),
+                _ => None,
+            }
         };
-        notify.notify_waiters();
+        if let Some(notify) = notify {
+            notify.notify_waiters();
+        }
         result
     }
 
@@ -914,6 +1037,7 @@ impl DeviceManager {
         session_token: &str,
         owner_client_id: u64,
         ws_auth_hash: &str,
+        reservation: Arc<OpenReservation>,
     ) -> anyhow::Result<(u32, String)> {
         let (info, uses_numbered_reports, device) = tokio::task::spawn_blocking({
             let opener = Arc::clone(&self.opener);
@@ -944,9 +1068,20 @@ impl DeviceManager {
         let device_arc: DeviceHandle = Arc::new(device);
         #[cfg(not(target_os = "linux"))]
         let device_arc: DeviceHandle = Arc::new(Mutex::new(device));
-
         {
             let _lifecycle = self.lifecycle.lock().unwrap_or_else(|e| e.into_inner());
+            let current = !reservation.invalidated.load(Ordering::SeqCst)
+                && self
+                    .opening
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get(&device_id)
+                    .is_some_and(|current| Arc::ptr_eq(current, &reservation));
+            if !current {
+                return Err(anyhow!(
+                    "device '{device_id:#x}' open reservation invalidated"
+                ));
+            }
             if self.register_session_locked(id, session_token, owner_client_id, ws_auth_hash) {
                 self.refresh_nm_hot_locked(id, owner_client_id);
                 return Ok((id, session_token.to_string()));
@@ -954,12 +1089,14 @@ impl DeviceManager {
         }
 
         let stop_flag = Arc::new(AtomicBool::new(false));
+        let reader_start: ReaderStartGate = Arc::new((Mutex::new(false), Condvar::new()));
         let io_epoch = Arc::new(AtomicU64::new(0));
         let (io_tx, io_rx) = mpsc::channel(128);
         let dev_for_task = Arc::clone(&device_arc);
         let handle = self.spawn_reader(ReaderConfig {
             dev_id: id,
             dev_for_task,
+            start_gate: Arc::clone(&reader_start),
             stop_flag: Arc::clone(&stop_flag),
             uses_numbered_reports,
             read_buf_size,
@@ -980,6 +1117,7 @@ impl DeviceManager {
             spawn_device_io_worker(Arc::clone(&device_arc), Arc::clone(&io_epoch), io_rx);
 
         let mut entry = Some(Entry {
+            reader_start: Arc::clone(&reader_start),
             stop_flag,
             handle: Some(handle),
             io_tx: Some(io_tx),
@@ -991,11 +1129,21 @@ impl DeviceManager {
             blocking,
         });
 
-        let installed = {
+        let (installed, invalidated) = {
             let _lifecycle = self.lifecycle.lock().unwrap_or_else(|e| e.into_inner());
-            if self.register_session_locked(id, session_token, owner_client_id, ws_auth_hash) {
+            let current = !reservation.invalidated.load(Ordering::SeqCst)
+                && self
+                    .opening
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get(&device_id)
+                    .is_some_and(|current| Arc::ptr_eq(current, &reservation));
+            if !current {
+                (false, true)
+            } else if self.register_session_locked(id, session_token, owner_client_id, ws_auth_hash)
+            {
                 self.refresh_nm_hot_locked(id, owner_client_id);
-                false
+                (false, false)
             } else {
                 self.devices
                     .lock()
@@ -1008,10 +1156,22 @@ impl DeviceManager {
                     ws_auth_hash
                 ));
                 self.refresh_nm_hot_locked(id, owner_client_id);
-                true
+                (true, false)
             }
         };
-        if !installed {
+        if invalidated {
+            stop_entry(
+                entry
+                    .take()
+                    .expect("invalidated reservation still owns local entry"),
+            );
+            return Err(anyhow!(
+                "device '{device_id:#x}' open reservation invalidated"
+            ));
+        }
+        if installed {
+            release_reader_start(&reader_start);
+        } else {
             stop_entry(
                 entry
                     .take()
@@ -1072,6 +1232,7 @@ impl DeviceManager {
         let ReaderConfig {
             dev_id,
             dev_for_task,
+            start_gate,
             stop_flag,
             uses_numbered_reports,
             read_buf_size,
@@ -1092,65 +1253,18 @@ impl DeviceManager {
         let declared_for_task = Arc::clone(&declared_input_ids);
         let tx = self.event_tx.clone();
         thread::spawn(move || {
+            wait_reader_start(start_gate);
             let cleanup_dead_reader = || {
-                let (entry, cancels, non_nm_count) = {
-                    let _lifecycle = lifecycle_for_task.lock().unwrap_or_else(|e| e.into_inner());
-                    let Some(entry) = devices_for_task
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .remove(&dev_id)
-                    else {
-                        return;
-                    };
-                    let (tokens, cancels, non_nm_count) = {
-                        let sessions = sessions_for_task.lock().unwrap_or_else(|e| e.into_inner());
-                        let mut tokens = Vec::new();
-                        let mut cancels = Vec::new();
-                        let mut non_nm_count = 0;
-                        for session in sessions.values().filter(|s| s.device_id == dev_id) {
-                            if session.mode != MODE_NM {
-                                non_nm_count += 1;
-                            }
-                            tokens.push(session.token.clone());
-                            cancels.push(session.cancel.clone());
-                        }
-                        (tokens, cancels, non_nm_count)
-                    };
-                    {
-                        let mut sessions =
-                            sessions_for_task.lock().unwrap_or_else(|e| e.into_inner());
-                        for token in &tokens {
-                            sessions.remove(token);
-                        }
-                    }
-                    {
-                        let mut hashes = hashes_for_task.lock().unwrap_or_else(|e| e.into_inner());
-                        hashes.retain(|_, token| !tokens.contains(token));
-                    }
-                    {
-                        let mut validity = transport_validity_for_task
-                            .lock()
-                            .unwrap_or_else(|e| e.into_inner());
-                        validity.retain(|token, capability| {
-                            if tokens.contains(token) {
-                                capability.revoke();
-                                false
-                            } else {
-                                true
-                            }
-                        });
-                    }
-                    nm_hot.lock().unwrap_or_else(|e| e.into_inner()).retain(
-                        |(_, hot_device_id), hot| {
-                            if *hot_device_id == dev_id {
-                                hot.valid.store(false, Ordering::SeqCst);
-                                false
-                            } else {
-                                true
-                            }
-                        },
-                    );
-                    (entry, cancels, non_nm_count)
+                let Some((entry, cancels, non_nm_count)) = detach_dead_reader_lifetime(
+                    &lifecycle_for_task,
+                    &devices_for_task,
+                    &sessions_for_task,
+                    &transport_validity_for_task,
+                    &nm_hot,
+                    &hashes_for_task,
+                    dev_id,
+                ) else {
+                    return;
                 };
                 stop_entry_io_worker(entry);
                 if non_nm_count > 0 {
@@ -1451,9 +1565,15 @@ impl DeviceManager {
         }
     }
 
-    pub fn ws_disconnect(&self, device_id: u32, session_token: &str, generation: u64) {
+    pub(crate) fn ws_disconnect(
+        &self,
+        device_id: u32,
+        session_token: &str,
+        generation: u64,
+        capability: &TransportCapability,
+    ) {
         let _lifecycle = self.lifecycle.lock().unwrap_or_else(|e| e.into_inner());
-        let (owner_client_id, current_generation, was_non_nm, current) = {
+        let (owner_client_id, current_generation, was_non_nm, mode_current) = {
             let mut sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
             let session = match sessions.get_mut(session_token) {
                 Some(session) if session.active && session.device_id == device_id => session,
@@ -1461,14 +1581,22 @@ impl DeviceManager {
             };
             let owner_client_id = session.owner_client_id;
             let current_generation = session.ws_generation;
-            let current = current_generation == generation && session.mode == MODE_WS;
+            let mode_current = current_generation == generation && session.mode == MODE_WS;
             let was_non_nm = session.mode != MODE_NM;
-            if current {
+            (
+                owner_client_id,
+                current_generation,
+                was_non_nm,
+                mode_current,
+            )
+        };
+        let current = mode_current && self.transport_capability_current(session_token, capability);
+        if current {
+            let mut sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(session) = sessions.get_mut(session_token) {
                 session.mode = MODE_NM.to_string();
             }
-            (owner_client_id, current_generation, was_non_nm, current)
-        };
-        if current {
+            drop(sessions);
             self.invalidate_transport_validity(session_token);
             self.update_non_nm_count(was_non_nm, false);
             self.refresh_nm_hot_locked(device_id, owner_client_id);
@@ -1480,9 +1608,15 @@ impl DeviceManager {
         }
     }
 
-    pub fn wt_disconnect(&self, device_id: u32, session_token: &str, generation: u64) {
+    pub(crate) fn wt_disconnect(
+        &self,
+        device_id: u32,
+        session_token: &str,
+        generation: u64,
+        capability: &TransportCapability,
+    ) {
         let _lifecycle = self.lifecycle.lock().unwrap_or_else(|e| e.into_inner());
-        let (owner_client_id, current_generation, was_non_nm, current) = {
+        let (owner_client_id, current_generation, was_non_nm, mode_current) = {
             let mut sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
             let session = match sessions.get_mut(session_token) {
                 Some(session) if session.active && session.device_id == device_id => session,
@@ -1490,14 +1624,22 @@ impl DeviceManager {
             };
             let owner_client_id = session.owner_client_id;
             let current_generation = session.wt_generation;
-            let current = current_generation == generation && session.mode == MODE_WT;
+            let mode_current = current_generation == generation && session.mode == MODE_WT;
             let was_non_nm = session.mode != MODE_NM;
-            if current {
+            (
+                owner_client_id,
+                current_generation,
+                was_non_nm,
+                mode_current,
+            )
+        };
+        let current = mode_current && self.transport_capability_current(session_token, capability);
+        if current {
+            let mut sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(session) = sessions.get_mut(session_token) {
                 session.mode = MODE_NM.to_string();
             }
-            (owner_client_id, current_generation, was_non_nm, current)
-        };
-        if current {
+            drop(sessions);
             self.invalidate_transport_validity(session_token);
             self.update_non_nm_count(was_non_nm, false);
             self.refresh_nm_hot_locked(device_id, owner_client_id);
@@ -1525,6 +1667,15 @@ impl DeviceManager {
     pub fn force_close(&self, device_id: u32) {
         let (cancels, non_nm_count, entry) = {
             let _lifecycle = self.lifecycle.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(reservation) = self
+                .opening
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&device_id)
+            {
+                reservation.invalidated.store(true, Ordering::SeqCst);
+                reservation.notify.notify_waiters();
+            }
             let (tokens, cancels, non_nm_count) = {
                 let sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
                 let mut tokens = Vec::new();
@@ -1741,6 +1892,7 @@ mod tests {
             .insert(
                 device_id,
                 Entry {
+                    reader_start: Arc::new((Mutex::new(true), Condvar::new())),
                     stop_flag: Arc::new(AtomicBool::new(false)),
                     handle: None,
                     io_tx: Some(io_tx),
@@ -1753,6 +1905,150 @@ mod tests {
                 },
             );
         calls
+    }
+
+    #[test]
+    fn test_reader_start_gate_blocks_reads_until_publication() {
+        let gate: ReaderStartGate = Arc::new((Mutex::new(false), Condvar::new()));
+        let read_started = Arc::new(AtomicBool::new(false));
+        let (created_tx, created_rx) = std::sync::mpsc::channel();
+        let reader_gate = Arc::clone(&gate);
+        let read_started_for_reader = Arc::clone(&read_started);
+        let reader = thread::spawn(move || {
+            created_tx.send(()).unwrap();
+            wait_reader_start(reader_gate);
+            read_started_for_reader.store(true, Ordering::SeqCst);
+        });
+        created_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("reader created");
+        assert!(!read_started.load(Ordering::SeqCst));
+        release_reader_start(&gate);
+        reader.join().unwrap();
+        assert!(read_started.load(Ordering::SeqCst));
+    }
+    #[test]
+    fn test_abandoned_reader_releases_start_gate_on_teardown() {
+        let gate: ReaderStartGate = Arc::new((Mutex::new(false), Condvar::new()));
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let reader_gate = Arc::clone(&gate);
+        let reader = thread::spawn(move || {
+            wait_reader_start(reader_gate);
+            done_tx.send(()).unwrap();
+        });
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let (io_tx, io_rx) = mpsc::channel(1);
+        let io_epoch = Arc::new(AtomicU64::new(0));
+        let io_handle = spawn_io_worker(
+            MockDeviceIo {
+                calls: Arc::clone(&calls),
+            },
+            Arc::clone(&io_epoch),
+            io_rx,
+        );
+        let blocking = Arc::new(DeviceReportBlocking::new(
+            &DeviceInfo {
+                vendor_id: 1,
+                product_id: 1,
+                product_name: "test".to_string(),
+                manufacturer: None,
+                serial_number: None,
+                usage_page: None,
+                usage: None,
+                device_id: 0x1234,
+                descriptor_parse_failed: false,
+                collections: Vec::new(),
+                max_input_report_size: 64,
+                raw_descriptor: Vec::new(),
+            },
+            true,
+        ));
+        stop_entry(Entry {
+            reader_start: gate,
+            stop_flag: Arc::new(AtomicBool::new(false)),
+            handle: Some(reader),
+            io_tx: Some(io_tx),
+            io_handle: Some(io_handle),
+            io_epoch,
+            vendor_id: 1,
+            product_id: 1,
+            read_buf_size: 64,
+            blocking,
+        });
+        done_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("abandoned reader released");
+        assert!(calls.lock().unwrap_or_else(|e| e.into_inner()).is_empty());
+    }
+    #[test]
+    fn test_dead_reader_cleanup_removes_published_lifetime() {
+        let (tx, _) = broadcast::channel(16);
+        let mgr = Arc::new(DeviceManager::new(tx));
+        let calls = install_test_io_entry(&mgr, 0x1234);
+        insert_active_session(&mgr, "tok-nm", 1);
+        insert_active_session(&mgr, "tok-ws", 2);
+        mgr.ws_auth_hashes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .extend([
+                ("hash-nm".to_string(), "tok-nm".to_string()),
+                ("hash-ws".to_string(), "tok-ws".to_string()),
+            ]);
+        let (sink_tx, _sink_rx) = mpsc::channel(1);
+        mgr.register_nm_sink(1, sink_tx);
+        let ws = mgr.ws_connect(0x1234, "tok-ws").expect("WS connects");
+
+        let (entry, cancels, non_nm_count) = detach_dead_reader_lifetime(
+            &mgr.lifecycle,
+            &mgr.devices,
+            &mgr.sessions,
+            &mgr.transport_validity,
+            &mgr.nm_hot,
+            &mgr.ws_auth_hashes,
+            0x1234,
+        )
+        .expect("published lifetime");
+        stop_entry_io_worker(entry);
+        if non_nm_count > 0 {
+            mgr.non_nm_sessions
+                .fetch_sub(non_nm_count, Ordering::SeqCst);
+        }
+        for cancel in cancels {
+            let _ = cancel.send(true);
+        }
+
+        assert!(!ws.capability.is_valid());
+        assert!(
+            mgr.devices
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .is_empty()
+        );
+        assert!(
+            mgr.sessions
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .is_empty()
+        );
+        assert!(
+            mgr.ws_auth_hashes
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .is_empty()
+        );
+        assert!(
+            mgr.transport_validity
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .is_empty()
+        );
+        assert!(
+            mgr.nm_hot
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .is_empty()
+        );
+        assert!(calls.lock().unwrap_or_else(|e| e.into_inner()).is_empty());
     }
 
     #[test]
@@ -2180,6 +2476,87 @@ mod tests {
         );
     }
 
+    /// Audit regression (HIGH): force-close invalidates an in-flight opener
+    /// and prevents waiters from attaching to its abandoned lifetime.
+    #[tokio::test]
+    async fn test_force_close_invalidates_inflight_open_and_waiter() {
+        use std::sync::atomic::AtomicUsize;
+        use tokio::sync::oneshot;
+
+        let (event_tx, _) = broadcast::channel(16);
+        let (entered_tx, entered_rx) = oneshot::channel();
+        let (release_tx, release_rx) = oneshot::channel();
+        let entered_tx = Arc::new(Mutex::new(Some(entered_tx)));
+        let release_rx = Arc::new(Mutex::new(Some(release_rx)));
+        let opener_calls = Arc::new(AtomicUsize::new(0));
+        let opener_calls_for_task = Arc::clone(&opener_calls);
+        let entered_for_task = Arc::clone(&entered_tx);
+        let release_for_task = Arc::clone(&release_rx);
+        let mgr = Arc::new(DeviceManager::new_with_opener(event_tx, move |id| {
+            opener_calls_for_task.fetch_add(1, Ordering::SeqCst);
+            if let Some(tx) = entered_for_task.lock().unwrap().take() {
+                let _ = tx.send(());
+            }
+            if let Some(rx) = release_for_task.lock().unwrap().take() {
+                let _ = rx.blocking_recv();
+            }
+            Err(anyhow!("device '{id:#x}' unavailable in reservation test"))
+        }));
+
+        let open_a = {
+            let mgr = Arc::clone(&mgr);
+            tokio::spawn(async move { mgr.open(0x1234, 1).await })
+        };
+        entered_rx.await.unwrap();
+        let open_b = {
+            let mgr = Arc::clone(&mgr);
+            tokio::spawn(async move { mgr.open(0x1234, 2).await })
+        };
+        tokio::task::yield_now().await;
+
+        mgr.force_close(0x1234);
+        assert!(
+            mgr.opening
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&0x1234)
+                .is_some_and(|reservation| reservation.invalidated.load(Ordering::SeqCst))
+        );
+        release_tx.send(()).unwrap();
+        assert!(open_a.await.unwrap().is_err());
+        assert!(open_b.await.unwrap().is_err());
+        assert_eq!(opener_calls.load(Ordering::SeqCst), 1);
+        assert!(
+            mgr.opening
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .is_empty()
+        );
+        assert!(
+            mgr.sessions
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .is_empty()
+        );
+        assert!(
+            mgr.devices
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .is_empty()
+        );
+
+        install_test_io_entry(&mgr, 0x1234);
+        let (_, fresh_token) = mgr.open(0x1234, 3).await.expect("new lifetime opens");
+        assert!(
+            mgr.sessions
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .contains_key(&fresh_token)
+        );
+        mgr.close(0x1234, &fresh_token, 3)
+            .expect("close new lifetime");
+    }
+
     #[test]
     fn test_close_unknown_session_is_idempotent() {
         let (tx, _) = broadcast::channel(16);
@@ -2410,7 +2787,7 @@ mod tests {
         worker.join().unwrap();
         assert!(calls.lock().unwrap().is_empty());
 
-        mgr.ws_disconnect(0x1234, "tok", ws.generation);
+        mgr.ws_disconnect(0x1234, "tok", ws.generation, &ws.capability);
         assert!(mgr.session_transport_active(0x1234, "tok", MODE_WT, wt.generation));
         assert_eq!(
             mgr.sessions
@@ -2422,7 +2799,7 @@ mod tests {
             MODE_WT
         );
 
-        mgr.wt_disconnect(0x1234, "tok", wt.generation);
+        mgr.wt_disconnect(0x1234, "tok", wt.generation, &wt.capability);
         let sessions = mgr.sessions.lock().unwrap_or_else(|e| e.into_inner());
         assert_eq!(sessions.get("tok").unwrap().mode, MODE_NM);
         drop(sessions);
@@ -2455,7 +2832,7 @@ mod tests {
         drop(io_tx);
         worker.join().unwrap();
         assert!(calls.lock().unwrap().is_empty());
-        mgr.wt_disconnect(0x1234, "tok", wt2.generation);
+        mgr.wt_disconnect(0x1234, "tok", wt2.generation, &wt2.capability);
         assert!(mgr.session_transport_active(0x1234, "tok", MODE_WS, ws2.generation));
         assert_eq!(
             mgr.sessions
@@ -2466,13 +2843,61 @@ mod tests {
                 .mode,
             MODE_WS
         );
-        mgr.ws_disconnect(0x1234, "tok", ws2.generation);
+        mgr.ws_disconnect(0x1234, "tok", ws2.generation, &ws2.capability);
         let ws3 = mgr.ws_connect(0x1234, "tok").expect("WS reconnects");
         assert!(ws3.capability.is_valid());
         mgr.set_dataplane_mode(0x1234, "tok", MODE_NM, 1)
             .expect("switches to NM");
         assert!(!ws3.capability.is_valid());
         assert!(!mgr.session_transport_active(0x1234, "tok", MODE_WS, ws3.generation));
+        assert_eq!(
+            mgr.sessions
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get("tok")
+                .unwrap()
+                .mode,
+            MODE_NM
+        );
+    }
+    #[test]
+    fn test_same_mode_disconnect_is_stale_but_current_disconnect_falls_back() {
+        let (tx, _) = broadcast::channel(16);
+        let mgr = DeviceManager::new(tx);
+        insert_active_session(&mgr, "tok", 1);
+
+        let ws = mgr.ws_connect(0x1234, "tok").expect("WS connects");
+        mgr.set_dataplane_mode(0x1234, "tok", MODE_WS, 1)
+            .expect("same-mode WS transition");
+        assert!(!ws.capability.is_valid());
+        mgr.ws_disconnect(0x1234, "tok", ws.generation, &ws.capability);
+        assert_eq!(
+            mgr.sessions
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get("tok")
+                .unwrap()
+                .mode,
+            MODE_WS
+        );
+
+        let wt = mgr.wt_connect(0x1234, "tok").expect("WT connects");
+        mgr.set_dataplane_mode(0x1234, "tok", MODE_WT, 1)
+            .expect("same-mode WT transition");
+        assert!(!wt.capability.is_valid());
+        mgr.wt_disconnect(0x1234, "tok", wt.generation, &wt.capability);
+        assert_eq!(
+            mgr.sessions
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get("tok")
+                .unwrap()
+                .mode,
+            MODE_WT
+        );
+
+        let wt_current = mgr.wt_connect(0x1234, "tok").expect("current WT connects");
+        mgr.wt_disconnect(0x1234, "tok", wt_current.generation, &wt_current.capability);
         assert_eq!(
             mgr.sessions
                 .lock()

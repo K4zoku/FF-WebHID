@@ -98,14 +98,24 @@ async fn handle_websocket(
         return Ok(());
     };
     if !grant.capability.is_valid() {
-        device_mgr.ws_disconnect(device_id, &session_token, grant.generation);
+        device_mgr.ws_disconnect(
+            device_id,
+            &session_token,
+            grant.generation,
+            &grant.capability,
+        );
         return Ok(());
     }
     let ws_gen = grant.generation;
     let mut cancel = grant.cancel.clone();
     let mut revocation = grant.capability.subscribe_revocation();
     if !grant.capability.is_valid() {
-        device_mgr.ws_disconnect(device_id, &session_token, grant.generation);
+        device_mgr.ws_disconnect(
+            device_id,
+            &session_token,
+            grant.generation,
+            &grant.capability,
+        );
         return Ok(());
     }
 
@@ -196,7 +206,7 @@ async fn handle_websocket(
     frame_worker.abort();
 
     log::info!("[ws] connection for {device_id:#x} closed");
-    device_mgr.ws_disconnect(device_id, &session_token, ws_gen);
+    device_mgr.ws_disconnect(device_id, &session_token, ws_gen, &grant.capability);
     Ok(())
 }
 
