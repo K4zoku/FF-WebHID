@@ -221,11 +221,6 @@
   })()
 
   const actionApi = browser.browserAction || browser.action || null
-  if (actionApi && actionApi.onClicked) {
-    actionApi.onClicked.addListener(function () {
-      browser.runtime.openOptionsPage()
-    })
-  }
 
   const notificationsApi = browser.notifications || null
   if (notificationsApi && notificationsApi.onClicked) {

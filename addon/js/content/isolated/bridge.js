@@ -110,6 +110,32 @@
     'pickerResult'
   ])
 
+  const PAGE_ACTION_API_ACTIONS = new Set([
+    'getPolicy',
+    'getPairedDevices',
+    'enumerate',
+    'requestDevice',
+    'open',
+    'close',
+    'sendReport',
+    'receiveFeatureReport',
+    'sendFeatureReport',
+    'unpairDevice'
+  ])
+  let pageActionMarked = false
+
+  /**
+   * Marks the current tab as using WebHID so its page action becomes visible.
+   * @returns {void}
+   */
+  function markPageActionUsed() {
+    if (pageActionMarked) return
+    pageActionMarked = true
+    sendBackgroundRequest({ action: 'showPageAction' }).catch(() => {
+      pageActionMarked = false
+    })
+  }
+
   /** @type {Set<string>} */
   const openDevices = new Set()
   /** @type {Map<string, Map<string, string[]>>} deviceId -> origin -> LIFO
@@ -1400,6 +1426,7 @@
     if (!data || data.id === undefined) return
 
     logger.debug('req action=' + data.action + ' id=' + data.id)
+    if (PAGE_ACTION_API_ACTIONS.has(data.action)) markPageActionUsed()
 
     const handler = REQUEST_HANDLERS[data.action]
     if (handler) {
@@ -1561,6 +1588,7 @@
           : msg.type === 'sendFeature'
             ? 'sendFeatureReport'
             : 'receiveFeatureReport'
+      markPageActionUsed()
       const payload = { deviceId, reportId: msg.reportId }
       if (msg.type === 'send' || msg.type === 'sendFeature') payload.data = msg.data
       const reqId = allocateDataReqId()

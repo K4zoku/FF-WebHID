@@ -574,6 +574,20 @@
   }
 
   /**
+   * Shows the page action for a tab that has used the WebHID API.
+   * @param {object} request
+   * @param {object} sender
+   * @returns {boolean}
+   */
+  function handleShowPageAction(request, sender) {
+    const tabId = sender.tab != null ? sender.tab.id : undefined
+    if (!isChromium && browser.pageAction && tabId != null) {
+      browser.pageAction.show(tabId).catch((e) => logger.debug('pageAction.show failed', e))
+    }
+    return false
+  }
+
+  /**
    * @param {object} request
    * @param {object} sender
    * @param {function(*): void} sendResponse
@@ -724,15 +738,24 @@
    */
   function openPickerPageAction(req, tabId, origin) {
     if (isChromium) return
-    browser.pageAction.setIcon({
-      tabId,
-      path: 'icons/gamepad.alert.svg'
-    })
-    browser.pageAction.setPopup({
-      tabId,
-      popup: 'js/internal/pages/picker/index.html'
-    })
-    if (browser.pageAction.openPopup) browser.pageAction.openPopup().catch(() => {})
+    browser.pageAction
+      .show(tabId)
+      .then(() =>
+        Promise.all([
+          browser.pageAction.setIcon({
+            tabId,
+            path: 'icons/gamepad.alert.svg'
+          }),
+          browser.pageAction.setPopup({
+            tabId,
+            popup: 'js/internal/pages/picker/index.html'
+          })
+        ])
+      )
+      .then(() => {
+        if (browser.pageAction.openPopup) return browser.pageAction.openPopup()
+      })
+      .catch((e) => logger.debug('openPickerPageAction failed', e))
     browser.tabs
       .query({ active: true, currentWindow: true })
       .then((tabs) => {
@@ -959,6 +982,7 @@
     unpairDevice: handleUnpairDevice,
     getAllowedDevices: handleGetAllowedDevices,
     deviceCountChanged: handleDeviceCountChanged,
+    showPageAction: handleShowPageAction,
     getDeviceCache: handleGetDeviceCache,
     getDeviceInfo: handleGetDeviceInfo,
     fetchResource: handleFetchResource,

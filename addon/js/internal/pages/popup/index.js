@@ -235,6 +235,11 @@
   const viewDevices = document.getElementById('view-devices')
   const viewSettings = document.getElementById('view-settings')
   const btnSettings = document.getElementById('btn-settings')
+  const startsInSettings = window.location.hash === '#settings'
+  viewDevices.hidden = startsInSettings
+  viewSettings.hidden = !startsInSettings
+  btnSettings.classList.toggle('active', startsInSettings)
+
   btnSettings.addEventListener('click', () => {
     const open = viewSettings.hidden
     viewDevices.hidden = open
