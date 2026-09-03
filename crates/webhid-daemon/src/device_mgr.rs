@@ -231,16 +231,27 @@ fn stop_entry_output_worker(mut entry: Entry) {
 }
 
 fn route_nm_input(sinks: &NmHotMap, device_id: u32, report_id: u8, data: &Bytes) {
-    let targets: Vec<mpsc::Sender<NmMessage>> = sinks
+    let targets: Vec<(mpsc::Sender<NmMessage>, Arc<AtomicBool>)> = sinks
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .iter()
         .filter(|((_, target_device_id), _)| *target_device_id == device_id)
-        .map(|(_, hot)| hot.sink.clone())
+        .map(|(_, hot)| (hot.sink.clone(), Arc::clone(&hot.valid)))
         .collect();
-    for target in targets {
-        let message = NmMessage::packed_input_report(device_id, [(report_id, &data[..])]);
-        let _ = target.blocking_send(message);
+    for (target, valid) in targets {
+        let mut message = NmMessage::packed_input_report(device_id, [(report_id, &data[..])]);
+        loop {
+            if !valid.load(Ordering::SeqCst) {
+                break;
+            }
+            match target.try_send(message) {
+                Ok(()) | Err(mpsc::error::TrySendError::Closed(_)) => break,
+                Err(mpsc::error::TrySendError::Full(next)) => {
+                    message = next;
+                    std::thread::yield_now();
+                }
+            }
+        }
     }
 }
 
@@ -1277,6 +1288,49 @@ mod tests {
             other_rx.try_recv(),
             Err(mpsc::error::TryRecvError::Empty)
         ));
+    }
+
+    #[test]
+    fn test_route_nm_input_stops_when_sink_is_invalidated() {
+        let (nm_tx, _nm_rx) = mpsc::channel(1);
+        nm_tx
+            .try_send(NmMessage::PackedData(vec![0]))
+            .unwrap();
+        let valid = Arc::new(AtomicBool::new(true));
+        let map: NmHotMap = Arc::new(Mutex::new(HashMap::from([(
+            (1, 7),
+            NmHotSession {
+                output_tx: mpsc::channel(1).0,
+                epoch: Arc::new(AtomicU64::new(0)),
+                blocking: Arc::new(DeviceReportBlocking::new(
+                    &DeviceInfo {
+                        vendor_id: 1,
+                        product_id: 1,
+                        product_name: "test".to_string(),
+                        manufacturer: None,
+                        serial_number: None,
+                        usage_page: None,
+                        usage: None,
+                        device_id: 7,
+                        descriptor_parse_failed: false,
+                        collections: Vec::new(),
+                        max_input_report_size: 64,
+                        raw_descriptor: Vec::new(),
+                    },
+                    true,
+                )),
+                valid: Arc::clone(&valid),
+                vendor_id: 1,
+                product_id: 1,
+                sink: nm_tx,
+            },
+        )])));
+        let task = std::thread::spawn({
+            let map = Arc::clone(&map);
+            move || route_nm_input(&map, 7, 1, &Bytes::from_static(&[1, 2, 3]))
+        });
+        valid.store(false, Ordering::SeqCst);
+        task.join().unwrap();
     }
 
     #[test]

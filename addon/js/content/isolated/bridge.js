@@ -761,16 +761,12 @@
       ensureRuntimeDataPort(deviceId)
       nmPlanes.add(deviceId)
       deviceTransports.delete(deviceId)
-      try {
-        await sendBackgroundRequest({
-          action: 'setDataPlane',
-          deviceId: deviceId,
-          mode: 'nm',
-          sessionToken: sessionToken
-        })
-      } catch (e) {
-        logger.debug('setDataPlane NM fallback failed', e)
-      }
+      sendBackgroundRequest({
+        action: 'setDataPlane',
+        deviceId: deviceId,
+        mode: 'nm',
+        sessionToken: sessionToken
+      }).catch((e) => logger.debug('setDataPlane NM fallback failed', e))
     }
   }
 
@@ -911,16 +907,12 @@
     nmPlanes.add(deviceId)
     deviceTransports.delete(deviceId)
     const token = dataPlaneTokens.get(deviceId) || allOpenTokens(deviceId).at(-1) || null
-    try {
-      await sendBackgroundRequest({
-        action: 'setDataPlane',
-        deviceId: deviceId,
-        mode: 'nm',
-        sessionToken: token
-      })
-    } catch (e) {
-      logger.debug('setDataPlane NM fallback failed', e)
-    }
+    sendBackgroundRequest({
+      action: 'setDataPlane',
+      deviceId: deviceId,
+      mode: 'nm',
+      sessionToken: token
+    }).catch((e) => logger.debug('setDataPlane NM fallback failed', e))
     const pagePort = pagePorts.get(window)
     if (pagePort) pagePort.postMessage({ type: 'wireWorkerPort', deviceId })
   }
@@ -1250,6 +1242,7 @@
 
     const dataPlane = settings.dataPlane
     if (dataPlane === 'nm' || nmPlanes.has(deviceId)) {
+      nmPlanes.add(deviceId)
       ensureRuntimeDataPort(deviceId)
     } else if (dataPlane === 'ws') {
       await spawnDataPlane(deviceId, response.t, response.w || wsPort)

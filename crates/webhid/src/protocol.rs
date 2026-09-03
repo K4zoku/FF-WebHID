@@ -1,4 +1,5 @@
 use std::io;
+use std::borrow::Cow;
 
 use base64::Engine;
 use bytes::BytesMut;
@@ -116,7 +117,7 @@ pub fn read_nm_request_sync<R: io::Read>(reader: &mut R) -> Result<NmRequest, Fr
 #[derive(serde::Deserialize)]
 struct PackedEnvelope<'a> {
     #[serde(borrow)]
-    d: Option<&'a str>,
+    d: Option<Cow<'a, str>>,
     #[serde(default, deserialize_with = "mark_field_present")]
     a: bool,
 }
@@ -135,7 +136,7 @@ fn try_read_packed(buf: &[u8]) -> io::Result<Option<NmRequest>> {
         return Ok(None);
     }
     let packed = base64::engine::general_purpose::STANDARD
-        .decode(d)
+        .decode(d.as_bytes())
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("bad b64: {e}")))?;
     if packed.is_empty() {
         return Err(io::Error::new(
@@ -531,6 +532,28 @@ mod tests {
             }
             _ => panic!("expected SendReport"),
         }
+    }
+
+    #[test]
+    fn test_read_nm_request_sync_packed_escaped_base64() {
+        use base64::Engine;
+        let mut tlv = vec![0x02u8];
+        tlv.extend_from_slice(&42u32.to_le_bytes());
+        tlv.extend_from_slice(&0xCAFEBABEu32.to_le_bytes());
+        tlv.push(7);
+        tlv.extend_from_slice(&2u16.to_le_bytes());
+        tlv.extend_from_slice(&[0xAA, 0xBB]);
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&tlv);
+        let body = format!(r#"{{"d":"{}"}}"#, b64.replace('=', r#"\u003d"#));
+        assert!(body.contains(r#"\u003d"#));
+        let mut frame = (body.len() as u32).to_le_bytes().to_vec();
+        frame.extend_from_slice(body.as_bytes());
+        let mut reader: &[u8] = &frame;
+        let req = read_nm_request_sync(&mut reader).unwrap();
+        assert!(matches!(
+            req,
+            NmRequest::SendReport { id: None, packed } if packed == tlv
+        ));
     }
 
     #[tokio::test]

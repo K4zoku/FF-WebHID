@@ -61,8 +61,11 @@ fn spawn_sync_writer(rx: mpsc::Receiver<NmMessage>) -> WriterTask {
     WriterTask::Sync { task, cancel }
 }
 
+/// Limits parsed synchronous requests to one frame ahead of dispatch.
+const SYNC_REQUEST_QUEUE_CAPACITY: usize = 1;
+
 fn spawn_sync_request_reader() -> mpsc::Receiver<Result<NmRequest, protocol::FrameReadError>> {
-    let (tx, rx) = mpsc::channel(1024);
+    let (tx, rx) = mpsc::channel(SYNC_REQUEST_QUEUE_CAPACITY);
     let _ = thread::spawn(move || {
         let stdin = std::io::stdin();
         let mut reader = stdin.lock();

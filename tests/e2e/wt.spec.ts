@@ -82,7 +82,7 @@ async function waitForNmPlane(backgroundPage: FirefoxBgPage, timeoutMs = 10000):
     const status = (await backgroundPage.evaluate(async () => {
       const tabs = await browser.tabs.query({ active: true, currentWindow: true })
       const tab = tabs[0]
-      if (!tab) return null
+      if (!tab || tab.id == null) return null
       const response: unknown = await browser.tabs.sendMessage(tab.id, {
         action: 'getDataPlaneStatus'
       })
