@@ -40,21 +40,21 @@ Step-by-step instructions for Linux, macOS, and Windows: [docs/INSTALLATION.md](
 2. Open a website that uses WebHID and click its device or connect button.
 3. Pick your device in the chooser and connect.
 
-The gamepad icon in the address bar shows which devices a site can access and lets you revoke access. Per-site settings live behind the gear icon in the same popup.
+When a site actually uses WebHID, its gamepad page-action icon appears in the address bar and shows which devices the site can access; it also lets you revoke access. The browser action opens the device view even when the page action is hidden. Per-site settings live behind the gear icon in the same popup.
 
 ## Settings
 
 Everything works out of the box. Most settings exist for edge cases, so change them only when a site misbehaves.
 
-**Recommended setup**: enable **Daemon as NM host** and keep the default **WebTransport** data plane in a worker. This is the most secure and fastest combination, but it needs a correct install: the daemon then runs as your user instead of a system service, which on Linux needs the udev rules and on macOS needs Input Monitoring permission. Step-by-step setup per platform: [docs/INSTALLATION.md](docs/INSTALLATION.md).
+**Recommended setup**: enable **Daemon as NM host** and keep the default **WebTransport** data plane in a worker. This keeps page rendering isolated while retaining the preferred network path, but it needs a correct install: the daemon then runs as your user instead of a system service, which on Linux needs the udev rules and on macOS needs Input Monitoring permission. Step-by-step setup per platform: [docs/INSTALLATION.md](docs/INSTALLATION.md).
 
 ### Per-site settings
 
 Click the gamepad icon in the address bar, then the gear icon. Changes here apply to the current site only and override the global defaults:
 
 - **Data Plane**: how the addon moves data between the site and the daemon.
-  - **WebTransport** (default): the fastest option; runs in a background worker so pages stay smooth. Keep it unless a site has problems.
-  - **WebTransport (in-page)**: connects directly in the page; fine at normal report rates, uses a bit more of the page's CPU. Use it when a site blocks background workers (CSP) but still allows the connection. The first time a site connects this way, Firefox asks for permission: "example.com wants to access other apps and services on this device." Tick **Remember my choice for this site**, then click **Allow**, otherwise you will be asked again on every page load. Reload the page after changing this setting.
+  - **WebTransport** (default where available): the preferred fast path; runs in a background worker so pages stay smooth. Keep it unless a site has problems.
+  - **WebTransport (in-page)**: connects directly in the page; fine at normal report rates, uses a bit more of the page's CPU. Use it when a site blocks background workers (CSP) but still allows the connection. On Firefox 154, Local Network Access can apply to page-context WebTransport and may make it fail or retry without showing a prompt. Trying WebSocket first can surface the LNA permission UI, after which WebTransport may work. If WS or WT cannot start because of LNA or another setup problem, the addon falls back to Native Messaging instead of making WebHID unusable. This behavior is observed and may change as Firefox's implementation evolves. Reload the page after changing this setting.
   - **WebSocket**: fallback when WebTransport is not available, for example on older Firefox.
   - **Native Messaging**: the slowest but most compatible option; use it when a site's security policy blocks the other three.
 - **Worker Spawn Mode**: how the addon creates the worker in the page. Only shown when a worker is actually used (Data Plane is WebTransport or WebSocket). If the site's security policy (CSP) blocks worker creation, the addon falls back to Native Messaging instead.
@@ -78,9 +78,11 @@ Click the gamepad icon in the address bar, then the gear icon. Changes here appl
 
 ### Global settings
 
-Open `about:addons → WebHID → Options`. Every setting above is available per site; sites that have not set their own value use the global default. One setting is global only:
+Open `about:addons → WebHID → Options`. Site settings are overridden from the popup; the global-only settings are:
 
+- **Hide Page Action**: keep the Firefox page-action icon hidden even after a page uses WebHID. The browser action still opens the device view.
 - **Daemon as NM host**: how the daemon is launched.
+
   - **On** (recommended): Firefox spawns the daemon on demand, so no system service is needed; requires the setup described in the Recommended setup note above.
   - **Off** (default; on by default on Windows): the daemon runs as a system service.
 

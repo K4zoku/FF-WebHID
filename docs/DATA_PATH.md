@@ -1,5 +1,7 @@
 # Data Path Analysis
 
+The path and cost tables describe the current implementation structure. They do not replace measured benchmark results; see [BENCHMARK.md](BENCHMARK.md) for run-specific measurements.
+
 ## 1. Execution Contexts
 
 | #   | Context           | Process                         | Realm            | Files                                             |
@@ -11,56 +13,56 @@
 | N   | NM host process   | OS process                      | --               | `webhid.forwarder_nm_host` or daemon NM-host mode |
 | D   | Daemon process    | OS process                      | --               | `webhid-daemon`                                   |
 
-Control ops (enumerate/open/close/handshake) are NM-only, handled by bridge→background→NM host→daemon.
+Control ops (enumerate/open/close/handshake/setDataPlane) are NM-only, handled by bridge→background→NM host→daemon.
 
 ---
 
 ## 2. Cost Model
 
-| Operation                                       | Copy cost                                        | Hop cost                               | Est. latency |
-| ----------------------------------------------- | ------------------------------------------------ | -------------------------------------- | ------------ |
-| `postMessage` same-process (P↔B, B↔W)           | 1 structured clone (~5 to 15 µs for typed array) | 1 realm switch                         | 5 to 15 µs   |
-| `postMessage` with transfer list                | 0 (buffer ownership moved)                       | 1 realm switch                         | 3 to 8 µs    |
-| MessageChannel `port.postMessage` with transfer | 0 (buffer ownership moved)                       | 1 realm switch (direct W→P, no bridge) | 3 to 8 µs    |
-| `runtime.sendMessage` (B↔G)                     | 1 clone + IPC marshal                            | 1 process boundary                     | 50 to 200 µs |
-| `connectNative.postMessage` (G→N)               | 1 JSON serialize + pipe write                    | 1 process spawn/pipe                   | 30 to 100 µs |
-| Unix socket write+read (N↔D, loopback)          | 2 kernel copies                                  | 1 process boundary                     | 5 to 15 µs   |
-| WebSocket send+recv (W↔D, TCP loopback)         | 1 WS encode + 2 kernel copies                    | 1 process boundary                     | 10 to 30 µs  |
-| `JSON.stringify`/`parse` (small obj)            | 1 alloc                                          | --                                     | 1 to 5 µs    |
-| base64 encode/decode (64 B)                     | 1 alloc (+33% size)                              | --                                     | 0.5 to 2 µs  |
-| `spawn_blocking` thread switch                  | 0 (Arc move)                                     | 1 thread pool dispatch                 | 5 to 20 µs   |
-| `broadcast::send`/`recv` (tokio, Arc<[u8]>)     | 0 (Arc refcount bump)                            | 1 task wake                            | 1 to 3 µs    |
-| hidraw `write(2)`/`read(2)` syscall             | 1 user→kernel (or reverse)                       | 1 kernel→driver                        | 5 to 30 µs   |
-| `tabs.sendMessage` (G→B, tab-targeted)          | 1 clone + IPC                                    | 1 process boundary                     | 50 to 200 µs |
+| Operation                                       | Copy cost                                        | Hop cost                               | Est. latency            |
+| ----------------------------------------------- | ------------------------------------------------ | -------------------------------------- | ----------------------- |
+| `postMessage` same-process (P↔B, B↔W)           | 1 structured clone (~5 to 15 µs for typed array) | 1 realm switch                         | 5 to 15 µs              |
+| `postMessage` with transfer list                | 0 (buffer ownership moved)                       | 1 realm switch                         | 3 to 8 µs               |
+| MessageChannel `port.postMessage` with transfer | 0 (buffer ownership moved)                       | 1 realm switch (direct W→P, no bridge) | 3 to 8 µs               |
+| `runtime.sendMessage` (B↔G)                     | 1 clone + IPC marshal                            | 1 process boundary                     | 50 to 200 µs            |
+| `connectNative.postMessage` (G→N)               | 1 JSON serialize + pipe write                    | 1 process spawn/pipe                   | 30 to 100 µs            |
+| Unix socket write+read (N↔D, loopback)          | 2 kernel copies                                  | 1 process boundary                     | 5 to 15 µs              |
+| WebSocket send+recv (W↔D, TCP loopback)         | 1 WS encode + 2 kernel copies                    | 1 process boundary                     | 10 to 30 µs             |
+| `JSON.stringify`/`parse` (small obj)            | 1 alloc                                          | --                                     | 1 to 5 µs               |
+| base64 encode/decode (64 B)                     | 1 alloc (+33% size)                              | --                                     | 0.5 to 2 µs             |
+| Persistent per-device I/O worker queue          | 0 (command ownership moves into the queue)       | 1 blocking worker handoff              | not separately measured |
+| `broadcast::send`/`recv` (tokio, Arc<[u8]>)     | 0 (Arc refcount bump)                            | 1 task wake                            | 1 to 3 µs               |
+| hidraw `write(2)`/`read(2)` syscall             | 1 user→kernel (or reverse)                       | 1 kernel→driver                        | 5 to 30 µs              |
+| `tabs.sendMessage` (G→B, tab-targeted)          | 1 clone + IPC                                    | 1 process boundary                     | 50 to 200 µs            |
 
 ---
 
 ## 3. Path Inventory
 
-| Path | Message                      | Mode                | Sub-path                                                                               |
-| ---- | ---------------------------- | ------------------- | -------------------------------------------------------------------------------------- |
-| A    | `sendReport`                 | WS                  | P→B→W→WS→D→hidraw→WS→W→B→P (ack-wait)                                                  |
-| C    | `sendReport`                 | NM                  | P→B→G→NM→D→hidraw→NM→G→B→P (ack-wait)                                                  |
-| U    | `sendReport`                 | WT worker           | P→B→W→WT stream→D→hidraw→WT→W→B→P (ack-wait, same frame as WS)                         |
-| V    | `sendReport` (in-page)       | WT, `useWorker` off | P (in-page plane) → WT stream→D→hidraw→WT→P (ack-wait; full hot path in-page)          |
-| E    | `sendFeatureReport`          | WS                  | Same as A (WS frame type 0x02)                                                         |
-| F    | `sendFeatureReport`          | NM                  | Same as C (NM packed TLV 0x04)                                                         |
-| G    | `receiveFeatureReport`       | WS                  | P→B→W→WS→D→hidraw→WS→W→B→P                                                             |
-| H    | `receiveFeatureReport`       | NM                  | P→B→G→NM→D→hidraw→NM→G→B→P (JSON, action 5)                                            |
-| I    | Input report                 | WS + MessagePort    | hidraw→D→WS→W→MessagePort→P (direct, bypass bridge)                                    |
-| J    | Input report                 | WS, port fallback   | hidraw→D→WS→W→postMessage→B→control port→P                                             |
-| K    | Input report                 | NM                  | hidraw→D→NM→G→B→P (tab-targeted, or via data port)                                     |
-| W    | Input report                 | WT worker           | hidraw→D→WT→W→MessagePort→P (direct, bypass bridge)                                    |
-| X    | Input report                 | WT in-page          | hidraw→D→WT→P (main-thread parse, no worker; `useWorker` off)                          |
-| L    | `enumerate`                  | NM                  | P→B→G→NM→D→hidapi→NM→G→B→P                                                             |
-| M    | `open`                       | NM                  | P→B→G→NM→D→hidapi→NM→G→B→P + data worker setup + MessagePort transfer                  |
-| N    | `close`                      | NM                  | P→B→G→NM→D→NM→G→B→P + data worker terminate + port return                              |
-| O    | `requestDevice`              | NM                  | P→B (picker UI) → enumerate → user select → B pairs (bridge-side) → B→P                |
-| P    | `getDevices`                 | NM                  | P→B→G→storage + enumeratePaired (or cache hit)                                         |
-| Q    | `handshake` (NM)             | NM                  | B→G→NM→D→NM→G→B (returns wsPort + wsNonce)                                             |
-| R    | `connect`/`disconnect` event | NM                  | D→NM→G→B→P (tab-targeted)                                                              |
-| S    | `getPolicy`                  | NM                  | P→B→G (Permissions-Policy header cache + iframe `allow` attr check)                    |
-| T    | `globalReset`                | NM→G→B              | G broadcasts to all tabs on NM disconnect: B clears state, emits disconnect per device |
+| Path | Message                      | Mode                | Sub-path                                                                                              |
+| ---- | ---------------------------- | ------------------- | ----------------------------------------------------------------------------------------------------- |
+| A    | `sendReport`                 | WS                  | P→B→W→WS→D→hidraw→WS→W→B→P (ack-wait)                                                                 |
+| C    | `sendReport`                 | NM                  | P→B→G→NM→D→hidraw→NM→G→B→P (ack-wait)                                                                 |
+| U    | `sendReport`                 | WT worker           | P→B→W→WT stream→D→hidraw→WT→W→B→P (ack-wait, same frame as WS)                                        |
+| V    | `sendReport` (in-page)       | WT, `useWorker` off | P (in-page plane) → WT stream→D→hidraw→WT→P (ack-wait; full hot path in-page)                         |
+| E    | `sendFeatureReport`          | WS                  | Same as A (WS frame type 0x02)                                                                        |
+| F    | `sendFeatureReport`          | NM                  | Same as C (NM packed TLV 0x04)                                                                        |
+| G    | `receiveFeatureReport`       | WS                  | P→B→W→WS→D→hidraw→WS→W→B→P                                                                            |
+| H    | `receiveFeatureReport`       | NM                  | P→B→G→NM→D→hidraw→NM→G→B→P (JSON, action 5)                                                           |
+| I    | Input report                 | WS + MessagePort    | hidraw→D→WS→W→MessagePort→P (direct, bypass bridge)                                                   |
+| J    | Input report                 | WS, port fallback   | hidraw→D→WS→W→postMessage→B→control port→P                                                            |
+| K    | Input report                 | NM                  | hidraw→D→NM→G→B→P (tab-targeted, or via data port)                                                    |
+| W    | Input report                 | WT worker           | hidraw→D→WT→W→MessagePort→P (direct, bypass bridge)                                                   |
+| X    | Input report                 | WT in-page          | hidraw→D→WT→P (main-thread parse, no worker; `useWorker` off)                                         |
+| L    | `enumerate`                  | NM                  | P→B→G→NM→D→hidapi→NM→G→B→P                                                                            |
+| M    | `open`                       | NM                  | P→B→G→NM→D→hidapi→NM→G→B→P + persistent reader/I/O workers + data worker setup + MessagePort transfer |
+| N    | `close`                      | NM                  | P→B→G→NM→D→NM→G→B→P + reader/I/O worker teardown + data worker terminate + port return                |
+| O    | `requestDevice`              | NM                  | P→B (picker UI) → enumerate → user select → B pairs (bridge-side) → B→P                               |
+| P    | `getDevices`                 | NM                  | P→B→G→storage + enumeratePaired (or cache hit)                                                        |
+| Q    | `handshake` (NM)             | NM                  | B→G→NM→D→NM→G→B (returns wsPort + wsNonce)                                                            |
+| R    | `connect`/`disconnect` event | NM                  | D→NM→G→B→P (tab-targeted)                                                                             |
+| S    | `getPolicy`                  | NM                  | P→B→G (Permissions-Policy header cache + iframe `allow` attr check)                                   |
+| T    | `globalReset`                | NM→G→B              | G broadcasts to all tabs on NM disconnect: B clears state, emits disconnect per device                |
 
 All send/sendFeature paths are ack-wait (resolve on daemon response).
 
@@ -70,19 +72,19 @@ All send/sendFeature paths are ack-wait (resolve on daemon response).
 
 ### Path A - `sendReport` WS (ack-wait)
 
-| Step      | Location                           | Operation                                                                       | Copies                         | Hops  |
-| --------- | ---------------------------------- | ------------------------------------------------------------------------------- | ------------------------------ | ----- |
-| 1         | `content/main/index.js`            | `view.slice()` own-buffer copy                                                  | 1                              | 0     |
-| 2         | `content/main/index.js`            | `dataPort.postMessage({type:'send',...}, [buffer])` → P→W via MessagePort       | 0 (transfer)                   | 1     |
-| 3         | `content/isolated/worker/index.js` | `frame = new Uint8Array(6+len); frame.set(payload,6)`                           | 1 (alloc+copy)                 | 0     |
-| 4         | `content/isolated/worker/index.js` | `ws.send(frame)` → W→D                                                          | 1 (WS encode) + 1 (kernel TCP) | 1     |
-| 5         | `batching.rs`                      | `Arc::from(&frame[6..])` → `spawn_blocking`                                     | 0 (Arc)                        | 1     |
-| 6         | `hid.rs`                           | `WRITE_BUF.extend_from_slice(&payload)`                                         | 1 (copy)                       | 0     |
-| 7         | `hid.rs`                           | `dev.write(&buf)` → hidraw                                                      | 1 (kernel)                     | 1     |
-| 8         | `websocket.rs`                     | WS ack frame → D→W                                                              | 1 (WS encode) + 1 (kernel)     | 1     |
-| 9         | `content/isolated/worker/index.js` | `handleControlResponse` → `dataPort.postMessage({type:'sendResult',...})` → W→P | 0 (small obj)                  | 1     |
-| 10        | `content/main/index.js`            | `dataPort.onmessage` → resolve Promise                                          | 0                              | 0     |
-| **Total** |                                    |                                                                                 | **7**                          | **6** |
+| Step      | Location                           | Operation                                                                                | Copies                         | Hops               |
+| --------- | ---------------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------ | ------------------ |
+| 1         | `content/main/index.js`            | `view.slice()` own-buffer copy                                                           | 1                              | 0                  |
+| 2         | `content/main/index.js`            | `dataPort.postMessage({type:'send',...}, [buffer])` → P→W via MessagePort                | 0 (transfer)                   | 1                  |
+| 3         | `content/isolated/worker/index.js` | `frame = new Uint8Array(6+len); frame.set(payload,6)`                                    | 1 (alloc+copy)                 | 0                  |
+| 4         | `content/isolated/worker/index.js` | `ws.send(frame)` → W→D                                                                   | 1 (WS encode) + 1 (kernel TCP) | 1                  |
+| 5         | `batching.rs` / `device_mgr.rs`    | `payload[1..].to_vec()` then enqueue `IoCommand` on the persistent per-device I/O worker | 1 (payload copy)               | 1 (worker handoff) |
+| 6         | `device_mgr.rs`                    | I/O worker calls `hid::write_report` using its thread-local write buffer                 | 1 (report-id + payload copy)   | 0                  |
+| 7         | `hid.rs`                           | `dev.write(&buf)` → hidraw                                                               | 1 (kernel)                     | 1                  |
+| 8         | `websocket.rs`                     | WS ack frame → D→W                                                                       | 1 (WS encode) + 1 (kernel)     | 1                  |
+| 9         | `content/isolated/worker/index.js` | `handleControlResponse` → `dataPort.postMessage({type:'sendResult',...})` → W→P          | 0 (small obj)                  | 1                  |
+| 10        | `content/main/index.js`            | `dataPort.onmessage` → resolve Promise                                                   | 0                              | 0                  |
+| **Total** |                                    |                                                                                          | **8**                          | **6**              |
 
 **Page-side latency**: **5 to 10 ms** (resolves on WS ack, not early).
 
@@ -92,20 +94,20 @@ All send/sendFeature paths are ack-wait (resolve on daemon response).
 
 ### Path C - `sendReport` NM (ack-wait)
 
-| Step      | Location                     | Operation                                                      | Copies                | Hops  |
-| --------- | ---------------------------- | -------------------------------------------------------------- | --------------------- | ----- |
-| 1         | `content/main/index.js`      | `view.slice()` own-buffer copy                                 | 1                     | 0     |
-| 2         | `content/main/index.js`      | `bridgePort.postMessage` → P→B                                 | 1 (clone)             | 1     |
-| 3         | `content/isolated/bridge.js` | `browser.runtime.sendMessage(msg)` → B→G                       | 1 (clone+IPC)         | 1     |
-| 4         | `background/index.js`        | `buildPackedSend` → `port.postMessage({d:base64})` → G→N       | 1 (b64) + 1 (JSON)    | 1     |
-| 5         | NM host                      | `read_frame` → `write_vectored` → socket → D                   | 2 (kernel)            | 1     |
-| 6         | `client.rs`                  | `read_message` → JSON parse → base64 decode → `spawn_blocking` | 1 (JSON) + 1 (b64)    | 1     |
-| 7         | `hid.rs`                     | `WRITE_BUF.extend` → `dev.write`                               | 1 (copy) + 1 (kernel) | 1     |
-| 8         | `client.rs`                  | NM response → N→G                                              | 1 (JSON) + 2 (kernel) | 1     |
-| 9         | `background/index.js`        | sendResponse → G→B                                             | 1 (clone+IPC)         | 1     |
-| 10        | `content/isolated/bridge.js` | `replyToPage` → B→P                                            | 1 (clone)             | 1     |
-| 11        | `content/main/index.js`      | resolve Promise                                                | 0                     | 0     |
-| **Total** |                              |                                                                | **15**                | **9** |
+| Step      | Location                      | Operation                                                                                           | Copies                                    | Hops               |
+| --------- | ----------------------------- | --------------------------------------------------------------------------------------------------- | ----------------------------------------- | ------------------ |
+| 1         | `content/main/index.js`       | `view.slice()` own-buffer copy                                                                      | 1                                         | 0                  |
+| 2         | `content/main/index.js`       | `bridgePort.postMessage` → P→B                                                                      | 1 (clone)                                 | 1                  |
+| 3         | `content/isolated/bridge.js`  | `browser.runtime.sendMessage(msg)` → B→G                                                            | 1 (clone+IPC)                             | 1                  |
+| 4         | `background/index.js`         | `buildPackedSend` → `port.postMessage({d:base64})` → G→N                                            | 1 (b64) + 1 (JSON)                        | 1                  |
+| 5         | NM host                       | `read_frame` → `write_vectored` → socket → D                                                        | 2 (kernel)                                | 1                  |
+| 6         | `client.rs` / `device_mgr.rs` | JSON parse + base64 decode + `data.to_vec()`, then enqueue `IoCommand` on the persistent I/O worker | 1 (JSON) + 1 (b64) + 1 (payload copy)     | 1 (worker handoff) |
+| 7         | `device_mgr.rs`               | I/O worker calls `hid::write_report` using its thread-local write buffer                            | 1 (report-id + payload copy) + 1 (kernel) | 1                  |
+| 8         | `client.rs`                   | NM response → N→G                                                                                   | 1 (JSON) + 2 (kernel)                     | 1                  |
+| 9         | `background/index.js`         | sendResponse → G→B                                                                                  | 1 (clone+IPC)                             | 1                  |
+| 10        | `content/isolated/bridge.js`  | `replyToPage` → B→P                                                                                 | 1 (clone)                                 | 1                  |
+| 11        | `content/main/index.js`       | resolve Promise                                                                                     | 0                                         | 0                  |
+| **Total** |                               |                                                                                                     | **16**                                    | **9**              |
 
 **Page-side latency**: **8 to 20 ms** (full NM roundtrip).
 
@@ -118,9 +120,9 @@ All send/sendFeature paths are ack-wait (resolve on daemon response).
 Identical to Path A with the transport leg swapped: the worker writes the same
 `[0x01][reqId:u32 LE][reportId][payload]` frame over the persistent WT
 bidirectional stream (each frame length-prefixed `[len:u32 LE]`; QUIC/TLS
-encode + kernel UDP instead of WS encode + TCP). Same totals: **7 copies,
-6 hops**. Latency **3 to 8 ms** (benchmark per-report round-trip p50 ≈ 0.85ms
-vs ws 0.78ms: QUIC/TLS loopback costs ~+0.07ms per report).
+encode + kernel UDP instead of WS encode + TCP). Same totals as Path A:
+**8 copies, 6 hops**. Latency **3 to 8 ms** (benchmark per-report round-trip
+p50 ≈ 0.85ms vs ws 0.78ms: QUIC/TLS loopback costs ~+0.07ms per report).
 
 ---
 
@@ -134,20 +136,21 @@ like every stream frame); acks (0x81/0x82/0x83) return on the same stream and
 resolve the promise (`handleInPageControlResponse`). The bridge data-port (NM)
 path remains only as the fallback while the plane is not open.
 
-| Step      | Location                | Operation                                                       | Copies                               | Hops  |
-| --------- | ----------------------- | --------------------------------------------------------------- | ------------------------------------ | ----- |
-| 1         | `content/main/index.js` | `view.slice()` own-buffer copy                                  | 1                                    | 0     |
-| 2         | `content/main/index.js` | `inPageRequest` builds `[0x01][reqId][reportId][payload]` frame | 1 (alloc+copy)                       | 0     |
-| 3         | `content/main/index.js` | `plane.wt.send(frame)` → P→D over WT stream                     | 1 (QUIC/TLS encode) + 1 (kernel UDP) | 1     |
-| 4         | `batching.rs`           | `Arc::from(&frame[6..])` → `spawn_blocking`                     | 0 (Arc)                              | 1     |
-| 5         | `hid.rs`                | `WRITE_BUF.extend_from_slice(&payload)`                         | 1 (copy)                             | 0     |
-| 6         | `hid.rs`                | `dev.write(&buf)` → hidraw                                      | 1 (kernel)                           | 1     |
-| 7         | `webtransport.rs`       | ack frame → D→P over WT stream                                  | 1 (QUIC/TLS encode) + 1 (kernel UDP) | 1     |
-| 8         | `content/main/index.js` | `handleInPageControlResponse` → resolve                         | 0                                    | 0     |
-| **Total** |                         |                                                                 | **8**                                | **4** |
+| Step      | Location                        | Operation                                                                                | Copies                               | Hops               |
+| --------- | ------------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------ | ------------------ |
+| 1         | `content/main/index.js`         | `view.slice()` own-buffer copy                                                           | 1                                    | 0                  |
+| 2         | `content/main/index.js`         | `inPageRequest` builds `[0x01][reqId][reportId][payload]` frame                          | 1 (alloc+copy)                       | 0                  |
+| 3         | `content/main/index.js`         | `plane.wt.send(frame)` → P→D over WT stream                                              | 1 (QUIC/TLS encode) + 1 (kernel UDP) | 1                  |
+| 4         | `batching.rs` / `device_mgr.rs` | `payload[1..].to_vec()` then enqueue `IoCommand` on the persistent per-device I/O worker | 1 (payload copy)                     | 1 (worker handoff) |
+| 5         | `device_mgr.rs`                 | I/O worker calls `hid::write_report` using its thread-local write buffer                 | 1 (report-id + payload copy)         | 0                  |
+| 6         | `hid.rs`                        | `dev.write(&buf)` → hidraw                                                               | 1 (kernel)                           | 1                  |
+| 7         | `webtransport.rs`               | ack frame → D→P over WT stream                                                           | 1 (QUIC/TLS encode) + 1 (kernel UDP) | 1                  |
+| 8         | `content/main/index.js`         | `handleInPageControlResponse` → resolve                                                  | 0                                    | 0                  |
+| **Total** |                                 |                                                                                          | **9**                                | **4**              |
 
-Copy count matches the worker send path (Path A: the two MessagePort hops are zero-copy transfers); the hop count is 4. Latency **3 to 8 ms**
-(ack-wait over WT; benchmark per-report round-trip p50 ≈ 0.85ms vs ws 0.78ms).
+The extra copy versus the worker path is the in-page frame payload copy at the
+daemon boundary. Latency **3 to 8 ms** (ack-wait over WT; benchmark per-report
+round-trip p50 ≈ 0.85ms vs ws 0.78ms).
 
 ---
 
@@ -170,7 +173,7 @@ Copy count matches the worker send path (Path A: the two MessagePort hops are ze
 | 1 kHz (sparse) | 1 to 5 ms    | 0 µs (immediate flush)       |
 | 8 kHz (burst)  | 1 to 13 ms   | ≤8 ms (high-rate coalescing) |
 
-**Key improvement vs old SAB path**: MessagePort eliminates bridge re-forward (1 fewer hop, 1 fewer structured clone, 0 Xray unwrap alloc). Polyfill zero-copy DataView eliminates 1 ArrayBuffer + 1 byte copy per report. Total allocs per report: ~2 (worker ArrayBuffer + DataView) vs ~5 to 7 in the old SAB path.
+**MessagePort direct delivery** eliminates the bridge re-forward (one fewer hop, one fewer structured clone, and no Xray unwrap allocation). Polyfill zero-copy DataView eliminates one ArrayBuffer and one byte copy per report. The worker's persistent HID I/O queue also handles output and feature operations without per-request thread-pool dispatch.
 
 ---
 
@@ -263,7 +266,7 @@ Latency: **1 to 6 ms** (same frame path as W, one hop less; main-thread parse ad
 | Phase                                                                                   | Copies | Hops   | Est. latency    |
 | --------------------------------------------------------------------------------------- | ------ | ------ | --------------- |
 | Request P→D (NM)                                                                        | 5      | 4      | 2 to 5 ms       |
-| Daemon: hidapi open + reader thread                                                     | 0      | 1      | 5 to 15 ms      |
+| Daemon: hidapi open + reader thread + persistent per-device I/O worker                  | 0      | 1      | 5 to 15 ms      |
 | Response D→P (NM, returns sessionToken + wsPort)                                        | 6      | 4      | 2 to 5 ms       |
 | Data worker spawn (shadow URL or blob mode) + WS connect + MessagePort transfer (P→B→W) | 1      | 2      | 5 to 15 ms      |
 | `setDataPlane` → daemon (NM)                                                            | 2      | 2      | 1 to 3 ms       |
@@ -306,21 +309,21 @@ Bridge sends `handshake` on init. The response contains `wsPort` (the daemon's W
 
 ## 6. Copy + Hop Summary
 
-| Path                   | Copies | Hops | Bottleneck                                             |
-| ---------------------- | ------ | ---- | ------------------------------------------------------ |
-| A: sendReport WS       | 7      | 6    | TCP loopback + hidraw syscall                          |
-| C: sendReport NM       | 15     | 9    | runtime.sendMessage + JSON/base64 + NM pipe            |
-| I: Input MessagePort   | 6      | 4    | WS recv + per-report alloc                             |
-| J: Input port fallback | 7      | 6    | Transfer eliminates 2 clones                           |
-| K: Input NM            | 10     | 7    | JSON + base64 + tabs.sendMessage                       |
-| U: sendReport WT       | 7      | 6    | QUIC/TLS encode + hidraw syscall                       |
-| V: sendReport in-page  | 8      | 4    | QUIC/TLS encode + hidraw syscall (no MessagePort hops) |
-| W: Input WT worker     | 6      | 4    | QUIC/TLS encode + per-report alloc                     |
-| X: Input WT in-page    | 6      | 3    | No worker hop, but main-thread parse (CPU contention)  |
-| L: enumerate (NM)      | 14     | 10   | hidapi scan                                            |
-| M: open                | 14     | 13   | hidapi open + worker spawn + WS + setdataplane         |
-| N: close (NM)          | 10     | 10   | NM roundtrip                                           |
-| Q: handshake           | 7      | 6    | NM roundtrip (one-time, on init)                       |
+| Path                   | Copies | Hops | Bottleneck                                            |
+| ---------------------- | ------ | ---- | ----------------------------------------------------- |
+| A: sendReport WS       | 8      | 6    | Persistent I/O worker + TCP loopback + hidraw syscall |
+| C: sendReport NM       | 16     | 9    | runtime.sendMessage + JSON/base64 + NM pipe           |
+| I: Input MessagePort   | 6      | 4    | WS recv + per-report alloc                            |
+| J: Input port fallback | 7      | 6    | Transfer eliminates 2 clones                          |
+| K: Input NM            | 10     | 7    | JSON + base64 + tabs.sendMessage                      |
+| U: sendReport WT       | 8      | 6    | Persistent I/O worker + QUIC/TLS + hidraw syscall     |
+| V: sendReport in-page  | 9      | 4    | QUIC/TLS + persistent I/O worker, no MessagePort hops |
+| W: Input WT worker     | 6      | 4    | QUIC/TLS encode + per-report alloc                    |
+| X: Input WT in-page    | 6      | 3    | No worker hop, but main-thread parse (CPU contention) |
+| L: enumerate (NM)      | 14     | 10   | hidapi scan                                           |
+| M: open                | 14     | 13   | hidapi open + worker spawn + WS + setdataplane        |
+| N: close (NM)          | 10     | 10   | NM roundtrip                                          |
+| Q: handshake           | 7      | 6    | NM roundtrip (one-time, on init)                      |
 
 ---
 
@@ -332,11 +335,11 @@ Bridge sends `handshake` on init. The response contains `wsPort` (the daemon's W
 
 3. **Zero-copy polyfill eliminates GCMajor.** DataView created directly on transferred ArrayBuffer (no intermediate `new Uint8Array` copy) reduces allocation pressure by ~70%, preventing GCMajor from triggering during benchmarks.
 
-4. **WS data plane is faster end-to-end** for sendReport (3 to 8ms vs 8 to 20ms) and input reports (1 to 5ms vs 8 to 18ms).
+4. **WS remains the fastest measured Firefox data plane on loopback**, while WT is the default because it avoids WebSocket IPC on the content main thread. WS sendReport is about 3 to 8ms end to end versus 8 to 20ms for NM, and input delivery is about 1 to 5ms versus 8 to 18ms for NM.
 
 5. **Rate-gated batching** keeps latency low for sparse reports (0µs), coalesces bursts within 25µs, and widens to an 8ms window once the flush rate exceeds ~12 reports per 4ms, so 8kHz polling amortizes per-frame overhead without hurting low-rate latency.
 
-6. **Daemon does not broadcast to both channels.** `has_nm_session_for_client` checks whether the client holds an active NM-mode session on the device before forwarding InputReports via NM. Explicit per-client session records (`session_token -> {device_id, owner_client_id, mode, ws_auth_hash, active}`) track each session's mode independently.
+6. **Daemon mode routing is session-scoped.** Each active session has its own device authority, owner client, mode, auth hash, cancellation signal, and transport generations. NM input forwarding uses a per-client hot binding, while WS and WT use revocable generation-scoped capabilities. A mode switch invalidates the previous binding before publishing the next one, so the daemon does not double-deliver or let stale transports reach the HID handle.
 
 7. **WS data frame header is 6 bytes** (no device ID): `[type:u8][reqId:u32 LE][reportId:u8][payload]`. The WS connection is per-device, so the device ID is implicit. NM packed TLVs include a device ID (12-byte header) because the NM connection is shared across all devices.
 
@@ -362,7 +365,8 @@ sequenceDiagram
     B->>W: postMessage (transfer)
     W->>W: frame = new Uint8Array(6+len)
     W->>D: ws.send(binary frame)
-    D->>D: Arc::from(&frame[6..]) spawn_blocking
+    D->>D: payload copy + enqueue IoCommand on persistent I/O worker
+    D->>D: I/O worker uses thread-local write buffer
     D->>D: hidraw write
     D-->>W: ws ack frame
     W-->>B: sendResult
@@ -387,6 +391,8 @@ sequenceDiagram
     G->>N: port.postMessage({d:b64})
     N->>D: socket write
     D->>D: JSON parse + b64 decode
+    D->>D: enqueue IoCommand on persistent I/O worker
+    D->>D: I/O worker uses thread-local write buffer
     D->>D: hidraw write
     D-->>N: socket response
     N-->>G: NM read
@@ -463,7 +469,8 @@ sequenceDiagram
     P->>P: view.slice() own-buffer copy
     P->>P: inPageRequest builds frame ([0x01][reqId][reportId][payload])
     P->>D: plane.wt.send(frame) over WT stream
-    D->>D: Arc::from(&frame[6..]) spawn_blocking
+    D->>D: payload copy + enqueue IoCommand on persistent I/O worker
+    D->>D: I/O worker uses thread-local write buffer
     D->>D: hidraw write
     D-->>P: ack frame over WT stream (0x81/0x82/0x83)
     P->>P: handleInPageControlResponse → resolve
@@ -526,7 +533,7 @@ sequenceDiagram
     B-->>P: port.postMessage(res)
 ```
 
-### Path M: `open` (NM + WS data plane setup)
+### Path M: `open` (NM + selected data-plane setup)
 
 ```mermaid
 sequenceDiagram
@@ -541,7 +548,7 @@ sequenceDiagram
     B->>G: runtime.sendMessage
     G->>N: port.postMessage({a:2})
     N->>D: socket write
-    D->>D: hidapi open + reader thread
+    D->>D: hidapi open + reader thread + persistent I/O worker
     D-->>N: socket response (sessionToken + wsPort)
     N-->>G: NM read
     G-->>B: sendResponse
@@ -569,7 +576,8 @@ sequenceDiagram
     B->>G: runtime.sendMessage
     G->>N: port.postMessage({a:3})
     N->>D: socket write
-    D->>D: close hidraw + stop reader
+    D->>D: invalidate session transport and NM binding
+    D->>D: if last session, close HID + stop reader and I/O worker
     D-->>N: socket response
     N-->>G: NM read
     G-->>B: sendResponse

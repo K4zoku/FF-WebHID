@@ -49,18 +49,18 @@ Profile B (persistent daemon + forwarder):
   service integration, IPC authorization (webhid group / socket perms).
 ```
 
-| Package        | Profile | Notes                                                                          |
-| -------------- | ------- | ------------------------------------------------------------------------------ |
-| Arch (AUR)     | A+B     | Root systemd service (B) plus both manifests on Firefox/LibreWolf/Waterfox (A). |
-| Debian/Ubuntu  | A+B     | systemd service, udev rule, `webhid` group created by postinst.                 |
-| Fedora/RHEL    | A+B     | systemd service, udev rule, `webhid` group created by `%pre`.                   |
-| Alpine         | B       | OpenRC + mdev; group created by pre-install hook.                               |
-| Void           | B       | runit service shipped; systemd unit kept as reference.                          |
-| NixOS          | B       | systemd service as `webhid` user, udev group rule for hidraw.                   |
-| Homebrew       | A+B     | `webhid-register-firefox` (A) plus `brew services` (B).                         |
-| Windows MSI    | A+B     | Registers both NM hosts; no persistent service (use Scheduled Task manually).   |
-| Windows ZIP    | A       | `install.ps1` registers daemon-as-NM-host; MSI for all-users/B mode.            |
-| macOS ZIP      | A       | `install.sh` registers daemon-as-NM-host; Homebrew for B mode.                  |
+| Package       | Profile | Notes                                                                           |
+| ------------- | ------- | ------------------------------------------------------------------------------- |
+| Arch (AUR)    | A+B     | Root systemd service (B) plus both manifests on Firefox/LibreWolf/Waterfox (A). |
+| Debian/Ubuntu | A+B     | systemd service, udev rule, `webhid` group created by postinst.                 |
+| Fedora/RHEL   | A+B     | systemd service, udev rule, `webhid` group created by `%pre`.                   |
+| Alpine        | B       | OpenRC + mdev; group created by pre-install hook.                               |
+| Void          | B       | runit service shipped; systemd unit kept as reference.                          |
+| NixOS         | B       | systemd service as `webhid` user, udev group rule for hidraw.                   |
+| Homebrew      | A+B     | `webhid-register-firefox` (A) plus `brew services` (B).                         |
+| Windows MSI   | A+B     | Registers both NM hosts; no persistent service (use Scheduled Task manually).   |
+| Windows ZIP   | A       | `install.ps1` registers daemon-as-NM-host; MSI for all-users/B mode.            |
+| macOS ZIP     | A       | `install.sh` registers daemon-as-NM-host; Homebrew for B mode.                  |
 
 ---
 
@@ -376,8 +376,9 @@ Then install the [browser extension](https://addons.mozilla.org/en-US/firefox/ad
 - **NM host silent failure** (addon paralyzed, no logs): the NM host writes `{"s":503,"E":"..."}` error frame to stdout before exiting, addon logs `[nm] host error: <reason>`.
 - **Device picker shows "No HID devices found"**: daemon running but no HID devices detected. Check `hidapi` can enumerate: `ls /dev/hidraw*` (Linux).
 - **Badge counter not showing**: ensure the device is opened via `navigator.hid.requestDevice()`, the counter tracks open devices, not paired ones.
-- **NM data plane is slow**: switch Data Plane to WebSocket in settings.
-- **Daemon restart causes input report freeze**: workers detect WS close code 4401 (unknown token) and trigger token refresh via bridge (re-open for data).
+- **NM data plane is slow**: switch Data Plane to WebTransport when available (the default), or WebSocket otherwise. Use NM when the site's security policy blocks both worker transports.
+- **WebTransport or worker WebSocket retries on Firefox 154**: Local Network Access can affect both worker WebSocket and page-context WebTransport. WebSocket is the practical path that can surface the browser permission UI; after granting it, WebTransport may work. If the network data plane still cannot start, FF-WebHID falls back to Native Messaging. `network.lna.blocking=false` is the narrower workaround; `network.lna.enabled=false` disables LNA more broadly.
+- **Daemon restart causes input report freeze**: workers detect WS close code 4401 (unknown token); the bridge refreshes the data plane by reusing a live session token when possible instead of opening a new HID session solely for transport refresh.
 - **Settings change doesn't take effect**: `SettingsStore` Proxy observer fires listeners only on actual value change.
 
 ## Recommended Settings per Platform
@@ -387,26 +388,26 @@ Then install the [browser extension](https://addons.mozilla.org/en-US/firefox/ad
 | Setting            | Recommended      | Reason                                                                                                                                                                  |
 | ------------------ | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Daemon as NM host  | ON (recommended) | Runs daemon as your user, no forwarder process / Unix socket, one less IPC hop. Needs udev `uaccess` rule. OFF only if you prefer a persistent root daemon + forwarder. |
-| Data Plane         | WS (default)     | Binary WS via worker with MessagePort for max performance. Switch to NM if WS is blocked.                                                                               |
+| Data Plane         | WT (default)     | WebTransport in a worker keeps page rendering isolated; use WebSocket when WT is unavailable, or NM when site policy blocks both worker transports.                     |
 | Device Picker Mode | modal (default)  | Inline dialog, least friction. pageAction/window available for single-device sites.                                                                                     |
 
 **Setup**: Install daemon (system package or `make install-system`). Recommended: install the udev rule (`sudo make install-udev-rule` or copy `72-webhid.rules`) and enable "Daemon as NM host" in the addon settings; no group membership needed. Alternative: keep the root daemon + thin forwarder and add your user to the `webhid` group (`sudo usermod -aG webhid $USER`, log out + back in).
 
 ### Windows
 
-| Setting           | Recommended  | Reason                                                                                                                                           |
-| ----------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Daemon as NM host | ON (default) | Recommended mode: daemon speaks NM directly, no forwarder. Windows has no permission setup; daemon auto-detects via Firefox's 2 positional args. |
-| Data Plane        | WS (default) | Binary WS via worker with MessagePort for performance                                                                                            |
+| Setting           | Recommended  | Reason                                                                                                                                              |
+| ----------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Daemon as NM host | ON (default) | Recommended mode: daemon speaks NM directly, no forwarder. Windows has no permission setup; daemon auto-detects via Firefox's 2 positional args.    |
+| Data Plane        | WT (default) | WebTransport in a worker keeps page rendering isolated; use WebSocket when WT is unavailable, or NM when site policy blocks both worker transports. |
 
 **Setup**: Install MSI or portable zip. `daemonAsNmHost` defaults to `true` on Windows (auto-detected). For forwarder mode, register `webhid.forwarder_nm_host.json` with `path` pointing to `webhid-native-messaging.exe`.
 
 ### macOS
 
-| Setting           | Recommended  | Reason                                                     |
-| ----------------- | ------------ | ---------------------------------------------------------- |
-| Daemon as NM host | ON           | Recommended mode: no forwarder / Unix socket, one less hop |
-| Data Plane        | WS (default) | WS worker + MessagePort works well on macOS                |
+| Setting           | Recommended  | Reason                                                                                                                                              |
+| ----------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Daemon as NM host | ON           | Recommended mode: no forwarder / Unix socket, one less hop                                                                                          |
+| Data Plane        | WT (default) | WebTransport in a worker keeps page rendering isolated; use WebSocket when WT is unavailable, or NM when site policy blocks both worker transports. |
 
 **Setup**: Install via Homebrew (`brew install webhid`) or manual. Recommended: stop the `brew services` daemon and enable "Daemon as NM host" in the addon settings. Grant HID permissions in System Settings → Privacy & Security → Input Monitoring if prompted.
 
