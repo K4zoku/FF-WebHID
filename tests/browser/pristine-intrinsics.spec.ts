@@ -41,6 +41,7 @@ test.describe('MAIN-world pristine intrinsics', () => {
         set: ownMethod(nativeWeakMap.prototype, 'set')
       }
       const originalObjectDescriptor = ownMethod(nativeObject, 'getOwnPropertyDescriptor')
+      const originalFreeze = ownMethod(nativeObject, 'freeze')
       const originalReflectConstruct = ownMethod(nativeReflect, 'construct')
       const originalUint8Set = ownMethod(nativeUint8Array.prototype, 'set')
       const originalDataViewGetUint32 = ownMethod(nativeDataView.prototype, 'getUint32')
@@ -71,6 +72,7 @@ test.describe('MAIN-world pristine intrinsics', () => {
       nativeReflect.construct = () => {
         throw new Error('patched Reflect.construct')
       }
+      nativeObject.freeze = (target: object): object => target
       nativeUint8Array.prototype.set = () => {
         throw new Error('patched Uint8Array.set')
       }
@@ -96,6 +98,7 @@ test.describe('MAIN-world pristine intrinsics', () => {
       nativeWeakMap.prototype.get = originalWeakMap.get
       nativeWeakMap.prototype.set = originalWeakMap.set
       nativeObject.getOwnPropertyDescriptor = originalObjectDescriptor
+      nativeObject.freeze = originalFreeze
       nativeReflect.construct = originalReflectConstruct
       nativeUint8Array.prototype.set = originalUint8Set
       nativeDataView.prototype.getUint32 = originalDataViewGetUint32

@@ -1403,21 +1403,21 @@
   }
 
   /**
-   * @param {object} object
+   * @param {object} target
    * @returns {object}
    */
-  function deepFreeze(object) {
-    const propNames = reflect.ownKeys(object)
+  function deepFreeze(target) {
+    const propNames = reflect.ownKeys(target)
 
     for (const name of propNames) {
-      const value = object[name]
+      const value = target[name]
 
       if ((value && typeof value === 'object') || typeof value === 'function') {
         deepFreeze(value)
       }
     }
 
-    return object.freeze(object)
+    return object.freeze(target)
   }
 
   /**
