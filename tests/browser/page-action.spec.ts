@@ -114,6 +114,24 @@ test.describe('extension action surfaces', () => {
     }
   })
 
+  test('settings localize the page action control and document metadata', async ({
+    backgroundPage,
+    sharedPage
+  }) => {
+    const settingsUrl = await backgroundPage.evaluate(() =>
+      browser.runtime.getURL('js/internal/pages/settings/index.html')
+    )
+    await sharedPage.goto(settingsUrl, { waitUntil: 'domcontentloaded', timeout: 15000 })
+    await expect(sharedPage.locator('#settingsHidePageAction')).toHaveText('Hide Page Action')
+    await expect(sharedPage.locator('[data-i18n-md="settingsHidePageActionDesc"]')).toHaveText(
+      'Keep the page action hidden when a site uses the WebHID API. The browser action still opens the device view by default.'
+    )
+    const expectedLanguage = await sharedPage.evaluate(() =>
+      browser.i18n.getUILanguage().replaceAll('_', '-')
+    )
+    await expect(sharedPage.locator('html')).toHaveAttribute('lang', expectedLanguage)
+  })
+
   test('browser action popup opens on the settings view', async ({
     backgroundPage,
     sharedPage

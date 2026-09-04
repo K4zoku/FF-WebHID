@@ -43,11 +43,39 @@
   }
 
   /**
+   * @param {string} locale
+   * @returns {string}
+   */
+  function normalizeDocumentLanguage(locale) {
+    const normalized = String(locale || '').replace(/_/g, '-')
+    return /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(normalized) ? normalized : ''
+  }
+
+  /**
+   * @returns {void}
+   */
+  function localizeDocumentMetadata() {
+    if (
+      typeof document === 'undefined' ||
+      typeof browser === 'undefined' ||
+      !browser.i18n ||
+      !document.documentElement
+    ) {
+      return
+    }
+    const language = normalizeDocumentLanguage(browser.i18n.getUILanguage())
+    if (language) document.documentElement.lang = language
+    const direction = browser.i18n.getMessage('@@bidi_dir')
+    if (direction === 'ltr' || direction === 'rtl') document.documentElement.dir = direction
+  }
+
+  /**
    * @param {Element|Document} [root]
    * @returns {void}
    */
   function localizeHTML(root) {
     const scope = root || document
+    if (scope === document) localizeDocumentMetadata()
     scope.querySelectorAll('[data-i18n-md]').forEach((el) => {
       applyMarkdown(el, t(el.getAttribute('data-i18n-md')))
     })

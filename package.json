@@ -56,6 +56,7 @@
     "test:headed": "npx playwright test --config $npm_package_config_playwrightConfig --headed",
     "test:rs": "cargo test --manifest-path $npm_package_config_cargoManifest",
     "prepare": "husky",
+    "test:i18n": "node --test tests/unit/i18n.test.js",
     "test:benchmark:chromium:addon": "npx playwright test --config $npm_package_config_playwrightBenchmarkConfig --project=chromium-addon-benchmark"
   },
   "name": "ff-webhid",

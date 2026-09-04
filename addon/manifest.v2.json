@@ -1,8 +1,8 @@
 {
   "manifest_version": 2,
-  "name": "WebHID",
+  "name": "__MSG_extensionName__",
   "version": "3.2.0",
-  "description": "WebHID API implementation for Firefox",
+  "description": "__MSG_extensionDescription__",
   "icons": {
     "48": "icons/icon.svg"
   },
@@ -47,7 +47,7 @@
   "browser_action": {
     "default_popup": "js/internal/pages/popup/index.html#settings",
     "default_icon": "icons/icon.svg",
-    "default_title": "WebHID"
+    "default_title": "__MSG_extensionName__"
   },
   "options_ui": {
     "page": "js/internal/pages/settings/index.html",

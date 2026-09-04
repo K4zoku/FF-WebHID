@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "WebHID",
+  "name": "__MSG_extensionName__",
   "version": "3.1.0",
-  "description": "WebHID API implementation",
+  "description": "__MSG_extensionDescription__",
   "minimum_chrome_version": "148",
   "message_serialization": "structured_clone",
   "icons": {
@@ -18,7 +18,8 @@
     "default_icon": {
       "16": "icons/gamepad16.png",
       "32": "icons/gamepad32.png"
-    }
+    },
+    "default_title": "__MSG_extensionName__"
   },
   "options_ui": {
     "page": "js/internal/pages/settings/index.html"

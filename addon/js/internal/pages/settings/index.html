@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title data-i18n="settingsTitle">FF-WebHID Settings</title>
+    <title data-i18n="settingsTitle">WebHID Settings</title>
     <link rel="stylesheet" href="../../../../css/theme.css" />
     <link rel="stylesheet" href="../../../../css/shared.css" />
     <link rel="stylesheet" href="style.css" />
@@ -15,11 +15,10 @@
           <h3 id="settingsDaemonAsNmHost" data-i18n="settingsDaemonAsNmHost">Daemon as NM host</h3>
           <div class="info-popover">
             <p data-i18n-md="settingsDaemonAsNmHostDesc">
-              Talk to the daemon directly over native messaging (skip the
-              <code>webhid-native-messaging</code> forwarder and Unix socket). Requires the
-              <code>webhid.daemon_nm_host</code> native-messaging manifest to be installed and the
-              daemon to run as your user (with the udev rule). Lower latency, but no root-daemon
-              fallback. The addon reconnects automatically when toggled.
+              Connect directly to the daemon through Native Messaging, bypassing the forwarder.
+              Requires the <code>webhid.daemon_nm_host</code> native-messaging manifest and a daemon
+              process that can access your devices. It may reduce latency but does not fall back to
+              a persistent system daemon. Reconnects automatically.
             </p>
           </div>
         </div>
@@ -30,10 +29,10 @@
       </div>
       <div class="setting">
         <div class="setting-info">
-          <h3 id="settingsHidePageAction">Hide Page Action</h3>
+          <h3 id="settingsHidePageAction" data-i18n="settingsHidePageAction">Hide Page Action</h3>
           <div class="info-popover">
-            <p>
-              Keep the page action hidden, even when a site uses the WebHID API. The browser action
+            <p data-i18n-md="settingsHidePageActionDesc">
+              Keep the page action hidden when a site uses the WebHID API. The browser action still
               opens the device view by default.
             </p>
           </div>
@@ -49,11 +48,10 @@
           <h3 id="settingsDataPlane" data-i18n="settingsDataPlane">Data Plane</h3>
           <div class="info-popover">
             <p data-i18n-md="settingsDataPlaneDesc">
-              <strong>WebTransport</strong> (default): the fastest option; runs in a background
-              worker so pages stay smooth.<br /><strong>WebSocket</strong>: fallback when
-              WebTransport is not available (older Firefox).<br /><strong>Native Messaging</strong
-              >: the slowest but most compatible option; use when a site's security policy blocks
-              the others.
+              <strong>WebTransport worker</strong> (default): keeps transport work and parsing off
+              the page main thread.<br /><strong>WebSocket worker</strong>: use when WebTransport is
+              unavailable, such as on older Firefox.<br /><strong>Native Messaging</strong>: most
+              compatible; use when a site's security policy prevents a worker transport.
             </p>
           </div>
         </div>
@@ -65,13 +63,9 @@
               value="wt"
               data-i18n-attr="aria-label:settingsDataPlaneWt"
             />
-            <span class="seg-label" data-i18n="segDataPlaneWt">WebTransport</span>
+            <span class="seg-label" data-i18n="segDataPlaneWt">WebTransport worker</span>
           </label>
-          <label
-            class="seg-option"
-            data-i18n-attr="title:settingsDataPlaneWtInpage"
-            hidden
-          >
+          <label class="seg-option" data-i18n-attr="title:settingsDataPlaneWtInpage" hidden>
             <input
               type="radio"
               name="dataPlane"
@@ -87,7 +81,7 @@
               value="ws"
               data-i18n-attr="aria-label:settingsDataPlaneWs"
             />
-            <span class="seg-label" data-i18n="segDataPlaneWs">WebSocket</span>
+            <span class="seg-label" data-i18n="segDataPlaneWs">WebSocket worker</span>
           </label>
           <label class="seg-option" data-i18n-attr="title:settingsDataPlaneNm">
             <input
