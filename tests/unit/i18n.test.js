@@ -39,8 +39,8 @@ function markupKeys(source) {
 }
 
 function staticTKeys(source) {
-  return [...source.matchAll(/\bt\(\s*['"]([A-Za-z][A-Za-z0-9_]*)['"]\s*\)/g)].map(
-    (match) => match[1]
+  return [...source.matchAll(/\bt\(\s*(['"])([A-Za-z][A-Za-z0-9_]*)\1(?=\s*(?:,|\)))/g)].map(
+    (match) => match[2]
   )
 }
 
@@ -80,7 +80,7 @@ function loadI18n({ language, direction }) {
   return { ...exports, document }
 }
 
-test('every static localization reference resolves in en_US', () => {
+test('every static localization reference with a literal key resolves in en_US', () => {
   const keys = new Set(DYNAMIC_KEYS)
   for (const path of filesUnder(ADDON, (path) => path.endsWith('.html'))) {
     for (const key of markupKeys(readFileSync(path, 'utf8'))) keys.add(key)
@@ -96,6 +96,31 @@ test('every static localization reference resolves in en_US', () => {
     [...keys].filter((key) => !SOURCE_KEYS.has(key)),
     []
   )
+})
+
+test('static t key detection accepts substitutions and rejects dynamic keys', () => {
+  const source = `
+    t('single')
+    t("double")
+    t('withValue', value)
+    t('withArray', [value])
+    t('withExpression', expression)
+    t('planeName' + suffix)
+    t(dynamicKey)
+  `
+  assert.deepEqual(staticTKeys(source), [
+    'single',
+    'double',
+    'withValue',
+    'withArray',
+    'withExpression'
+  ])
+
+  const popup = readFileSync(resolve(ADDON, 'js/internal/pages/popup/index.js'), 'utf8')
+  const picker = readFileSync(resolve(ADDON, 'js/content/isolated/picker/index.js'), 'utf8')
+  assert.ok(staticTKeys(popup).includes('statusFallback'))
+  assert.ok(staticTKeys(popup).includes('pickerInterfaces'))
+  assert.ok(staticTKeys(picker).includes('pickerInterfaces'))
 })
 
 test('catalogues preserve source placeholders without requiring Crowdin parity', () => {
@@ -140,7 +165,6 @@ test('high-value source strings match the current production architecture', () =
   assert.doesNotMatch(EN_CATALOG.pickerParseFailed.message, /sending reports still works/i)
 })
 
-
 test('localized extension pages keep text-bearing controls localized', () => {
   for (const relativePath of LOCALIZED_PAGES) {
     const source = readFileSync(resolve(ADDON, relativePath), 'utf8')
@@ -166,6 +190,25 @@ test('i18n applies normalized language and direction metadata', () => {
   localizeHTML(document)
   assert.equal(document.documentElement.lang, 'ar-SA')
   assert.equal(document.documentElement.dir, 'rtl')
+})
+
+test('i18n uses English metadata when the UI locale has no catalogue', () => {
+  const { document, localizeHTML } = loadI18n({ language: 'fr_CA', direction: 'ltr' })
+  localizeHTML(document)
+  assert.equal(document.documentElement.lang, 'en')
+  assert.equal(document.documentElement.dir, 'ltr')
+})
+
+test('i18n recognizes every packaged locale directory', () => {
+  for (const entry of readdirSync(resolve(ADDON, '_locales'), { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue
+    const { document, localizeHTML } = loadI18n({
+      language: entry.name.replaceAll('_', '-'),
+      direction: ''
+    })
+    localizeHTML(document)
+    assert.equal(document.documentElement.lang, entry.name.replaceAll('_', '-'))
+  }
 })
 
 test('i18n preserves the static language fallback for invalid UI locales', () => {

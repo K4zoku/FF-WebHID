@@ -1,5 +1,55 @@
 ;(function () {
   const webhid = globalThis.webhid
+  const SUPPORTED_LOCALES = new Set([
+    'af-ZA',
+    'ar-SA',
+    'ca-ES',
+    'cs-CZ',
+    'da-DK',
+    'de-DE',
+    'el-GR',
+    'en-US',
+    'es-ES',
+    'fi-FI',
+    'fr-FR',
+    'he-IL',
+    'hu-HU',
+    'it-IT',
+    'ja-JP',
+    'ko-KR',
+    'nl-NL',
+    'no-NO',
+    'pl-PL',
+    'pt-BR',
+    'pt-PT',
+    'ro-RO',
+    'ru-RU',
+    'sr-SP',
+    'sv-SE',
+    'tr-TR',
+    'uk-UA',
+    'vi-VN',
+    'zh-CN',
+    'zh-TW'
+  ])
+
+  /**
+   * @param {string} locale
+   * @returns {string[]}
+   */
+  function localeCandidates(locale) {
+    const parts = locale.split('-')
+    const candidates = [locale]
+    for (let end = parts.length - 1; end > 1; end--) {
+      candidates.push(parts.slice(0, end).join('-'))
+    }
+    const scriptIndex = parts.findIndex((part, index) => index > 0 && /^[A-Za-z]{4}$/.test(part))
+    if (scriptIndex > 0) {
+      candidates.push(parts.filter((_, index) => index !== scriptIndex).join('-'))
+    }
+    candidates.push(parts[0])
+    return candidates
+  }
 
   /**
    * @param {string} key
@@ -48,7 +98,30 @@
    */
   function normalizeDocumentLanguage(locale) {
     const normalized = String(locale || '').replace(/_/g, '-')
-    return /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(normalized) ? normalized : ''
+    if (!/^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(normalized)) return ''
+    return normalized
+      .split('-')
+      .map((part, index) => {
+        if (index === 0) return part.toLowerCase()
+        if (/^[A-Za-z]{4}$/.test(part)) {
+          return part[0].toUpperCase() + part.slice(1).toLowerCase()
+        }
+        if (/^(?:[A-Za-z]{2}|\d{3})$/.test(part)) return part.toUpperCase()
+        return part
+      })
+      .join('-')
+  }
+
+  /**
+   * @param {string} locale
+   * @returns {string}
+   */
+  function resolveDocumentLanguage(locale) {
+    const normalized = normalizeDocumentLanguage(locale)
+    if (!normalized) return 'en'
+    return (
+      localeCandidates(normalized).find((candidate) => SUPPORTED_LOCALES.has(candidate)) || 'en'
+    )
   }
 
   /**
@@ -63,8 +136,7 @@
     ) {
       return
     }
-    const language = normalizeDocumentLanguage(browser.i18n.getUILanguage())
-    if (language) document.documentElement.lang = language
+    document.documentElement.lang = resolveDocumentLanguage(browser.i18n.getUILanguage())
     const direction = browser.i18n.getMessage('@@bidi_dir')
     if (direction === 'ltr' || direction === 'rtl') document.documentElement.dir = direction
   }
