@@ -23,7 +23,8 @@ The daemon has two deployment modes:
   Firefox spawns it on demand per session.
 - **Persistent daemon + thin forwarder**: the daemon runs as a system service
   (root on Linux, `brew services` on macOS, Scheduled Task on Windows) and a
-  tiny `webhid-native-messaging` forwarder bridges stdio to the Unix socket.
+  tiny `webhid-native-messaging` forwarder bridges stdio to the platform socket
+  or named pipe.
   This survives browser restarts and shares one daemon across the system.
 
 Why Daemon-as-NM-host is recommended: one fewer process and IPC hop per

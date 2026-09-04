@@ -2,7 +2,7 @@
 
 ## Automated image-pipeline benchmark
 
-A Playwright-driven end-to-end benchmark measuring the full data-plane round-trip automatically. The Firefox project (`firefox-benchmark`) exercises the three production modes, nm, ws, and worker wt, plus `wt-inpage`, a benchmark-only WT configuration. `wt-inpage` sets `dataPlane: 'wt'` with `useWorker: false`, so the hostile MAIN world owns the transport and can see daemon bearer credentials. The settings UI hides it, and it is not a supported user-facing data plane. The Chromium projects run native WebHID (`chromium-benchmark`) and the addon on the same Chromium build (`chromium-addon-benchmark`) across the same benchmark modes.
+A Playwright-driven end-to-end benchmark measuring the full data-plane round-trip automatically. The Firefox project (`firefox-benchmark`) exercises the three production modes, nm, ws, and worker wt, plus `wt-inpage`, a benchmark-only WT configuration. `wt-inpage` sets `dataPlane: 'wt'` with `useWorker: false`, so the page MAIN world owns transport handling and parsing and receives the derived transport authentication value needed to establish WT, not the daemon Session bearer token. It is retained to measure the performance cost of moving that work onto the page main thread, performs worse under page CPU and render load, and is hidden from the normal settings UI. It is not a supported user-facing data plane. The Chromium projects run native WebHID (`chromium-benchmark`) and the addon on the same Chromium build (`chromium-addon-benchmark`) across the same benchmark modes.
 
 **Scenario**: a benchmark page fetches a small PNG fixture
 (`tests/fixtures/images/sample.png`, the project icon, ~32KB), chunks it into
@@ -462,16 +462,19 @@ the sum of the 10 whole-run walltimes)
 
 ### What the wt numbers buy (and cost)
 
-- **wt beats ws on Firefox** (p50 0.74ms vs 0.94ms, walltime 334.8ms vs
-  399.9ms) despite the TLS/QUIC handshake: WS input reports cross the
+- **wt beats ws on Firefox** (p50 0.74ms vs 0.94ms, walltime 334.8ms vs 399.9ms) despite the TLS/QUIC handshake: WS input reports cross the
   content main thread (PWebSocket IPC into `RecvOnBinaryMessageAvailable`,
   then ChannelEventQueue into the worker), contending with page rendering;
   wt reads reports from a DataPipe shared-memory buffer on the worker with
   zero WebSocket IPC. Profiler-verified: ws main thread carries ~10.8k
   `OnBinaryMessageAvailable` + ~10.8k `FrameReceived` IPC markers per 3.5s
   spec and 3.8x the IPC of wt; main-thread CPU ws 75% vs wt 57%.
-- **wt-inpage sits between**: no delivery hops, but the DataPipe read
-  happens on the main thread.
+- **wt-inpage is a benchmark-only performance comparison**: transport handling,
+  DataPipe reads, and parsing happen on the page main thread, so this variant
+  competes directly with page CPU and rendering work. It is not a security
+  downgrade and does not expose the daemon Session bearer token; the page
+  receives only the derived transport authentication value required by the
+  benchmark transport.
 - **Security**: loopback TLS does not stop a network MITM (there is no real
   network between daemon and browser); it stops another local process from
   impersonating the daemon at `127.0.0.1:<port>` without the private key

@@ -14,10 +14,9 @@ graph TB
         BG["background.js"]
     end
 
-    subgraph "Native Messaging deployment, choose one"
-        Direct["webhid-daemon<br/>Native Messaging host"]
+    subgraph "Native Messaging deployment, choose one route"
         Forwarder["webhid-native-messaging<br/>thin forwarder"]
-        Daemon["webhid-daemon<br/>persistent daemon"]
+        Daemon["webhid-daemon<br/>single daemon implementation"]
     end
 
     HID["HID device"]
@@ -27,21 +26,20 @@ graph TB
     Page -- "transferred per-device MessagePort" --> Worker
     Bridge -- "persistent runtime Port: webhid-data:<deviceId>, NM only" --> BG
     Worker -- "persistent WS or WT" --> Daemon
-    BG -- "persistent Native Messaging Port" --> Direct
-    BG -- "persistent Native Messaging Port" --> Forwarder
+    BG -- "persistent Native Messaging stdio, direct profile" --> Daemon
+    BG -- "persistent Native Messaging stdio, forwarder profile" --> Forwarder
     Forwarder -- "Unix socket or Windows named pipe" --> Daemon
-    Direct -- "hidapi" --> HID
     Daemon -- "hidapi" --> HID
 ```
 
-The Native Messaging branches are deployment alternatives, not consecutive hops:
+The Native Messaging routes are deployment alternatives to the same daemon implementation:
 
-1. **Daemon as Native Messaging host:** `background → Native Messaging stdio → webhid-daemon`.
-2. **Persistent daemon plus forwarder:** `background → Native Messaging stdio → webhid-native-messaging → Unix socket or Windows named pipe → webhid-daemon`.
+1. **Daemon as Native Messaging host:** `background → persistent Native Messaging stdio → webhid-daemon`.
+2. **Persistent daemon plus forwarder:** `background → persistent Native Messaging stdio → webhid-native-messaging → Unix socket or Windows named pipe → webhid-daemon`.
 
-`browser.runtime.connectNative()` establishes a persistent Native Messaging Port. Subsequent `postMessage()` calls reuse that Port and do not start another host process.
+Worker WS and WT connections reach that same daemon in either profile, as does HID access. `browser.runtime.connectNative()` establishes a persistent Native Messaging Port. Subsequent `postMessage()` calls reuse that Port and do not start another host process.
 
-The `dataPlane` setting selects report transport: `wt` is the preferred default where available, `ws` is the alternate worker transport, and `nm` is the compatibility path. Control operations always use Native Messaging.
+The `dataPlane` setting selects report transport: `wt` is the preferred default where available, `ws` is the alternate worker transport, and `nm` is the compatibility path. Normal page control requests that leave the bridge enter the persistent bridge control Port, then either resolve in the addon background or continue over Native Messaging when the operation is daemon-backed. Extension-page control uses the one-shot internal paths described below.
 
 ## Browser communication surfaces
 
@@ -53,7 +51,7 @@ The normal bridge to background path is Port-based:
 - When an open device uses NM, the bridge creates or reuses `browser.runtime.connect({name: 'webhid-data:<deviceId>'})`. `sendReport`, `sendFeatureReport`, and `receiveFeatureReport` go through that per-device Port.
 - Background receives both through `runtime.onConnect`, registers them with `registerContentPort`, and dispatches their requests through the same handlers as other callers. A response carries the request id back on the originating Port.
 
-This replaces the old normal `bridge → runtime.sendMessage → background → sendResponse → bridge` model. `runtime.sendMessage` remains valid for one-shot cold or internal traffic, including extension-page interactions, picker operations, and MV2 resource fetches. It is not the normal bridge control or NM report path.
+This replaces the old normal `bridge → runtime.sendMessage → background → sendResponse → bridge` model. `runtime.sendMessage` remains valid for one-shot cold or internal traffic, including the isolated and extension picker flows, the devices and popup pages, and extension resource fetching. It is not the normal bridge control or NM report path.
 
 ### Direct page to worker data path
 
@@ -72,21 +70,22 @@ The bridge participates in worker spawn, port transfer, lifecycle, fallback, and
 | `content/main/index.js`                                    | MAIN-world WebHID polyfill. Uses the control MessagePort for general requests and a per-device data MessagePort for reports. Transfers report payload buffers where possible. Receives worker input batches directly and dispatches `HIDInputReportEvent`. |
 | `content/isolated/bridge.js`                               | Owns persistent `webhid-control` and per-device `webhid-data:<deviceId>` runtime Ports, data-plane setup, worker lifecycle, settings propagation, consent enforcement, and NM fallback.                                                                    |
 | `content/isolated/worker/index.js`                         | Per-device production WS or WT worker. Owns the persistent network transport and communicates directly with the page through the transferred data MessagePort.                                                                                             |
-| `background/messages.js` and `background/content-ports.js` | Registers `runtime.onConnect` Ports with `registerContentPort`, routes their requests through the handler set, and replies on the same Port. Also retains the one-shot `runtime.onMessage` handler for legitimate extension and internal callers.          |
-| `background/nm.js`                                         | Maintains one reconnecting `connectNative` Port, routes requests, decodes packed NM input, delivers first through matching `webhid-data:<deviceId>` Ports, then uses `tabs.sendMessage` only for target tabs not reached through those Ports.              |
-| `webhid-native-messaging`                                  | Thin stdio to daemon socket/pipe forwarder. Used only in the persistent-daemon deployment.                                                                                                                                                                 |
-| `webhid-daemon`                                            | Owns logical sessions and physical HID entries, Native Messaging client connections, WS/WT servers, reader, persistent per-device I/O worker, report blocking, and transport authority.                                                                    |
+| `background/messages.js` and `background/content-ports.js` | Registers `runtime.onConnect` Ports with `registerContentPort`, routes their requests through the handler set, and replies on the same Port. It also retains the one-shot `runtime.onMessage` handler for legitimate extension and internal callers. |
+| `background/nm.js`                                         | Maintains one reconnecting `connectNative` Port, routes daemon-backed requests, decodes packed NM input, delivers first through matching `webhid-data:<deviceId>` Ports, then uses `tabs.sendMessage` only for target tabs not reached through those Ports. |
+| `webhid-native-messaging`                                  | Thin stdio to daemon socket/pipe forwarder. Used only in the persistent-daemon deployment. |
+| `webhid-daemon`                                            | Single daemon implementation. Owns logical sessions and physical HID entries, Native Messaging client connections, WS/WT servers, reader, persistent per-device I/O worker, report blocking, and transport authority. |
 
 ## Control plane
 
-Control requests such as `enumerate`, `open`, `close`, `handshake`, `setDataPlane`, `getPolicy`, and paired-device operations travel:
+Normal page control requests that leave the bridge use this browser-local route:
 
 ```text
-Page MessagePort → Bridge → persistent webhid-control runtime Port → Background
-→ persistent Native Messaging Port → daemon or forwarder → daemon
+Page control MessagePort → Bridge → persistent webhid-control runtime Port → Background
 ```
 
-The chooser and extension pages may use their own one-shot internal messaging where appropriate. Pairing remains bridge-side only after chooser selection. A page port cannot invoke the privileged pairing and cache-management actions.
+The background then resolves browser-local operations from addon state, such as `getPolicy`, `getPairedDevices`, page-action state, picker bookkeeping, and grant-management state, or forwards daemon-backed operations through the persistent Native Messaging Port. Daemon-backed examples include `navigator.hid.getDevices()` (`enumeratePaired`), `open`, `close`, `handshake`, `setDataPlane`, and physical device information requests. The two Native Messaging deployment routes are described above. Settings handled directly by the bridge or extension pages do not use this route.
+
+Chooser and extension pages may use their own one-shot internal messaging where appropriate. Pairing remains addon-side after chooser selection, and a page port cannot invoke privileged pairing or cache-management actions.
 
 ## Production data planes
 
@@ -206,7 +205,7 @@ When `workerPolyfillEnabled` is enabled, background injects the worker polyfill 
 
 ### Valid one-shot runtime messages
 
-The persistent bridge Ports do not replace every one-shot message. Current intentional `runtime.sendMessage` users are the isolated picker for enumeration and paired-device lookup, extension picker, device, and popup pages, and `utils/resource.js` for MV2 resource fetching. These are extension-page or cold/internal operations, not the normal bridge control or report paths.
+The persistent bridge Ports do not replace every one-shot message. Current intentional `runtime.sendMessage` users are the isolated picker (`enumerate`, `getPairedDevices`), the extension picker (`getPendingPicker`, `enumerate`, and `pickerResult`), the devices page (grant listing and revocation), popup pages (frame origins, backend status, paired devices, revocation, device info, and cache), and `utils/resource.js` for extension resource fetching. These are extension-page or cold/internal operations, not the normal bridge control or report paths.
 
 ### Settings
 
@@ -216,11 +215,11 @@ User-facing settings include `dataPlane`, `workerSpawnMode`, `daemonAsNmHost`, `
 
 ### Benchmark-only WT in-page mode
 
-Production architecture covers only NM, worker WS, and worker WT. The code retains `dataPlane: 'wt'` with `useWorker: false` for benchmark and test runs. This in-page WT variant exposes daemon bearer credentials to the hostile MAIN world, so the normal settings UI hides it and normal user-facing documentation does not offer it as a data-plane option. `BENCHMARK.md` preserves its measured `wt-inpage` datasets and labels them benchmark-only.
+Production architecture covers only NM, worker WS, and worker WT. The code retains `dataPlane: 'wt'` with `useWorker: false` for benchmark and test runs. In this variant the page MAIN world receives the derived transport authentication value needed to establish WT, not the daemon Session bearer token. The variant is retained to measure the cost of moving transport handling and parsing onto the page main thread, and the UI hides it because it is not the preferred production architecture and performs worse under page CPU and render load. `BENCHMARK.md` preserves its measured `wt-inpage` datasets and labels them benchmark-only.
 
 ## Message flows
 
-### `getDevices()` through the control Port
+### `navigator.hid.getDevices()` through the daemon-backed control path
 
 ```mermaid
 sequenceDiagram
@@ -234,11 +233,31 @@ sequenceDiagram
     B->>G: webhid-control runtime Port
     G->>N: persistent Native Messaging Port
     N->>D: direct stdio, or forwarder then socket/pipe
-    D-->>N: response
+    D-->>N: full inventory response
     N-->>G: response
+    G-->>G: filter to origin's paired device ids
     G-->>B: same runtime Port
-    B-->>P: control MessagePort response
+    B-->>P: paired devices only
 ```
+
+The page-facing `navigator.hid.getDevices()` operation is rewritten to `enumeratePaired`. The daemon supplies the current inventory, while the background filters it against the requesting origin's stored grants. `requestDevice()` uses the chooser flow: its internal `enumerate` obtains full inventory data subject to chooser filters, then the bridge persists the selected devices as grants. Ordinary pages cannot enumerate the full HID inventory.
+
+### `getPolicy()` through the browser-local control path
+
+```mermaid
+sequenceDiagram
+    participant P as Page
+    participant B as Bridge
+    participant G as Background
+
+    P->>B: control MessagePort request
+    B->>G: webhid-control runtime Port
+    G->>G: resolve Permissions Policy state
+    G-->>B: same runtime Port
+    B-->>P: policy result
+```
+
+`getPairedDevices` follows the same control route and terminates in background addon storage. Settings handled directly by the bridge or extension pages do not require a background or daemon hop.
 
 ### `sendReport()` through WS or WT
 
@@ -248,11 +267,14 @@ sequenceDiagram
     participant W as Data worker
     participant D as Daemon
     participant I as Persistent I/O worker
+    participant H as HID
 
     P->>W: transferred data MessagePort, payload buffer
     W->>D: persistent WS or WT frame
     D->>I: IoCommand with capability and epoch
-    I->>I: validate authority, write HID
+    I->>H: HID operation
+    H-->>I: operation completion
+    I-->>D: oneshot completion reply
     D-->>W: transport acknowledgement
     W-->>P: transferred data MessagePort result
 ```
@@ -267,13 +289,16 @@ sequenceDiagram
     participant N as Native Messaging Port
     participant D as Daemon
     participant I as Persistent I/O worker
+    participant H as HID
 
     P->>B: data MessagePort request
     B->>G: webhid-data:<deviceId> runtime Port
     G->>N: persistent Native Messaging Port
     N->>D: direct stdio, or forwarder then socket/pipe
     D->>I: IoCommand with nm_hot authority and epoch
-    I->>I: validate authority, write HID
+    I->>H: HID operation
+    H-->>I: operation completion
+    I-->>D: oneshot completion reply
     D-->>N: acknowledgement
     N-->>G: acknowledgement
     G-->>B: same webhid-data:<deviceId> Port
@@ -285,13 +310,13 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant R as HID reader
-    participant D as Daemon NM hot sink
+    participant D as Daemon
     participant G as Background
     participant B as Bridge
     participant P as Page
 
-    R->>D: packed report through active nm_hot binding
-    D->>G: persistent Native Messaging Port
+    R->>D: enqueue packed report to active nm_hot sink
+    D->>G: client writer, persistent Native Messaging Port
     G->>B: matching webhid-data:<deviceId> Port
     B->>P: page data MessagePort
     Note over G,B: tabs.sendMessage only reaches remaining target tabs without that Port
