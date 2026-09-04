@@ -21,7 +21,7 @@ Bugs have repeatedly been mistaken for architectural ceilings. Check logs/behavi
 
 - "Worker + SAB at the performance ceiling": Worker+SAB never engaged; everything silently fell back to NM.
 - "SAB push must run on a Worker to avoid blocking via `Atomics.wait`": false after the drain moved to non-blocking `Atomics.waitAsync`; that mechanism was never in the flow.
-- "SAB is zero-copy, so it must be fastest": false by half. SAB write is zero-copy but drain still copies once (`HIDInputReportEvent` needs exclusive ownership). The no-SAB path (`postMessage` + Transferable) is zero-copy end to end.
+- "SAB is zero-copy, so it must be fastest": false by half. SAB write is zero-copy but drain still copies once (`HIDInputReportEvent` needs exclusive ownership). The no-SAB path uses Transferable buffers for the worker-to-page handoff, but the worker parser first copies each report payload into an owned buffer.
 - "Transfer the whole WS frame buffer instead of copying the payload" broke Chromium WebHID semantics: pages do `new Uint8Array(event.data.buffer)`, so `event.data.buffer.byteLength` must equal `event.data.byteLength` (`byteOffset === 0`). Reverted (saved ~30-50µs/report). Lesson: count copies and shape changes to the consumer; the `.buffer` contract is part of the journey.
 
 ### WS data plane runs in a dedicated Worker
@@ -30,9 +30,10 @@ Profiler-confirmed: WS receive/parse on the content main thread competes with pa
 
 **Final WS architecture**: `daemon <-WS-> Worker (no SAB) <-MessageChannel port, transferred once at setup-> page`.
 
-- The Worker owns the WS connection and posts each report directly to the page via the transferred port. One hop per report, zero copies.
-- The bridge only spawns/despawns workers and relays the port once; it sits on no per-message hot path. Data worker is per-device, spawned on `open()`, killed on close.
-- Fallback: 2-hop relay (worker → bridge → page, both Transferable) if direct port transfer fails.
+The worker owns the WS connection and posts each report directly to the page through the transferred port. The worker parser allocates an owned buffer for each report before that transfer, so "zero-copy" applies only to the worker-to-page handoff. The bridge is not on the steady-state report path. It creates and tears down the worker and handles setup, mode changes, and NM fallback.
+
+There is no implemented worker-to-bridge-to-page relay fallback. A worker spawn or transport failure selects the NM path instead.
+
 - Data plane switches mid-session (WS ↔ NM) via one control-plane command; a duplicated/dropped report in the switch instant is accepted as user-caused.
 
 ### SAB removed entirely (2026-07)
@@ -41,21 +42,19 @@ After the ring-buffer alloc bug was fixed, SAB lost to the simpler no-SAB path w
 
 ### Rate-gated WS batching (2026-08)
 
-Under a render-saturated main thread, WS loses ~1.6-4.3% of input reports at >= ~3kHz (source-verified in mozilla-central: WS-to-worker delivery crosses the content main thread via PWebSocket IPC → `RecvOnBinaryMessageAvailable` → unbounded `ChannelEventQueue`; no drop mechanism, just late delivery counted as lost after the drain window). NM drops 0. Drop curve scales with frame rate (~1-4% at 1000-8000 frames/s, 0 at 125/s): queuing delay, not per-frame probability.
-
-Fix: `run_sender` (`crates/webhid-daemon/src/batching.rs`) tracks reports flushed per 4ms window; at 12 reports/4ms (~3kHz) it accumulates ~8ms frames instead of flushing per ~1ms. Sparse traffic keeps the 25µs coalesce path (p50 unchanged, 0.86-0.92ms). Render-load loss: 4.32% worst-run → 0.000-0.583%. WT shares `run_sender` (loss 0.000). Tradeoff: >= ~3kHz streams pay up to 8ms delivery latency (chunked, in order). Knobs: `WEBHID_WS_HIGH_RATE_MS` (8), `WEBHID_WS_RATE_WINDOW_MS` (4), `WEBHID_WS_HIGH_RATE_COUNT` (12); fixed `WEBHID_WS_BATCH_MS` path also exists. Do not remove the rate gate: idle benchmarks never see the drop; repro needs the 8000Hz loss workload on a render-saturated page.
+Under a render-saturated main thread, an earlier loss benchmark recorded WS losses of about 1.6-4.3% at high rates. The current rate-gated `run_sender` path in `crates/webhid-daemon/src/batching.rs` tracks reports flushed per 4ms window; at 12 reports per window it uses an 8ms coalesce window. Sparse traffic keeps the 25µs coalesce path. These are benchmark observations, not guarantees for every browser or workload. Knobs: `WEBHID_WS_HIGH_RATE_MS` (8), `WEBHID_WS_RATE_WINDOW_MS` (4), `WEBHID_WS_HIGH_RATE_COUNT` (12); fixed `WEBHID_WS_BATCH_MS` path also exists. Do not remove the rate gate without rerunning the dedicated 8000Hz render-saturated workload.
 
 ### Tradeoffs without a universally correct answer become settings
 
-Single `dataPlane` setting (`ws` / `wt` / `nm`). Daemon-backed control operations such as handshake, open/close, and setDataPlane use the persistent Native Messaging port in the background: NM control verifies the peer at OS level (SO_PEERCRED + webhid group on the abstract socket) on top of the session token; ws control was token-only and removed (c964326, 2026-07-22). Browser-local control operations resolve in the addon background or page/extension state without a daemon hop. Default is `wt` (profiler: ~18pp less content main-thread CPU, 3.8x less main-thread IPC under render load; WT reads a DataPipe on the worker with zero WebSocket IPC), `ws` on older Firefox; WS is the fallback when the WT port is not offered or page CSP forces NM.
+The `dataPlane` setting selects `wt`, `ws`, or `nm`. Daemon-backed control requests use the persistent Native Messaging Port, while browser-local and extension-page operations terminate in addon state. Native Messaging trust differs by deployment: direct daemon-as-host mode relies on the browser's Native Messaging host authorization and OS process boundary; the forwarder profile adds platform IPC checks. On Linux, the daemon checks a Unix-socket peer's `webhid` group and the forwarder accepts a root or same-UID daemon peer. These checks do not apply universally, and handshake/open are pre-session operations that do not carry a Session token. WS and WT report transports use a per-session derived authentication hash plus live Session authority. `wt` is preferred where the handshake offers it, `ws` is the alternate worker network path, and a missing WT port uses WS; failed worker setup or transport setup falls back to NM.
 
 ## Project facts
 
 ### Benchmarks
 
-- The `open` metric (38-58ms) is NOT a daemon regression: `open()` itself ~15ms (worker spawn + NM control round trip + collections) plus a one-time ~25ms first-WS-message penalty in Firefox's WS IPC (later sends ~0.7ms round trip). Older docs numbers (20-23ms) measured a phase without the penalty.
-- Cold-start methodology: local sayodevice.com clone removes network variance; Playwright-driven removes click timing; Chromium grants via policy.
-- Image-pipeline benchmark (`tests/benchmark/`, see [docs/BENCHMARK.md](docs/BENCHMARK.md)): bursts of ~330 consecutive reports drop on the page side (ws 30-36, nm 7-37 mid-session); the FIRST burst after cold start or a data-plane switch is the lossiest. Benchmark invalidates dropped runs, retries, and runs an unmeasured warm-up burst per cold-start spec. Normal-rate e2e is drop-free; do not extrapolate burst loss to normal use.
+- The `open` metric of 38-58ms is a historical benchmark artifact, not a daemon-wide latency guarantee. That benchmark decomposed `open()` and a one-time first-WS-message cost; see [docs/BENCHMARK.md](docs/BENCHMARK.md) for the preserved dataset and methodology.
+- Cold-start methodology: local sayodevice.com clone removes network variance; Playwright-driven runs remove click timing; Chromium grants are supplied by policy.
+- Image-pipeline benchmark (`tests/benchmark/`, see [docs/BENCHMARK.md](docs/BENCHMARK.md)) uses a separate mock relay and retries invalidated runs. Do not extrapolate its burst behavior to normal device traffic.
 - Benchmark chunking protocols differ per harness on purpose: the image pipeline chunks a 62-byte payload + 2-byte sequence (tests/pages/benchmark-image.html + benchmark-utils PAYLOAD), the loss harness uses a 63-byte payload + 3-byte sequence (loss-utils). The page-side decoders match their own harness; keep them in sync pairwise, not across harnesses.
 
 - Hung-ack fix (2026-08): the data worker never settled in-flight send promises when WS dropped. `onClosed` rejects and clears `pending`; the page gets a fast `'ws closed'` rejection. Benchmark pitfalls: prime with an awaited 96-report burst, time-boxed per send (fire-and-forget inflates ws total ~2s; a single global gate falsely fails slow primes).
@@ -65,13 +64,13 @@ Single `dataPlane` setting (`ws` / `wt` / `nm`). Daemon-backed control operation
 - e2e devices (`tests/helpers/e2e-devices.ts`, VID 0x16c0): vendor=0x0001 (report ID 1, 64-byte in/out; primary chain + feature reports; send-side rejects report types the descriptor does not declare, matching Chromium's `max_*_report_size() == 0` gates), gamepad=0x0002 (no report ID, 5-byte input; WS-data-plane-with-URL-fragment + fresh-pairing gates), mouse=0x0003, keyboard=0x0004. Lazy spawn, reused across the serial chain.
 - `hidreport` rejects "Missing Usages for main item" when reportCount exceeds declared usages on a Data/Variable item; const items sidestep the check.
 - Concurrent-run WS drop: running the e2e and forwarder configs concurrently occasionally drops a vendor input report because of WS CPU contention. Each config runs the E2E directory with `workers: 1` baked in; do not rely on a hardcoded test count.
-- Firefox 154 applies LNA enforcement to WebSocket and WebTransport connections created in a worker. Worker-context networking is not categorically exempt. A WebSocket worker attempt can show the LNA permission UI, while WebTransport retries without showing an LNA prompt until permission has been granted. Granting LNA after a WS worker attempt can allow worker WT afterward. This is observed Firefox 154 behavior, not a stable browser contract. Page-context WT remains unsuitable for normal use and cannot survive Juggler interception (`context.route('**/*')` → `SetupReplacementChannel` → `NS_ERROR_NOT_AVAILABLE`), so the bridge falls back to NM after 10s. Do not add a catch-all route in `tests/helpers/e2e.ts`.
+- Firefox 154 applies LNA enforcement to WebSocket and WebTransport connections created in a worker. Worker-context networking is not categorically exempt. A WebSocket worker attempt can show the LNA permission UI, while WebTransport retries without showing an LNA prompt until permission has been granted. Granting LNA after a WS worker attempt can allow worker WT afterward. This is observed Firefox 154 behavior, not a stable browser contract. The test harness forces `network.lna.enabled: false`, so automated tests do not exercise that permission flow. Page-context WT remains unsuitable for normal use and cannot survive Juggler interception (`context.route('**/*')` → `SetupReplacementChannel` → `NS_ERROR_NOT_AVAILABLE`), so the bridge falls back to NM after 10s. Do not add a catch-all route in `tests/helpers/e2e.ts`.
 - Browser-harness limitations: each Playwright page runs in its own Firefox window (a popup opened via `newPage()` never sees another page's tab as active in its window); visually hidden toggle inputs need `check({ force: true })`; `storage.local.get(null)` throws `EmptyDatabaseError` (keyed `get` works). These blocked a Playwright spec for the popup origin picker; it was verified manually.
 - OS permissions: macOS needs Input Monitoring (TCC) granted manually; Windows none (`HidD_*`); Linux `udev`/`eudev` (Alpine `mdev`).
 
 ### Daemon deployment
 
-Two modes, both must keep working: (1) persistent root daemon + thin NM-host forwarder over Unix socket (no udev rules); (2) daemon-as-NM-host spawned by Firefox running as the user (needs udev rules).
+Two deployment profiles must keep working: (1) a persistent daemon plus a thin NM-host forwarder over platform IPC, commonly a Unix socket or Windows named pipe, and (2) the daemon itself as the Native Messaging host, spawned by Firefox. A persistent daemon may be root or a user service; the required HID and IPC permissions depend on the platform and service account.
 
 ### Blocklist (verified 1:1 vs Chromium/WICG, 2026-08-03)
 
@@ -82,7 +81,7 @@ Two layers, always-on like Chromium:
 
 ### Consent model (2026-08-06)
 
-A page cannot grant itself a device or see the full inventory. `pairDevice`/`recordGrantGroup`/`getGrantGroups`/`getAllPairedDevices`/`revokeDevice`/`getDeviceCache`/`getDeviceInfo`/`showPicker`/`pickerResult` are blocked from page ports (`PAGE_BLOCKED_ACTIONS`, 403). Page `enumerate` is rewritten to `enumeratePaired`; the background filters to the requesting origin's paired hashes (chooser/extension pages call `enumerate` directly). Pairing runs in the bridge after chooser selection (`grantSelectedDevices`); `pickerResult` rejected unless `sender.url` is the picker page. Devices granted together form a grant group (IndexedDB `grantGroups`); revoking any member cascades to the group; affected page devices settle pending sends with `AbortError` via the `revoked` event. Polyfill `forget()` un-pairs its device.
+A page cannot grant itself a device or see the full inventory. `pairDevice`/`recordGrantGroup`/`getGrantGroups`/`getAllPairedDevices`/`revokeDevice`/`getDeviceCache`/`getDeviceInfo`/`showPicker`/`pickerResult` are blocked from page ports (`PAGE_BLOCKED_ACTIONS`, 403). Page `enumerate` is rewritten to `enumeratePaired`; the background filters the daemon inventory by the requesting origin's stored grants. Chooser and extension pages call unmodified `enumerate` for chooser data. Pairing runs in the bridge after chooser selection (`grantSelectedDevices`); `pickerResult` is accepted only from the extension picker page. Devices granted together form a grant group (IndexedDB `grantGroups`); revoking any member cascades to the group and closes that origin's daemon sessions.
 
 ### Permissions Policy trust (2026-08-09)
 
@@ -112,7 +111,7 @@ The popup's site label is a custom dropdown (no `<select>`) listing the active t
 
 ### Exploratory branches (curiosity-driven, not benchmark-justified)
 
-- **WT/QUIC data plane** (`dataPlane: "wt"`): daemon WT server at boot (self-signed ECDSA P-256, SAN 127.0.0.1, ≤14-day validity, pinned via `serverCertificateHashes`); auth via URL path; one persistent bidirectional stream with `[len_u32 LE]` frame prefix; data worker auto-reconnects post-ready (500ms→5s exponential backoff, same as WS); cert renewal rotates to a fresh port with drain. p50 0.85ms vs ws 0.78ms / nm 1.77ms (loopback): TLS/QUIC costs ~+0.07ms/report; ws remains the fastest Firefox path. Seccomp needed `SYS_fcntl` + `SYS_recvmmsg`. Covered by `tests/e2e/wt.spec.ts` + `tests/benchmark/benchmark-wt.spec.ts`.
+- **WT/QUIC data plane** (`dataPlane: "wt"`): the daemon WT server starts at boot, uses a self-signed certificate with SAN 127.0.0.1 and a default validity of 14 days, pins the certificate with `serverCertificateHashes`, authenticates with the URL path, and uses one persistent bidirectional stream with a `[len_u32 LE]` frame prefix. Certificate expiry rotates to a new port while existing sessions drain. In the current benchmark dataset, Firefox worker WT has a per-report p50 of 0.74ms versus WS at 0.94ms; this is a recorded benchmark result, not a universal performance guarantee. Covered by `tests/e2e/wt.spec.ts` and `tests/benchmark/benchmark-wt.spec.ts`.
 - **Chromium native-WebHID benchmark** (`chromium-benchmark`, headless): mock pre-granted via `WebHidAllowDevicesForUrls` policy; fixed port 8123 (policy matches origins including port); `channel: 'chromium'` required (chrome-headless-shell has no udev/HID layer); never `--no-sandbox` (breaks udev). Finding: `vendor.bin`'s report ID 1 sat between two top-level collections, which Chromium's HID parser does not carry across; the ID now lives inside the vendor collection. Chromium p50 ~0.3-0.4ms; its `performance.now()` is clamped to 100µs, benchmark page uses COOP/COEP for 5µs precision.
 - **Chromium testbed** (`chromium-testbed` branch): runs the addon itself on Chromium via `TARGET=chromium npm run build:addon` (unpacked `dist/chromium/`) to measure addon overhead vs native WebHID in the same runtime. Conventions:
   - Daemon `detect_nm_host_mode` also accepts Chrome's launch convention: one arg, the caller origin (`chrome-extension://<id>/`), instead of Firefox's manifest path + id. The tuple's first slot is only for logging.

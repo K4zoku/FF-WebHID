@@ -1,5 +1,5 @@
-//! Thin byte forwarder between Firefox native-messaging stdin/stdout and the
-//! webhid-daemon Unix domain socket.
+//! Thin byte forwarder between Firefox Native Messaging stdin/stdout and the
+//! webhid-daemon platform IPC endpoint (Unix socket or Windows named pipe).
 //!
 //! All protocol intelligence lives in the daemon (which speaks `NmRequest` /
 //! `NmResponse` directly), so this binary is a pure pipe:

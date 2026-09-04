@@ -212,7 +212,7 @@ radar-beta
   curve ws["ws"]{0.94, 1.28, 1.48, 5.82}
   curve wtip["wt-inpage"]{0.80, 1.06, 1.16, 6.20}
   curve wt["wt"]{0.74, 0.96, 1.06, 3.64}
-  curve nat["native"]{0.26, 0.87, 1.56, 4.27}
+  curve nat["native"]{0.25, 0.87, 1.56, 4.27}
   curve chrnm["chr-nm"]{1.16, 1.69, 1.98, 4.45}
   curve chrws["chr-ws"]{0.41, 0.64, 0.77, 2.56}
   curve chrwti["chr-wt-inpage"]{0.79, 1.14, 1.30, 3.67}
@@ -427,27 +427,25 @@ rows by a rounding step; totals are sums of the displayed walltimes.
 
 </details>
 
-**Delta vs the native baseline** (per-report p50 is the median of the 10
-per-run p50 values; walltime p50 and total as in the summary table; total is
-the sum of the 10 whole-run walltimes)
+**Delta vs the native baseline** (per-report p50 is the lower median selected by `percentile()` from the 10 per-run p50 values; walltime p50 and total are taken from the summary table; total is the sum of the 10 whole-run walltimes)
 
 | mode          | per-report p50 | vs native    | walltime p50 | vs native     | total  | vs native      |
 | ------------- | -------------- | ------------ | ------------ | ------------- | ------ | -------------- |
-| native        | 0.26           | -            | 113.8        | -             | 1251.2 | -              |
-| chr-ws        | 0.41           | +0.15 (1.6x) | 157.2        | +43.4 (1.4x)  | 1709.0 | +457.8 (1.4x)  |
-| chr-wt-inpage | 0.79           | +0.53 (3.0x) | 333.2        | +219.4 (2.9x) | 3448.4 | +2197.2 (2.8x) |
-| chr-wt        | 0.73           | +0.47 (2.8x) | 317.1        | +203.3 (2.8x) | 3188.1 | +1936.9 (2.5x) |
-| wt (Firefox)  | 0.74           | +0.48 (2.8x) | 334.7        | +220.9 (2.9x) | 3508.2 | +2257.0 (2.8x) |
-| wt-inpage     | 0.80           | +0.54 (3.1x) | 350.5        | +236.7 (3.1x) | 3535.9 | +2284.7 (2.8x) |
-| ws (Firefox)  | 0.94           | +0.68 (3.6x) | 399.8        | +286.0 (3.5x) | 4048.2 | +2797.0 (3.2x) |
-| chr-nm        | 1.16           | +0.90 (4.5x) | 473.0        | +359.2 (4.2x) | 4883.3 | +3632.1 (3.9x) |
-| nm (Firefox)  | 1.98           | +1.72 (7.6x) | 950.7        | +836.9 (8.3x) | 9882.9 | +8631.7 (7.9x) |
+| native        | 0.25           | -            | 113.8        | -             | 1251.2 | -              |
+| chr-ws        | 0.41           | +0.16 (1.6x) | 157.2        | +43.4 (1.4x)  | 1709.0 | +457.8 (1.4x)  |
+| chr-wt-inpage | 0.79           | +0.54 (3.2x) | 333.2        | +219.4 (2.9x) | 3448.4 | +2197.2 (2.8x) |
+| chr-wt        | 0.73           | +0.48 (2.9x) | 317.1        | +203.3 (2.8x) | 3188.1 | +1936.9 (2.5x) |
+| wt (Firefox)  | 0.74           | +0.49 (3.0x) | 334.7        | +220.9 (2.9x) | 3508.2 | +2257.0 (2.8x) |
+| wt-inpage     | 0.80           | +0.55 (3.2x) | 350.5        | +236.7 (3.1x) | 3535.9 | +2284.7 (2.8x) |
+| ws (Firefox)  | 0.94           | +0.69 (3.8x) | 399.8        | +286.0 (3.5x) | 4048.2 | +2797.0 (3.2x) |
+| chr-nm        | 1.16           | +0.91 (4.6x) | 473.0        | +359.2 (4.2x) | 4883.3 | +3632.1 (3.9x) |
+| nm (Firefox)  | 1.98           | +1.73 (7.9x) | 950.7        | +836.9 (8.3x) | 9882.9 | +8631.7 (7.9x) |
 
 ## What the numbers mean
 
 - **The addon is fastest over ws on Chromium**: per-report p50 0.41ms,
-  1.6x native (0.26ms). Chromium wt (0.73ms) and wt-inpage (0.79ms) are
-  2.8-3.0x native; Chromium nm (1.16ms) is the slowest addon plane. Firefox
+  1.6x native (0.25ms). Chromium wt (0.73ms) and wt-inpage (0.79ms) are
+  2.9-3.2x native; Chromium nm (1.16ms) is the slowest addon plane. Firefox
   wt (0.74ms) and ws (0.94ms) remain below Firefox nm (1.98ms).
 - **The addon adds little walltime**: chr-ws whole-run p50 is 157.2ms vs
   native 113.8ms (1.4x). Firefox wt is 334.7ms, ws is 399.8ms, and nm is
@@ -462,27 +460,23 @@ the sum of the 10 whole-run walltimes)
 
 ### What the wt numbers buy (and cost)
 
-- **wt beats ws on Firefox** (p50 0.74ms vs 0.94ms, walltime 334.8ms vs 399.9ms) despite the TLS/QUIC handshake: WS input reports cross the
-  content main thread (PWebSocket IPC into `RecvOnBinaryMessageAvailable`,
-  then ChannelEventQueue into the worker), contending with page rendering;
-  wt reads reports from a DataPipe shared-memory buffer on the worker with
-  zero WebSocket IPC. Profiler-verified: ws main thread carries ~10.8k
-  `OnBinaryMessageAvailable` + ~10.8k `FrameReceived` IPC markers per 3.5s
-  spec and 3.8x the IPC of wt; main-thread CPU ws 75% vs wt 57%.
+- **wt beats ws on Firefox in this recorded run** (p50 0.74ms vs 0.94ms, walltime 334.7ms vs 399.8ms): WS input reports cross the content
+  main thread (PWebSocket IPC into `RecvOnBinaryMessageAvailable`, then
+  ChannelEventQueue into the worker), while WT reads reports from a DataPipe
+  on the worker. The profile recorded about 10.8k `OnBinaryMessageAvailable`
+  plus 10.8k `FrameReceived` IPC markers per 3.5s spec, with ws main-thread
+  CPU at 75% and wt at 57%. These are profiler observations for this run.
 - **wt-inpage is a benchmark-only performance comparison**: transport handling,
   DataPipe reads, and parsing happen on the page main thread, so this variant
   competes directly with page CPU and rendering work. It is not a security
   downgrade and does not expose the daemon Session bearer token; the page
   receives only the derived transport authentication value required by the
   benchmark transport.
-- **Security**: loopback TLS does not stop a network MITM (there is no real
-  network between daemon and browser); it stops another local process from
-  impersonating the daemon at `127.0.0.1:<port>` without the private key
-  (the `serverCertificateHashes` pin is unforgeable without it), and does
-  not stop an attacker with admin/root. So WT is a free security option on
-  loopback that is also the fastest Firefox data plane; the default
-  `dataPlane` is wt (ws on Firefox < 114, where WebTransport does not
-  exist).
+- **Transport security scope**: the benchmark's WT connection uses a loopback
+  certificate pin and the derived transport authentication value. The pin
+  rejects a different certificate for the configured endpoint. This benchmark
+  does not establish broader guarantees about local privileged processes or
+  Native Messaging authorization.
 
 ---
 

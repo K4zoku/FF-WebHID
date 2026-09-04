@@ -48,7 +48,7 @@ This is intentionally the "conservative in what you send" half of Postel's Law, 
 
 Only the daemon understands the wire format and protocol semantics. Other components (NM host, addon layers) should be as dumb as possible:
 
-- The NM host is a thin forwarder: it moves bytes between stdio and the Unix socket. It does not parse, deserialize, or reason about message content.
+- The NM host is a thin forwarder: it moves bytes between stdio and the daemon's platform IPC endpoint, which is a Unix socket on Unix platforms and a named pipe on Windows. It does not parse, deserialize, or reason about message content.
 - Don't duplicate parsing or serialization logic across crates or across JS contexts. If two places need to understand the same structure, that's a signal the structure should be produced or consumed in one place and passed through as opaque bytes everywhere else.
 
 ### 3. Zero-copy by default on hot paths, but know which paths are hot
@@ -74,9 +74,9 @@ But don't accept "this is the ceiling" without verifying. This project has repea
 Device permission and isolation are layered independently:
 
 - udev rules (or platform equivalent) gate which devices a non-root process can even open.
-- The HID blocklist (FIDO/U2F security keys) is enforced in the daemon regardless of OS-level permissions, matching Chromium's blocklist. Keyboard and mouse device access (enumerability) is gated by the OS layer (udev rules on Linux, HID API on Windows, Input Monitoring/TCC on macOS); the daemon additionally blocks their input/output/feature reports (unconditionally, matching Chromium), so consumer-input devices stay enumerable but never deliver data to pages.
+- The HID blocklist (FIDO/U2F security keys) is enforced in the daemon regardless of OS-level permissions, matching Chromium's blocklist. Keyboard and mouse device access is still subject to the platform's HID permissions; the daemon additionally blocks their protected input/output/feature reports and prunes blocked reports from visible collections. A device whose visible collections become empty is hidden.
 - The device picker UI runs in closed-mode Shadow DOM, isolated from page script.
-- WebSocket auth uses a per-session token, checked independently of the above.
+- WS and WT authentication uses a per-session derived hash, checked independently of OS permissions and report blocking. NM report I/O uses client-bound daemon authority instead.
 
 Don't remove a layer because another layer "already covers it"; they are independent, not redundant.
 

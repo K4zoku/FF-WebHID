@@ -25,7 +25,7 @@ Production paths are NM, worker WS, and worker WT. `wt-inpage` remains implement
 | `webhid-control` runtime Port, B↔G         | Bridge lifetime                  | Queued normal bridge control requests                          |
 | Page data MessagePort, P↔B or P↔W          | Device open lifetime             | Report and feature operations, input reports, acknowledgements |
 | `webhid-data:<deviceId>` runtime Port, B↔G | Device NM lifetime               | NM report/feature traffic and Port-first NM input delivery     |
-| Native Messaging Port, G↔host              | Background connection lifetime   | Daemon-backed control and NM report traffic                       |
+| Native Messaging Port, G↔host              | Background connection lifetime   | Daemon-backed control and NM report traffic                    |
 | WS or WT, W↔D                              | Worker/device transport lifetime | Production worker data plane                                   |
 
 Background registers runtime Ports from `runtime.onConnect` with `registerContentPort`. Normal bridge control traffic is not a series of `runtime.sendMessage` calls. The persistent Native Messaging Port comes from `connectNative`; sending another message on it does not start another host process.
@@ -41,20 +41,20 @@ The tables below show both profiles where that extra hop changes accounting. Do 
 
 ## Production path inventory
 
-| Path | Operation                       | Current route                                                                                                                                         |
-| ---- | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A    | Browser-local control          | `P ⇄ B ⇄ webhid-control runtime Port ⇄ G` for `getPolicy`, `getPairedDevices`, page-action state, and picker bookkeeping; some settings resolve in `B` or an extension page |
-| B    | Daemon-backed control          | `P → B → webhid-control runtime Port → G → Native Messaging Port → D`, or `→ F → D`, for `navigator.hid.getDevices()`/`enumeratePaired`, `open`, `close`, `handshake`, `setDataPlane`, and physical device information |
-| C    | WS output or feature           | `P ⇄ W ⇄ WS ⇄ D ⇄ persistent IoCommand worker ⇄ HID`                                                                                                  |
-| D    | WT output or feature           | `P ⇄ W ⇄ WT ⇄ D ⇄ persistent IoCommand worker ⇄ HID`                                                                                                  |
-| E    | NM output or feature           | `P → B → webhid-data:<deviceId> Port → G → Native Messaging Port → D → persistent IoCommand worker → HID`, with `F → D` added in forwarder mode      |
-| F    | WS input                       | `HID → reader → event-broadcast queue → D/batching → WS → W → transferred page MessagePort → P`                                                          |
-| G    | WT input                       | `HID → reader → event-broadcast queue → D/batching → WT → W → transferred page MessagePort → P`                                                          |
-| H    | NM input, primary              | `HID → reader → nm_hot sink queue → Native Messaging → G → webhid-data:<deviceId> Port → B → page data MessagePort → P`                                |
-| I    | NM input, fallback delivery    | Same as H until G. `G → tabs.sendMessage → B → page data MessagePort → P` only for target tabs not reached through the persistent data Port.          |
-| J    | First open                    | Daemon-backed control → `OpenReservation` → physical HID open → publish Entry → register Session → release reader-start gate → optional worker setup |
-| K    | Additional open               | Daemon-backed control → register another Session on an existing Entry → optional worker setup                                                        |
-| L    | Close                         | Daemon-backed control → revoke one Session's authority; physical Entry teardown only after the final Session or a force-close/failure condition       |
+| Path | Operation                   | Current route                                                                                                                                                                                                                                                                 |
+| ---- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A    | Browser-local control       | `P ⇄ B ⇄ webhid-control runtime Port ⇄ G` for `getPolicy`, `getPairedDevices`, page-action state, and picker bookkeeping; some settings resolve in `B` or an extension page                                                                                                   |
+| B    | Daemon-backed control       | `P → B → webhid-control runtime Port → G → Native Messaging Port → D`, or `→ F → D`, for `enumeratePaired`, `open`, `close`, `handshake`, and `setDataPlane`; `getDeviceInfo` is cache/IndexedDB local and `getDeviceCache` reaches D only when the background cache is empty |
+| C    | WS output or feature        | `P ⇄ W ⇄ WS ⇄ D ⇄ persistent IoCommand worker ⇄ HID`                                                                                                                                                                                                                          |
+| D    | WT output or feature        | `P ⇄ W ⇄ WT ⇄ D ⇄ persistent IoCommand worker ⇄ HID`                                                                                                                                                                                                                          |
+| E    | NM output or feature        | `P → B → webhid-data:<deviceId> Port → G → Native Messaging Port → D → persistent IoCommand worker → HID`, with `F → D` added in forwarder mode                                                                                                                               |
+| F    | WS input                    | `HID → reader → event-broadcast queue → D/batching → WS → W → transferred page MessagePort → P`                                                                                                                                                                               |
+| G    | WT input                    | `HID → reader → event-broadcast queue → D/batching → WT → W → transferred page MessagePort → P`                                                                                                                                                                               |
+| H    | NM input, primary           | `HID → reader → nm_hot sink queue → Native Messaging → G → webhid-data:<deviceId> Port → B → page data MessagePort → P`                                                                                                                                                       |
+| I    | NM input, fallback delivery | Same as H until G. `G → tabs.sendMessage → B`, then bridge uses the page data MessagePort when present or its ordinary page event dispatch otherwise. This is only for authorized tabs not reached through the persistent data Port.                                          |
+| J    | First open                  | Daemon-backed control → `OpenReservation` → physical HID open → publish Entry → register Session → release reader-start gate → optional worker setup                                                                                                                          |
+| K    | Additional open             | Daemon-backed control → register another Session on an existing Entry → optional worker setup                                                                                                                                                                                 |
+| L    | Close                       | Daemon-backed control → revoke one Session's authority; physical Entry teardown only after the final Session or a force-close/failure condition                                                                                                                               |
 
 `sendReport`, `sendFeatureReport`, and `receiveFeatureReport` use Path E in NM mode. They do not use one-shot bridge `runtime.sendMessage` requests.
 
@@ -62,7 +62,7 @@ The tables below show both profiles where that extra hop changes accounting. Do 
 
 ### Output and feature requests
 
-For WS and WT, page and worker communicate over the transferred per-device data MessagePort. The bridge transferred the port during setup, but does not relay normal report traffic afterward.
+For WS and WT, page and worker communicate over the transferred per-device data MessagePort. The bridge transfers the worker control port during setup, but does not relay normal report traffic afterward.
 
 ```text
 P data MessagePort → W → WS or WT → D → IoCommand queue → persistent HID handle
@@ -76,10 +76,10 @@ The worker owns request ids and transport acknowledgement handling. It builds th
 The daemon batches WS and WT input independently of the page MessagePort. The worker parses each received transport frame and transfers report buffers directly to the page. The normal direct route is:
 
 ```text
-HID → daemon → WS or WT → worker → transferred MessagePort → page
+HID → reader → event-broadcast queue → WS or WT → worker → transferred MessagePort → page
 ```
 
-Bridge involvement is limited to setup, spawn/despawn, data-plane change, transport failure, and the explicit fallback path when a page-to-worker port cannot be transferred.
+Bridge involvement is limited to setup, spawn/despawn, data-plane change, transport failure, and NM fallback. There is no worker-to-bridge-to-page relay fallback.
 
 ## Native Messaging paths
 
@@ -93,7 +93,7 @@ On the daemon, the active client and device must have a valid `nm_hot` binding. 
 
 The input reader calls `route_nm_input` before considering the generic broadcast channel. It creates a packed NM input message for each valid, active client-bound `nm_hot` sink. The client writer sends it through the already-connected Native Messaging stream.
 
-Background decodes the packed message, identifies authorized target tabs, and tries `postToContentPorts(targets, message, 'webhid-data:<deviceId>')` first. The return value identifies reached tabs. Only the remaining targets receive `tabs.sendMessage`, then their bridge forwards to its page data MessagePort.
+Background decodes the packed message, identifies authorized target tabs, and tries `postToContentPorts(targets, message, 'webhid-data:<deviceId>')` first. The return value identifies reached tabs. Only the remaining targets receive `tabs.sendMessage`. That one-shot message reaches bridge, which forwards through its page data ports when available and otherwise falls through to normal page event dispatch.
 
 The generic broadcast event path supports non-NM sessions and lifecycle events. It is not the primary NM input-report path.
 
@@ -116,7 +116,7 @@ A later or concurrent open registers another logical Session against the already
 
 ### Close and failure
 
-Closing one Session removes its `ws_auth_hash` mapping, revokes its transport capability, signals cancellation, and refreshes NM authority for the relevant client. The Entry remains live while another active Session references the device. The last close, reader error, or force-close removes the Entry, advances `io_epoch`, wakes the reader-start gate, stops the I/O worker, and joins the physical lifetime.
+Closing one Session removes its `ws_auth_hash` mapping, revokes its transport capability, signals cancellation, and refreshes NM authority for the relevant client. The Entry remains live while another active Session references the device. The last close, reader error, or force-close removes the Entry, advances `io_epoch`, wakes the reader-start gate, stops the I/O worker, and joins the physical lifetime. Background cleanup is tab-scoped: tab removal purges sessions, but frame navigation has no current cleanup hook and does not itself close the daemon Session.
 
 ## Authority relevant to the data path
 
@@ -132,26 +132,27 @@ Closing one Session removes its `ws_auth_hash` mapping, revokes its transport ca
 
 ## Copy and hop accounting
 
-Counts below are application-level handoffs at the canonical component boundaries shown in the routes. Each directional crossing of a named MessagePort, runtime Port, Native Messaging, transport, queue, or HID boundary counts once. Included queues are the reader-to-event-broadcast queue, reader-to-`nm_hot` sink queue, and daemon-task-to-persistent-I/O-worker queue, with the I/O oneshot reply counted in the reverse direction. Internal transport task queues and browser-internal channel scheduling are excluded because they are implementation details inside the endpoint boundary. Browser-internal, TLS, TCP, UDP, kernel, and allocator copies are also excluded. The named transformations identify known application payload work instead of presenting unsupported total-copy estimates.
+Counts below are application-level handoffs at the canonical component boundaries shown in the routes. Each directional crossing of a named MessagePort, runtime Port, Native Messaging surface, WS/WT transport, explicit queue, or HID boundary counts once. The reader-to-event-broadcast queue, reader-to-`nm_hot` sink queue, and daemon-task-to-persistent-I/O-worker queue are included. The I/O oneshot completion is counted in the reverse direction. Internal transport-task queues, browser-internal scheduling, TLS, TCP, UDP, kernel, and allocator copies are excluded. These are handoff counts, not copy counts or latency measurements.
 
-| Path                                      | Handoffs, daemon-as-host | Handoffs, forwarder | Known application payload transformations                                                                                                                                           |
-| ----------------------------------------- | -----------------------: | ------------------: | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Browser-local control request and response |                        4 |                   4 | Runtime-Port messages; policy/storage/picker state resolution.                                                                                                                      |
-| Daemon-backed control request and response |                        6 |                   8 | Runtime-Port messages and Native Messaging JSON framing; control payloads are not hot-path report data.                                                                             |
-| WS or WT output plus acknowledgement      |                        8 |                   8 | Page payload transfer to worker; worker frame creation; daemon payload extraction; HID write-buffer construction; transport framing; oneshot completion reply.                     |
-| NM output or feature plus acknowledgement |                       10 |                  12 | Page to bridge transfer; runtime-Port structured clone; packed TLV/base64 encode and decode; daemon payload extraction; HID write-buffer construction; JSON/native-message framing; oneshot completion reply. |
-| WS input                                  |                        4 |                   4 | Reader event-broadcast queue and daemon batch framing; worker parse and report-buffer creation; worker to page buffer transfer.                                                     |
-| WT input                                  |                        4 |                   4 | Reader event-broadcast queue and daemon batch framing; worker parse and report-buffer creation; worker to page buffer transfer.                                                     |
-| NM input, Port-first                      |                        5 |                   6 | Packed input construction and base64 encode/decode; reader-to-`nm_hot` queue; background report payload allocation; runtime-Port structured clone.                                                            |
-| NM input, tab fallback                    |                        5 |                   6 | Same as Port-first, except background uses `tabs.sendMessage` for the G→B leg.                                                                                                      |
+| Path                                       | Handoffs, daemon-as-host | Handoffs, forwarder | Known application payload transformations                                                                                                                                                                     |
+| ------------------------------------------ | -----------------------: | ------------------: | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Browser-local control request and response |                        4 |                   4 | Runtime-Port messages; policy/storage/picker state resolution.                                                                                                                                                |
+| Daemon-backed control request and response |                        6 |                   8 | Runtime-Port messages and Native Messaging JSON framing; control payloads are not hot-path report data.                                                                                                       |
+| WS or WT output plus acknowledgement       |                        8 |                   8 | Page payload transfer to worker; worker frame creation; daemon payload extraction; HID write-buffer construction; transport framing; oneshot completion reply.                                                |
+| NM output or feature plus acknowledgement  |                       10 |                  12 | Page to bridge transfer; runtime-Port structured clone; packed TLV/base64 encode and decode; daemon payload extraction; HID write-buffer construction; JSON/native-message framing; oneshot completion reply. |
+| WS input                                   |                        4 |                   4 | Reader event-broadcast queue and daemon batch framing; worker parse and report-buffer creation; worker to page buffer transfer.                                                                               |
+| WT input                                   |                        4 |                   4 | Reader event-broadcast queue and daemon batch framing; worker parse and report-buffer creation; worker to page buffer transfer.                                                                               |
+| NM input, Port-first                       |                        5 |                   6 | Packed input construction and base64 encode/decode; reader-to-`nm_hot` queue; background report payload allocation; runtime-Port structured clone.                                                            |
+| NM input, tab fallback                     |                        5 |                   6 | Same number of boundary crossings as Port-first, but the G→B delivery uses `tabs.sendMessage`; the final bridge-to-page surface can be a data port or ordinary page event dispatch.                           |
 
-The concrete derivations are:
+The derivations are:
 
-- Direct WS/WT output has eight handoffs: `P→W`, `W→D`, `D→I/O worker`, `I/O worker→HID`, `HID→I/O worker`, `I/O worker→D` (oneshot completion), `D→W`, and `W→P`. The bridge is absent from this steady-state path.
-- Direct NM output has ten: `P→B`, `B→G`, `G→D`, `D→I/O worker`, `I/O worker→HID`, `HID→I/O worker`, `I/O worker→D`, `D→G`, `G→B`, and `B→P`. The forwarder route is twelve because `G↔F` and `F↔D` replace the single `G↔D` Native Messaging boundary on both request and response directions.
-- WS/WT input has four: `HID→reader`, `reader→event-broadcast queue`, `D→W` through the transport boundary, and `W→P`. The daemon's batching consumes the explicit event queue before sending the transport frame.
-- NM input Port-first has five direct handoffs: `HID→reader`, `reader→nm_hot sink queue`, `D→G` through the Native Messaging writer, `G→B` through the matching data Port, and `B→P`. Forwarder mode has six because `D→F` and `F→G` replace the direct `D→G` boundary. The `tabs.sendMessage` fallback replaces only the `G→B` delivery surface, so it has the same 5/6 counts.
-- Daemon-backed control has six direct handoffs: `P→B`, `B→G`, `G→D`, `D→G`, `G→B`, and `B→P`. Forwarder mode has eight because the request and response each add the forwarder/socket route.
+- Browser-local control has four: `P→B`, `B→G`, `G→B`, and `B→P`.
+- Daemon-backed control has six direct: `P→B`, `B→G`, `G→D`, `D→G`, `G→B`, and `B→P`. Forwarder mode adds one D↔F crossing in each direction, producing eight.
+- Direct WS/WT output has eight: `P→W`, `W→D`, `D→I/O worker`, `I/O worker→HID`, `HID→I/O worker`, `I/O worker→D`, `D→W`, and `W→P`. The bridge is absent from this steady-state path.
+- Direct NM output has ten: `P→B`, `B→G`, `G→D`, `D→I/O worker`, `I/O worker→HID`, `HID→I/O worker`, `I/O worker→D`, `D→G`, `G→B`, and `B→P`. Forwarder mode adds one D↔F crossing in each direction, producing twelve.
+- WS/WT input has four: `HID→reader`, `reader→event-broadcast queue`, `D→W` through the transport boundary, and `W→P`.
+- NM input Port-first has five direct: `HID→reader`, `reader→nm_hot sink queue`, `D→G`, `G→B` through the matching data Port, and `B→P`. Forwarder mode replaces D→G with D→F→G, adding one. Tab fallback replaces only the G→B delivery surface, so its count remains five direct or six with a forwarder.
 
 ## Benchmark-only WT in-page variant
 

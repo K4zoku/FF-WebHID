@@ -1,9 +1,9 @@
 # Installation
 
-WebHID requires two components:
+WebHID requires two pieces:
 
-1. **System daemon** (`webhid-daemon` + `webhid-native-messaging`): runs in the background, talks to HID hardware
-2. **Browser extension**: installed in Firefox, bridges web pages to the daemon
+1. **Daemon installation**: `webhid-daemon` talks to HID hardware. The `webhid-native-messaging` forwarder is additionally used by the persistent-daemon profile.
+2. **Browser extension**: installed in Firefox, it bridges web pages to the daemon.
 
 Install the browser extension from AMO: **[WebHID](https://addons.mozilla.org/en-US/firefox/addon/webhid/)**
 
@@ -13,27 +13,14 @@ Choose your platform below for daemon installation.
 
 ## Choosing a daemon mode
 
-The daemon has two deployment modes:
+The daemon has two deployment profiles:
 
-- **Daemon-as-NM-host (recommended on all platforms)**: the daemon speaks the
-  native-messaging protocol directly on stdin/stdout. No separate forwarder
-  process, no Unix socket, no IPC hop. The daemon runs as **your user** (not
-  root), so it can only touch devices the OS grants your user (udev `uaccess`
-  on Linux, TCC Input Monitoring on macOS, no special setup on Windows).
-  Firefox spawns it on demand per session.
-- **Persistent daemon + thin forwarder**: the daemon runs as a system service
-  (root on Linux, `brew services` on macOS, Scheduled Task on Windows) and a
-  tiny `webhid-native-messaging` forwarder bridges stdio to the platform socket
-  or named pipe.
-  This survives browser restarts and shares one daemon across the system.
+- **Daemon-as-NM-host**: Firefox starts `webhid-daemon` as the Native Messaging host. The daemon speaks the Native Messaging protocol directly on stdin/stdout, so this profile has no separate forwarder or daemon IPC socket. It runs with the Firefox user's OS permissions and is started when the Native Messaging connection is opened.
+- **Persistent daemon plus thin forwarder**: Firefox starts `webhid-native-messaging` as the Native Messaging host. The forwarder relays bytes to a daemon that is already running as a system or user service over the platform socket or named pipe. The daemon can therefore outlive a browser restart.
 
-Why Daemon-as-NM-host is recommended: one fewer process and IPC hop per
-message (lower latency), and the daemon never runs as root. The forwarder
-mode's only real advantage is persistence (daemon stays up across browser
-restarts); its latency cost is a few microseconds per report, so pick it if
-you want the daemon always-on. Both modes are switchable at any time from the
-addon settings (`about:addons → WebHID → Options → Daemon as NM host`); all
-packages ship both NM manifests.
+Both profiles use the same daemon implementation. The required HID permissions and IPC checks depend on the platform and service account. In the forwarder profile, Linux checks the daemon's accepted Unix-socket peer against the `webhid` group and the forwarder checks that its daemon peer is root or the same UID. Those checks do not apply to the direct daemon-as-NM-host profile or universally on other platforms.
+
+The `Daemon as NM host` setting selects the Native Messaging host name. On a new installation it defaults to off on Linux and true on macOS or Windows when platform initialization finds no stored value. The profile can be changed without changing the daemon implementation. The two profiles and their platform setup are described below.
 
 ## Packaging profiles per platform
 
@@ -102,8 +89,7 @@ sudo usermod -aG webhid $USER
 ```
 
 Root daemon has access to all hidraw devices; no udev rule needed. Users must
-be in the `webhid` group to connect via the thin forwarder. The latency cost
-of the forwarder vs. daemon-as-NM-host is a few microseconds per report.
+be in the `webhid` group to connect via the thin forwarder.
 
 **User daemon (systemd user service, optional):**
 
@@ -137,8 +123,7 @@ sudo systemctl disable --now webhid-daemon
 
 **Prefer a persistent root daemon?** Leave the service enabled; add your user
 to the `webhid` group (`sudo usermod -aG webhid $USER`) and connect via the
-thin forwarder. The latency cost vs. daemon-as-NM-host is a few microseconds
-per report.
+thin forwarder.
 
 **Non-root daemon (optional):**
 
@@ -170,8 +155,7 @@ sudo systemctl disable --now webhid-daemon
 
 **Prefer a persistent root daemon?** Leave the service enabled; add your user
 to the `webhid` group (`sudo usermod -aG webhid $USER`) and connect via the
-thin forwarder. The latency cost vs. daemon-as-NM-host is a few microseconds
-per report.
+thin forwarder.
 
 **Non-root daemon (optional):**
 
@@ -233,11 +217,11 @@ Install paths are configurable: `make install-system PREFIX=/usr` or `make insta
 
 ### Daemon-as-NM-host mode (details)
 
-Eliminates the separate NM host binary and IPC socket; the daemon speaks native-messaging protocol directly on stdin/stdout, saving one IPC hop per message (a few microseconds of latency vs. the forwarder).
+This profile removes the separate NM forwarder and daemon IPC socket. The daemon speaks Native Messaging directly on stdin/stdout.
 
-**Requires:** udev rules installed (daemon runs as your user, not root).
+**Requires:** the daemon must be able to open the HID devices as the Firefox user. On Linux this normally means the shipped udev rule; on macOS it means the required Input Monitoring permission. Windows has no separate HID permission step in this guide.
 
-The daemon auto-detects NM-host mode by inspecting the two positional args Firefox passes to every native-messaging host on startup (manifest path + add-on ID, per the [Mozilla spec](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Native_messaging)). No `--nm-host` flag is needed; the NM manifest's `path` field points at the `webhid-daemon` binary directly.
+The daemon auto-detects Native Messaging host mode from the browser's launch arguments. Firefox passes the manifest path and addon ID; Chromium uses its one extension-origin argument. No `--nm-host` flag is needed. The manifest's `path` points at the `webhid-daemon` binary.
 
 #### System-wide install
 
@@ -274,7 +258,7 @@ The daemon uses a random WebSocket port in this mode (avoids conflicts with any 
 
 The installed NM manifest (`webhid.daemon_nm_host.json`) uses the `"name": "webhid.daemon_nm_host"` identifier, distinct from the thin-forwarder manifest (`webhid.forwarder_nm_host`). The addon picks the correct name based on the "Daemon as NM host" toggle in its settings page.
 
-> **Note:** On Windows, the NM manifest `path` field can be the bare executable name (`webhid-daemon.exe`). Firefox resolves relative paths against the manifest's own directory, so the JSON must live next to the binary. The daemon auto-detects NM-host mode via the 2 positional args Firefox passes (manifest path + addon ID). No wrapper script or `--nm-host` flag needed.
+> **Note:** On Windows, the NM manifest `path` field can be the bare executable name (`webhid-daemon.exe`). Firefox resolves relative paths against the manifest's own directory, so the JSON must live next to the binary. The daemon auto-detects NM-host mode from Firefox's two positional arguments (manifest path and addon ID). No wrapper script or `--nm-host` flag is needed.
 
 ---
 
@@ -352,7 +336,8 @@ uninstall.sh
 
 ## Verifying Installation
 
-After installing the daemon, verify it's running:
+For the persistent-daemon profile, verify the service with the platform service
+manager:
 
 ```sh
 # Linux
@@ -367,6 +352,10 @@ launchctl list | grep webhid
 schtasks /query /tn "WebHID Daemon"
 ```
 
+For daemon-as-NM-host, no daemon service is expected before a site uses
+WebHID. Open a WebHID site and inspect the Native Messaging and daemon logs
+instead.
+
 Then install the [browser extension](https://addons.mozilla.org/en-US/firefox/addon/webhid/) and visit a WebHID-enabled site. Open `about:debugging → Inspect → Console` to see connection logs.
 
 ## Troubleshooting
@@ -377,11 +366,11 @@ Then install the [browser extension](https://addons.mozilla.org/en-US/firefox/ad
 - **NM host silent failure** (addon paralyzed, no logs): the NM host writes `{"s":503,"E":"..."}` error frame to stdout before exiting, addon logs `[nm] host error: <reason>`.
 - **Device picker shows "No HID devices found"**: daemon running but no HID devices detected. Check `hidapi` can enumerate: `ls /dev/hidraw*` (Linux).
 - **Badge counter not showing**: ensure the device is opened via `navigator.hid.requestDevice()`, the counter tracks open devices, not paired ones.
-- **NM data plane is slow**: switch Data Plane to WebTransport when available (the default), or WebSocket otherwise. Use NM when the site's security policy blocks both worker transports.
-- **Firefox 154 Local Network Access**: worker WebSocket and WebTransport connections require local-network permission. WebSocket can trigger the LNA permission prompt, but WebTransport keeps retrying without showing one.
+- **Native Messaging data plane troubleshooting**: select WebTransport when its endpoint is available, or WebSocket as the alternate worker path. Use Native Messaging directly when worker setup or transport fails, or when a site's policy requires it.
+- **Firefox 154 Local Network Access**: in the observed Firefox 154 behavior, worker WebSocket and WebTransport connections are subject to local-network permission. A WebSocket attempt can surface the LNA prompt, while WebTransport may retry without showing one until permission has been granted. This is version-specific behavior, not a stable browser contract.
   - To use **WebTransport**, switch **Data Plane** to **WebSocket**, reconnect, choose **Remember my choice for this site** and **Allow**, then switch back to **WebTransport**.
-  - **about:config workaround**: set `network.lna.blocking` to `false` to disable LNA blocking. As a broader fallback, set `network.lna.enabled` to `false` to disable LNA entirely.
-- **Daemon restart causes input report freeze**: workers detect WS close code 4401 (unknown token); the bridge refreshes the data plane by reusing a live session token when possible instead of opening a new HID session solely for transport refresh.
+  - **about:config workaround**: set `network.lna.blocking` to `false`. As a broader workaround, set `network.lna.enabled` to `false`. These preference names and effects are Firefox-version dependent.
+- **Daemon or Native Messaging host restart**: the Native Messaging disconnect broadcasts a reset and closes the affected logical sessions, so the page reports disconnect and must reopen. A transport-only authentication failure can refresh an already-live session token without opening another session.
 - **Settings change doesn't take effect**: `SettingsStore` Proxy observer fires listeners only on actual value change.
 
 ## Recommended Settings per Platform
@@ -398,10 +387,10 @@ Then install the [browser extension](https://addons.mozilla.org/en-US/firefox/ad
 
 ### Windows
 
-| Setting           | Recommended  | Reason                                                                                                                                              |
-| ----------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Daemon as NM host | ON (default) | Recommended mode: daemon speaks NM directly, no forwarder. Windows has no permission setup; daemon auto-detects via Firefox's 2 positional args.    |
-| Data Plane        | WT (default) | WebTransport in a worker keeps page rendering isolated; use WebSocket when WT is unavailable, or NM when site policy blocks both worker transports. |
+| Setting           | Recommended  | Reason                                                                                                                                   |
+| ----------------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Daemon as NM host | ON (default) | Daemon speaks Native Messaging directly, without the forwarder profile. Windows has no separate HID permission setup.                    |
+| Data Plane        | WT (default) | WebTransport uses a worker when its endpoint is offered; use WebSocket when WT is unavailable, or NM if worker setup or transport fails. |
 
 **Setup**: Install MSI or portable zip. `daemonAsNmHost` defaults to `true` on Windows (auto-detected). For forwarder mode, register `webhid.forwarder_nm_host.json` with `path` pointing to `webhid-native-messaging.exe`.
 
@@ -412,7 +401,7 @@ Then install the [browser extension](https://addons.mozilla.org/en-US/firefox/ad
 | Daemon as NM host | ON (default) | Recommended mode: daemon speaks NM directly, no forwarder / Unix socket, one less hop. macOS has no special daemon permission setup beyond Input Monitoring. |
 | Data Plane        | WT (default) | WebTransport in a worker keeps page rendering isolated; use WebSocket when WT is unavailable, or NM when site policy blocks both worker transports.          |
 
-**Setup**: Install via Homebrew (`brew install webhid`) or manual. On macOS, `daemonAsNmHost` defaults to `true`; the recommended mode stops the `brew services` daemon and enables "Daemon as NM host" in the addon settings. Grant HID permissions in System Settings → Privacy & Security → Input Monitoring if prompted.
+**Setup**: Install via Homebrew (`brew install webhid`) or manual. On macOS, `daemonAsNmHost` defaults to `true` when no stored value exists; the recommended mode stops the `brew services` daemon and enables "Daemon as NM host" in the addon settings. Grant HID permissions in System Settings → Privacy & Security → Input Monitoring if prompted.
 
 ### Benchmarking / Debugging
 

@@ -11,13 +11,13 @@
 
 ### Build
 
-| Dependency        | Package (Arch)     | Why                                         |
-| ----------------- | ------------------ | ------------------------------------------- |
-| Rust ≥ 1.85       | `rustup` or `rust` | edition 2024                                |
-| `libudev` headers | `systemd`          | `udev` crate links at build time            |
-| `pkg-config`      | `pkgconf`          | hidapi build                                |
-| `zip`             | `zip`              | Building addon XPI                          |
-| Node.js ≥ 18      | `nodejs`           | Running Playwright tests, linter, formatter |
+| Dependency        | Package (Arch)     | Why                                             |
+| ----------------- | ------------------ | ----------------------------------------------- |
+| Rust ≥ 1.85       | `rustup` or `rust` | edition 2024                                    |
+| `libudev` headers | `systemd`          | `udev` crate links at build time                |
+| `pkg-config`      | `pkgconf`          | hidapi build                                    |
+| `zip`             | `zip`              | Building addon XPI                              |
+| Node.js ≥ 20      | `nodejs`           | Running Playwright tests, linter, and formatter |
 
 ```sh
 sudo pacman -S rust systemd pkgconf zip nodejs
@@ -134,31 +134,31 @@ Restart browser after writing these files. Paths must be absolute.
 
 | Variable                    | Default                                                                                                                                                                                        | Description                                                                                                                                                                                           |
 | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `WEBHID_SOCKET`             | `@webhid` (Linux root, abstract) / `$XDG_RUNTIME_DIR/webhid/webhid.sock` or `/run/user/<uid>/webhid/webhid.sock` (Linux user) / `$HOME/Library/Application Support/webhid/webhid.sock` (macOS) | IPC socket path                                                                                                                                                                                       |
-| `WEBHID_PIPE`               | `\\.\pipe\webhid` (Windows)                                                                                                                                                                    | Named pipe path                                                                                                                                                                                       |
-| `WEBHID_WS_PORT`            | `0` (OS-assigned random)                                                                                                                                                                       | WebSocket server port (forced to 0 in NM-host mode)                                                                                                                                                   |
+| `WEBHID_SOCKET`             | `@webhid` (Linux root, abstract) / `$XDG_RUNTIME_DIR/webhid/webhid.sock` or `/run/user/<uid>/webhid/webhid.sock` (Linux user) / `$HOME/Library/Application Support/webhid/webhid.sock` (macOS) | Unix socket path used by the persistent-daemon forwarder profile; not used by daemon-as-NM-host.                                                                                                      |
+| `WEBHID_PIPE`               | `\\.\pipe\webhid` (Windows)                                                                                                                                                                    | Named pipe path used by the persistent-daemon forwarder profile.                                                                                                                                      |
+| `WEBHID_WS_PORT`            | `0` (OS-assigned random)                                                                                                                                                                       | WebSocket server port, forced to 0 in Native Messaging host mode.                                                                                                                                     |
 | `WEBHID_WS_BATCH_MS`        | `0`                                                                                                                                                                                            | Input report flush policy. `0` = rate-gated (immediate flush for a single report, 25µs coalescing for sparse bursts, 8ms coalescing once ~12+ reports land in a 4ms window). `1`+ = fixed N ms timer. |
-| `WEBHID_WS_HIGH_RATE_MS`    | `8`                                                                                                                                                                                            | Coalesce window (ms) used when the high-rate threshold is met                                                                                                                                         |
-| `WEBHID_WS_RATE_WINDOW_MS`  | `4`                                                                                                                                                                                            | Sliding window (ms) over which the flushed-report count is measured                                                                                                                                   |
-| `WEBHID_WS_HIGH_RATE_COUNT` | `12`                                                                                                                                                                                           | Flushed reports within the rate window that trigger the high-rate (8ms) coalesce window                                                                                                               |
-| `RUST_LOG`                  | `info`                                                                                                                                                                                         | Log level                                                                                                                                                                                             |
+| `WEBHID_WS_HIGH_RATE_MS`    | `8`                                                                                                                                                                                            | Coalesce window (ms) used when the high-rate threshold is met.                                                                                                                                        |
+| `WEBHID_WS_RATE_WINDOW_MS`  | `4`                                                                                                                                                                                            | Window (ms) over which the flushed-report count is measured.                                                                                                                                          |
+| `WEBHID_WS_HIGH_RATE_COUNT` | `12`                                                                                                                                                                                           | Flushed reports within the rate window that trigger the high-rate coalesce window.                                                                                                                    |
+| `RUST_LOG`                  | `info`                                                                                                                                                                                         | Log level.                                                                                                                                                                                            |
 
 Note: the user systemd unit (`manifests/webhid-daemon.user.service`) hardcodes `WEBHID_WS_PORT=31337` for backwards compatibility. The system unit and daemon default use port 0 (random, OS-assigned).
 
 ### Addon settings
 
-| Setting                            | Values                            | Default                               | Description                                                                                                                                                                                                                                                                                                                                                                                                       |
-| ---------------------------------- | --------------------------------- | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `dataPlane`                        | `ws` / `wt` / `nm`                | `wt` when available, otherwise `ws`   | Data plane: WS, WT (QUIC, pinned self-signed cert), or NM via bridge. Control ops are always NM.                                                                                                                                                                                                                                                                                                                  |
-| `workerSpawnMode`                  | `shadow` / `blob`                 | `shadow` (MV3) / `blob` (MV2)         | How the data worker is spawned in page context. `shadow` = `new Worker(location.href)` with webRequest interception (Shadow URL). `blob` = blob URL from the extension's worker bundle, requires CSP rewrite. Background pre-flights the page CSP (`getCspInfo`) and falls back: shadow blocked → blob, blob blocked on MV3 → NM. Hidden in the UI unless a worker will actually spawn (data plane `wt` or `ws`). |
-| `daemonAsNmHost`                   | bool                              | `false` (`true` on macOS and Windows) | Use daemon-as-NM-host (skip forwarder + socket)                                                                                                                                                                                                                                                                                                                                                                   |
-| `hidePageAction`                   | bool                              | `false`                               | Keep the Firefox page-action icon hidden even after a page uses WebHID; the browser action still opens the device view                                                                                                                                                                                                                                                                                            |
-| `logLevel`                         | 0 to 3                            | `1`                                   | 0=error, 1=warn, 2=info, 3=debug                                                                                                                                                                                                                                                                                                                                                                                  |
-| `devicePickerMode`                 | `modal` / `pageAction` / `window` | `modal`                               | Device picker UI mode                                                                                                                                                                                                                                                                                                                                                                                             |
-| `workerPolyfillEnabled`            | bool                              | `false`                               | Inject WebHID polyfill into page-created Web Workers                                                                                                                                                                                                                                                                                                                                                              |
-| `allowActivationlessRequestDevice` | bool                              | `false`                               | Skip the user-activation check in `requestDevice()` for sites that request devices after asynchronous work. This is a spec deviation; explicit chooser selection and Permissions Policy still apply.                                                                                                                                                                                                              |
+| Setting                            | Values                            | Default                                          | Description                                                                                                                                                                                                                                                                                              |
+| ---------------------------------- | --------------------------------- | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dataPlane`                        | `ws` / `wt` / `nm`                | `wt` when available, otherwise `ws`              | Report data plane. WT uses worker WebTransport when the handshake offers it; selected WT uses worker WS when no WT endpoint is offered; worker setup or transport failure can move the device to NM. Daemon-backed control still uses Native Messaging, while browser-local control does not.            |
+| `workerSpawnMode`                  | `shadow` / `blob`                 | `shadow` (MV3) / `blob` (MV2)                    | How the data worker is spawned in page context. Shadow uses `new Worker(location.href)` with webRequest interception. Blob uses the extension worker bundle and CSP path. CSP preflight can select NM for shadow; a failed blob spawn also falls back to NM. Hidden unless a worker will actually spawn. |
+| `daemonAsNmHost`                   | bool                              | `false` (`true` on macOS and Windows when unset) | Use daemon-as-NM-host, rather than the persistent-daemon forwarder profile.                                                                                                                                                                                                                              |
+| `hidePageAction`                   | bool                              | `false`                                          | Keep the Firefox page-action icon hidden even after a page uses WebHID; the browser action still opens the device view.                                                                                                                                                                                  |
+| `logLevel`                         | 0 to 3                            | `1`                                              | 0=error, 1=warn, 2=info, 3=debug.                                                                                                                                                                                                                                                                        |
+| `devicePickerMode`                 | `modal` / `pageAction` / `window` | `modal`                                          | Device picker UI mode.                                                                                                                                                                                                                                                                                   |
+| `workerPolyfillEnabled`            | bool                              | `false`                                          | Inject the WebHID polyfill into page-created Web Workers.                                                                                                                                                                                                                                                |
+| `allowActivationlessRequestDevice` | bool                              | `false`                                          | Skip the user-activation check in `requestDevice()` for sites that request devices after asynchronous work. This is a spec deviation; explicit chooser selection and Permissions Policy still apply.                                                                                                     |
 
-`daemonAsNmHost` and `hidePageAction` are global-only. Every other user-facing setting can be overridden per-site via the popup. `useWorker` is an internal benchmark setting, not a user-facing settings option. Settings use per-key format in `browser.storage.local`: global keys are `settings :: <name>`, site overrides are `settings :: <origin> :: <name>`. Device info + origin allowlists are stored in IndexedDB (`webhid-store`).
+`daemonAsNmHost` and `hidePageAction` are global-only. Every other user-facing setting can be overridden per-site via the popup. `useWorker` is an internal benchmark setting, not a user-facing settings option. Settings use per-key format in `browser.storage.local`: global keys are `settings :: <name>`, site overrides are `settings :: <origin> :: <name>`. Device info, origin allowlists, and grant groups are stored in IndexedDB (`webhid-store`).
 
 The bridge uses a `SettingsStore` Proxy-based observer. `storage.onChanged` extracts `changes[k].newValue` and calls `settings.set(patch)`. The store handles diffing internally and fires listeners only when a value actually changes.
 
@@ -172,7 +172,7 @@ cargo test --manifest-path crates/Cargo.toml
 
 ### Layer 2: browser specs (Playwright)
 
-Automated browser tests under `tests/browser/` use Playwright + `firefox-webext-playwright-harness` to load the addon through RDP without real hardware. The suite covers WebHID class and event shapes, Permissions Policy, activation, page-action behavior, MAIN-world race resistance, worker polyfill injection, worker spawn and shadow redirects, CSP and Trusted Types behavior, self-script/self-worker injection, and destination rewriting.
+Automated browser tests under `tests/browser/` use Playwright + `firefox-webext-playwright-harness` to load the addon through RDP without real hardware. The harness forces Firefox preference `network.lna.enabled: false`, so these tests do not exercise the real Firefox 154 LNA permission flow. The suite covers WebHID class and event shapes, Permissions Policy, activation, page-action behavior, MAIN-world race resistance, worker polyfill injection, worker spawn and shadow redirects, CSP and Trusted Types behavior, self-script/self-worker injection, and destination rewriting.
 
 ```sh
 npm ci
@@ -239,89 +239,31 @@ journalctl -u webhid-daemon -f
 ```
 FF-WebHID/
 ├── addon/                   Firefox extension (MV2 + MV3)
-│   ├── manifest.json        Active MV3 manifest (source of truth; manifest.v2.json is the MV2 variant)
-│   ├── manifest.v2.json     MV2 manifest (uses js/content/isolated/inject.js for MAIN-world injection)
+│   ├── manifest.json        Active MV3 manifest; `manifest.v2.json` is the MV2 variant
 │   ├── js/
-│   │   ├── background/      Extension background context
-│   │   │   ├── index.js     NM bridge, handshake, tab-targeted events, CSP pre-flight + rewrite, Permissions-Policy tracking, worker bundle serving, worker-polyfill injection
-│   │   │   ├── state.js     Shared mutable state (deviceCache, deviceTabMap, permissionsPolicy, pendingPicker, workerPolyfillSites)
-│   │   │   ├── storage.js   IndexedDB webhid-store (deviceInfo + origins)
-│   │   │   ├── packed.js    NM constants + packed TLV builder
-│   │   │   ├── state_ops.js Tab tracking + globalReset broadcast
-│   │   │   ├── bundle.js    Fetches + concatenates worker bundles for StreamFilter injection
-│   │   │   └── nm.js        NativeMessaging singleton (connect/reconnect/sendRequest/sendPacked)
-│   │   ├── content/
-│   │   │   ├── main/        MAIN world: navigator.hid polyfill (also runs inside page-created workers when workerPolyfillEnabled)
-│   │   │   │   ├── index.js
-│   │   │   │   └── types.js
-│   │   │   └── isolated/    Isolated world content scripts
-│   │   │       ├── bridge.js    Control/data routing, data worker spawn (shadow/blob/NM), MessagePort relay, getPolicy
-│   │   │       ├── inject.js    MV2-only MAIN-world injector
-│   │   │       ├── picker/      WebHidDevicePicker (closed Shadow DOM)
-│   │   │       ├── worker/      Data Web Worker (binary WS, MessagePort input reports, ack-wait sendReport)
-│   │   │       └── types.js
-│   │   ├── internal/pages/  Extension UI (colocated HTML+CSS+JS)
-│   │   │   ├── picker/      Popup picker window
-│   │   │   ├── popup/       Per-site settings + device list
-│   │   │   └── settings/    Global settings page
-│   │   └── utils/
-│   │       ├── bootstrap.js     Module registry (export/import via globalThis.webhid Map)
-│   │       ├── bundle-files.js  Central list of files per runtime bundle (worker, workerPolyfill, mv2MainWorld)
-│   │       ├── resource.js      fetchResource helper
-│   │       ├── http.js          HTTP status helpers (isOk, name)
-│   │       ├── logger.js        Level-based logger (storage-driven)
-│   │       ├── settings.js      GLOBAL_DEFAULTS + SettingsStore Proxy factory
-│   │       ├── base64.js        Uint8Array.fromBase64/toBase64 polyfill
-│   │       ├── websocket.js     createWsTransport (WS reconnect/backoff/auth-failure)
-│   │       ├── device.js        guessDeviceType, applyFilters (incl. exclusionFilters), isValidFilter, groupDevices
-│   │       ├── descriptor-tlv.js  NM collections TLV binary + base64 decoder (runs once at cache time)
-│   │       ├── i18n.js          browser.i18n wrapper + data-i18n localization
-│   │       └── theme-sync.js    Theme synchronization for UI pages
-│   ├── css/                 theme.css, shared.css, picker.css
-│   ├── icons/ res/          Icons + device type icons
+│   │   ├── background/      Startup, message handlers, persistent NM, storage, state, CSP, and webRequest code
+│   │   ├── content/main/    MAIN-world WebHID polyfill, including page-created worker context
+│   │   ├── content/isolated/ Bridge, picker, and production data worker
+│   │   ├── internal/pages/  Picker, popup, settings, and devices extension pages
+│   │   └── utils/           Shared settings, transport, wire-format, resource, and UI helpers
+│   ├── css/                 Shared and theme CSS
+│   ├── icons/               Extension icons
+│   └── res/                 Device-type resources
 │
 ├── crates/                  Rust workspace
-│   ├── webhid/              Shared types (NmRequest, NmResponse, IpcRequest, IpcResponse) + FNV-1a hash + packed TLV parsers + collections TLV serde (collections_tlv.rs) + base64 serde
-| `webhid-daemon/`       System daemon (hidapi, WS server, rate-gated batching, udev hot-plug, blocklist, seccomp hardening)
-│   ├── webhid-native-messaging/  Firefox ↔ daemon thin forwarder (vectored I/O on all platforms, writes error frame on connect failure)
-│   └── webhid-mock/         Virtual HID device mocker for E2E tests (Linux /dev/uhid, macOS IOHIDUserDevice; Windows stub)
+│   ├── webhid/              Shared protocol/types, device identity, packed formats, and collection TLV serialization
+│   ├── webhid-daemon/      HID daemon, WS/WT servers, batching, hot-plug, blocklist, and persistent device I/O
+│   ├── webhid-native-messaging/ Thin NM stdio-to-platform-IPC forwarder
+│   └── webhid-mock/         Virtual HID device mocker for E2E tests
 │
-├── manifests/               NM manifests + systemd units + udev rules
-│   ├── webhid.forwarder_nm_host.json   Forwarder NM manifest ({{NM_BIN}})
-│   ├── webhid.daemon_nm_host.json      Daemon-as-NM-host manifest ({{DAEMON_BIN}})
-│   ├── webhid-daemon.service           System systemd unit (root, {{DAEMON_BIN}}, Group=webhid)
-│   ├── webhid-daemon.user.service      User systemd unit (hardcodes WEBHID_WS_PORT=31337 for backwards compat)
-│   ├── 72-webhid.rules                 udev rule (uaccess + FIDO blocklist exclusions)
-│   └── 99-webhid-e2e.rules             E2E rule (webhid group gets /dev/uhid + VID 0x16C0 hidraw)
+├── manifests/               Native Messaging manifests, service units, and udev rules
 ├── packaging/               Platform packaging
-│   ├── linux/archlinux/     Arch PKGBUILDs (webhid daemon + webhid-addon)
-│   ├── windows/             WiX v6 MSI (.wxs)
-│   └── macos/               Homebrew formula
-├── tests/                   Playwright test suite
-│   ├── playwright.config.ts (firefox-browser, firefox-e2e-daemon projects)
-│   ├── playwright.forwarder.config.ts (firefox-e2e-forwarder project)
-│   ├── playwright.benchmark.config.ts (firefox-benchmark, firefox-benchmark-loss, chromium-benchmark projects)
-│   ├── browser/             Browser specs for activation, page action, policy, race, CSP, worker, and polyfill behavior
-│   ├── e2e/                 E2E serial chains for core behavior, input fanout, NM request ids, picker bypass, transport revocation, and WT
-│   ├── benchmark/           Image-pipeline and loss benchmarks. `wt-inpage` specs are benchmark-only; production modes are nm, ws, and worker wt.
-│   ├── helpers/             Test harness (e2e.ts, e2e-devices.ts, e2e-process.ts, e2e-types.ts, browser.ts, browser-utils.ts)
-│   ├── pages/               Static test pages (policy-check, worker-spawn-csp, self-script, dest-gated, iframe-parent/child, ...)
-│   ├── fixtures/descriptors/ Binary HID report descriptors (generated by scripts/gen-descriptors.mjs: vendor.bin, gamepad.bin, mouse.bin, keyboard.bin, edge/)
-│   ├── serve.ts             Test HTTP servers (policy headers + static files)
-│   └── test-page.html       Test page exposing window.tests = { helper, results } API
-├── scripts/
-│   ├── gen-descriptors.mjs  Generates HID report descriptors for webhid-mock tests
-│   ├── build-addon.mjs      Builds dist/addon + XPI (minify-only pipeline)
-│   └── build-package.mjs    Builds .deb/.rpm/.msi packages
-├── .github/workflows/       CI: check (audit), test (cargo + playwright browser), build (matrix), build-addon, sign-addon, release
-├── docs/
-│   ├── ARCHITECTURE.md      System architecture
-│   ├── SPECIFICATION.md     WebHID spec compliance report
-│   ├── DATA_PATH.md         Per-path copy/hop/latency analysis
-│   ├── DEVELOPMENT.md       This file
-│   ├── INSTALLATION.md      Install guide + platform recommendations
-│   ├── BENCHMARK.md         Benchmark report
+├── tests/                   Playwright browser, E2E, benchmark, fixture, and helper code
+├── scripts/                 Build and descriptor-generation scripts
+└── docs/                    Architecture, specification, data path, development, installation, and benchmark docs
 ```
+
+The tree above is intentionally a map of responsibilities, not an exhaustive file listing. The test helper and fixture directories contain the current browser and daemon harness details.
 
 ## Packaging (Arch Linux)
 
@@ -335,7 +277,7 @@ cd packaging/linux/archlinux/webhid-addon && makepkg -si
 
 ## Versioning
 
-Versioning uses [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) (configured in `.versionrc.json`). Current version: 3.0.1.
+Versioning uses [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) (configured in `.versionrc.json`). Current version: 3.2.0.
 
 ```sh
 npm run release
@@ -349,13 +291,13 @@ Bumps `.version.json`, `package.json`, `addon/manifest.json`, the three `Cargo.t
 
 CI builds on Linux, Windows, and macOS. Platform-specific code is gated with `#[cfg]`:
 
-| Platform | IPC                                                                  | Hot-plug                   | hidapi feature        | Daemon-as-NM-host     |
-| -------- | -------------------------------------------------------------------- | -------------------------- | --------------------- | --------------------- |
-| Linux    | Unix socket (abstract `@webhid` for root)                            | udev monitor               | `linux-static-hidraw` | Yes (needs udev rule) |
-| macOS    | Unix socket (`$HOME/Library/Application Support/webhid/webhid.sock`) | IOHIDManager callbacks     | `macos-shared-device` | Yes                   |
-| Windows  | Named pipe (`\\.\pipe\webhid`)                                       | RegisterDeviceNotification | `windows-native`      | Yes                   |
+| Platform | Persistent-daemon IPC                                 | Hot-plug                   | hidapi feature        | Daemon-as-NM-host                      |
+| -------- | ----------------------------------------------------- | -------------------------- | --------------------- | -------------------------------------- |
+| Linux    | Unix socket, including abstract `@webhid` for root    | udev monitor               | `linux-static-hidraw` | Yes, with user HID permissions         |
+| macOS    | Unix socket under the user's Application Support path | IOHIDManager callbacks     | `macos-shared-device` | Yes, with Input Monitoring as required |
+| Windows  | Named pipe (`\\.\pipe\webhid`)                        | RegisterDeviceNotification | `windows-native`      | Yes                                    |
 
-Daemon-as-NM-host works on all platforms. The daemon auto-detects NM mode via the 2 positional args Firefox passes (manifest path + addon ID). On macOS and Windows, `daemonAsNmHost` defaults to `true` (auto-detected in `loadNmHostSetting`).
+Daemon-as-NM-host works on all listed platforms. Firefox supplies the manifest path and addon ID as two positional arguments; Chromium supplies one extension-origin argument. The addon selects the host name from `daemonAsNmHost`. On macOS and Windows, that setting defaults to `true` when no value is stored.
 
 The NM forwarder uses vectored I/O (`write_vectored`) on all platforms (no `splice()`).
 

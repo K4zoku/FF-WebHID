@@ -1227,8 +1227,9 @@ impl DeviceManager {
     }
 
     /// Spawn the background input reader for a freshly opened device. The
-    /// reader stops when `stop_flag` is set and forwards unblocked input
-    /// reports to the event bus.
+    /// reader stops when `stop_flag` is set, sends active NM sessions directly
+    /// to their `nm_hot` sinks, and publishes unblocked reports to the event
+    /// bus only when non-NM sessions are active.
     fn spawn_reader(&self, cfg: ReaderConfig) -> JoinHandle<()> {
         let ReaderConfig {
             dev_id,
