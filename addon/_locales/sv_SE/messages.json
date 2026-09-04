@@ -3,13 +3,10 @@
     "message": "WebHID"
   },
   "extensionDescription": {
-    "message": "WebHID API implementation for Firefox"
+    "message": "WebHID API implementation"
   },
   "popupTitle": {
     "message": "WebHID"
-  },
-  "popupBack": {
-    "message": "Back"
   },
   "popupPairedDevices": {
     "message": "Paired Devices"
@@ -24,16 +21,7 @@
     "message": "Data Plane"
   },
   "popupDataPlaneDesc": {
-    "message": "WebTransport (in a worker), WebTransport (in the page), WebSocket, or Native Messaging"
-  },
-  "popupDataPlaneWs": {
-    "message": "WebSocket"
-  },
-  "popupDataPlaneWt": {
-    "message": "WebTransport"
-  },
-  "popupDataPlaneNm": {
-    "message": "Native Messaging"
+    "message": "WebTransport worker, WebSocket worker, or Native Messaging"
   },
   "popupDevicePickerMode": {
     "message": "Device Picker Mode"
@@ -107,9 +95,6 @@
   "popupDeviceCount": {
     "message": "($1/$2)"
   },
-  "popupInPageWtWarning": {
-    "message": "In-page WebTransport may trigger a Firefox local-network permission prompt (\"wants to access other apps and services on this device\"). Tick \"Remember my choice for this site\" before clicking Allow, otherwise you will be asked again on every page load."
-  },
   "statusReady": {
     "message": "Ready"
   },
@@ -120,7 +105,7 @@
     "message": "Daemon offline"
   },
   "statusOfflineGuidance": {
-    "message": "Check that the daemon is running (systemctl status webhid-daemon), that your user is in the webhid group, and that the udev rules are installed."
+    "message": "Check that the daemon is installed and running, and that it has permission to access your HID devices. See the installation guide for platform-specific setup."
   },
   "planeNameWS": {
     "message": "WebSocket"
@@ -150,22 +135,28 @@
     "message": "Daemon as NM host"
   },
   "settingsDaemonAsNmHostDesc": {
-    "message": "Talk to the daemon directly over native messaging, skipping the forwarder and Unix socket. Requires the daemon_nm_host manifest and the daemon running as your user (with the udev rule). Lower latency, no root-daemon fallback. Reconnects automatically."
+    "message": "Connect directly to the daemon through Native Messaging, bypassing the forwarder. Requires the webhid.daemon_nm_host native-messaging manifest and a daemon process that can access your devices. It may reduce latency but does not fall back to a persistent system daemon. Reconnects automatically."
+  },
+  "settingsHidePageAction": {
+    "message": "Hide Page Action"
+  },
+  "settingsHidePageActionDesc": {
+    "message": "Keep the page action hidden when a site uses the WebHID API. The browser action still opens the device view by default."
   },
   "settingsDataPlane": {
     "message": "Data Plane"
   },
   "settingsDataPlaneDesc": {
-    "message": "**WebTransport** (default): the fastest option; runs in a background worker so pages stay smooth.\n**WebTransport (in-page)**: connects directly in the page; fine at normal report rates, uses more page CPU. Use it when the site blocks background workers (CSP) but still allows the connection; the worker-based options would fall back to Native Messaging there. Firefox asks a one-time local-network permission (\"Allow\") before the first in-page connection; tick \"Remember my choice for this site\". Reload pages after changing.\n**WebSocket**: fallback when WebTransport is not available (older Firefox).\n**Native Messaging**: the slowest but most compatible option; use when a site's security policy blocks the others."
+    "message": "**WebTransport worker** (default): keeps transport work and parsing off the page main thread.\n**WebSocket worker**: use when WebTransport is unavailable, such as on older Firefox.\n**Native Messaging**: most compatible; use when a site's security policy prevents a worker transport."
   },
   "settingsDataPlaneWs": {
-    "message": "WebSocket"
+    "message": "WebSocket worker"
   },
   "settingsDataPlaneWt": {
-    "message": "WebTransport"
+    "message": "WebTransport worker"
   },
   "settingsDataPlaneWtInpage": {
-    "message": "WebTransport (in-page)"
+    "message": "WebTransport in-page (internal benchmark mode)"
   },
   "settingsDataPlaneNm": {
     "message": "Native Messaging"
@@ -219,7 +210,7 @@
     "message": "Cannot reach the WebHID daemon. Check that it is installed and running, then try again."
   },
   "pickerParseFailed": {
-    "message": "This device's report descriptor could not be parsed. Connecting and sending reports still works."
+    "message": "This device's report descriptor could not be parsed, so it cannot be opened."
   },
   "pickerNoMatch": {
     "message": "No devices match the specified filters"
