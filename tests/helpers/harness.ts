@@ -107,11 +107,17 @@ export async function harnessCtxBody(
   use: (ctx: HarnessContext) => Promise<void>,
   opts: HarnessCtxOptions = {}
 ): Promise<void> {
+  const launchOptions = {
+    ...(opts.launchOptions ?? {}),
+    firefoxUserPrefs: {
+      ...(opts.launchOptions as { firefoxUserPrefs?: Record<string, unknown> } | undefined)
+        ?.firefoxUserPrefs,
+      'network.lna.enabled': false
+    }
+  }
   const { context } = await createFirefoxContext(args.rdpPort, EXTENSION_PATH, {
     routeHandler: defaultRouteHandler,
-    playwrightOptions: opts.launchOptions
-      ? { headless: args.headless, launchOptions: opts.launchOptions }
-      : { headless: args.headless }
+    playwrightOptions: { headless: args.headless, launchOptions }
   })
 
   let bridge: NetworkEventBridge | undefined
