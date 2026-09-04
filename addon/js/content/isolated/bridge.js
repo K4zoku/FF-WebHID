@@ -928,6 +928,20 @@
     workerError: handleWorkerErrorEvent
   }
 
+  /**
+   * Signals that the isolated bridge can receive the MAIN bootstrap port.
+   * @param {MessageEvent} event
+   * @returns {void}
+   */
+  function handleBridgeReadyRequest(event) {
+    if (!event.data || event.data.type !== 'webhidBridgeRequest') return
+    const source = event.source
+    if (!source || typeof source.postMessage !== 'function') return
+    source.postMessage({ type: 'webhidBridgeReady' }, event.origin || '*')
+  }
+  window.addEventListener('message', handleBridgeReadyRequest)
+  window.postMessage({ type: 'webhidBridgeReady' }, '*')
+
   window.addEventListener('message', (event) => {
     const port = event.ports != null ? event.ports[0] : undefined
     if (!port) return
@@ -1006,6 +1020,7 @@
     const origin = getRequestOrigin(data)
     portOrigin.set(p, origin || window.location.origin)
     p.onmessage = (event) => dispatchPortMessage(p, event, null)
+    if (typeof p.start === 'function') p.start()
     replyToPage({ type: 'response', id: data.id, result: { ok: true } })
   }
 

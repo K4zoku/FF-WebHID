@@ -4,9 +4,13 @@
 
   /** @type {import("./types.js").Logger} */
   const logger = webhid.import('logger')
-  const isWorker = typeof window === 'undefined' || !(window instanceof Window)
-  if (!isWorker && !window.isSecureContext) {
-    logger.warn('NO POLYFILL')
+  const pristine = webhid.import('pristine')
+  const { object, reflect, types, host } = pristine
+  const NativeWindow = types.Window && types.Window.constructor
+  const windowObject = host.window
+  const isWorker = typeof windowObject === 'undefined' || !NativeWindow || !(windowObject instanceof NativeWindow)
+  if (!isWorker && !windowObject.isSecureContext) {
+    webhid.import('logger').warn('NO POLYFILL')
     return
   }
 
@@ -15,53 +19,126 @@
   const createSettingsStore = webhid.import('createSettingsStore')
   const isValidFilter = webhid.import('isValidFilter')
   const createWtTransport = webhid.import('createWtTransport')
-  delete globalThis.webhid
+  const NativeMap = types.Map.constructor
+  const NativeWeakMap = types.WeakMap.constructor
+  const NativeArrayBuffer = types.ArrayBuffer.constructor
+  const NativeDataView = types.DataView.constructor
+  const NativeUint8Array = types.Uint8Array.constructor
+  const NativeEventTarget = types.EventTarget.constructor
+  const NativeMessageChannel = types.MessageChannel.constructor
+  const NativeWorker = types.Worker ? types.Worker.constructor : null
+  const NativeBlob = types.Blob ? types.Blob.constructor : null
+  const NativeEvent = types.Event ? types.Event.constructor : null
+  const NativeDOMException = types.DOMException ? types.DOMException.constructor : null
+  const NativeError = types.Error.constructor
+  const NativeTypeError = types.TypeError.constructor
+  const TypeError = NativeTypeError
+  const NativeObject = types.Object.constructor
+  const NativePromise = types.Promise.constructor
+  const Promise = NativePromise
+  const mapOps = types.Map.proto.methods
+  const weakMapOps = types.WeakMap.proto.methods
+  const eventTargetOps = types.EventTarget.proto.methods
+  const nativeMessagePortPostMessage = types.MessagePort.getDescriptor('postMessage').value
+  const nativeMessagePortAddEventListener =
+    types.MessagePort.getDescriptor('addEventListener').value
+  const nativeMessagePortRemoveEventListener =
+    types.MessagePort.getDescriptor('removeEventListener').value
+  const nativeMessagePortClose = types.MessagePort.getDescriptor('close').value
+  const nativeMessagePortStart = types.MessagePort.getDescriptor('start').value
+  const nativeWorkerPostMessage = types.Worker
+    ? types.Worker.getDescriptor('postMessage').value
+    : null
+  const nativeWorkerAddEventListener = types.Worker
+    ? types.Worker.getDescriptor('addEventListener').value
+    : null
+  const nativeWindowPostMessage = !isWorker ? host.windowPostMessageMethod : null
+  const nativeWindowAddEventListener = host.windowAddEventListener
+  const nativeWindowRemoveEventListener = host.windowRemoveEventListener
+  const nativeCreateObjectURL = host.url.createObjectURL
+  const nativeRevokeObjectURL = host.url.revokeObjectURL
+  const nativeCryptoRandomUUID = host.cryptoRandomUUID
+  const nativeSetTimeout = host.timers.setTimeout
+  const nativeSelfPostMessage = host.postMessage
+  const ArrayBuffer = NativeArrayBuffer
+  const DataView = NativeDataView
+  const Uint8Array = NativeUint8Array
+  const EventTarget = NativeEventTarget
+  const Event = NativeEvent
+  const Object = NativeObject
+  const arrayIsArray = types.Array.getStaticDescriptor('isArray').value
+  const arrayOps = types.Array.proto.methods
+  const stringOps = types.String.proto.methods
+  const nativeClearTimeout = host.timers.clearTimeout
+  const nativeCreateTrustedTypePolicy = host.trustedTypesCreatePolicy
+  const nativeUserActivation = host.userActivation
+  const nativeIsActiveGetter = host.userActivationIsActive
+  const callNative = (fn, receiver, ...args) => reflect.apply(fn, receiver, args)
+  const nativeBind = types.Function.proto.methods.bind
+  const permissionsObject = host.permissions
+  const executionGlobal = isWorker ? host.self : windowObject
+  const trustedTypes = host.trustedTypes
+  const Navigator = types.Navigator ? types.Navigator.constructor : null
+  const TrustedTypePolicy = types.TrustedTypePolicy
+    ? types.TrustedTypePolicy.constructor
+    : null
+  const nativePermissionsQuery =
+    host.permissionsQuery ||
+    (permissionsObject && typeof permissionsObject.query === 'function'
+      ? nativeBind(permissionsObject.query, permissionsObject)
+      : null)
+  const promiseOps = types.Promise.proto.methods
+  const promiseAll = types.Promise.getStaticDescriptor('all').value
+  const stringConstructor = types.String.constructor
+  const uint8Ops = types.Uint8Array.proto.methods
+  const nativeNumberIsFinite = host.numberIsFinite
+  const nativeMathTrunc = host.mathTrunc
+  const nativeJsonStringify = host.jsonStringify
+  function hardenMap(value) {
+    object.defineProperties(value, {
+      get: { value: (key) => mapOps.get(value, key) },
+      set: { value: (key, item) => mapOps.set(value, key, item) },
+      delete: { value: (key) => mapOps.delete(value, key) },
+      has: { value: (key) => mapOps.has(value, key) },
+      forEach: { value: (callback, receiver) => mapOps.forEach(value, callback, receiver) },
+      entries: { value: () => mapOps.entries(value) },
+      values: { value: () => mapOps.values(value) },
+      keys: { value: () => mapOps.keys(value) },
+      size: { get: () => types.Map.proto.getters.size(value) }
+    })
+    return value
+  }
 
-  const nativeMessagePortPostMessage = MessagePort.prototype.postMessage
-  const nativeMessagePortAddEventListener = MessagePort.prototype.addEventListener
-  const nativeMessagePortRemoveEventListener = MessagePort.prototype.removeEventListener
-  const nativeMessagePortClose = MessagePort.prototype.close
-  const nativeMessagePortStart = MessagePort.prototype.start
-  const NativeMessageChannel = MessageChannel
-  const NativeWorker = typeof Worker !== 'undefined' ? Worker : null
-  const NativeBlob = typeof Blob !== 'undefined' ? Blob : null
-  const NativeEvent = typeof Event !== 'undefined' ? Event : null
-  const NativeDOMException = typeof DOMException !== 'undefined' ? DOMException : null
-  const nativeCreateObjectURL =
-    typeof URL !== 'undefined' && URL.createObjectURL ? URL.createObjectURL.bind(URL) : null
-  const nativeRevokeObjectURL =
-    typeof URL !== 'undefined' && URL.revokeObjectURL ? URL.revokeObjectURL.bind(URL) : null
-  const nativeCryptoRandomUUID =
-    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-      ? crypto.randomUUID.bind(crypto)
-      : null
-  const nativeSetTimeout = typeof setTimeout !== 'undefined' ? setTimeout : null
-  const nativeClearTimeout = typeof clearTimeout !== 'undefined' ? clearTimeout : null
-  const nativeCreateTrustedTypePolicy =
-    typeof trustedTypes !== 'undefined' && trustedTypes !== null
-      ? trustedTypes.createPolicy.bind(trustedTypes)
-      : null
-  const nativeWorkerPostMessage =
-    typeof Worker !== 'undefined' ? Worker.prototype.postMessage : null
-  const nativeWorkerAddEventListener =
-    typeof Worker !== 'undefined' ? Worker.prototype.addEventListener : null
-  const nativeSelfPostMessage = typeof self !== 'undefined' ? self.postMessage.bind(self) : null
-  const nativeWindowPostMessage = typeof window !== 'undefined' ? window.postMessage : null
-  const nativeUserActivation =
-    !isWorker && navigator.userActivation ? navigator.userActivation : null
-  const nativeIsActiveDescriptor = nativeUserActivation
-    ? Object.getOwnPropertyDescriptor(Object.getPrototypeOf(nativeUserActivation), 'isActive')
-    : null
-  const nativeIsActiveGetter = nativeIsActiveDescriptor
-    ? nativeIsActiveDescriptor.get
-    : null
+  function hardenWeakMap(value) {
+    object.defineProperties(value, {
+      get: { value: (key) => weakMapOps.get(value, key) },
+      set: { value: (key, item) => weakMapOps.set(value, key, item) },
+      delete: { value: (key) => weakMapOps.delete(value, key) },
+      has: { value: (key) => weakMapOps.has(value, key) }
+    })
+    return value
+  }
+  function hardenEventTarget(value) {
+    object.defineProperties(value, {
+      addEventListener: {
+        value: (type, listener, options) =>
+          eventTargetOps.addEventListener(value, type, listener, options)
+      },
+      removeEventListener: {
+        value: (type, listener, options) =>
+          eventTargetOps.removeEventListener(value, type, listener, options)
+      },
+      dispatchEvent: {
+        value: (event) => eventTargetOps.dispatchEvent(value, event)
+      }
+    })
+    return value
+  }
+
+  reflect.deleteProperty(globalThis, 'webhid')
 
   function hasTransientActivation() {
-    return nativeIsActiveGetter
-      ? nativeIsActiveGetter.call(nativeUserActivation)
-      : nativeUserActivation
-        ? nativeUserActivation.isActive === true
-        : false
+    return nativeIsActiveGetter && nativeUserActivation ? nativeIsActiveGetter() : false
   }
 
   logger.initLogger('polyfill')
@@ -74,7 +151,7 @@
   let hidInstance = null
 
   /** @type {Map<string, object>} */
-  const inPagePlanes = new Map()
+  const inPagePlanes = hardenMap(new NativeMap())
 
   const {
     MSG_SEND_REPORT,
@@ -86,7 +163,7 @@
     handleControlResponse: handleControlResponseShared
   } = webhid.import('wireFormat')
   /** @type {Map<number, {deviceId: string, resolve: Function, reject: Function}>} */
-  const inPagePending = new Map()
+  const inPagePending = hardenMap(new NativeMap())
 
   /**
    * @param {object} req
@@ -99,17 +176,17 @@
       onReady: () => {
         if (readyNotified) return
         readyNotified = true
-        nativeMessagePortPostMessage.call(bridgePort, {
+        callNative(nativeMessagePortPostMessage, bridgePort, {
           type: 'dataPlaneResponse',
           id: req.id,
           result: { ok: true }
         })
       },
       onClosed: (info) => {
-        rejectInPagePending(deviceId, new Error('data plane closed'))
+        rejectInPagePending(deviceId, new NativeError('data plane closed'))
         if (info && info.willReconnect) return
         inPagePlanes.delete(deviceId)
-        nativeMessagePortPostMessage.call(bridgePort, {
+        callNative(nativeMessagePortPostMessage, bridgePort, {
           type: 'dataPlaneEvent',
           deviceId,
           event: { type: 'closed' }
@@ -117,8 +194,8 @@
       },
       onAuthFailed: (code) => {
         inPagePlanes.delete(deviceId)
-        rejectInPagePending(deviceId, new Error('auth failed'))
-        nativeMessagePortPostMessage.call(bridgePort, {
+        rejectInPagePending(deviceId, new NativeError('auth failed'))
+        callNative(nativeMessagePortPostMessage, bridgePort, {
           type: 'dataPlaneEvent',
           deviceId,
           event: { type: 'auth-failed', code }
@@ -156,7 +233,7 @@
       if (plane.wt) plane.wt.disconnect()
       inPagePlanes.delete(data.deviceId)
     }
-    rejectInPagePending(data.deviceId, new Error('data plane closed'))
+    rejectInPagePending(data.deviceId, new NativeError('data plane closed'))
   }
 
   /**
@@ -166,12 +243,12 @@
    * @returns {void}
    */
   function rejectInPagePending(deviceId, error) {
-    for (const [reqId, entry] of inPagePending) {
+    inPagePending.forEach((entry, reqId) => {
       if (entry.deviceId === deviceId) {
         inPagePending.delete(reqId)
         entry.reject(error)
       }
-    }
+    })
   }
 
   /**
@@ -209,7 +286,7 @@
   }
 
   /** @type {Map<string, Worker>} */
-  const mainWorldWorkers = new Map()
+  const mainWorldWorkers = hardenMap(new NativeMap())
 
   /**
    * @param {object} req
@@ -245,12 +322,12 @@
           throw e
         }
       } else {
-        await sendRequest('armShadowSpawn', { url: location.href }, { timeoutMs: 2000 })
-        worker = new NativeWorker(makeUrl(location.href))
+        await sendRequest('armShadowSpawn', { url: executionGlobal.location.href }, { timeoutMs: 2000 })
+        worker = new NativeWorker(makeUrl(executionGlobal.location.href))
       }
     } catch (e) {
-      sendRequest('unarmShadowSpawn', { url: location.href }, { timeoutMs: 500 })
-      return { result: { ok: false, error: String(e && e.message) }, transfer: null }
+      sendRequest('unarmShadowSpawn', { url: executionGlobal.location.href }, { timeoutMs: 500 })
+      return { result: { ok: false, error: stringConstructor(e && e.message) }, transfer: null }
     }
     const previous = mainWorldWorkers.get(payload.deviceId)
     if (previous && previous !== worker) previous.terminate()
@@ -260,9 +337,9 @@
       if (mainWorldWorkers.get(payload.deviceId) === worker) {
         mainWorldWorkers.delete(payload.deviceId)
       }
-      sendRequest('unarmShadowSpawn', { url: location.href }, { timeoutMs: 500 })
+      sendRequest('unarmShadowSpawn', { url: executionGlobal.location.href }, { timeoutMs: 500 })
       if (bridgePort) {
-        nativeMessagePortPostMessage.call(bridgePort, {
+        callNative(nativeMessagePortPostMessage, bridgePort, {
           type: 'workerError',
           deviceId: payload.deviceId,
           message: (event && event.message) || 'unknown'
@@ -285,14 +362,12 @@
     if (state.dataPort) {
       try {
         if (state.dataPortHandler) {
-          nativeMessagePortRemoveEventListener.call(
-            state.dataPort,
-            'message',
-            state.dataPortHandler
-          )
+          callNative(nativeMessagePortRemoveEventListener, state.dataPort,
+          'message',
+          state.dataPortHandler)
           state.dataPortHandler = null
         }
-        nativeMessagePortClose.call(state.dataPort)
+        callNative(nativeMessagePortClose, state.dataPort)
       } catch (e) {
         logger.debug('close stale dataPort failed', e)
       }
@@ -300,27 +375,21 @@
     const dataChannel = new NativeMessageChannel()
     state.dataPort = dataChannel.port1
     state.dataPortHandler = (event) => onDataPortMessage(state, event.data)
-    nativeMessagePortAddEventListener.call(state.dataPort, 'message', state.dataPortHandler)
-    nativeMessagePortStart.call(state.dataPort)
+    callNative(nativeMessagePortAddEventListener, state.dataPort, 'message', state.dataPortHandler)
+    callNative(nativeMessagePortStart, state.dataPort)
     const worker = mainWorldWorkers.get(state.deviceId)
     if (worker) {
       const controlChannel = new NativeMessageChannel()
-      nativeWorkerPostMessage.call(
-        worker,
-        { type: 'setPorts', controlPort: controlChannel.port2, dataPort: dataChannel.port2 },
-        [controlChannel.port2, dataChannel.port2]
-      )
-      nativeMessagePortPostMessage.call(
-        bridgePort,
-        { id: 0, action: 'dataPort', payload: { deviceId: state.deviceId } },
-        [controlChannel.port1]
-      )
+      callNative(nativeWorkerPostMessage, worker,
+      { type: 'setPorts', controlPort: controlChannel.port2, dataPort: dataChannel.port2 },
+      [controlChannel.port2, dataChannel.port2])
+      callNative(nativeMessagePortPostMessage, bridgePort,
+      { id: 0, action: 'dataPort', payload: { deviceId: state.deviceId } },
+      [controlChannel.port1])
     } else {
-      nativeMessagePortPostMessage.call(
-        bridgePort,
-        { id: 0, action: 'dataPort', payload: { deviceId: state.deviceId } },
-        [dataChannel.port2]
-      )
+      callNative(nativeMessagePortPostMessage, bridgePort,
+      { id: 0, action: 'dataPort', payload: { deviceId: state.deviceId } },
+      [dataChannel.port2])
     }
   }
 
@@ -347,7 +416,8 @@
     const markCaptured = (policy) => {
       if (captured) return
       captured = true
-      ttFactory = (url) => policy.createScriptURL(url)
+      const createScriptURL = nativeBind(policy.createScriptURL, policy)
+      ttFactory = (url) => createScriptURL(url)
       resolveReady(true)
     }
     const baseRules = {
@@ -370,24 +440,23 @@
       return makeWrappedPolicy(policy, claimedName, pageRules)
     }
 
-    sendRequest('getCspInfo')
-      .then((info) => {
-        if (captured) return
-        const names = Array.isArray(info && info.trustedTypesNames) ? info.trustedTypesNames : []
-        const candidates = names.length ? names : ['webhid-worker']
-        for (const name of candidates) {
-          if (typeof name !== 'string' || name === "'none'" || name === "'allow-duplicates'")
-            continue
-          const policy = claim(name)
-          if (policy) {
-            markCaptured(policy)
-            installTtSharing(name, policy, nativeCreateTrustedTypePolicy)
-            return
-          }
+    const cspRequest = promiseOps.then(sendRequest('getCspInfo'), (info) => {
+      if (captured) return
+      const names = arrayIsArray(info && info.trustedTypesNames) ? info.trustedTypesNames : []
+      const candidates = names.length ? names : ['webhid-worker']
+      for (const name of candidates) {
+        if (typeof name !== 'string' || name === "'none'" || name === "'allow-duplicates'")
+          continue
+        const policy = claim(name)
+        if (policy) {
+          markCaptured(policy)
+          installTtSharing(name, policy, nativeCreateTrustedTypePolicy)
+          return
         }
-        resolveReady(!(info && info.hasTrustedTypesRequire))
-      })
-      .catch(() => resolveReady(true))
+      }
+      resolveReady(!(info && info.hasTrustedTypesRequire))
+    })
+    promiseOps.catch(cspRequest, () => resolveReady(true))
   }
 
   /**
@@ -397,13 +466,14 @@
    * @returns {object}
    */
   function makeWrappedPolicy(policy, name, pageRules) {
-    const proto =
-      typeof TrustedTypePolicy !== 'undefined' ? TrustedTypePolicy.prototype : Object.prototype
-    const wrapperProto = Object.create(proto)
-    const wrapper = Object.create(wrapperProto)
+    const proto = TrustedTypePolicy
+      ? types.TrustedTypePolicy.prototype
+      : types.Object.prototype
+    const wrapperProto = object.create(proto)
+    const wrapper = object.create(wrapperProto)
     const rules = pageRules || {}
     const define = (target, prop, value) => {
-      Object.defineProperty(target, prop, {
+      object.defineProperty(target, prop, {
         value,
         writable: false,
         enumerable: false,
@@ -421,7 +491,7 @@
       typeof policy.createScriptURL === 'function'
     ) {
       const pageFn = rules.createScriptURL
-      const origScriptURL = policy.createScriptURL.bind(policy)
+      const origScriptURL = nativeBind(policy.createScriptURL, policy)
       define(wrapper, 'createScriptURL', (s) => origScriptURL(pageFn(s)))
     } else {
       defineMissing('createScriptURL')
@@ -429,7 +499,7 @@
     for (const m of ['createHTML', 'createScript']) {
       if (typeof rules[m] === 'function' && typeof policy[m] === 'function') {
         const pageFn = rules[m]
-        const orig = policy[m].bind(policy)
+        const orig = nativeBind(policy[m], policy)
         define(wrapper, m, (s) => orig(pageFn(s)))
       } else if (typeof rules[m] !== 'function') {
         defineMissing(m)
@@ -456,12 +526,9 @@
     ttFactory = (url) => policy.createScriptURL(url)
   }
 
-  let OriginalError
-  let stackDescriptor
   let getOriginalStack
   if (!isWorker) {
-    OriginalError = window.Error
-    stackDescriptor = Object.getOwnPropertyDescriptor(OriginalError.prototype, 'stack')
+    const stackDescriptor = types.Error.getDescriptor('stack')
     getOriginalStack = stackDescriptor && stackDescriptor.get
   }
 
@@ -469,13 +536,13 @@
   function isCalledFromConsole() {
     if (isWorker) return false
     try {
-      throw new OriginalError()
+      throw new NativeError()
     } catch (e) {
-      const stack = getOriginalStack ? getOriginalStack.call(e) : e.stack
+      const stack = getOriginalStack ? callNative(getOriginalStack, e) : ''
       if (typeof stack !== 'string') return false
-      const lines = stack.split('\n')
-      const callerFrame = lines.at(2) || ''
-      return callerFrame.includes('debugger eval code')
+      const lines = stringOps.split(stack, '\n')
+      const callerFrame = arrayOps.at(lines, 2) || ''
+      return stringOps.includes(callerFrame, 'debugger eval code')
     }
   }
 
@@ -484,14 +551,13 @@
   /** @type {{object}} */
   const pending = {}
   if (!nativeCryptoRandomUUID) {
-    throw new Error('WebHID polyfill requires crypto.randomUUID (secure context)')
+    throw new NativeError('WebHID polyfill requires crypto.randomUUID (secure context)')
   }
   /** @type {string} */
   const frameNonce = nativeCryptoRandomUUID()
 
   /** @type {MessagePort|null} */
   let bridgePort = null
-  /** @type {Promise<void>} */
   const bridgeReady = isWorker
     ? (() => {
         const ch = new NativeMessageChannel()
@@ -501,24 +567,35 @@
         return Promise.resolve()
       })()
     : new Promise((resolve) => {
-        const channel = new NativeMessageChannel()
-        bridgePort = channel.port1
-        const target = window === window.top ? window : window.top
-        nativeWindowPostMessage.call(target, null, '*', [channel.port2])
-        setupBridgePort()
-        resolve()
+        const target = windowObject === windowObject.top ? windowObject : windowObject.top
+        const onReady = (event) => {
+          if (
+            !event.data ||
+            event.data.type !== 'webhidBridgeReady' ||
+            event.source !== target
+          )
+            return
+          callNative(nativeWindowRemoveEventListener, windowObject, 'message', onReady)
+          const channel = new NativeMessageChannel()
+          bridgePort = channel.port1
+          callNative(nativeWindowPostMessage, target, null, '*', [channel.port2])
+          setupBridgePort()
+          resolve()
+        }
+        callNative(nativeWindowAddEventListener, windowObject, 'message', onReady)
+        callNative(nativeWindowPostMessage, target, { type: 'webhidBridgeRequest' }, '*')
       })
   if (!isWorker) setupTrustedTypesSharing()
 
   /** @returns {void} */
   function setupBridgePort() {
     if (!bridgePort) return
-    nativeMessagePortAddEventListener.call(bridgePort, 'message', (event) => {
+    callNative(nativeMessagePortAddEventListener, bridgePort, 'message', (event) => {
       if (!event.data) return
       const handler = BRIDGE_MESSAGE_HANDLERS[event.data.type]
       if (handler) handler(event.data)
     })
-    nativeMessagePortStart.call(bridgePort)
+    callNative(nativeMessagePortStart, bridgePort)
   }
 
   /**
@@ -526,12 +603,12 @@
    * @returns {void}
    */
   function handleSpawnWorkerMessage(data) {
-    handleSpawnWorkerRequest(data).then((r) => {
+    promiseOps.then(handleSpawnWorkerRequest(data), (r) => {
       const msg = { type: 'spawnWorkerResponse', id: data.id, result: r.result }
       if (r.transfer) {
-        nativeMessagePortPostMessage.call(bridgePort, msg, [r.transfer])
+        callNative(nativeMessagePortPostMessage, bridgePort, msg, [r.transfer])
       } else {
-        nativeMessagePortPostMessage.call(bridgePort, msg)
+        callNative(nativeMessagePortPostMessage, bridgePort, msg)
       }
     })
   }
@@ -599,7 +676,7 @@
       if (payload && payload.data instanceof Uint8Array) {
         transfers.push(payload.data.buffer)
       }
-      nativeMessagePortPostMessage.call(bridgePort, msg, transfers.length ? transfers : undefined)
+      callNative(nativeMessagePortPostMessage, bridgePort, msg, transfers.length ? transfers : undefined)
     })
   }
 
@@ -626,12 +703,12 @@
     if (deviceInfoCache !== null) return deviceInfoCache
     try {
       const response = await sendRequest('enumerate')
-      const devices = http.isOk(response.s) && Array.isArray(response.D) ? response.D : []
-      deviceInfoCache = new Map()
+      const devices = http.isOk(response.s) && arrayIsArray(response.D) ? response.D : []
+      deviceInfoCache = hardenMap(new NativeMap())
       for (const device of devices) deviceInfoCache.set(device.deviceId, device)
       return deviceInfoCache
     } catch {
-      deviceInfoCache = new Map()
+      deviceInfoCache = hardenMap(new NativeMap())
       return deviceInfoCache
     }
   }
@@ -642,21 +719,20 @@
   settings.on('dataPlane', (v) => logger.info('data plane changed: ' + v))
   logger.bindSettings(settings)
 
-  bridgeReady.then(() => {
-    sendRequest('getSettings', {}).then((result) => {
+  promiseOps.then(bridgeReady, () => {
+    promiseOps.then(sendRequest('getSettings', {}), (result) => {
       if (!result) return
       settings.set(result)
       logger.info('data plane: ' + settings.dataPlane)
     })
   })
-
   /** @returns {{isCrossOrigin: boolean}} */
   function getPolicyContext() {
     if (isWorker) return { isCrossOrigin: false }
     let isCrossOrigin = false
-    if (window !== window.top) {
+    if (windowObject !== windowObject.top) {
       try {
-        window.parent.location.origin
+        windowObject.parent.location.origin
       } catch {
         isCrossOrigin = true
       }
@@ -669,12 +745,9 @@
     return sendRequest('getPolicy', getPolicyContext())
   }
 
-  const originalQuery =
-    navigator.permissions && typeof navigator.permissions.query === 'function'
-      ? navigator.permissions.query.bind(navigator.permissions)
-      : null
-  if (originalQuery) {
-    navigator.permissions.query = async (desc) => {
+  const originalQuery = nativePermissionsQuery
+  if (originalQuery && permissionsObject) {
+    permissionsObject.query = async (desc) => {
       if (desc && desc.name === 'hid') {
         const policy = await getPolicy()
         return {
@@ -690,15 +763,15 @@
   }
 
   /** @type {WeakMap<object, object>} */
-  const devState = new WeakMap()
+  const devState = hardenWeakMap(new NativeWeakMap())
   /** @type {WeakMap<object, object>} */
-  const hidState = new WeakMap()
+  const hidState = hardenWeakMap(new NativeWeakMap())
   /** @type {WeakMap<object, object>} */
-  const evtState = new WeakMap()
+  const evtState = hardenWeakMap(new NativeWeakMap())
   /** @type {symbol} */
   const irState = Symbol('webhid_ir')
   /** @type {Map<string, object>} */
-  const deviceRegistry = new Map()
+  const deviceRegistry = hardenMap(new NativeMap())
 
   /**
    * Sends a report request over the in-page plane when one is open, else the
@@ -722,7 +795,7 @@
       opts.mapResolve
     )
     if (inPage) return inPage
-    if (!state.dataPort) throw new Error('data port not connected')
+    if (!state.dataPort) throw new NativeError('data port not connected')
     const reqId = ++nextReqId
     const msg = { type: opts.portType, reqId, reportId: opts.reportId }
     const transfers = []
@@ -731,7 +804,7 @@
       transfers.push(opts.payload.buffer)
     }
     return new Promise((resolve, reject) => {
-      state.dataPending = state.dataPending || new Map()
+      state.dataPending = state.dataPending || hardenMap(new NativeMap())
       state.dataPending.set(reqId, {
         resolve: (data) => resolve(opts.mapResolve(data)),
         reject: (e) => {
@@ -742,11 +815,9 @@
           }
         }
       })
-      nativeMessagePortPostMessage.call(
-        state.dataPort,
-        msg,
-        transfers.length ? transfers : undefined
-      )
+      callNative(nativeMessagePortPostMessage, state.dataPort,
+      msg,
+      transfers.length ? transfers : undefined)
     })
   }
 
@@ -757,14 +828,14 @@
   function HIDDevice() {
     throw new TypeError('Illegal constructor')
   }
-  HIDDevice.prototype = Object.create(EventTarget.prototype)
+  HIDDevice.prototype = object.create(EventTarget.prototype)
   HIDDevice.prototype.constructor = HIDDevice
-  Object.defineProperty(HIDDevice.prototype, Symbol.toStringTag, {
+  object.defineProperty(HIDDevice.prototype, Symbol.toStringTag, {
     value: 'HIDDevice',
     configurable: true
   })
 
-  Object.defineProperties(HIDDevice.prototype, {
+  object.defineProperties(HIDDevice.prototype, {
     opened: {
       get() {
         return devState.get(this) == null
@@ -844,13 +915,13 @@
             reportSize: state.maxInputReportSize + 3
           })
           if (state.forgotten) {
-            sendRequest('close', { deviceId: state.deviceId }).catch(() => {})
+            promiseOps.catch(sendRequest('close', { deviceId: state.deviceId }), () => {})
             throw new NativeDOMException('Device has been forgotten', 'InvalidStateError')
           }
           if (http.isOk(response.s)) {
             await bridgeReady
             if (state.forgotten) {
-              sendRequest('close', { deviceId: state.deviceId }).catch(() => {})
+              promiseOps.catch(sendRequest('close', { deviceId: state.deviceId }), () => {})
               throw new NativeDOMException('Device has been forgotten', 'InvalidStateError')
             }
             wireDevicePort(state)
@@ -858,7 +929,7 @@
             logger.info('open deviceId=' + state.deviceId)
             this.dispatchEvent(new NativeEvent('open'))
           } else {
-            throw new Error('Open failed: ' + http.name(response.s || 0))
+            throw new NativeError('Open failed: ' + http.name(response.s || 0))
           }
         } catch (error) {
           throw error instanceof NativeDOMException
@@ -890,19 +961,17 @@
             rejectPendingReports(state, new NativeDOMException('Device closed', 'AbortError'))
             if (state.dataPort) {
               if (state.dataPortHandler) {
-                nativeMessagePortRemoveEventListener.call(
-                  state.dataPort,
-                  'message',
-                  state.dataPortHandler
-                )
+                callNative(nativeMessagePortRemoveEventListener, state.dataPort,
+                'message',
+                state.dataPortHandler)
                 state.dataPortHandler = null
               }
-              nativeMessagePortClose.call(state.dataPort)
+              callNative(nativeMessagePortClose, state.dataPort)
               state.dataPort = null
             }
             this.dispatchEvent(new NativeEvent('close'))
           } else {
-            throw new Error('Failed to close device')
+            throw new NativeError('Failed to close device')
           }
         } catch (error) {
           throw new NativeDOMException(error.message, 'InvalidStateError')
@@ -926,9 +995,9 @@
         const normalizedReportId = validateReportId(convertedReportId, state.collections)
         const view =
           data instanceof ArrayBuffer
-            ? new Uint8Array(data)
-            : new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
-        const buffer = view.slice()
+            ? new NativeUint8Array(data)
+            : new NativeUint8Array(data.buffer, data.byteOffset, data.byteLength)
+        const buffer = uint8Ops.slice(view)
         try {
           logger.debug('sendReport reportId=' + normalizedReportId + ' len=' + buffer.length)
           return sendDeviceRequest(state, {
@@ -965,9 +1034,9 @@
             reportId: normalizedReportId,
             payload: null,
             mapResolve: (data) => {
-              if (!data) return new DataView(new ArrayBuffer(0))
-              const b = data instanceof Uint8Array ? data : new Uint8Array(data)
-              return new DataView(b.buffer, b.byteOffset, b.byteLength)
+              if (!data) return new NativeDataView(new NativeArrayBuffer(0))
+              const b = data instanceof Uint8Array ? data : new NativeUint8Array(data)
+              return new NativeDataView(b.buffer, b.byteOffset, b.byteLength)
             },
             failMessage: 'receive failed'
           })
@@ -993,9 +1062,9 @@
         const normalizedReportId = validateReportId(convertedReportId, state.collections)
         const view =
           data instanceof ArrayBuffer
-            ? new Uint8Array(data)
-            : new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
-        const buffer = view.slice()
+            ? new NativeUint8Array(data)
+            : new NativeUint8Array(data.buffer, data.byteOffset, data.byteLength)
+        const buffer = uint8Ops.slice(view)
         logger.debug('sendFeatureReport reportId=' + normalizedReportId + ' len=' + buffer.length)
         try {
           return sendDeviceRequest(state, {
@@ -1063,8 +1132,8 @@
    */
   async function resolvePairedDevice(deviceId) {
     deviceInfoCache = null
-    const [hashes, cache] = await Promise.all([getPairedDevices(), getDeviceCache()])
-    if (!hashes.includes(deviceId)) return null
+    const [hashes, cache] = await promiseAll([getPairedDevices(), getDeviceCache()])
+    if (!arrayOps.includes(hashes, deviceId)) return null
     const info = cache.get(deviceId)
     return info ? getOrCreateDevice(info) : null
   }
@@ -1109,7 +1178,7 @@
               detail.data.byteOffset || 0,
               detail.data.byteLength
             )
-          : new DataView(new ArrayBuffer(0))
+          : new NativeDataView(new NativeArrayBuffer(0))
         device.dispatchEvent(
           new HIDInputReportEvent('inputreport', {
             device: device,
@@ -1129,13 +1198,13 @@
    */
   function rejectPendingReports(state, error) {
     if (!state.dataPending || !state.dataPending.size) return
-    for (const [, entry] of state.dataPending) {
+    state.dataPending.forEach((entry) => {
       try {
         entry.reject(error)
       } catch (e) {
         logger.debug('reject pending report failed', e)
       }
-    }
+    })
     state.dataPending.clear()
   }
 
@@ -1175,10 +1244,10 @@
     } catch {
       throw new TypeError('reportId must be a number in the range 0-255')
     }
-    if (!Number.isFinite(number) || number < 0 || number > 255) {
+    if (!nativeNumberIsFinite(number) || number < 0 || number > 255) {
       throw new TypeError('reportId must be a number in the range 0-255')
     }
-    return Math.trunc(number) || 0
+    return nativeMathTrunc(number) || 0
   }
 
   /**
@@ -1218,14 +1287,12 @@
       }
       if (state.dataPort) {
         if (state.dataPortHandler) {
-          nativeMessagePortRemoveEventListener.call(
-            state.dataPort,
-            'message',
-            state.dataPortHandler
-          )
+          callNative(nativeMessagePortRemoveEventListener, state.dataPort,
+          'message',
+          state.dataPortHandler)
           state.dataPortHandler = null
         }
-        nativeMessagePortClose.call(state.dataPort)
+        callNative(nativeMessagePortClose, state.dataPort)
         state.dataPort = null
       }
       device.dispatchEvent(new NativeEvent('close'))
@@ -1260,7 +1327,7 @@
     const entry = state.dataPending != null ? state.dataPending.get(data.reqId) : undefined
     if (!entry) return
     state.dataPending.delete(data.reqId)
-    if (data.error) entry.reject(new Error(data.error))
+    if (data.error) entry.reject(new NativeError(data.error))
     else if (data.type === 'featureResult') entry.resolve(data.data)
     else entry.resolve()
   }
@@ -1272,10 +1339,10 @@
    */
   function handleInputReportBatch(state, data) {
     const device = state.self
-    if (device && Array.isArray(data.reports)) {
+    if (device && arrayIsArray(data.reports)) {
       for (const r of data.reports) {
         if (r == null) continue
-        const dataView = r.data ? new DataView(r.data) : new DataView(new ArrayBuffer(0))
+        const dataView = r.data ? new NativeDataView(r.data) : new NativeDataView(new NativeArrayBuffer(0))
         device.dispatchEvent(
           new HIDInputReportEvent('inputreport', {
             device: device,
@@ -1293,7 +1360,7 @@
    * @returns {void}
    */
   function handleInputReport(state, data) {
-    const dataView = data.data ? new DataView(data.data) : new DataView(new ArrayBuffer(0))
+    const dataView = data.data ? new NativeDataView(data.data) : new NativeDataView(new NativeArrayBuffer(0))
     const device = state.self
     if (device)
       device.dispatchEvent(
@@ -1340,7 +1407,7 @@
    * @returns {object}
    */
   function deepFreeze(object) {
-    const propNames = Reflect.ownKeys(object)
+    const propNames = reflect.ownKeys(object)
 
     for (const name of propNames) {
       const value = object[name]
@@ -1350,7 +1417,7 @@
       }
     }
 
-    return Object.freeze(object)
+    return object.freeze(object)
   }
 
   /**
@@ -1358,9 +1425,9 @@
    * @returns {object}
    */
   function createHIDDevice(deviceInfo) {
-    const obj = Object.create(HIDDevice.prototype)
-    const eventTarget = new EventTarget()
-    obj.dispatchEvent = eventTarget.dispatchEvent.bind(eventTarget)
+    const obj = object.create(HIDDevice.prototype)
+    const eventTarget = hardenEventTarget(new NativeEventTarget())
+    obj.dispatchEvent = (event) => eventTarget.dispatchEvent(event)
     const state = {
       eventTarget: eventTarget,
       self: obj,
@@ -1413,7 +1480,7 @@
     const data = dictionary.data
     if (device == null) throw new TypeError('HIDInputReportEventInit.device is required')
     if (data == null) throw new TypeError('HIDInputReportEventInit.data is required')
-    const obj = Reflect.construct(Event, [type, dictionary], new.target || HIDInputReportEvent)
+    const obj = types.Event.construct([type, dictionary], new.target || HIDInputReportEvent)
     obj[irState] = {
       device,
       reportId: convertEnforcedOctet(dictionary.reportId),
@@ -1421,13 +1488,13 @@
     }
     return obj
   }
-  HIDInputReportEvent.prototype = Object.create(Event.prototype)
+  HIDInputReportEvent.prototype = object.create(Event.prototype)
   HIDInputReportEvent.prototype.constructor = HIDInputReportEvent
-  Object.defineProperty(HIDInputReportEvent.prototype, Symbol.toStringTag, {
+  object.defineProperty(HIDInputReportEvent.prototype, Symbol.toStringTag, {
     value: 'HIDInputReportEvent',
     configurable: true
   })
-  Object.defineProperties(HIDInputReportEvent.prototype, {
+  object.defineProperties(HIDInputReportEvent.prototype, {
     device: {
       get() {
         var st = this[irState]
@@ -1467,17 +1534,17 @@
     }
     const device = dictionary.device
     if (device == null) throw new TypeError('HIDConnectionEventInit.device is required')
-    const obj = Reflect.construct(Event, [type, dictionary], new.target || HIDConnectionEvent)
+    const obj = types.Event.construct([type, dictionary], new.target || HIDConnectionEvent)
     evtState.set(obj, { device })
     return obj
   }
-  HIDConnectionEvent.prototype = Object.create(Event.prototype)
+  HIDConnectionEvent.prototype = object.create(Event.prototype)
   HIDConnectionEvent.prototype.constructor = HIDConnectionEvent
-  Object.defineProperty(HIDConnectionEvent.prototype, Symbol.toStringTag, {
+  object.defineProperty(HIDConnectionEvent.prototype, Symbol.toStringTag, {
     value: 'HIDConnectionEvent',
     configurable: true
   })
-  Object.defineProperty(HIDConnectionEvent.prototype, 'device', {
+  object.defineProperty(HIDConnectionEvent.prototype, 'device', {
     get() {
       var st = evtState.get(this)
       return st != null ? st.device : undefined
@@ -1493,9 +1560,9 @@
   function HID() {
     throw new TypeError('Illegal constructor')
   }
-  HID.prototype = Object.create(EventTarget.prototype)
+  HID.prototype = object.create(EventTarget.prototype)
   HID.prototype.constructor = HID
-  Object.defineProperty(HID.prototype, Symbol.toStringTag, {
+  object.defineProperty(HID.prototype, Symbol.toStringTag, {
     value: 'HID',
     configurable: true
   })
@@ -1559,7 +1626,7 @@
     if (!devices || devices.length === 0) return []
     pairedDevices = null
     deviceInfoCache = null
-    return devices.map((device) => getOrCreateDevice(device))
+    return arrayOps.map(devices, (device) => getOrCreateDevice(device))
   }
 
   /**
@@ -1573,9 +1640,9 @@
 
     logger.debug(
       'requestDevice filters=' +
-        JSON.stringify(filters) +
+        nativeJsonStringify(filters) +
         ' exclusionFilters=' +
-        JSON.stringify(exclusionFilters)
+        nativeJsonStringify(exclusionFilters)
     )
     if (isWorker) {
       throw new NativeDOMException('Not allowed in worker context', 'NotSupportedError')
@@ -1600,11 +1667,11 @@
     return new Promise((resolve, reject) => {
       const id = frameNonce + ':' + ++nextReqId
       pending[id] = (result) => {
-        grantRequestedDevices(result).then(resolve, (e) =>
+        promiseOps.then(grantRequestedDevices(result), resolve, (e) =>
           reject(new NativeDOMException(e != null ? e.message : 'requestDevice failed', 'NetworkError'))
         )
       }
-      nativeMessagePortPostMessage.call(bridgePort, {
+      callNative(nativeMessagePortPostMessage, bridgePort, {
         id,
         action: 'requestDevice',
         payload: { filters, exclusionFilters }
@@ -1612,7 +1679,7 @@
     })
   }
 
-  Object.defineProperties(HID.prototype, {
+  object.defineProperties(HID.prototype, {
     getDevices: {
       /** @returns {Promise<object[]>} */
       value: async function () {
@@ -1722,9 +1789,9 @@
 
   /** @returns {object} */
   function createHID() {
-    const obj = Object.create(HID.prototype)
-    const eventTarget = new EventTarget()
-    obj.dispatchEvent = eventTarget.dispatchEvent.bind(eventTarget)
+    const obj = object.create(HID.prototype)
+    const eventTarget = hardenEventTarget(new NativeEventTarget())
+    obj.dispatchEvent = (event) => eventTarget.dispatchEvent(event)
     hidState.set(obj, {
       eventTarget: eventTarget,
       onconnect: null,
@@ -1740,7 +1807,7 @@
    * @returns {void}
    */
   function defineWebhidGlobal(name, value) {
-    Object.defineProperty(isWorker ? self : globalThis, name, {
+    object.defineProperty(isWorker ? self : globalThis, name, {
       value,
       writable: false,
       configurable: true,
@@ -1757,8 +1824,8 @@
 
   /** @returns {void} */
   function installNavigatorHid() {
-    const target = isWorker ? Object.getPrototypeOf(self.navigator) : Navigator.prototype
-    Object.defineProperty(target, 'hid', {
+    const target = isWorker ? object.getPrototypeOf(executionGlobal.navigator) : Navigator.prototype
+    object.defineProperty(target, 'hid', {
       get() {
         return hidInstance
       },
@@ -1776,12 +1843,13 @@
   function PatchedWorker(url, opts) {
     const instance = new NativeWorker(url, opts)
     if (nativeWorkerAddEventListener) {
-      nativeWorkerAddEventListener.call(instance, 'message', (e) => {
+      callNative(nativeWorkerAddEventListener, instance, 'message', (e) => {
         if (e.data === null && e.ports && e.ports[0]) {
           e.stopImmediatePropagation()
-          bridgeReady.then(() => {
+          promiseOps.then(bridgeReady, () => {
             if (!bridgePort) return
-            nativeMessagePortPostMessage.call(
+            callNative(
+              nativeMessagePortPostMessage,
               bridgePort,
               {
                 id: frameNonce + ':' + ++nextReqId,
@@ -1798,7 +1866,7 @@
   }
   if (NativeWorker) {
     PatchedWorker.prototype = NativeWorker.prototype
-    Object.setPrototypeOf(PatchedWorker, NativeWorker)
+    reflect.setPrototypeOf(PatchedWorker, NativeWorker)
     globalThis.Worker = PatchedWorker
   }
 })()

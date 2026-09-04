@@ -91,6 +91,32 @@ A page cannot grant itself a device or see the full inventory. `pairDevice`/`rec
 
 The worker polyfill creates its own bridge port; no page-side init decision. On load, the injected bundle (webRequest gate: global `workerPolyfillEnabled` or the per-site key for the WORKER SCRIPT's origin) snapshots `MessageChannel` (before page code can patch it), keeps one end as its bridge port, posts `null` + the other end to the page; `PatchedWorker`'s instance listener swallows that message and forwards the port via `workerPort`. Plain/blob/data workers never post, so never receive a spurious init message. It also wraps `navigator.permissions.query({name:'hid'})`. Shadow-URL interception: the MAIN world requests `armShadowSpawn` (tab+document keyed, one-shot, 3s TTL backstop, fail-open after 2s) before spawning the data worker from `new Worker(location.href)`; the webRequest handler serves the worker bundle only when armed, consumed on the real worker fetch. `shadowRedirectTargets` tracks redirect hops without the arm. The data bundle's `null`+port `'ready'` reply branch was removed; production workers spawn via `NativeWorker` in `handleSpawnWorkerRequest`, driven by `setPorts`, ready via `onReady`. Cross-origin worker scripts can't be exercised in the browser harness (network bridge re-serves without CORS headers). Regression: `tests/browser/worker.spec.ts`.
 
+### Hostile MAIN intrinsic capture
+
+The first script in every MAIN, worker, worker-polyfill, and MV2 MAIN-world bundle is
+`js/utils/pristine.js`. It captures the small native root used by delayed code:
+Object, Reflect, Function, constructors, prototype methods, accessors, and explicit
+host operations. `captureType()` returns the native constructor, prototype, immutable
+descriptor-backed operation tables, and a pristine construct operation. `captureOps()`
+is the operation-only form for internal branded objects. Descriptor records and every
+operation closure are immutable after bootstrap, and authority accessors such as
+`navigator.userActivation.isActive` are exposed only as zero-argument operations bound
+to the captured authority object.
+
+Every module loaded into the MAIN bundle imports the shared snapshot during its capture
+section. Runtime code must use those lexical references for mutable constructors,
+prototype operations, accessors, timers, typed-array operations, promises, transport
+objects, and errors. Page-facing mutations, such as installing the WebHID globals or
+wrapping `navigator.permissions.query`, remain explicit and are not internal
+capabilities. Do not add a downstream authorization check to compensate for a missed
+MAIN capture. Fix the capture at the source instead.
+The MAIN bridge installs a captured Window message listener and requests readiness from
+the ISOLATED bridge before transferring its single bootstrap MessagePort. The ISOLATED
+bridge responds only to the request source and also announces readiness after its
+listener is installed. Firefox keeps MAIN first so inline worker polyfill injection
+retains its document_start ordering; no second channel or retry is used.
+
+
 ### Polyfill realm and MessagePort gotchas
 
 The polyfill runs in the MAIN world and pre-claims pristine `MessagePort`/`MessageChannel`/`Worker.prototype.postMessage`/`window.postMessage` at document_start. Gotchas: (1) `addEventListener` does not implicitly start a `MessagePort`; call `start()` or responses never dispatch (30s sendRequest timeouts). (2) `window.postMessage` targets `this`; never bind it when an iframe polyfill posts to `window.top` (cross-origin iframe tests catch this). Regression: `tests/e2e/picker-bypass.spec.ts`.

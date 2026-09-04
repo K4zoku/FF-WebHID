@@ -1,15 +1,42 @@
 ;(function () {
   const webhid = globalThis.webhid
+  const pristine = webhid.import('pristine')
+  const { object, types } = pristine
+  const NativeMap = types.Map.constructor
+  const NativeSet = types.Set.constructor
+  const NativeProxy = types.Proxy.constructor
+  const Map = NativeMap
+  const Set = NativeSet
+  const Proxy = NativeProxy
   const isChromium = webhid.import('isChromium')
-
   const isMv2 =
     typeof browser !== 'undefined' &&
     browser.runtime != null &&
     browser.runtime.getManifest().manifest_version === 2
-
+  const mapOps = types.Map.proto.methods
+  const setOps = types.Set.proto.methods
+  const arrayOps = types.Array.proto.methods
+  function hardenMap(value) {
+    object.defineProperties(value, {
+      get: { value: (key) => mapOps.get(value, key) },
+      set: { value: (key, item) => mapOps.set(value, key, item) },
+      delete: { value: (key) => mapOps.delete(value, key) },
+      has: { value: (key) => mapOps.has(value, key) },
+      forEach: { value: (callback, receiver) => mapOps.forEach(value, callback, receiver) }
+    })
+    return value
+  }
+  function hardenSet(value) {
+    object.defineProperties(value, {
+      add: { value: (item) => setOps.add(value, item) },
+      delete: { value: (item) => setOps.delete(value, item) },
+      has: { value: (item) => setOps.has(value, item) }
+    })
+    return value
+  }
   /** @type {import("../types.js").SettingsDefaults} */
   const GLOBAL_DEFAULTS = {
-    dataPlane: typeof WebTransport !== 'undefined' ? 'wt' : 'ws',
+    dataPlane: types.WebTransport ? 'wt' : 'ws',
     logLevel: 1,
     daemonAsNmHost: false,
     hidePageAction: false,
@@ -28,7 +55,7 @@
     /** @type {{[key: string]: any}} */
     const values = { ...defaults }
     /** @type {Map<string, Set<Function>>} */
-    const listeners = new Map()
+    const listeners = hardenMap(new Map())
 
     /**
      * @param {string} key
@@ -49,7 +76,7 @@
       on(keys, callback) {
         if (!Array.isArray(keys)) keys = [keys]
         for (const k of keys) {
-          if (!listeners.has(k)) listeners.set(k, new Set())
+          if (!listeners.has(k)) listeners.set(k, hardenSet(new Set()))
           listeners.get(k).add(callback)
         }
         return () => {
@@ -65,7 +92,7 @@
        */
       set(patch) {
         const changed = {}
-        for (const [k, v] of Object.entries(patch)) {
+        for (const [k, v] of object.entries(patch)) {
           if (k in api || k === 'on' || k === 'set' || k === 'getAll') continue
           if (values[k] !== v) {
             values[k] = v
@@ -122,7 +149,16 @@
        * @returns {string[]}
        */
       ownKeys(target) {
-        return [...new Set([...Object.keys(target), ...Object.keys(values)])]
+        const keys = []
+        const append = (source) => {
+          for (let i = 0; i < source.length; i++) {
+            const key = source[i]
+            if (!arrayOps.includes(keys, key)) keys[keys.length] = key
+          }
+        }
+        append(object.keys(target))
+        append(object.keys(values))
+        return keys
       },
       /**
        * @param {object} target
@@ -130,7 +166,7 @@
        * @returns {PropertyDescriptor|undefined}
        */
       getOwnPropertyDescriptor(target, prop) {
-        if (prop in target) return Object.getOwnPropertyDescriptor(target, prop)
+        if (prop in target) return object.getOwnPropertyDescriptor(target, prop)
         if (prop in values) {
           return {
             configurable: true,
@@ -147,7 +183,7 @@
   webhid.export('GLOBAL_DEFAULTS', GLOBAL_DEFAULTS)
   webhid.export('createSettingsStore', createSettingsStore)
 
-  const SETTING_NAMES = Object.keys(GLOBAL_DEFAULTS)
+  const SETTING_NAMES = object.keys(GLOBAL_DEFAULTS)
 
   /**
    * Settings that can be overridden per site, except global-only settings.
@@ -228,7 +264,7 @@
     const global = await loadGlobalSettings()
     if (!origin) return global
     const site = await loadSiteSettings(origin)
-    for (const [k, v] of Object.entries(site)) global[k] = v
+    for (const [k, v] of object.entries(site)) global[k] = v
     return global
   }
 

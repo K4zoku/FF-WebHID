@@ -1,5 +1,20 @@
 ;(function () {
-  /** @type {Array<[RegExp, string]>} */
+  const webhid = globalThis.webhid
+  const pristine = webhid.import('pristine')
+  const { object, types } = pristine
+  const NativeMap = types.Map.constructor
+  const NativeString = types.String.constructor
+  const mapOps = types.Map.proto.methods
+  const regexpOps = types.RegExp.proto.methods
+  const stringOps = types.String.proto.methods
+  const hardenMap = (value) => {
+    object.defineProperties(value, {
+      has: { value: (key) => mapOps.has(value, key) },
+      get: { value: (key) => mapOps.get(value, key) },
+      set: { value: (key, item) => mapOps.set(value, key, item) }
+    })
+    return value
+  }
   const TYPE_PATTERNS = [
     [/mouse|trackball|trackpad|touchpad/i, 'mouse'],
     [/keyboard|kbd/i, 'keyboard'],
@@ -22,9 +37,11 @@
       if (u === 0x04 || u === 0x08) return 'joystick'
       if (u === 0x05) return 'controller'
     }
-    const name = (device.productName || '').toLowerCase()
-    for (const [pattern, type] of TYPE_PATTERNS) {
-      if (pattern.test(name)) return type
+    const name = stringOps.toLowerCase(NativeString(device.productName || ''))
+    for (let i = 0; i < TYPE_PATTERNS.length; i++) {
+      const pattern = TYPE_PATTERNS[i][0]
+      const type = TYPE_PATTERNS[i][1]
+      if (regexpOps.test(pattern, name)) return type
     }
     return 'unknown'
   }
@@ -34,9 +51,9 @@
    * @returns {Map<string, import("../types.js").HIDDeviceInfo[]>}
    */
   function groupDevices(devices) {
-    const groups = new Map()
+    const groups = hardenMap(new NativeMap())
     for (const device of devices) {
-      const name = device.productName || String(device.deviceId)
+      const name = device.productName || NativeString(device.deviceId)
       if (!groups.has(name)) groups.set(name, [])
       groups.get(name).push(device)
     }
@@ -49,7 +66,7 @@
    */
   function isValidFilter(filter) {
     if (!filter || typeof filter !== 'object') return false
-    if (Object.keys(filter).length === 0) return false
+    if (object.keys(filter).length === 0) return false
     if ('productId' in filter && !('vendorId' in filter)) return false
     if ('usage' in filter && !('usagePage' in filter)) return false
     return true

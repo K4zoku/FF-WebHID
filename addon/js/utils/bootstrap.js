@@ -1,25 +1,12 @@
 ;(function () {
-  if (typeof globalThis === 'undefined') {
-    var getGlobal = function () {
-      if (typeof window !== 'undefined') return window
-      if (typeof self !== 'undefined') return self
-      if (typeof global !== 'undefined') return global
-      return (
-        (function () {
-          return this
-        })() || {}
-      )
-    }
-    Object.defineProperty(Object.prototype, 'globalThis', {
-      get: function () {
-        return getGlobal()
-      },
-      configurable: true,
-      enumerable: false
-    })
-  }
-  /** @type {Map<string, any>} */
-  const registry = new Map()
+  const pristine = globalThis.webhidPristine
+  if (!pristine) throw new Error('pristine intrinsics are not loaded')
+  const { object } = pristine
+  const map = pristine.types.Map
+  const mapSet = map.proto.methods.set
+  const mapGet = map.proto.methods.get
+  const NativeError = pristine.types.Error.constructor
+  const registry = map.construct([])
   const api = {
     /**
      * @param {string} name
@@ -27,7 +14,7 @@
      * @returns {any}
      */
     export(name, value) {
-      registry.set(name, value)
+      mapSet(registry, name, value)
       api[name] = value
       return value
     },
@@ -36,13 +23,19 @@
      * @returns {any}
      */
     import(name) {
-      const v = registry.get(name)
-      if (v === undefined) throw new Error("module '" + name + "' not loaded")
+      const v = mapGet(registry, name)
+      if (v === undefined) throw new NativeError("module '" + name + "' not loaded")
       return v
     }
   }
-  Object.defineProperty(globalThis, 'webhid', {
+  object.defineProperty(globalThis, 'webhid', {
     value: api,
+    writable: false,
+    enumerable: false,
+    configurable: true
+  })
+  object.defineProperty(globalThis, 'webhidPristine', {
+    value: undefined,
     writable: false,
     enumerable: false,
     configurable: true
@@ -54,4 +47,5 @@
       browser.runtime != null &&
       browser.runtime.getURL('').startsWith('chrome-extension://')
   )
+  api.export('pristine', pristine)
 })()

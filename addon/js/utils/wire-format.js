@@ -1,5 +1,17 @@
 ;(function () {
   const webhid = globalThis.webhid
+  const pristine = webhid.import('pristine')
+  const { types } = pristine
+  const NativeUint8Array = types.Uint8Array.constructor
+  const NativeArrayBuffer = types.ArrayBuffer.constructor
+  const NativeDataView = types.DataView.constructor
+  const NativeError = types.Error.constructor
+  const Uint8Array = NativeUint8Array
+  const ArrayBuffer = NativeArrayBuffer
+  const DataView = NativeDataView
+  const u8Ops = types.Uint8Array.proto.methods
+  const dataViewOps = types.DataView.proto.methods
+  const mapOps = types.Map.proto.methods
 
   const MSG_SEND_REPORT = 0x01
   const MSG_SEND_FEATURE_REPORT = 0x02
@@ -24,7 +36,7 @@
       const payloadLen = len - 1
       if (payloadLen > 0) {
         const buffer = new ArrayBuffer(payloadLen)
-        new Uint8Array(buffer).set(batch.subarray(offset + 1, offset + len))
+        u8Ops.set(new Uint8Array(buffer), u8Ops.subarray(batch, offset + 1, offset + len))
         reports.push({ reportId, data: buffer })
       } else {
         reports.push({ reportId, data: null })
@@ -45,23 +57,24 @@
     if (batch.length < 6) return
     const respType = batch[0]
     const dataView = new DataView(batch.buffer, batch.byteOffset, batch.byteLength)
-    const reqId = dataView.getUint32(1, true)
+    const reqId = dataViewOps.getUint32(dataView, 1, true)
     const status = batch[5]
-    const entry = pending.get(reqId)
+    const entry = mapOps.get(pending, reqId)
     if (!entry) return
-    pending.delete(reqId)
+    mapOps.delete(pending, reqId)
     if (respType === RESP_RECEIVE_FEATURE_REPORT) {
       if (status === 2) return entry.reject({ blocked: true })
-      if (status !== 0) return entry.reject(new Error('feature read failed'))
-      if (batch.length < 8) return entry.reject(new Error('short feature resp'))
-      const len = dataView.getUint16(6, true)
+      if (status !== 0) return entry.reject(new NativeError('feature read failed'))
+      if (batch.length < 8) return entry.reject(new NativeError('short feature resp'))
+      const len = dataViewOps.getUint16(dataView, 6, true)
       const out = new Uint8Array(len)
-      if (len > 0 && batch.length >= 8 + len) out.set(batch.subarray(8, 8 + len))
+      if (len > 0 && batch.length >= 8 + len)
+        u8Ops.set(out, u8Ops.subarray(batch, 8, 8 + len))
       return entry.resolve(out)
     }
     if (status === 0) entry.resolve()
     else if (status === 2) entry.reject({ blocked: true })
-    else entry.reject(new Error('write failed status=' + status))
+    else entry.reject(new NativeError('write failed status=' + status))
   }
 
   /**
@@ -74,9 +87,9 @@
   function buildSendFrame(msgType, reqId, reportId, payload) {
     const frame = new Uint8Array(6 + (payload ? payload.length : 0))
     frame[0] = msgType
-    new DataView(frame.buffer).setUint32(1, reqId, true)
+    dataViewOps.setUint32(new DataView(frame.buffer), 1, reqId, true)
     frame[5] = reportId
-    if (payload) frame.set(payload, 6)
+    if (payload) u8Ops.set(frame, payload, 6)
     return frame
   }
 

@@ -1,5 +1,14 @@
 ;(function () {
   const webhid = globalThis.webhid
+  const pristine = webhid.import('pristine')
+  const { types, host } = pristine
+  const NativeDate = types.Date.constructor
+  const NativeString = types.String.constructor
+  const dateOps = types.Date.proto.methods
+  const stringOps = types.String.proto.methods
+  const consoleOps = host.console
+  const nativeParseInt = host.parseInt
+  const nativeIsNaN = host.isNaN
   const LEVEL_ERROR = 0
   const LEVEL_WARN = 1
   const LEVEL_INFO = 2
@@ -23,15 +32,16 @@
    * @returns {string}
    */
   function prefix(levelName) {
-    const t = new Date()
+    const t = new NativeDate()
+    const pad = (value, width) => stringOps.padStart(NativeString(value), width, '0')
     const time =
-      String(t.getHours()).padStart(2, '0') +
+      pad(dateOps.getHours(t), 2) +
       ':' +
-      String(t.getMinutes()).padStart(2, '0') +
+      pad(dateOps.getMinutes(t), 2) +
       ':' +
-      String(t.getSeconds()).padStart(2, '0') +
+      pad(dateOps.getSeconds(t), 2) +
       '.' +
-      String(t.getMilliseconds()).padStart(3, '0')
+      pad(dateOps.getMilliseconds(t), 3)
     return '[' + time + ' webhid' + (mod ? '::' + mod : '') + ' ' + levelName + ']'
   }
 
@@ -53,10 +63,14 @@
    */
   function applyLevel(level) {
     logger.level = level
-    logger.error = level >= LEVEL_ERROR ? (...args) => console.error(prefix('ERROR'), ...args) : nop
-    logger.warn = level >= LEVEL_WARN ? (...args) => console.warn(prefix('WARN'), ...args) : nop
-    logger.info = level >= LEVEL_INFO ? (...args) => console.info(prefix('INFO'), ...args) : nop
-    logger.debug = level >= LEVEL_DEBUG ? (...args) => console.debug(prefix('DEBUG'), ...args) : nop
+    logger.error =
+      level >= LEVEL_ERROR ? (...args) => consoleOps.error(prefix('ERROR'), ...args) : nop
+    logger.warn =
+      level >= LEVEL_WARN ? (...args) => consoleOps.warn(prefix('WARN'), ...args) : nop
+    logger.info =
+      level >= LEVEL_INFO ? (...args) => consoleOps.info(prefix('INFO'), ...args) : nop
+    logger.debug =
+      level >= LEVEL_DEBUG ? (...args) => consoleOps.debug(prefix('DEBUG'), ...args) : nop
   }
 
   /**
@@ -66,10 +80,11 @@
   function parseLevel(v) {
     if (typeof v === 'number') return v
     if (typeof v === 'string') {
-      const n = parseInt(v, 10)
-      if (!isNaN(n)) return n
+      const n = nativeParseInt(v, 10)
+      if (!nativeIsNaN(n)) return n
       const map = { error: 0, warn: 1, warning: 1, info: 2, debug: 3 }
-      return map[v.toLowerCase()] != null ? map[v.toLowerCase()] : LEVEL_WARN
+      const name = stringOps.toLowerCase(NativeString(v))
+      return map[name] != null ? map[name] : LEVEL_WARN
     }
     return LEVEL_WARN
   }

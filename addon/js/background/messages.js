@@ -950,7 +950,6 @@
     sendResponse({ ok: true })
     return false
   }
-
   /**
    * @param {object} request
    * @param {object} sender
@@ -978,6 +977,7 @@
     sendResponse({ ok: true })
     return false
   }
+
 
   /**
    * @param {object} request

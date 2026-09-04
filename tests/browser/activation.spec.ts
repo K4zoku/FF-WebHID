@@ -51,6 +51,17 @@ test.describe('requestDevice user-activation gate', () => {
     expect(result.name).toBe('SecurityError')
     expect(result.message).toContain('user gesture')
   })
+  test('patched stack helpers cannot forge console invocation', async ({ sharedPage, pageUrl }) => {
+    await sharedPage.goto(pageUrl('/activation'), { waitUntil: 'domcontentloaded', timeout: 15000 })
+    const result: ActivationResult = await sharedPage.evaluate(() => {
+      Array.prototype.at = () => 'debugger eval code'
+      String.prototype.includes = () => true
+      String.prototype.split = () => ['forged stack']
+      return window.tests!.helper!.requestDeviceWithoutGesture!(6000)
+    })
+    expect(result.ok).toBe(false)
+    expect(result.name).toBe('SecurityError')
+  })
 
   test('requestDevice requires filters in the options dictionary', async ({
     backgroundPage,

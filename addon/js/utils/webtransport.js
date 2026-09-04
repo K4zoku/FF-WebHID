@@ -1,7 +1,34 @@
 ;(function () {
   const webhid = globalThis.webhid
-  /** @type {import("../types.js").Logger} */
+  const pristine = webhid.import('pristine')
+  const { types, host } = pristine
   const logger = webhid.import('logger')
+  const NativeUint8Array = types.Uint8Array.constructor
+  const NativeDataView = types.DataView.constructor
+  const NativeTextEncoder = types.TextEncoder ? types.TextEncoder.constructor : null
+  const NativeWebTransport = types.WebTransport ? types.WebTransport.constructor : null
+  const Uint8Array = NativeUint8Array
+  const DataView = NativeDataView
+  const TextEncoder = NativeTextEncoder
+  const WebTransport = NativeWebTransport
+  const u8Ops = types.Uint8Array.proto.methods
+  const dataViewOps = types.DataView.proto.methods
+  const promiseOps = types.Promise.proto.methods
+  const webTransportOps = types.WebTransport ? types.WebTransport.proto.methods : null
+  const webTransportGetters = types.WebTransport ? types.WebTransport.proto.getters : null
+  const readableStreamOps = types.ReadableStream ? types.ReadableStream.proto.methods : null
+  const readerOps = types.ReadableStreamDefaultReader
+    ? types.ReadableStreamDefaultReader.proto.methods
+    : null
+  const writerOps = types.WritableStreamDefaultWriter
+    ? types.WritableStreamDefaultWriter.proto.methods
+    : null
+  const writableStreamOps = types.WritableStream ? types.WritableStream.proto.methods : null
+  const setTimeout = host.timers.setTimeout
+  const clearTimeout = host.timers.clearTimeout
+  const stringOps = types.String.proto.methods
+  const nativeParseInt = host.parseInt
+  const nativeMathMin = host.mathMin
 
   /**
    * @param {string} hex
@@ -9,7 +36,8 @@
    */
   function hexToBytes(hex) {
     const bytes = new Uint8Array(hex.length / 2)
-    for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(hex.substr(i * 2, 2), 16)
+    for (let i = 0; i < bytes.length; i++)
+      bytes[i] = nativeParseInt(stringOps.substr(hex, i * 2, 2), 16)
     return bytes
   }
 
@@ -20,8 +48,8 @@
    */
   function concatBytes(a, b) {
     const out = new Uint8Array(a.length + b.length)
-    out.set(a, 0)
-    out.set(b, a.length)
+    u8Ops.set(out, a, 0)
+    u8Ops.set(out, b, a.length)
     return out
   }
 
@@ -66,7 +94,7 @@
       log('warn', 'WT transport failed: ' + reason)
       if (wt) {
         try {
-          wt.close()
+          webTransportOps.close(wt)
         } catch (e) {
           log('debug', 'WT close after failure failed', e)
         }
@@ -118,7 +146,7 @@
         reconnectTimer = null
         doConnect()
       }, reconnectDelay)
-      reconnectDelay = Math.min(reconnectDelay * 2, 5000)
+      reconnectDelay = nativeMathMin(reconnectDelay * 2, 5000)
     }
 
     /**
@@ -127,20 +155,20 @@
      */
     async function readFrames(stream) {
       try {
-        const reader = stream.readable.getReader()
+        const reader = readableStreamOps.getReader(stream.readable)
         streamReader = reader
         let buf = new Uint8Array(0)
         while (true) {
-          const { value, done } = await reader.read()
+          const { value, done } = await readerOps.read(reader)
           if (done) break
           if (!value) continue
           buf = concatBytes(buf, value instanceof Uint8Array ? value : new Uint8Array(value))
           while (buf.length >= 4) {
             const dataView = new DataView(buf.buffer, buf.byteOffset, buf.byteLength)
-            const len = dataView.getUint32(0, true)
+            const len = dataViewOps.getUint32(dataView, 0, true)
             if (buf.length < 4 + len) break
-            const frame = buf.subarray(4, 4 + len)
-            buf = buf.subarray(4 + len)
+            const frame = u8Ops.subarray(buf, 4, 4 + len)
+            buf = u8Ops.subarray(buf, 4 + len)
             if (opts.onBinary) opts.onBinary(frame)
           }
         }
@@ -157,13 +185,13 @@
     async function attachStream() {
       if (!wt) return
       try {
-        const stream = await wt.createBidirectionalStream()
+        const stream = await webTransportOps.createBidirectionalStream(wt)
         if (!wt) return
         if (authTimer) {
           clearTimeout(authTimer)
           authTimer = null
         }
-        streamWriter = stream.writable.getWriter()
+        streamWriter = writableStreamOps.getWriter(stream.writable)
         log('debug', 'WT persistent stream attached')
         readFrames(stream)
         opts.onReady && opts.onReady()
@@ -194,29 +222,31 @@
         opts.onClosed && opts.onClosed()
         return
       }
-      wt.ready
-        .then(() => {
-          if (!wt) return
-          open = true
-          reconnectDelay = 500
-          log('debug', 'WT connected')
-          authTimer = setTimeout(() => {
-            authTimer = null
-          }, 1000)
-          attachStream()
-        })
-        .catch((e) => {
-          log('warn', 'WT ready rejected: ' + (e.message || e))
-          closedHandled = true
-          open = false
-          wt = null
-          streamWriter = null
-          streamReader = null
-          opts.onAuthFailed && opts.onAuthFailed(0)
-        })
-      wt.closed
-        .then((info) => handleClosed(info && info.reason))
-        .catch((e) => handleClosed(e && e.message))
+      const ready = webTransportGetters.ready(wt)
+      const readyHandled = promiseOps.then(ready, () => {
+        if (!wt) return
+        open = true
+        reconnectDelay = 500
+        log('debug', 'WT connected')
+        authTimer = setTimeout(() => {
+          authTimer = null
+        }, 1000)
+        attachStream()
+      })
+      promiseOps.catch(readyHandled, (e) => {
+        log('warn', 'WT ready rejected: ' + (e.message || e))
+        closedHandled = true
+        open = false
+        wt = null
+        streamWriter = null
+        streamReader = null
+        opts.onAuthFailed && opts.onAuthFailed(0)
+      })
+      const closed = webTransportGetters.closed(wt)
+      promiseOps.catch(
+        promiseOps.then(closed, (info) => handleClosed(info && info.reason)),
+        (e) => handleClosed(e && e.message)
+      )
     }
 
     return {
@@ -237,11 +267,11 @@
         if (!wt || !open || !streamWriter) return false
         const data = frame instanceof Uint8Array ? frame : new TextEncoder().encode(frame)
         const header = new Uint8Array(4)
-        new DataView(header.buffer).setUint32(0, data.length, true)
+        dataViewOps.setUint32(new DataView(header.buffer), 0, data.length, true)
         const onWriteError = (e) =>
           failTransport('send failed: ' + (e && e.message ? e.message : e))
-        streamWriter.write(header).catch(onWriteError)
-        streamWriter.write(data).catch(onWriteError)
+        promiseOps.catch(writerOps.write(streamWriter, header), onWriteError)
+        promiseOps.catch(writerOps.write(streamWriter, data), onWriteError)
         return true
       },
       /** @returns {boolean} */
@@ -256,7 +286,7 @@
         }
         if (streamReader) {
           try {
-            streamReader.cancel()
+            readerOps.cancel(streamReader)
           } catch (e) {
             log('debug', 'WT stream reader cancel failed', e)
           }
@@ -264,7 +294,7 @@
         }
         if (streamWriter) {
           try {
-            streamWriter.close()
+            writerOps.close(streamWriter)
           } catch (e) {
             log('debug', 'WT stream writer close failed', e)
           }
@@ -275,7 +305,7 @@
           authTimer = null
         }
         if (wt) {
-          wt.close()
+          webTransportOps.close(wt)
           wt = null
         }
         open = false
