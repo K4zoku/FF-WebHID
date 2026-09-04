@@ -8,9 +8,6 @@
   "popupTitle": {
     "message": "WebHID"
   },
-  "popupBack": {
-    "message": "Quay lại"
-  },
   "popupPairedDevices": {
     "message": "Thiết bị đã cho phép"
   },
@@ -25,15 +22,6 @@
   },
   "popupDataPlaneDesc": {
     "message": "WebTransport (trong worker), WebTransport (trong trang), WebSocket, hoặc Native Messaging"
-  },
-  "popupDataPlaneWs": {
-    "message": "WebSocket"
-  },
-  "popupDataPlaneWt": {
-    "message": "WebTransport"
-  },
-  "popupDataPlaneNm": {
-    "message": "Native Messaging"
   },
   "popupDevicePickerMode": {
     "message": "Chế độ chọn thiết bị"
@@ -107,9 +95,6 @@
   "popupDeviceCount": {
     "message": "($1/$2)"
   },
-  "popupInPageWtWarning": {
-    "message": "WebTransport trong trang có thể hiện cảnh báo quyền mạng cục bộ của Firefox (\"wants to access other apps and services on this device\"). Hãy tick \"Remember my choice for this site\" trước khi bấm Allow, nếu không sẽ bị hỏi lại mỗi lần tải trang."
-  },
   "statusReady": {
     "message": "Sẵn sàng"
   },
@@ -152,6 +137,12 @@
   "settingsDaemonAsNmHostDesc": {
     "message": "Nói chuyện trực tiếp với daemon qua native messaging, bỏ qua forwarder và Unix socket. Yêu cầu manifest daemon_nm_host và daemon chạy dưới user của bạn (kèm udev rule). Độ trễ thấp hơn, không có fallback daemon root. Tự kết nối lại."
   },
+  "settingsHidePageAction": {
+    "message": "Hide Page Action"
+  },
+  "settingsHidePageActionDesc": {
+    "message": "Keep the page action hidden when a site uses the WebHID API. The browser action still opens the device view by default."
+  },
   "settingsDataPlane": {
     "message": "Kênh dữ liệu"
   },
@@ -159,13 +150,13 @@
     "message": "**WebTransport** (mặc định): tùy chọn nhanh nhất; chạy trong background worker nên trang mượt hơn.\n**WebTransport (in-page)**: kết nối trực tiếp trong trang; ổn ở tốc độ report thường, dùng nhiều CPU trang hơn. Dùng khi site chặn background worker (CSP) nhưng vẫn cho phép kết nối; các tùy chọn dùng worker sẽ fallback sang Native Messaging. Firefox hỏi quyền local-network (\"Allow\") một lần trước kết nối in-page đầu tiên; tick \"Remember my choice for this site\". Reload trang sau khi thay đổi.\n**WebSocket**: fallback khi không có WebTransport (Firefox cũ).\n**Native Messaging**: tùy chọn chậm nhất nhưng tương thích nhất; dùng khi chính sách bảo mật của site chặn các tùy chọn khác."
   },
   "settingsDataPlaneWs": {
-    "message": "WebSocket"
+    "message": "WebSocket worker"
   },
   "settingsDataPlaneWt": {
-    "message": "WebTransport"
+    "message": "WebTransport worker"
   },
   "settingsDataPlaneWtInpage": {
-    "message": "WebTransport (in-page)"
+    "message": "WebTransport in-page (internal benchmark mode)"
   },
   "settingsDataPlaneNm": {
     "message": "Native Messaging"
