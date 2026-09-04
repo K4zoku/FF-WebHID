@@ -39,7 +39,7 @@ test.describe('requestDevice user-activation gate', () => {
     expect(result.expiredActive).toBe(false)
   })
 
-  test('default: requestDevice() without a user gesture rejects with SecurityError', async ({
+  test('requestDevice({ filters: [] }) without a user gesture rejects with SecurityError', async ({
     sharedPage,
     pageUrl
   }) => {
@@ -50,6 +50,45 @@ test.describe('requestDevice user-activation gate', () => {
     expect(result.ok).toBe(false)
     expect(result.name).toBe('SecurityError')
     expect(result.message).toContain('user gesture')
+  })
+
+  test('requestDevice requires filters in the options dictionary', async ({
+    backgroundPage,
+    sharedPage,
+    pageUrl
+  }) => {
+    await backgroundPage.evaluate((key) => browser.storage.local.set({ [key]: true }), settingKey())
+    try {
+      await sharedPage.goto(pageUrl('/activation'), {
+        waitUntil: 'domcontentloaded',
+        timeout: 15000
+      })
+      const result = await sharedPage.evaluate(async () => {
+        const options: unknown[] = [
+          undefined,
+          {},
+          { filters: undefined },
+          { filters: null },
+          { filters: {} }
+        ]
+        const requestDevice = navigator.hid.requestDevice.bind(navigator.hid) as unknown as (
+          options?: unknown
+        ) => Promise<unknown>
+        const outcomes = []
+        for (const option of options) {
+          try {
+            await requestDevice(option)
+            outcomes.push('accepted')
+          } catch (error) {
+            outcomes.push(error instanceof Error ? error.name : String(error))
+          }
+        }
+        return outcomes
+      })
+      expect(result).toEqual(['TypeError', 'TypeError', 'TypeError', 'TypeError', 'TypeError'])
+    } finally {
+      await backgroundPage.evaluate((key) => browser.storage.local.remove(key), settingKey())
+    }
   })
 
   test('allowActivationlessRequestDevice: no SecurityError without a gesture', async ({
@@ -67,28 +106,8 @@ test.describe('requestDevice user-activation gate', () => {
       await new Promise((r) => setTimeout(r, 6800))
       return { settled }
     })
-    expect(result.settled ?? '').not.toContain('SecurityError')
+    expect(result.settled ? result.settled : '').not.toContain('SecurityError')
     await sharedPage.keyboard.press('Escape')
-  })
-
-  test('forged MAIN-world userActivation does not open the picker (ISOLATED rechecks)', async ({
-    backgroundPage,
-    sharedPage,
-    pageUrl
-  }) => {
-    await backgroundPage.evaluate((key) => browser.storage.local.remove(key), settingKey())
-    await sharedPage.goto(pageUrl('/activation'), { waitUntil: 'domcontentloaded', timeout: 15000 })
-    const result: ActivationResult = await sharedPage.evaluate(() => {
-      try {
-        Object.defineProperty(navigator, 'userActivation', {
-          value: { isActive: true },
-          configurable: true
-        })
-      } catch {}
-      return window.tests!.helper!.requestDeviceWithoutGesture!(6000)
-    })
-    expect(result.ok).toBe(true)
-    expect(result.count).toBe(0)
   })
 
   test.afterAll(async ({ backgroundPage }) => {

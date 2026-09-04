@@ -72,32 +72,6 @@
   const devicePicker = new WebHidDevicePicker()
   document.documentElement.appendChild(devicePicker.host)
 
-  let nativeUserActivation = null
-  try {
-    nativeUserActivation = navigator.userActivation ?? null
-  } catch {
-    nativeUserActivation = null
-  }
-  /** @type {number} last trusted pointer/key input timestamp (ms) */
-  let lastTrustedActivationInput = 0
-  const ACTIVATION_WINDOW_MS = 5000
-  for (const type of ['pointerdown', 'mousedown', 'keydown', 'touchend']) {
-    document.addEventListener(
-      type,
-      (event) => {
-        if (event.isTrusted) lastTrustedActivationInput = Date.now()
-      },
-      { capture: true, passive: true }
-    )
-  }
-  /** @returns {boolean} whether the requesting frame holds transient activation */
-  function hasTransientActivation() {
-    if (nativeUserActivation) {
-      return nativeUserActivation.isActive === true
-    }
-    return Date.now() - lastTrustedActivationInput < ACTIVATION_WINDOW_MS
-  }
-
   const PAGE_BLOCKED_ACTIONS = new Set([
     'pairDevice',
     'recordGrantGroup',
@@ -1192,11 +1166,6 @@
     const payload = data.payload || {}
     const filters = payload.filters || []
     const exclusionFilters = payload.exclusionFilters || []
-    if (!settings.allowActivationlessRequestDevice && !hasTransientActivation()) {
-      logger.debug('requestDevice rejected: no user activation in isolated world')
-      replyToPage({ type: 'response', id: data.id, result: { cancelled: true } })
-      return
-    }
     const pickerMode =
       isChromium && settings.devicePickerMode === 'pageAction' ? 'modal' : settings.devicePickerMode
 

@@ -47,6 +47,22 @@
     typeof Worker !== 'undefined' ? Worker.prototype.addEventListener : null
   const nativeSelfPostMessage = typeof self !== 'undefined' ? self.postMessage.bind(self) : null
   const nativeWindowPostMessage = typeof window !== 'undefined' ? window.postMessage : null
+  const nativeUserActivation =
+    !isWorker && navigator.userActivation ? navigator.userActivation : null
+  const nativeIsActiveDescriptor = nativeUserActivation
+    ? Object.getOwnPropertyDescriptor(Object.getPrototypeOf(nativeUserActivation), 'isActive')
+    : null
+  const nativeIsActiveGetter = nativeIsActiveDescriptor
+    ? nativeIsActiveDescriptor.get
+    : null
+
+  function hasTransientActivation() {
+    return nativeIsActiveGetter
+      ? nativeIsActiveGetter.call(nativeUserActivation)
+      : nativeUserActivation
+        ? nativeUserActivation.isActive === true
+        : false
+  }
 
   logger.initLogger('polyfill')
 
@@ -653,7 +669,10 @@
     return sendRequest('getPolicy', getPolicyContext())
   }
 
-  const originalQuery = navigator.permissions?.query?.bind(navigator.permissions)
+  const originalQuery =
+    navigator.permissions && typeof navigator.permissions.query === 'function'
+      ? navigator.permissions.query.bind(navigator.permissions)
+      : null
   if (originalQuery) {
     navigator.permissions.query = async (desc) => {
       if (desc && desc.name === 'hid') {
@@ -900,21 +919,22 @@
        * @returns {Promise<void>}
        */
       value: async function (reportId, data) {
+        const convertedReportId = convertEnforcedOctet(reportId)
         const state = devState.get(this)
         if (!state) throw new NativeDOMException('Invalid state', 'InvalidStateError')
         if (!state.opened) throw new NativeDOMException('Device is not open', 'InvalidStateError')
-        validateReportId(reportId, state.collections)
+        const normalizedReportId = validateReportId(convertedReportId, state.collections)
         const view =
           data instanceof ArrayBuffer
             ? new Uint8Array(data)
             : new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
         const buffer = view.slice()
         try {
-          logger.debug('sendReport reportId=' + reportId + ' len=' + buffer.length)
+          logger.debug('sendReport reportId=' + normalizedReportId + ' len=' + buffer.length)
           return sendDeviceRequest(state, {
             inPageType: MSG_SEND_REPORT,
             portType: 'send',
-            reportId,
+            reportId: normalizedReportId,
             payload: buffer,
             mapResolve: () => undefined,
             failMessage: 'send failed'
@@ -933,15 +953,16 @@
        * @returns {Promise<DataView>}
        */
       value: async function (reportId) {
+        const convertedReportId = convertEnforcedOctet(reportId)
         const state = devState.get(this)
         if (!state) throw new NativeDOMException('Invalid state', 'InvalidStateError')
         if (!state.opened) throw new NativeDOMException('Device is not open', 'InvalidStateError')
-        validateReportId(reportId, state.collections)
+        const normalizedReportId = validateReportId(convertedReportId, state.collections)
         try {
           return sendDeviceRequest(state, {
             inPageType: MSG_RECEIVE_FEATURE_REPORT,
             portType: 'receiveFeature',
-            reportId,
+            reportId: normalizedReportId,
             payload: null,
             mapResolve: (data) => {
               if (!data) return new DataView(new ArrayBuffer(0))
@@ -965,21 +986,22 @@
        * @returns {Promise<void>}
        */
       value: async function (reportId, data) {
+        const convertedReportId = convertEnforcedOctet(reportId)
         const state = devState.get(this)
         if (!state) throw new NativeDOMException('Invalid state', 'InvalidStateError')
         if (!state.opened) throw new NativeDOMException('Device is not open', 'InvalidStateError')
-        validateReportId(reportId, state.collections)
+        const normalizedReportId = validateReportId(convertedReportId, state.collections)
         const view =
           data instanceof ArrayBuffer
             ? new Uint8Array(data)
             : new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
         const buffer = view.slice()
-        logger.debug('sendFeatureReport reportId=' + reportId + ' len=' + buffer.length)
+        logger.debug('sendFeatureReport reportId=' + normalizedReportId + ' len=' + buffer.length)
         try {
           return sendDeviceRequest(state, {
             inPageType: MSG_SEND_FEATURE_REPORT,
             portType: 'sendFeature',
-            reportId,
+            reportId: normalizedReportId,
             payload: buffer,
             mapResolve: () => undefined,
             failMessage: 'send failed'
@@ -1140,20 +1162,32 @@
   }
 
   /**
-   * @param {number} reportId
+   * Converts a WebIDL [EnforceRange] octet argument.
+   *
+   * @param {*} value
+   * @returns {number}
+   * @throws {TypeError}
+   */
+  function convertEnforcedOctet(value) {
+    let number
+    try {
+      number = +value
+    } catch {
+      throw new TypeError('reportId must be a number in the range 0-255')
+    }
+    if (!Number.isFinite(number) || number < 0 || number > 255) {
+      throw new TypeError('reportId must be a number in the range 0-255')
+    }
+    return Math.trunc(number) || 0
+  }
+
+  /**
+   * @param {*} reportId
    * @param {object[]} collections
-   * @returns {void}
+   * @returns {number}
    * @throws {TypeError}
    */
   function validateReportId(reportId, collections) {
-    if (
-      typeof reportId !== 'number' ||
-      !Number.isInteger(reportId) ||
-      reportId < 0 ||
-      reportId > 255
-    ) {
-      throw new TypeError('reportId must be an integer in the range 0-255')
-    }
     const usesReportIds = deviceUsesReportIds(collections)
     if (reportId === 0 && usesReportIds) {
       throw new TypeError('reportId must not be 0 for a device that uses report IDs')
@@ -1161,6 +1195,7 @@
     if (reportId !== 0 && !usesReportIds) {
       throw new TypeError('reportId must be 0 for a device that does not use report IDs')
     }
+    return reportId
   }
 
   /**
@@ -1364,11 +1399,25 @@
    * @returns {Event}
    */
   function HIDInputReportEvent(type, init) {
-    const obj = Reflect.construct(Event, [type, init], new.target || HIDInputReportEvent)
+    const dictionary = init == null ? null : Object(init)
+    if (dictionary == null || !('device' in dictionary)) {
+      throw new TypeError('HIDInputReportEventInit.device is required')
+    }
+    if (!('reportId' in dictionary)) {
+      throw new TypeError('HIDInputReportEventInit.reportId is required')
+    }
+    if (!('data' in dictionary)) {
+      throw new TypeError('HIDInputReportEventInit.data is required')
+    }
+    const device = dictionary.device
+    const data = dictionary.data
+    if (device == null) throw new TypeError('HIDInputReportEventInit.device is required')
+    if (data == null) throw new TypeError('HIDInputReportEventInit.data is required')
+    const obj = Reflect.construct(Event, [type, dictionary], new.target || HIDInputReportEvent)
     obj[irState] = {
-      device: init != null ? init.device : undefined,
-      reportId: init != null ? init.reportId : undefined,
-      data: init != null ? init.data : undefined
+      device,
+      reportId: convertEnforcedOctet(dictionary.reportId),
+      data
     }
     return obj
   }
@@ -1412,10 +1461,14 @@
    * @returns {Event}
    */
   function HIDConnectionEvent(type, init) {
-    const obj = Reflect.construct(Event, [type], new.target || HIDConnectionEvent)
-    evtState.set(obj, {
-      device: init == null ? void 0 : init.device != null ? init.device : init
-    })
+    const dictionary = init == null ? null : Object(init)
+    if (dictionary == null || !('device' in dictionary)) {
+      throw new TypeError('HIDConnectionEventInit.device is required')
+    }
+    const device = dictionary.device
+    if (device == null) throw new TypeError('HIDConnectionEventInit.device is required')
+    const obj = Reflect.construct(Event, [type, dictionary], new.target || HIDConnectionEvent)
+    evtState.set(obj, { device })
     return obj
   }
   HIDConnectionEvent.prototype = Object.create(Event.prototype)
@@ -1449,12 +1502,27 @@
 
   /**
    * Validates and normalizes requestDevice options.
-   * @param {object} options
+   *
+   * @param {*} options
    * @returns {{filters: object[], exclusionFilters: object[]}}
    * @throws {TypeError}
    */
   function normalizeRequestOptions(options) {
-    const filters = Array.isArray(options.filters) ? options.filters : []
+    const dictionary = options == null ? null : Object(options)
+    if (dictionary == null || !('filters' in dictionary)) {
+      throw new TypeError('HIDDeviceRequestOptions.filters is required')
+    }
+    const toSequence = (value, name) => {
+      if (value == null) throw new TypeError(name + ' must be a sequence')
+      const values = []
+      try {
+        for (const item of value) values.push(item)
+      } catch {
+        throw new TypeError(name + ' must be a sequence')
+      }
+      return values
+    }
+    const filters = toSequence(dictionary.filters, 'HIDDeviceRequestOptions.filters')
     for (const filter of filters) {
       if (!isValidFilter(filter)) {
         throw new TypeError('Invalid filter in HIDDeviceRequestOptions.filters')
@@ -1462,8 +1530,11 @@
     }
 
     let exclusionFilters = []
-    if (options.exclusionFilters !== undefined) {
-      exclusionFilters = Array.isArray(options.exclusionFilters) ? options.exclusionFilters : []
+    if (dictionary.exclusionFilters !== undefined) {
+      exclusionFilters = toSequence(
+        dictionary.exclusionFilters,
+        'HIDDeviceRequestOptions.exclusionFilters'
+      )
       if (exclusionFilters.length === 0) {
         throw new TypeError(
           'HIDDeviceRequestOptions.exclusionFilters must not be empty when present'
@@ -1493,29 +1564,11 @@
 
   /**
    * @param {object} options
-   * @param {object[]} [options.filters]
+   * @param {object[]} options.filters
    * @param {object[]} [options.exclusionFilters]
    * @returns {Promise<object[]>}
    */
-  async function requestDeviceImpl(options = {}) {
-    if (isWorker) {
-      throw new NativeDOMException('Not allowed in worker context', 'NotSupportedError')
-    }
-    const policy = await getPolicy()
-    if (policy && policy.hid === 'none') {
-      throw new NativeDOMException('Access to HID is blocked by Permissions Policy', 'SecurityError')
-    }
-    if (
-      !isCalledFromConsole() &&
-      !settings.allowActivationlessRequestDevice &&
-      navigator.userActivation &&
-      !navigator.userActivation.isActive
-    ) {
-      throw new NativeDOMException(
-        'Must be handling a user gesture to perform a hid.requestDevice() call.',
-        'SecurityError'
-      )
-    }
+  async function requestDeviceImpl(options) {
     const { filters, exclusionFilters } = normalizeRequestOptions(options)
 
     logger.debug(
@@ -1524,6 +1577,26 @@
         ' exclusionFilters=' +
         JSON.stringify(exclusionFilters)
     )
+    if (isWorker) {
+      throw new NativeDOMException('Not allowed in worker context', 'NotSupportedError')
+    }
+    const policy = await getPolicy()
+    if (policy && policy.hid === 'none') {
+      throw new NativeDOMException(
+        'Access to HID is blocked by Permissions Policy',
+        'SecurityError'
+      )
+    }
+    if (
+      !isCalledFromConsole() &&
+      !settings.allowActivationlessRequestDevice &&
+      !hasTransientActivation()
+    ) {
+      throw new NativeDOMException(
+        'Must be handling a user gesture to perform a hid.requestDevice() call.',
+        'SecurityError'
+      )
+    }
     return new Promise((resolve, reject) => {
       const id = frameNonce + ':' + ++nextReqId
       pending[id] = (result) => {
@@ -1568,8 +1641,8 @@
     },
     requestDevice: {
       /**
-       * @param {object} [options]
-       * @param {object[]} [options.filters]
+       * @param {object} options
+       * @param {object[]} options.filters
        * @param {object[]} [options.exclusionFilters]
        * @returns {Promise<object[]>}
        */

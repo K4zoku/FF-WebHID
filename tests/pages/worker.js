@@ -20,7 +20,7 @@ async function tryCatch(fn) {
         : 'undefined',
     getDevicesResult: typeof navigator.hid.getDevices === 'function' ? { ok: true } : { ok: false },
     requestDeviceError: await tryCatch(function () {
-      return navigator.hid.requestDevice()
+      return navigator.hid.requestDevice({ filters: [] })
     })
   }
 
