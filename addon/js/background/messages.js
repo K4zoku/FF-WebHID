@@ -33,7 +33,6 @@
     forTabsOfOrigin,
     collectDeviceSessionsForOrigin,
     getDeviceSessionOwner,
-    enqueueOrphanCleanup,
     closeForCleanup
   } = webhid.import('bgStateOps')
   const { urlOrigin, frameKey } = webhid.import('bgCsp')
@@ -288,7 +287,10 @@
       sendResponse({ s: 403 })
       return true
     }
-    registerFrameLifetime(tabId, ownerFrameKey)
+    if (!registerFrameLifetime(tabId, ownerFrameKey)) {
+      sendResponse({ s: 503 })
+      return true
+    }
     getAllowedDevices(request.origin)
       .then((deviceIds) => {
         if (!deviceIds.includes(request.deviceId)) {
@@ -317,14 +319,24 @@
                 sendResponse({ s: ownerStillAlive ? 403 : 503 })
                 return
               }
-              registerDeviceTab(response.i, tabId)
+              let sessionRegistered = true
               if (response.t) {
-                registerDeviceSession(response.i, response.t, {
+                sessionRegistered = registerDeviceSession(response.i, response.t, {
                   tabId,
                   origin: request.origin,
                   frameKey: ownerFrameKey
                 })
               }
+              if (!sessionRegistered) {
+                if (response.t) {
+                  await closeForCleanup(response.i, response.t, (id, token) =>
+                    NativeMessaging.closeDevice(id, token)
+                  )
+                }
+                sendResponse({ s: 503 })
+                return
+              }
+              registerDeviceTab(response.i, tabId)
             }
             sendResponse(response)
           })
@@ -383,14 +395,28 @@
    * @param {function(*): void} sendResponse
    * @returns {boolean}
    */
-  function handleFrameDestroyed(request, sender, sendResponse) {
+  async function handleFrameDestroyed(request, sender, sendResponse) {
     const tabId = sender.tab != null ? sender.tab.id : undefined
-    purgeFrame(
+    await purgeFrame(
       tabId,
       request.frameKey,
       (deviceId, token) => NativeMessaging.closeDevice(deviceId, token)
     )
     sendResponse({ s: 204 })
+    return true
+  }
+
+  /**
+   * Closes a daemon session returned by an open whose browser owner died.
+   * @param {object} request
+   * @param {object} _sender
+   * @param {function(*): void} sendResponse
+   * @returns {boolean}
+   */
+  function handleCleanupSession(request, _sender, sendResponse) {
+    closeForCleanup(request.deviceId, request.sessionToken, (deviceId, token) =>
+      NativeMessaging.closeDevice(deviceId, token)
+    ).then((confirmed) => sendResponse({ s: confirmed ? 204 : 503 }))
     return true
   }
 
@@ -465,25 +491,6 @@
       .catch(() => sendResponse({ s: 500 }))
     return true
   }
-  /**
-   * @param {object} request
-   * @param {object} sender
-   * @param {function(*): void} sendResponse
-   * @returns {boolean}
-   */
-  function handleSendReport(request, sender, sendResponse) {
-    if (!tabAllowsDevice(sender, request.deviceId)) {
-      sendResponse({ s: 403 })
-      return true
-    }
-    NativeMessaging.sendReport(request.deviceId, request.reportId || 0, request.data)
-      .then((resp) => {
-        sendResponse(resp)
-      })
-      .catch(() => sendResponse({ s: 500 }))
-    return true
-  }
-
   /**
    * @param {object} request
    * @param {object} sender
@@ -1070,6 +1077,7 @@
     close: handleClose,
     frameDestroyed: handleFrameDestroyed,
     revokeDevice: handleRevokeDevice,
+    cleanupSession: handleCleanupSession,
     setDataPlane: handleSetDataPlane,
     receiveFeatureReport: handleReceiveFeatureReport,
     sendFeatureReport: handleSendFeatureReport,

@@ -19,13 +19,15 @@
    * history when an existing orphan is retried.
    * @param {number} deviceId
    * @param {string} token
+   * @param {object|null} [expectedOwner]
    * @returns {void}
    */
-  function retainOrphanCleanup(deviceId, token) {
-    unregisterDeviceSession(deviceId, token)
+  function retainOrphanCleanup(deviceId, token, expectedOwner) {
+    if (expectedOwner && deviceSessions.get(deviceId)?.get(token) === expectedOwner) {
+      unregisterDeviceSession(deviceId, token)
+    }
     if (!orphanCleanup.has(token)) orphanCleanup.set(token, { deviceId, attempts: 0 })
   }
-
   /**
    * Closes one daemon session and removes its browser ownership only after a
    * confirmed close or already-gone response.
@@ -35,10 +37,13 @@
    * @returns {Promise<boolean>}
    */
   async function closeForCleanup(deviceId, token, closeDeviceFn) {
+    const ownerAtStart = deviceSessions.get(deviceId)?.get(token) || null
     try {
       const response = await closeDeviceFn(deviceId, token)
       if (isCleanupConfirmed(response)) {
-        unregisterDeviceSession(deviceId, token)
+        if (ownerAtStart && deviceSessions.get(deviceId)?.get(token) === ownerAtStart) {
+          unregisterDeviceSession(deviceId, token)
+        }
         orphanCleanup.delete(token)
         return true
       }
@@ -48,7 +53,7 @@
     } catch (e) {
       logger.debug('cleanup close failed for device', deviceId, e)
     }
-    retainOrphanCleanup(deviceId, token)
+    retainOrphanCleanup(deviceId, token, ownerAtStart)
     return false
   }
 
@@ -56,16 +61,18 @@
    * Registers a trusted bridge-owned document lifetime.
    * @param {number} tabId
    * @param {string} frameKey
-   * @returns {void}
+   * @returns {boolean} false when this generation was already retired
    */
   function registerFrameLifetime(tabId, frameKey) {
-    if (tabId == null || !frameKey) return
+    if (tabId == null || !frameKey) return false
     let frames = frameLifetimes.get(tabId)
     if (!frames) {
       frames = new Map()
       frameLifetimes.set(tabId, frames)
     }
+    if (frames.get(frameKey) === 0) return false
     frames.set(frameKey, (frames.get(frameKey) || 0) + 1)
+    return true
   }
 
   /**
@@ -76,7 +83,7 @@
   function isFrameLifetimeActive(tabId, frameKey) {
     if (tabId == null || !frameKey) return false
     const frames = frameLifetimes.get(tabId)
-    return !!frames && frames.has(frameKey)
+    return !!frames && frames.get(frameKey) > 0
   }
 
   /**
@@ -86,10 +93,13 @@
    * @returns {void}
    */
   function retireFrameLifetime(tabId, frameKey) {
-    const frames = frameLifetimes.get(tabId)
-    if (!frames) return
-    frames.delete(frameKey)
-    if (frames.size === 0) frameLifetimes.delete(tabId)
+    if (tabId == null || !frameKey) return
+    let frames = frameLifetimes.get(tabId)
+    if (!frames) {
+      frames = new Map()
+      frameLifetimes.set(tabId, frames)
+    }
+    frames.set(frameKey, 0)
   }
 
   /**
@@ -126,12 +136,14 @@
    * @param {number} deviceId
    * @param {string} token
    * @param {{tabId: number, origin: string, frameKey?: string}} owner
-   * @returns {void}
+   * @returns {boolean}
    */
   function registerDeviceSession(deviceId, token, owner) {
-    if (!deviceId || !token || !owner || owner.tabId == null || !owner.origin) return
+    if (!deviceId || !token || !owner || owner.tabId == null || !owner.origin) return false
     const frameKey = owner.frameKey || 'tab:' + owner.tabId
-    registerFrameLifetime(owner.tabId, frameKey)
+    if (!isFrameLifetimeActive(owner.tabId, frameKey) && !registerFrameLifetime(owner.tabId, frameKey)) {
+      return false
+    }
     let byToken = deviceSessions.get(deviceId)
     if (!byToken) {
       byToken = new Map()
@@ -139,6 +151,7 @@
     }
     byToken.set(token, { tabId: owner.tabId, origin: owner.origin, frameKey })
     logger.debug('register session device ' + deviceId + ' tab ' + owner.tabId)
+    return true
   }
 
   /**
@@ -336,19 +349,23 @@
    * @param {number} tabId
    * @param {string} frameKey
    * @param {Function} closeDeviceFn
-   * @returns {void}
+   * @returns {Promise<void>}
    */
-  function purgeFrame(tabId, frameKey, closeDeviceFn) {
+  async function purgeFrame(tabId, frameKey, closeDeviceFn) {
     if (tabId == null || !frameKey) return
     retireFrameLifetime(tabId, frameKey)
-    for (const [deviceId, tabs] of deviceTabMap) {
+    const deviceIds = new Set([...deviceSessions.keys(), ...deviceTabMap.keys()])
+    const pending = []
+    for (const deviceId of deviceIds) {
       const tokens = collectDeviceSessionsForFrame(deviceId, tabId, frameKey)
       for (const token of tokens) {
         unregisterDeviceTab(deviceId, tabId)
-        closeForCleanup(deviceId, token, closeDeviceFn)
+        pending.push(closeForCleanup(deviceId, token, closeDeviceFn))
       }
-      if (tabs.size === 0) deviceTabMap.delete(deviceId)
+      const tabs = deviceTabMap.get(deviceId)
+      if (tabs && tabs.size === 0) deviceTabMap.delete(deviceId)
     }
+    await Promise.all(pending)
   }
 
   /**
@@ -360,6 +377,7 @@
    * @returns {void}
    */
   function enqueueOrphanCleanup(deviceId, token) {
+    unregisterDeviceSession(deviceId, token)
     retainOrphanCleanup(deviceId, token)
   }
 
@@ -390,18 +408,21 @@
    * orphan retry queue. Sibling tab sessions remain untouched.
    * @param {number} tabId
    * @param {Function} closeDeviceFn
-   * @returns {void}
+   * @returns {Promise<void>}
    */
-  function purgeTab(tabId, closeDeviceFn) {
+  async function purgeTab(tabId, closeDeviceFn) {
     if (tabId == null) return
-    for (const [deviceId, tabs] of deviceTabMap) {
-      if (!tabs.has(tabId)) continue
-      tabs.delete(tabId)
+    const deviceIds = new Set([...deviceSessions.keys(), ...deviceTabMap.keys()])
+    const pending = []
+    for (const deviceId of deviceIds) {
+      const tabs = deviceTabMap.get(deviceId)
+      if (tabs) tabs.delete(tabId)
       const tokens = collectDeviceSessionsForTab(deviceId, tabId)
-      for (const token of tokens) closeForCleanup(deviceId, token, closeDeviceFn)
-      if (tabs.size === 0) deviceTabMap.delete(deviceId)
+      for (const token of tokens) pending.push(closeForCleanup(deviceId, token, closeDeviceFn))
+      if (tabs && tabs.size === 0) deviceTabMap.delete(deviceId)
     }
     frameLifetimes.delete(tabId)
+    await Promise.all(pending)
   }
   /**
    * Runs `fn` for every tab whose top-level origin matches `origin`

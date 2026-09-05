@@ -10,7 +10,6 @@
   const loadSiteSettings = webhid.import('loadSiteSettings')
   const parseSettingsKey = webhid.import('parseSettingsKey')
   const WebHidDevicePicker = webhid.import('WebHidDevicePicker')
-  const forwardInputReportToPorts = webhid.import('forwardInputReportToPorts')
   logger.initLogger('bridge')
   const controlPort = browser.runtime.connect({ name: 'webhid-control' })
   const controlQueue = []
@@ -148,6 +147,7 @@
    * @property {MessagePort} port
    * @property {Window|null} source
    * @property {string} origin
+   * @property {boolean} destroyed
    * @property {Map<string, string>} sessions
    */
   /** @type {Map<string, FrameContext>} */
@@ -171,6 +171,7 @@
       port,
       source,
       origin,
+      destroyed: false,
       sessions: new Map()
     }
     frameContexts.set(context.key, context)
@@ -187,13 +188,6 @@
     return (port && frameContextByPort.get(port)) || null
   }
 
-  /**
-   * @param {object} data
-   * @returns {FrameContext|null}
-   */
-  function frameContextForRequest(data) {
-    return frameContextForPort(requestPortMap.get(data.id))
-  }
 
   /**
    * @param {FrameContext} context
@@ -213,18 +207,6 @@
     return ids
   }
 
-  /**
-   * @param {string} deviceId
-   * @returns {Array<{context: FrameContext, token: string}>}
-   */
-  function sessionsForDevice(deviceId) {
-    const sessions = []
-    for (const context of frameContexts.values()) {
-      const token = context.sessions.get(deviceId)
-      if (token) sessions.push({ context, token })
-    }
-    return sessions
-  }
 
   /**
    * @param {FrameContext} context
@@ -327,6 +309,8 @@
   const nmPlanes = new Set()
   /** @type {Map<string, Set<MessagePort>>} */
   const dataPorts = new Map()
+  /** @type {Map<FrameContext, Set<MessagePort>>} */
+  const workerPagePorts = new Map()
   /** @type {Map<string, object>} */
   const runtimeDataPorts = new Map()
   /** @type {Map<number, {msg: object, port: MessagePort, key: string}>} */
@@ -986,6 +970,10 @@
    * @returns {void}
    */
   window.addEventListener('message', (event) => {
+    if (!event.data || event.data.type !== 'webhidBridgeRequest' || !event.source) return
+    event.source.postMessage({ type: 'webhidBridgeReady' }, event.origin)
+  })
+  window.addEventListener('message', (event) => {
     const port = event.ports != null ? event.ports[0] : undefined
     if (!port) return
     const source = event.source
@@ -1069,6 +1057,12 @@
     const context = frameContextForPort(requestPort)
     if (!p || !context) return
     frameContextByPort.set(p, context)
+    let workerPorts = workerPagePorts.get(context)
+    if (!workerPorts) {
+      workerPorts = new Set()
+      workerPagePorts.set(context, workerPorts)
+    }
+    workerPorts.add(p)
     portOrigin.set(p, context.origin)
     p.onmessage = (event) => dispatchPortMessage(p, event, null)
     if (typeof p.start === 'function') p.start()
@@ -1291,10 +1285,11 @@
    * Runs the post-open data-plane spawn for a device.
    * @param {object} response
    * @param {FrameContext} context
-   * @returns {Promise<void>}
+   * @returns {Promise<boolean>}
    */
   async function handleOpenSuccess(response, context) {
     const deviceId = response.i
+    if (!context || context.destroyed || !frameContexts.has(context.key)) return false
     const key = planeKey(context, deviceId)
     context.sessions.set(deviceId, response.t)
     sendBackgroundRequest({
@@ -1317,6 +1312,7 @@
         await spawnDataPlane(context, deviceId, response.t, response.w || wsPort)
       }
     }
+    return true
   }
 
   /**
@@ -1392,6 +1388,10 @@
           replyToPage({ type: 'response', id, result: { s: 403 } })
           return
         }
+        if (context.destroyed || !frameContexts.has(context.key)) {
+          replyToPage({ type: 'response', id, result: { s: 503 } })
+          return
+        }
         if (settings.dataPlane === 'nm' || nmPlanes.has(key)) {
           ensureRuntimeDataPort(context, deviceId)
           retainNmOpenAttempt(key)
@@ -1411,7 +1411,15 @@
       response = await sendBackgroundRequest(msg)
 
       if (action === 'open' && http.isOk(response.s) && response.t) {
-        await handleOpenSuccess(response, context)
+        const accepted = await handleOpenSuccess(response, context)
+        if (!accepted) {
+          sendBackgroundRequest({
+            action: 'cleanupSession',
+            deviceId: response.i,
+            sessionToken: response.t
+          }).catch((e) => logger.debug('late-open cleanup failed', e))
+          response = { s: 503 }
+        }
         if (nmOpenAttempt) {
           releaseNmOpenAttempt(key)
           nmOpenAttempt = false
@@ -1483,16 +1491,64 @@
    * @returns {Promise<void>}
    */
   async function destroyFrameContext(context, { close = true, notify = false } = {}) {
-    if (!context || !frameContexts.has(context.key)) return
+    if (!context || context.destroyed || !frameContexts.has(context.key)) return
+    context.destroyed = true
     const sessions = [...context.sessions.entries()]
-    if (close && sessions.length > 0) {
+    const planePrefix = context.key + '\u0000'
+    const planeDeviceIds = new Set(sessions.map(([deviceId]) => deviceId))
+    const planeKeys = [
+      workers.keys(),
+      workerReadyDevices,
+      connectParams.keys(),
+      deviceTransports.keys(),
+      nmPlanes,
+      dataPorts.keys(),
+      runtimeDataPorts.keys(),
+      spawnGen.keys()
+    ]
+    for (const keys of planeKeys) {
+      for (const key of keys) {
+        if (typeof key === 'string' && key.startsWith(planePrefix)) {
+          planeDeviceIds.add(key.slice(planePrefix.length))
+        }
+      }
+    }
+    for (const pending of pendingPlaneSpawns.values()) {
+      if (pending.key.startsWith(planePrefix)) {
+        planeDeviceIds.add(pending.key.slice(planePrefix.length))
+      }
+    }
+    frameContexts.delete(context.key)
+    frameContextByPort.delete(context.port)
+    if (frameContextBySource.get(context.source) === context) {
+      frameContextBySource.delete(context.source)
+      pagePorts.delete(context.source)
+    }
+    pageSourceByPort.delete(context.port)
+    portOrigin.delete(context.port)
+    const workerPorts = workerPagePorts.get(context)
+    if (workerPorts) {
+      for (const port of workerPorts) {
+        frameContextByPort.delete(port)
+        portOrigin.delete(port)
+        try {
+          port.onmessage = null
+          port.close()
+        } catch (e) {
+          logger.debug('worker page port cleanup failed', e)
+        }
+      }
+      workerPagePorts.delete(context)
+    }
+    if (close) {
       await sendBackgroundRequest({ action: 'frameDestroyed', frameKey: context.key }).catch((e) =>
         logger.debug('frame session cleanup request failed', e)
       )
     }
-    for (const [deviceId] of sessions) {
+    for (const deviceId of planeDeviceIds) {
+      const hadSession = context.sessions.has(deviceId)
       await despawnDataPlane(context, deviceId)
-      if (notify) {
+      if (notify && hadSession) {
         try {
           context.port.postMessage({
             type: 'event',
@@ -1504,14 +1560,6 @@
       }
     }
     context.sessions.clear()
-    frameContexts.delete(context.key)
-    frameContextByPort.delete(context.port)
-    if (frameContextBySource.get(context.source) === context) {
-      frameContextBySource.delete(context.source)
-      pagePorts.delete(context.source)
-    }
-    pageSourceByPort.delete(context.port)
-    portOrigin.delete(context.port)
   }
 
   /** @returns {void} */
@@ -1539,7 +1587,6 @@
       logger.debug('frame device reconciliation failed', e)
     }
   }
-
   /**
    * Forwards an NM input report to every frame that owns the device.
    * @param {object} messageEvent
@@ -1549,13 +1596,27 @@
     let handled = false
     for (const context of frameContexts.values()) {
       const key = planeKey(context, messageEvent.deviceId)
-      const ports = dataPorts.get(key)
-      if (ports && ports.size > 0) {
-        handled = forwardInputReportToPorts(ports, messageEvent, logger) || handled
+      if (workers.has(key) || inPageDevices.has(key) || !nmPlanes.has(key)) continue
+      const post = (port) => {
+        try {
+          const data = messageEvent.data
+          const copy =
+            data != null && ArrayBuffer.isView(data) ? new Uint8Array(data) : data
+          port.postMessage({
+            type: 'event',
+            event: { ...messageEvent, data: copy }
+          })
+          handled = true
+        } catch (e) {
+          logger.debug('forward inputReport to NM frame failed', e)
+        }
       }
+      post(context.port)
+      for (const port of workerPagePorts.get(context) || []) post(port)
     }
     return handled
   }
+
 
   /**
    * @param {object} message
