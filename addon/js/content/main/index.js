@@ -617,6 +617,17 @@
     callNative(nativeMessagePortStart, bridgePort)
   }
 
+  if (!isWorker) {
+    let lifecycleNotified = false
+    const notifyFrameDestroyed = () => {
+      if (lifecycleNotified || !bridgePort) return
+      lifecycleNotified = true
+      callNative(nativeMessagePortPostMessage, bridgePort, { type: 'frameDestroyed' })
+    }
+    callNative(nativeWindowAddEventListener, windowObject, 'pagehide', notifyFrameDestroyed)
+    callNative(nativeWindowAddEventListener, windowObject, 'unload', notifyFrameDestroyed)
+  }
+
   /**
    * @param {object} data
    * @returns {void}

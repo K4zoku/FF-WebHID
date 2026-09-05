@@ -9,6 +9,7 @@ function loadStateOps() {
   let exported
   const deviceTabMap = new Map()
   const deviceSessions = new Map()
+  const frameLifetimes = new Map()
   const orphanCleanup = new Map()
   const context = {
     globalThis: null,
@@ -16,7 +17,8 @@ function loadStateOps() {
     webhid: {
       import(name) {
         if (name === 'logger') return { debug() {}, warn() {}, error() {} }
-        if (name === 'bgState') return { deviceTabMap, deviceSessions, orphanCleanup }
+        if (name === 'bgState')
+          return { deviceTabMap, deviceSessions, frameLifetimes, orphanCleanup }
         throw new Error('unexpected import: ' + name)
       },
       export(_name, value) {

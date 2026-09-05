@@ -25,12 +25,16 @@
     registerDeviceSession,
     unregisterDeviceSession,
     unregisterDeviceTab,
-    clearDeviceTab,
     isTabAuthorizedForDevice,
     isSessionOwnedBy,
+    registerFrameLifetime,
+    isFrameLifetimeActive,
+    purgeFrame,
     forTabsOfOrigin,
     collectDeviceSessionsForOrigin,
-    enqueueOrphanCleanup
+    getDeviceSessionOwner,
+    enqueueOrphanCleanup,
+    closeForCleanup
   } = webhid.import('bgStateOps')
   const { urlOrigin, frameKey } = webhid.import('bgCsp')
   const NativeMessaging = webhid.import('NativeMessaging')
@@ -83,23 +87,21 @@
       removeDeviceInfo(deviceId)
       const tokens = collectDeviceSessionsForOrigin(deviceId, origin)
       for (const token of tokens) {
-        try {
-          await NativeMessaging.closeDevice(deviceId, token)
-          unregisterDeviceSession(deviceId, token)
-        } catch {
-          enqueueOrphanCleanup(deviceId, token)
-        }
+        const owner = getDeviceSessionOwner(deviceId, token)
+        if (owner) unregisterDeviceTab(deviceId, owner.tabId)
+        await closeForCleanup(deviceId, token, (id, sessionToken) =>
+          NativeMessaging.closeDevice(id, sessionToken)
+        )
       }
     }
     await deleteGrantGroups(memberGroups.map((g) => g.id))
     const deviceIds = await getAllowedDevices(origin)
-    await forTabsOfOrigin(origin, (tab) => {
+    await forTabsOfOrigin(null, (tab) => {
       for (const deviceId of toRevoke) {
-        clearDeviceTab(deviceId, tab.id)
         browser.tabs
           .sendMessage(tab.id, {
             action: 'webhidDeviceEvent',
-            event: { eventType: 'revoked', deviceId }
+            event: { eventType: 'revoked', deviceId, origin }
           })
           .catch(() => {})
       }
@@ -281,6 +283,12 @@
    */
   function handleOpen(request, sender, sendResponse) {
     const tabId = sender.tab != null ? sender.tab.id : undefined
+    const ownerFrameKey = request.frameKey || 'tab:' + tabId
+    if (tabId == null) {
+      sendResponse({ s: 403 })
+      return true
+    }
+    registerFrameLifetime(tabId, ownerFrameKey)
     getAllowedDevices(request.origin)
       .then((deviceIds) => {
         if (!deviceIds.includes(request.deviceId)) {
@@ -294,23 +302,27 @@
               const stillAllowed = (await getAllowedDevices(request.origin)).includes(
                 request.deviceId
               )
-              if (!stillAllowed) {
+              const ownerStillAlive = isFrameLifetimeActive(tabId, ownerFrameKey)
+              if (!stillAllowed || !ownerStillAlive) {
                 logger.warn(
                   'open for device',
                   request.deviceId,
-                  'revoked while in flight; closing fresh session'
+                  !stillAllowed ? 'revoked while in flight' : 'owner died while in flight'
                 )
                 if (response.t) {
-                  await NativeMessaging.closeDevice(response.i, response.t).catch(() => {})
+                  await closeForCleanup(response.i, response.t, (id, token) =>
+                    NativeMessaging.closeDevice(id, token)
+                  )
                 }
-                sendResponse({ s: 403 })
+                sendResponse({ s: ownerStillAlive ? 403 : 503 })
                 return
               }
               registerDeviceTab(response.i, tabId)
               if (response.t) {
                 registerDeviceSession(response.i, response.t, {
                   tabId,
-                  origin: request.origin
+                  origin: request.origin,
+                  frameKey: ownerFrameKey
                 })
               }
             }
@@ -340,11 +352,15 @@
    */
   function handleClose(request, sender, sendResponse) {
     const tabId = sender.tab != null ? sender.tab.id : undefined
+    const frame = request.frameKey || 'tab:' + tabId
     if (!isTabAuthorizedForDevice(tabId, request.deviceId)) {
       sendResponse({ s: 403 })
       return true
     }
-    if (request.T && !isSessionOwnedBy(request.deviceId, request.T, request.origin, tabId)) {
+    if (
+      request.T &&
+      !isSessionOwnedBy(request.deviceId, request.T, request.origin, tabId, frame)
+    ) {
       sendResponse({ s: 403 })
       return true
     }
@@ -357,6 +373,24 @@
         sendResponse(response)
       })
       .catch(() => sendResponse({ s: 500 }))
+    return true
+  }
+
+  /**
+   * Closes all sessions owned by one bridge document lifetime.
+   * @param {object} request
+   * @param {object} sender
+   * @param {function(*): void} sendResponse
+   * @returns {boolean}
+   */
+  function handleFrameDestroyed(request, sender, sendResponse) {
+    const tabId = sender.tab != null ? sender.tab.id : undefined
+    purgeFrame(
+      tabId,
+      request.frameKey,
+      (deviceId, token) => NativeMessaging.closeDevice(deviceId, token)
+    )
+    sendResponse({ s: 204 })
     return true
   }
 
@@ -407,7 +441,16 @@
     }
     if (request.sessionToken) {
       const tabId = sender.tab != null ? sender.tab.id : undefined
-      if (!isSessionOwnedBy(request.deviceId, request.sessionToken, request.origin, tabId)) {
+      const frame = request.frameKey || 'tab:' + tabId
+      if (
+        !isSessionOwnedBy(
+          request.deviceId,
+          request.sessionToken,
+          request.origin,
+          tabId,
+          frame
+        )
+      ) {
         sendResponse({ s: 403 })
         return true
       }
@@ -422,7 +465,6 @@
       .catch(() => sendResponse({ s: 500 }))
     return true
   }
-
   /**
    * @param {object} request
    * @param {object} sender
@@ -1026,9 +1068,9 @@
     getAllPairedDevices: handleGetAllPairedDevices,
     open: handleOpen,
     close: handleClose,
+    frameDestroyed: handleFrameDestroyed,
     revokeDevice: handleRevokeDevice,
     setDataPlane: handleSetDataPlane,
-    sendReport: handleSendReport,
     receiveFeatureReport: handleReceiveFeatureReport,
     sendFeatureReport: handleSendFeatureReport,
     getPairedDevices: handleGetPairedDevices,

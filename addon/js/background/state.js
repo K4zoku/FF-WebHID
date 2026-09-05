@@ -5,6 +5,8 @@
    * background is responsible for, so revoke/tab-cleanup can close the
    * exact sessions instead of guessing by device id. */
   const deviceSessions = new Map()
+  /** tabId -> Map<frameKey, generation>: trusted document lifetimes. */
+  const frameLifetimes = new Map()
   /** token -> { deviceId, attempts }: session closes that failed, kept for
    * retry after their owner tab is gone. */
   const orphanCleanup = new Map()
@@ -18,6 +20,7 @@
     deviceCache,
     deviceTabMap,
     deviceSessions,
+    frameLifetimes,
     orphanCleanup,
     permissionsPolicy,
     allowedCrossOrigin,

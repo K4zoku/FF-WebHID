@@ -12,7 +12,13 @@
   } = webhid.import('bgPacked')
   const { deviceCache } = webhid.import('bgState')
   const { saveDeviceInfo } = webhid.import('bgStorage')
-  const { tabsForEvent, broadcastGlobalReset, forTabsOfOrigin } = webhid.import('bgStateOps')
+  const {
+    tabsForEvent,
+    broadcastGlobalReset,
+    clearAuthorityOwnership,
+    clearDeviceOwnership,
+    forTabsOfOrigin
+  } = webhid.import('bgStateOps')
   const http = webhid.import('http')
   const { postToContentPorts } = webhid.import('content-ports')
 
@@ -130,6 +136,7 @@
           this.port = null
           for (const [, p] of this.pending) p.resolve({ s: 503 })
           this.pending.clear()
+          clearAuthorityOwnership()
           broadcastGlobalReset()
           this.scheduleReconnect()
         })
@@ -327,6 +334,7 @@
           })
           .catch((e) => logger.debug('enumerateDevices failed', e))
       }
+      if (message.e === EVT_DISCONNECT) clearDeviceOwnership(message.i)
       const normalized = {
         eventType: message.e === EVT_CONNECT ? 'connect' : 'disconnect',
         deviceId: message.i,
