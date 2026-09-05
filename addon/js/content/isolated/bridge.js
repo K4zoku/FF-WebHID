@@ -15,6 +15,8 @@
   const controlPort = browser.runtime.connect({ name: 'webhid-control' })
   const controlQueue = []
   let controlPending = null
+  const handshakePending = new Map()
+  let nextHandshakeReqId = 0
   /** @returns {void} */
   function pumpControlQueue() {
     if (controlPending || controlQueue.length === 0) return
@@ -37,6 +39,23 @@
       pumpControlQueue()
     })
   }
+  /**
+   * Sends the startup daemon handshake over the persistent control port without
+   * occupying the serialized request slot used by page operations.
+   * @returns {Promise<object>}
+   */
+  function sendHandshakeRequest() {
+    return new Promise((resolve, reject) => {
+      const reqId = 'handshake:' + ++nextHandshakeReqId
+      handshakePending.set(reqId, { resolve, reject })
+      try {
+        controlPort.postMessage({ action: 'handshake', reqId })
+      } catch (error) {
+        handshakePending.delete(reqId)
+        reject(error)
+      }
+    })
+  }
   controlPort.onMessage.addListener((message) => {
     if (message && message.action === 'globalReset') {
       handleGlobalReset()
@@ -53,6 +72,14 @@
       handleBackgroundEvent(message)
       return
     }
+    if (message && message.reqId != null) {
+      const pending = handshakePending.get(message.reqId)
+      if (pending) {
+        handshakePending.delete(message.reqId)
+        pending.resolve(message)
+        return
+      }
+    }
     if (controlPending) {
       const pending = controlPending
       controlPending = null
@@ -62,6 +89,8 @@
   })
   controlPort.onDisconnect.addListener(() => {
     const error = new Error('background port disconnected')
+    for (const pending of handshakePending.values()) pending.reject(error)
+    handshakePending.clear()
     if (controlPending) {
       controlPending.reject(error)
       controlPending = null
@@ -775,7 +804,7 @@
 
   ;(async () => {
     try {
-      const resp = await sendBackgroundRequest({ action: 'handshake' })
+      const resp = await sendHandshakeRequest()
       if (http.isOk(resp.s) && resp.w) {
         wsPort = resp.w
         wsNonce = resp.N || null
