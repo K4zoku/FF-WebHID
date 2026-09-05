@@ -89,3 +89,58 @@ test('cleanup classifies terminal and retryable close outcomes', async () => {
   assert.equal(deviceSessions.has(7), false)
   assert.equal(orphanCleanup.has('session-b'), false)
 })
+
+test('frame cleanup closes only the owning session', async () => {
+  const { ops, deviceTabMap, deviceSessions, orphanCleanup } = loadStateOps()
+  ops.registerFrameLifetime(11, 'frame-a')
+  ops.registerFrameLifetime(11, 'frame-b')
+  ops.registerDeviceTab(7, 11)
+  ops.registerDeviceTab(7, 11)
+  ops.registerDeviceSession(7, 'session-a', {
+    tabId: 11,
+    origin: 'https://a.test',
+    frameKey: 'frame-a'
+  })
+  ops.registerDeviceSession(7, 'session-b', {
+    tabId: 11,
+    origin: 'https://b.test',
+    frameKey: 'frame-b'
+  })
+
+  assert.equal(ops.isSessionOwnedBy(7, 'session-a', 'https://a.test', 11, 'frame-a'), true)
+  assert.equal(ops.isSessionOwnedBy(7, 'session-a', 'https://a.test', 11, 'frame-b'), false)
+
+  ops.purgeFrame(11, 'frame-a', async () => ({ s: 204 }))
+  await flush()
+
+  assert.equal(ops.isFrameLifetimeActive(11, 'frame-a'), false)
+  assert.equal(ops.isFrameLifetimeActive(11, 'frame-b'), true)
+  assert.deepEqual([...deviceSessions.get(7).keys()], ['session-b'])
+  assert.equal(deviceTabMap.get(7).get(11), 1)
+  assert.equal(orphanCleanup.has('session-a'), false)
+})
+
+test('frame cleanup retains failed authority without affecting siblings', async () => {
+  const { ops, deviceSessions, orphanCleanup } = loadStateOps()
+  ops.registerFrameLifetime(11, 'frame-a')
+  ops.registerFrameLifetime(11, 'frame-b')
+  ops.registerDeviceTab(7, 11)
+  ops.registerDeviceTab(7, 11)
+  ops.registerDeviceSession(7, 'session-a', {
+    tabId: 11,
+    origin: 'https://a.test',
+    frameKey: 'frame-a'
+  })
+  ops.registerDeviceSession(7, 'session-b', {
+    tabId: 11,
+    origin: 'https://b.test',
+    frameKey: 'frame-b'
+  })
+
+  ops.purgeFrame(11, 'frame-a', async () => ({ s: 403 }))
+  await flush()
+
+  assert.deepEqual([...deviceSessions.get(7).keys()], ['session-b'])
+  assert.equal(orphanCleanup.has('session-a'), true)
+  assert.equal(ops.isFrameLifetimeActive(11, 'frame-b'), true)
+})
