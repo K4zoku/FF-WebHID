@@ -168,3 +168,101 @@ test('authority and physical resets clear derived ownership', () => {
   assert.equal(orphanCleanup.size, 0)
   assert.equal(ops.isFrameLifetimeActive(11, 'frame-a'), false)
 })
+
+test('retired frame generations cannot publish late sessions', async () => {
+  const { ops, deviceSessions } = loadStateOps()
+  ops.registerFrameLifetime(11, 'frame-a')
+  await ops.purgeFrame(11, 'frame-a', async () => ({ s: 204 }))
+
+  assert.equal(ops.registerFrameLifetime(11, 'frame-a'), false)
+  assert.equal(
+    ops.registerDeviceSession(7, 'late-session', {
+      tabId: 11,
+      origin: 'https://a.test',
+      frameKey: 'frame-a'
+    }),
+    false
+  )
+  assert.equal(deviceSessions.size, 0)
+})
+
+test('failed cleanup does not remove a replacement owner with the same token', async () => {
+  const { ops, deviceSessions, orphanCleanup } = loadStateOps()
+  ops.registerFrameLifetime(11, 'frame-a')
+  ops.registerDeviceSession(7, 'session-a', {
+    tabId: 11,
+    origin: 'https://a.test',
+    frameKey: 'frame-a'
+  })
+  const { promise: close, resolve: finishClose } = Promise.withResolvers()
+  const cleanup = ops.purgeFrame(11, 'frame-a', async () => {
+    await close
+    return { s: 503 }
+  })
+
+  ops.registerFrameLifetime(11, 'frame-b')
+  ops.registerDeviceSession(7, 'session-a', {
+    tabId: 11,
+    origin: 'https://b.test',
+    frameKey: 'frame-b'
+  })
+  finishClose()
+  await cleanup
+
+  const replacement = deviceSessions.get(7).get('session-a')
+  assert.equal(replacement.tabId, 11)
+  assert.equal(replacement.origin, 'https://b.test')
+  assert.equal(replacement.frameKey, 'frame-b')
+  assert.equal(orphanCleanup.has('session-a'), true)
+})
+
+test('same-device sessions stay independent across frame lifetimes', async () => {
+  const { ops, deviceTabMap, deviceSessions } = loadStateOps()
+  ops.registerFrameLifetime(11, 'frame-a')
+  ops.registerFrameLifetime(11, 'frame-b')
+  ops.registerDeviceTab(7, 11)
+  ops.registerDeviceTab(7, 11)
+  ops.registerDeviceSession(7, 'session-a', {
+    tabId: 11,
+    origin: 'https://a.test',
+    frameKey: 'frame-a'
+  })
+  ops.registerDeviceSession(7, 'session-b', {
+    tabId: 11,
+    origin: 'https://b.test',
+    frameKey: 'frame-b'
+  })
+
+  await ops.purgeFrame(11, 'frame-a', async () => ({ s: 204 }))
+
+  assert.deepEqual([...deviceSessions.get(7).keys()], ['session-b'])
+  assert.equal(deviceTabMap.get(7).get(11), 1)
+  assert.equal(ops.isFrameLifetimeActive(11, 'frame-b'), true)
+})
+
+test('physical ownership reset removes every session for one device', () => {
+  const { ops, deviceTabMap, deviceSessions, orphanCleanup } = loadStateOps()
+  ops.registerFrameLifetime(11, 'frame-a')
+  ops.registerFrameLifetime(11, 'frame-b')
+  ops.registerDeviceTab(7, 11)
+  ops.registerDeviceTab(7, 11)
+  ops.registerDeviceSession(7, 'session-a', {
+    tabId: 11,
+    origin: 'https://a.test',
+    frameKey: 'frame-a'
+  })
+  ops.registerDeviceSession(7, 'session-b', {
+    tabId: 11,
+    origin: 'https://b.test',
+    frameKey: 'frame-b'
+  })
+  orphanCleanup.set('session-a', { deviceId: 7, attempts: 2 })
+
+  ops.clearDeviceOwnership(7)
+
+  assert.equal(deviceTabMap.has(7), false)
+  assert.equal(deviceSessions.has(7), false)
+  assert.equal(orphanCleanup.has('session-a'), false)
+  assert.equal(ops.isFrameLifetimeActive(11, 'frame-a'), true)
+  assert.equal(ops.isFrameLifetimeActive(11, 'frame-b'), true)
+})

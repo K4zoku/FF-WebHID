@@ -128,4 +128,110 @@ test.describe.serial('Public input report fan-out', () => {
       { reportId: 1, bytes: PACKET }
     ])
   })
+  test('same-device WS planes stay independent after one frame is removed', async ({
+    sharedPage,
+    backgroundPage,
+    vendorDevice
+  }) => {
+    test.setTimeout(60000)
+    const origin = new URL(sharedPage.url()).origin
+    await backgroundPage.evaluate((siteOrigin: string) => {
+      return browser.storage.local.set({ [`settings :: ${siteOrigin} :: dataPlane`]: 'ws' })
+    }, origin)
+    try {
+      await sharedPage.goto(`${origin}/tests/test-page.html`, {
+        waitUntil: 'domcontentloaded'
+      })
+      await sharedPage.waitForFunction(() => typeof navigator.hid !== 'undefined', {
+        timeout: 15000
+      })
+      expect(await grantDevicePermission(sharedPage, [VENDOR])).toBe(1)
+      await sharedPage.evaluate(() => {
+        const iframe = document.createElement('iframe')
+        iframe.id = 'frame-owner'
+        iframe.src = '/tests/test-page.html'
+        document.body.appendChild(iframe)
+      })
+      await sharedPage.waitForFunction(
+        () => document.querySelector<HTMLIFrameElement>('#frame-owner')?.contentWindow != null,
+        { timeout: 15000 }
+      )
+      const child = sharedPage.frames().find((frame) => frame !== sharedPage.mainFrame())
+      expect(child).toBeTruthy()
+      await child!.waitForFunction(() => typeof navigator.hid !== 'undefined', undefined, {
+        timeout: 15000
+      })
+      await sharedPage.evaluate(async () => {
+        const device = (await navigator.hid.getDevices())[0]
+        if (!device) throw new Error('top frame device missing')
+        await device.open()
+        let reports = 0
+        device.addEventListener('inputreport', () => reports++)
+        ;(window as typeof window & { __reports?: number }).__reports = reports
+        Object.defineProperty(window, '__getReports', {
+          configurable: true,
+          value: () => reports
+        })
+      })
+      await child!.evaluate(async () => {
+        const device = (await navigator.hid.getDevices())[0]
+        if (!device) throw new Error('child frame device missing')
+        await device.open()
+        let reports = 0
+        device.addEventListener('inputreport', () => reports++)
+        Object.defineProperty(window, '__getReports', {
+          configurable: true,
+          value: () => reports
+        })
+      })
+      await sleep(300)
+      sendInput(vendorDevice, 1, PACKET)
+      await sharedPage.waitForFunction(
+        () => (window as typeof window & { __getReports?: () => number }).__getReports?.() === 1,
+        { timeout: 15000 }
+      )
+      await child!.waitForFunction(
+        () => (window as typeof window & { __getReports?: () => number }).__getReports?.() === 1,
+        undefined,
+        { timeout: 15000 }
+      )
+      await child!.goto(`${origin}/tests/test-page.html`, { waitUntil: 'domcontentloaded' })
+      await child!.waitForFunction(() => typeof navigator.hid !== 'undefined', undefined, {
+        timeout: 15000
+      })
+      await child!.evaluate(async () => {
+        const device = (await navigator.hid.getDevices())[0]
+        if (!device) throw new Error('reloaded child device missing')
+        await device.open()
+        let reports = 0
+        device.addEventListener('inputreport', () => reports++)
+        Object.defineProperty(window, '__getReports', {
+          configurable: true,
+          value: () => reports
+        })
+      })
+      await sleep(300)
+      sendInput(vendorDevice, 1, PACKET)
+      await sharedPage.waitForFunction(
+        () => (window as typeof window & { __getReports?: () => number }).__getReports?.() === 2,
+        { timeout: 15000 }
+      )
+      await child!.waitForFunction(
+        () => (window as typeof window & { __getReports?: () => number }).__getReports?.() === 1,
+        undefined,
+        { timeout: 15000 }
+      )
+      await sharedPage.evaluate(() => document.querySelector('#frame-owner')?.remove())
+      await sleep(500)
+      sendInput(vendorDevice, 1, PACKET)
+      await sharedPage.waitForFunction(
+        () => (window as typeof window & { __getReports?: () => number }).__getReports?.() === 3,
+        { timeout: 15000 }
+      )
+    } finally {
+      await backgroundPage.evaluate((siteOrigin: string) => {
+        return browser.storage.local.set({ [`settings :: ${siteOrigin} :: dataPlane`]: 'nm' })
+      }, origin)
+    }
+  })
 })

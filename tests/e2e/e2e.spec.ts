@@ -262,13 +262,16 @@ test.describe.serial('WebHID E2E', () => {
     expect(event.data.length).toBe(GAMEPAD_INPUT_SIZE)
   })
 
-  test('device disconnect event fires when vendor mock is destroyed', async ({
+  test('device disconnect closes opened HIDDevice state', async ({
     sharedPage,
     vendorDevice
   }) => {
-    const disconnected = sharedPage.evaluate(() => {
+    const disconnected = sharedPage.evaluate(async () => {
+      const device = (await navigator.hid.getDevices())[0]
+      if (!device) throw new Error('vendor device missing before disconnect')
+      if (!device.opened) await device.open()
       const { promise, resolve, reject } = Promise.withResolvers<boolean>()
-      navigator.hid.addEventListener('disconnect', () => resolve(true))
+      navigator.hid.addEventListener('disconnect', () => resolve(device.opened === false))
       setTimeout(() => reject(new Error('disconnect event not received within 10s')), 10000)
       return promise
     })
