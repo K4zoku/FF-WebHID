@@ -97,6 +97,7 @@
     }
     for (const pending of controlQueue) pending.reject(error)
     controlQueue.length = 0
+    handleGlobalReset()
   })
   const devicePicker = new WebHidDevicePicker()
   document.documentElement.appendChild(devicePicker.host)
