@@ -2,7 +2,55 @@
   const logger = webhid.import('logger')
   const { deviceTabMap, deviceSessions, orphanCleanup } = webhid.import('bgState')
 
-  const MAX_CLEANUP_ATTEMPTS = 5
+  const CLEANUP_ALREADY_GONE = 404
+
+  /**
+   * Whether a daemon close response proves that a session is no longer live.
+   * @param {object|null|undefined} response
+   * @returns {boolean}
+   */
+  function isCleanupConfirmed(response) {
+    const status = response && response.s
+    return (status >= 200 && status < 300) || status === CLEANUP_ALREADY_GONE
+  }
+
+  /**
+   * Retains a session token as cleanup authority without resetting its retry
+   * history when an existing orphan is retried.
+   * @param {number} deviceId
+   * @param {string} token
+   * @returns {void}
+   */
+  function retainOrphanCleanup(deviceId, token) {
+    unregisterDeviceSession(deviceId, token)
+    if (!orphanCleanup.has(token)) orphanCleanup.set(token, { deviceId, attempts: 0 })
+  }
+
+  /**
+   * Closes one daemon session and removes its browser ownership only after a
+   * confirmed close or already-gone response.
+   * @param {number} deviceId
+   * @param {string} token
+   * @param {Function} closeDeviceFn
+   * @returns {Promise<boolean>}
+   */
+  async function closeForCleanup(deviceId, token, closeDeviceFn) {
+    try {
+      const response = await closeDeviceFn(deviceId, token)
+      if (isCleanupConfirmed(response)) {
+        unregisterDeviceSession(deviceId, token)
+        orphanCleanup.delete(token)
+        return true
+      }
+      if (response && response.s === 403) {
+        logger.error('cleanup ownership invariant failed for device', deviceId, token)
+      }
+    } catch (e) {
+      logger.debug('cleanup close failed for device', deviceId, e)
+    }
+    retainOrphanCleanup(deviceId, token)
+    return false
+  }
 
   /**
    * Returns the list of tab IDs authorized for the device in the given event, or null.
@@ -220,14 +268,12 @@
    * @returns {void}
    */
   function enqueueOrphanCleanup(deviceId, token) {
-    unregisterDeviceSession(deviceId, token)
-    orphanCleanup.set(token, { deviceId, attempts: 0 })
+    retainOrphanCleanup(deviceId, token)
   }
 
   /**
    * Retries every queued orphan close, passing `(deviceId, token)` to
-   * `closeDeviceFn`. Entries are removed on success and dropped after
-   * `MAX_CLEANUP_ATTEMPTS` failures. Returns the number of entries touched.
+   * `closeDeviceFn`. Entries are removed only on success or already-gone.
    * @param {Function} closeDeviceFn
    * @returns {number}
    */
@@ -236,15 +282,11 @@
     for (const [token, entry] of orphanCleanup) {
       entry.attempts += 1
       touched += 1
-      closeDeviceFn(entry.deviceId, token).then(
-        () => orphanCleanup.delete(token),
-        (e) => {
-          if (entry.attempts >= MAX_CLEANUP_ATTEMPTS) {
-            logger.warn('orphan cleanup gave up on device', entry.deviceId, e)
-            orphanCleanup.delete(token)
-          }
+      closeForCleanup(entry.deviceId, token, closeDeviceFn).then((confirmed) => {
+        if (!confirmed && entry.attempts % 5 === 0) {
+          logger.warn('orphan cleanup still pending for device', entry.deviceId, token)
         }
-      )
+      })
     }
     return touched
   }
@@ -252,9 +294,8 @@
   /**
    * Removes a closing tab's registrations and closes every session the tab
    * owned, passing `(deviceId, token)` to `closeDeviceFn`. Ownership records
-   * are removed only after the daemon confirms the close; failures move to
-   * the orphan retry queue. The tab's sessions are always cleaned even when
-   * other tabs keep the device open.
+   * are removed only after the daemon confirms the close; failures move to the
+   * orphan retry queue. Sibling tab sessions remain untouched.
    * @param {number} tabId
    * @param {Function} closeDeviceFn
    * @returns {void}
@@ -265,16 +306,8 @@
       if (!tabs.has(tabId)) continue
       tabs.delete(tabId)
       const tokens = collectDeviceSessionsForTab(deviceId, tabId)
-      for (const token of tokens) {
-        closeDeviceFn(deviceId, token).then(
-          () => unregisterDeviceSession(deviceId, token),
-          () => enqueueOrphanCleanup(deviceId, token)
-        )
-      }
-      if (tabs.size === 0) {
-        deviceTabMap.delete(deviceId)
-        deviceSessions.delete(deviceId)
-      }
+      for (const token of tokens) closeForCleanup(deviceId, token, closeDeviceFn)
+      if (tabs.size === 0) deviceTabMap.delete(deviceId)
     }
   }
   /**
@@ -328,6 +361,7 @@
     isSessionOwnedBy,
     purgeTab,
     broadcastGlobalReset,
-    forTabsOfOrigin
+    forTabsOfOrigin,
+    isCleanupConfirmed
   })
 })()
