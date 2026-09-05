@@ -8,7 +8,6 @@
    */
   const BUNDLE_FILES = {
     worker: [
-      'js/utils/pristine.js',
       'js/utils/bootstrap.js',
       'js/utils/logger.js',
       'js/utils/settings.js',
@@ -18,7 +17,6 @@
       'js/content/isolated/worker/index.js'
     ],
     workerPolyfill: [
-      'js/utils/pristine.js',
       'js/utils/bootstrap.js',
       'js/utils/logger.js',
       'js/utils/http.js',
@@ -29,7 +27,6 @@
       'js/content/main/index.js'
     ],
     mv2MainWorld: [
-      'js/utils/pristine.js',
       'js/utils/bootstrap.js',
       'js/utils/http.js',
       'js/utils/logger.js',

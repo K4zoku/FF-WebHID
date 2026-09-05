@@ -8,8 +8,8 @@ const bundleSource = readFileSync('addon/js/utils/bundle-files.js', 'utf8')
 
 const bundleNames = ['worker', 'workerPolyfill', 'mv2MainWorld']
 
-test('every MAIN entry starts with pristine capture', () => {
-  assert.equal(mainEntry.js[0], 'js/utils/pristine.js')
+test('every MAIN entry starts with pristine bootstrap', () => {
+  assert.equal(mainEntry.js[0], 'js/utils/bootstrap.js')
   assert.equal(manifest.content_scripts[0].world, 'MAIN')
   assert.equal(manifest.content_scripts[1].world, 'ISOLATED')
   const mainSource = readFileSync('addon/js/content/main/index.js', 'utf8')
@@ -21,7 +21,7 @@ test('every MAIN entry starts with pristine capture', () => {
   for (const name of bundleNames) {
     const match = new RegExp(`${name}: \\[\\s*'([^']+)'`).exec(bundleSource)
     assert.ok(match, `missing ${name} bundle list`)
-    assert.equal(match[1], 'js/utils/pristine.js', `${name} must bootstrap pristine capture first`)
+    assert.equal(match[1], 'js/utils/bootstrap.js', `${name} must bootstrap pristine capture first`)
   }
 })
 

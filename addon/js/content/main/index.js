@@ -94,6 +94,11 @@
   const nativeNumberIsFinite = host.numberIsFinite
   const nativeMathTrunc = host.mathTrunc
   const nativeJsonStringify = host.jsonStringify
+  /**
+   * Replaces Map instance methods with captured intrinsic operations.
+   * @param {Map} value
+   * @returns {Map}
+   */
   function hardenMap(value) {
     object.defineProperties(value, {
       get: { value: (key) => mapOps.get(value, key) },
@@ -109,6 +114,11 @@
     return value
   }
 
+  /**
+   * Replaces WeakMap instance methods with captured intrinsic operations.
+   * @param {WeakMap} value
+   * @returns {WeakMap}
+   */
   function hardenWeakMap(value) {
     object.defineProperties(value, {
       get: { value: (key) => weakMapOps.get(value, key) },
@@ -118,6 +128,11 @@
     })
     return value
   }
+  /**
+   * Replaces EventTarget methods with captured intrinsic operations.
+   * @param {EventTarget} value
+   * @returns {EventTarget}
+   */
   function hardenEventTarget(value) {
     object.defineProperties(value, {
       addEventListener: {
@@ -137,6 +152,10 @@
 
   reflect.deleteProperty(globalThis, 'webhid')
 
+  /**
+   * Reports whether the captured user activation is currently active.
+   * @returns {boolean}
+   */
   function hasTransientActivation() {
     return nativeIsActiveGetter && nativeUserActivation ? nativeIsActiveGetter() : false
   }

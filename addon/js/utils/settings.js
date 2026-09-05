@@ -16,6 +16,11 @@
   const mapOps = types.Map.proto.methods
   const setOps = types.Set.proto.methods
   const arrayOps = types.Array.proto.methods
+  /**
+   * Replaces Map instance methods with captured intrinsic operations.
+   * @param {Map} value
+   * @returns {Map}
+   */
   function hardenMap(value) {
     object.defineProperties(value, {
       get: { value: (key) => mapOps.get(value, key) },
@@ -26,6 +31,11 @@
     })
     return value
   }
+  /**
+   * Replaces Set instance methods with captured intrinsic operations.
+   * @param {Set} value
+   * @returns {Set}
+   */
   function hardenSet(value) {
     object.defineProperties(value, {
       add: { value: (item) => setOps.add(value, item) },

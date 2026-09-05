@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-await import('../../addon/js/utils/pristine.js')
-const pristine = globalThis.webhidPristine
+await import('../../addon/js/utils/bootstrap.js')
+const pristine = globalThis.webhid.import('pristine')
 
 test('captureType preserves native brands and immutable operations', () => {
   const captured = pristine.captureType(Map)

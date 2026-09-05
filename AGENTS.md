@@ -94,10 +94,11 @@ The worker polyfill creates its own bridge port; no page-side init decision. On 
 ### Hostile MAIN intrinsic capture
 
 The first script in every MAIN, worker, worker-polyfill, and MV2 MAIN-world bundle is
-`js/utils/pristine.js`. It captures the small native root used by delayed code:
+`js/utils/bootstrap.js`. It captures the small native root used by delayed code:
 Object, Reflect, Function, constructors, prototype methods, accessors, and explicit
-host operations. `captureType()` returns the native constructor, prototype, immutable
-descriptor-backed operation tables, and a pristine construct operation. `captureOps()`
+host operations, then exports the immutable snapshot as the `pristine` webhid module.
+`captureType()` returns the native constructor, prototype, immutable descriptor-backed
+operation tables, and a pristine construct operation. `captureOps()`
 is the operation-only form for internal branded objects. Descriptor records and every
 operation closure are immutable after bootstrap, and authority accessors such as
 `navigator.userActivation.isActive` are exposed only as zero-argument operations bound
