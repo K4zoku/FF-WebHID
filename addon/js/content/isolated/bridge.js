@@ -923,19 +923,7 @@
     const ev = data.event || {}
     if (ev.type === 'closed') {
       inPageDevices.delete(key)
-      let spawnPending = false
-      for (const entry of pendingPlaneSpawns.values()) {
-        if (entry.key === key) {
-          spawnPending = true
-          break
-        }
-      }
-      if (!spawnPending) {
-        context.port.postMessage({
-          type: 'event',
-          event: { eventType: 'disconnect', deviceId: deviceId }
-        })
-      }
+      handleWorkerErrorEvent({ deviceId, message: 'in-page transport closed' }, port)
     } else if (ev.type === 'auth-failed') {
       inPageDevices.delete(key)
       refreshDataPlaneToken(context, deviceId)

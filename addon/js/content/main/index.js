@@ -1190,6 +1190,10 @@
           )
         }
       }
+      if (detail.eventType === 'disconnect' && device) {
+        const state = devState.get(device)
+        reconcileAuthoritativeLifetime(state)
+      }
       if (hidInstance && device) {
         if (detail.eventType === 'disconnect') deviceInfoCache = null
         hidInstance.dispatchEvent(new HIDConnectionEvent(detail.eventType, { device: device }))
@@ -1236,6 +1240,39 @@
       }
     })
     state.dataPending.clear()
+  }
+
+  /**
+   * Reconciles an opened device after an authoritative lifetime loss.
+   * @param {object} state
+   * @param {{forgotten?: boolean}} [options]
+   * @returns {void}
+   */
+  function reconcileAuthoritativeLifetime(state, { forgotten = false } = {}) {
+    if (!state) return
+    state.opening = false
+    if (forgotten) state.forgotten = true
+    state.opened = false
+    rejectPendingReports(
+      state,
+      new NativeDOMException(
+        forgotten ? 'Device forgotten' : 'Device disconnected',
+        'AbortError'
+      )
+    )
+    if (state.dataPort) {
+      if (state.dataPortHandler) {
+        callNative(
+          nativeMessagePortRemoveEventListener,
+          state.dataPort,
+          'message',
+          state.dataPortHandler
+        )
+        state.dataPortHandler = null
+      }
+      callNative(nativeMessagePortClose, state.dataPort)
+      state.dataPort = null
+    }
   }
 
   /**
@@ -1303,10 +1340,8 @@
    * @returns {Promise<void>}
    */
   async function teardownForgottenDevice(device, state) {
-    state.forgotten = true
-    rejectPendingReports(state, new NativeDOMException('Device forgotten', 'AbortError'))
-    if (state.opened) {
-      state.opened = false
+    const wasOpened = !!state.opened
+    if (wasOpened) {
       try {
         await sendRequest('close', { deviceId: state.deviceId })
       } catch (error) {
@@ -1315,18 +1350,9 @@
           error != null ? (error.message != null ? error.message : error) : error
         )
       }
-      if (state.dataPort) {
-        if (state.dataPortHandler) {
-          callNative(nativeMessagePortRemoveEventListener, state.dataPort,
-          'message',
-          state.dataPortHandler)
-          state.dataPortHandler = null
-        }
-        callNative(nativeMessagePortClose, state.dataPort)
-        state.dataPort = null
-      }
-      device.dispatchEvent(new NativeEvent('close'))
     }
+    reconcileAuthoritativeLifetime(state, { forgotten: true })
+    if (wasOpened) device.dispatchEvent(new NativeEvent('close'))
     pairedDevices = null
     deviceInfoCache = null
     deviceRegistry.delete(state.deviceId)
@@ -1408,6 +1434,7 @@
    */
   function handleDataPortDisconnectEvent(state) {
     deviceInfoCache = null
+    reconcileAuthoritativeLifetime(state)
     const device = state.self
     if (device) device.dispatchEvent(new HIDConnectionEvent('disconnect', { device: device }))
   }
