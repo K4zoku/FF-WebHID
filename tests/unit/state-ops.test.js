@@ -144,3 +144,27 @@ test('frame cleanup retains failed authority without affecting siblings', async 
   assert.equal(orphanCleanup.has('session-a'), true)
   assert.equal(ops.isFrameLifetimeActive(11, 'frame-b'), true)
 })
+
+test('authority and physical resets clear derived ownership', () => {
+  const { ops, deviceTabMap, deviceSessions, orphanCleanup } = loadStateOps()
+  ops.registerFrameLifetime(11, 'frame-a')
+  ops.registerDeviceTab(7, 11)
+  ops.registerDeviceSession(7, 'session-a', {
+    tabId: 11,
+    origin: 'https://a.test',
+    frameKey: 'frame-a'
+  })
+  orphanCleanup.set('old-session', { deviceId: 7, attempts: 4 })
+
+  ops.clearDeviceOwnership(7)
+  assert.equal(deviceTabMap.has(7), false)
+  assert.equal(deviceSessions.has(7), false)
+  assert.equal(orphanCleanup.has('old-session'), false)
+  assert.equal(ops.isFrameLifetimeActive(11, 'frame-a'), true)
+
+  ops.clearAuthorityOwnership()
+  assert.equal(deviceTabMap.size, 0)
+  assert.equal(deviceSessions.size, 0)
+  assert.equal(orphanCleanup.size, 0)
+  assert.equal(ops.isFrameLifetimeActive(11, 'frame-a'), false)
+})
