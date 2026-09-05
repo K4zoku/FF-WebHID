@@ -183,7 +183,7 @@ test.describe('extension action surfaces', () => {
         const state = window as unknown as { pickerState?: string }
         state.pickerState = 'pending'
         navigator.hid
-          .requestDevice()
+          .requestDevice({ filters: [] })
           .then(() => {
             state.pickerState = 'settled'
           })
@@ -253,7 +253,7 @@ test.describe('extension action surfaces', () => {
         const state = window as unknown as { pickerState?: string }
         state.pickerState = 'pending'
         navigator.hid
-          .requestDevice()
+          .requestDevice({ filters: [] })
           .then(() => {
             state.pickerState = 'settled'
           })
