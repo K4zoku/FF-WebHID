@@ -305,6 +305,7 @@ fn run_windows(event_tx: broadcast::Sender<IpcResponse>) {
             return;
         }
         log::debug!("Windows HID device notification registration succeeded");
+        refresh_and_diff(&event_tx);
 
         let mut msg: WindowsMsg = std::mem::zeroed();
         loop {
