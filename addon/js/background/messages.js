@@ -497,6 +497,22 @@
    * @param {function(*): void} sendResponse
    * @returns {boolean}
    */
+  function handleSendReport(request, sender, sendResponse) {
+    if (!tabAllowsDevice(sender, request.deviceId)) {
+      sendResponse({ s: 403 })
+      return true
+    }
+    NativeMessaging.sendReport(request.deviceId, request.reportId || 0, request.data)
+      .then(sendResponse)
+      .catch(() => sendResponse({ s: 500 }))
+    return true
+  }
+  /**
+   * @param {object} request
+   * @param {object} sender
+   * @param {function(*): void} sendResponse
+   * @returns {boolean}
+   */
   function handleReceiveFeatureReport(request, sender, sendResponse) {
     if (!tabAllowsDevice(sender, request.deviceId)) {
       sendResponse({ s: 403 })
@@ -1079,6 +1095,7 @@
     revokeDevice: handleRevokeDevice,
     cleanupSession: handleCleanupSession,
     setDataPlane: handleSetDataPlane,
+    sendReport: handleSendReport,
     receiveFeatureReport: handleReceiveFeatureReport,
     sendFeatureReport: handleSendFeatureReport,
     getPairedDevices: handleGetPairedDevices,

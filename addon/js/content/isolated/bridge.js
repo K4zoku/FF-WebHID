@@ -246,31 +246,30 @@
     }
   })
   /**
-   * @param {FrameContext} context
    * @param {string} deviceId
    * @returns {object}
    */
-  function ensureRuntimeDataPort(context, deviceId) {
-    const key = planeKey(context, deviceId)
-    const existing = runtimeDataPorts.get(key)
+  function ensureRuntimeDataPort(deviceId) {
+    const existing = runtimeDataPorts.get(deviceId)
     if (existing) return existing
     const port = browser.runtime.connect({ name: `webhid-data:${deviceId}` })
-    runtimeDataPorts.set(key, port)
+    runtimeDataPorts.set(deviceId, port)
     port.onMessage.addListener((message) => {
       if (message && message.reqId != null) {
         const pending = dataPending.get(message.reqId)
-        if (!pending || pending.key !== key) return
+        if (!pending || pending.deviceId !== deviceId) return
         dataPending.delete(message.reqId)
         handleWorkerReportResponse(pending.msg, pending.port, message)
+        maybeDisconnectRuntimeDataPort(deviceId)
         return
       }
       if (message && message.event) handleBackgroundEvent(message)
     })
     port.onDisconnect.addListener(() => {
-      if (runtimeDataPorts.get(key) !== port) return
-      runtimeDataPorts.delete(key)
+      if (runtimeDataPorts.get(deviceId) !== port) return
+      runtimeDataPorts.delete(deviceId)
       for (const [reqId, pending] of dataPending) {
-        if (pending.key !== key) continue
+        if (pending.deviceId !== deviceId) continue
         dataPending.delete(reqId)
         handleWorkerReportResponse(pending.msg, pending.port, { s: 503 })
       }
@@ -311,9 +310,9 @@
   const dataPorts = new Map()
   /** @type {Map<FrameContext, Set<MessagePort>>} */
   const workerPagePorts = new Map()
-  /** @type {Map<string, object>} */
+  /** @type {Map<string, object>} deviceId -> shared NM runtime port */
   const runtimeDataPorts = new Map()
-  /** @type {Map<number, {msg: object, port: MessagePort, key: string}>} */
+  /** @type {Map<number, {msg: object, port: MessagePort, key: string, deviceId: string}>} */
   const dataPending = new Map()
   let dataReqSeq = 0
   /** @returns {number} */
@@ -336,6 +335,36 @@
     else nmOpenAttempts.delete(key)
   }
   /**
+   * @param {Iterable<string>} keys
+   * @param {string} deviceId
+   * @returns {boolean}
+   */
+  function hasDeviceKey(keys, deviceId) {
+    for (const key of keys) {
+      const separator = key.indexOf('\u0000')
+      if (separator >= 0 && key.slice(separator + 1) === String(deviceId)) return true
+    }
+    return false
+  }
+  /**
+   * @param {string} deviceId
+   * @returns {void}
+   */
+  function maybeDisconnectRuntimeDataPort(deviceId) {
+    if (hasDeviceKey(nmPlanes, deviceId) || hasDeviceKey(nmOpenAttempts.keys(), deviceId)) return
+    for (const pending of dataPending.values()) {
+      if (pending.deviceId === deviceId) return
+    }
+    const port = runtimeDataPorts.get(deviceId)
+    if (!port) return
+    runtimeDataPorts.delete(deviceId)
+    try {
+      port.disconnect()
+    } catch (e) {
+      logger.debug('runtime data port cleanup failed', e)
+    }
+  }
+  /**
    * Disconnects a data Port created for an open that did not succeed.
    * @param {FrameContext} context
    * @param {string} deviceId
@@ -344,14 +373,7 @@
   function discardFailedOpenDataPort(context, deviceId) {
     const key = planeKey(context, deviceId)
     if (context.sessions.has(deviceId) || nmOpenAttempts.has(key)) return
-    const port = runtimeDataPorts.get(key)
-    if (!port) return
-    runtimeDataPorts.delete(key)
-    try {
-      port.disconnect()
-    } catch (e) {
-      logger.debug('failed-open runtime data port cleanup failed', e)
-    }
+    maybeDisconnectRuntimeDataPort(deviceId)
   }
   /** @type {number|null} */
   let wsPort = null
@@ -500,15 +522,6 @@
       }
       dataPorts.delete(key)
     }
-    const runtimePort = runtimeDataPorts.get(key)
-    if (runtimePort) {
-      runtimeDataPorts.delete(key)
-      try {
-        runtimePort.disconnect()
-      } catch (e) {
-        logger.debug('runtime data port cleanup failed', e)
-      }
-    }
     for (const [reqId, pending] of dataPending) {
       if (pending.key !== key) continue
       dataPending.delete(reqId)
@@ -517,6 +530,7 @@
     connectParams.delete(key)
     deviceTransports.delete(key)
     nmPlanes.delete(key)
+    maybeDisconnectRuntimeDataPort(deviceId)
     spawnGen.delete(key)
   }
 
@@ -787,7 +801,7 @@
     }
     if (!ok && spawnGen.get(key) === gen) {
       logger.warn('data plane spawn failed for', deviceId, '; falling back to NM')
-      ensureRuntimeDataPort(context, deviceId)
+      ensureRuntimeDataPort(deviceId)
       nmPlanes.add(key)
       deviceTransports.delete(key)
       sendBackgroundRequest({
@@ -930,7 +944,7 @@
     workerReadyDevices.delete(key)
     connectParams.delete(key)
     if (!context.sessions.has(deviceId)) return
-    ensureRuntimeDataPort(context, deviceId)
+    ensureRuntimeDataPort(deviceId)
     nmPlanes.add(key)
     deviceTransports.delete(key)
     const token = context.sessions.get(deviceId) || null
@@ -1302,7 +1316,7 @@
     const dataPlane = settings.dataPlane
     if (dataPlane === 'nm' || nmPlanes.has(key)) {
       nmPlanes.add(key)
-      ensureRuntimeDataPort(context, deviceId)
+      ensureRuntimeDataPort(deviceId)
     } else if (dataPlane === 'ws') {
       await spawnDataPlane(context, deviceId, response.t, response.w || wsPort)
     } else if (dataPlane === 'wt') {
@@ -1393,7 +1407,7 @@
           return
         }
         if (settings.dataPlane === 'nm' || nmPlanes.has(key)) {
-          ensureRuntimeDataPort(context, deviceId)
+          ensureRuntimeDataPort(deviceId)
           retainNmOpenAttempt(key)
           nmOpenAttempt = true
         }
@@ -1424,6 +1438,7 @@
           releaseNmOpenAttempt(key)
           nmOpenAttempt = false
         }
+        if (!accepted) discardFailedOpenDataPort(context, deviceId)
       } else if (action === 'open') {
         if (nmOpenAttempt) {
           releaseNmOpenAttempt(key)
@@ -1503,7 +1518,7 @@
       deviceTransports.keys(),
       nmPlanes,
       dataPorts.keys(),
-      runtimeDataPorts.keys(),
+      nmOpenAttempts.keys(),
       spawnGen.keys()
     ]
     for (const keys of planeKeys) {
@@ -1735,9 +1750,9 @@
       if (msg.type === 'send' || msg.type === 'sendFeature') payload.data = msg.data
       const reqId = allocateDataReqId()
       const request = Object.assign({ action, reqId }, payload)
-      const dataPort = ensureRuntimeDataPort(context, deviceId)
+      const dataPort = ensureRuntimeDataPort(deviceId)
       const key = planeKey(context, deviceId)
-      dataPending.set(reqId, { msg, port, key })
+      dataPending.set(reqId, { msg, port, key, deviceId })
       try {
         dataPort.postMessage(request)
       } catch {
@@ -1784,7 +1799,7 @@
     if (dp === 'nm') {
       for (const { context, deviceId } of active) {
         const key = planeKey(context, deviceId)
-        ensureRuntimeDataPort(context, deviceId)
+        ensureRuntimeDataPort(deviceId)
         nmPlanes.add(key)
       }
     }

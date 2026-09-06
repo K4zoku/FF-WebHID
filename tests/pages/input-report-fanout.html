@@ -18,6 +18,11 @@
           )
           return { reportId: event.reportId, bytes: Array.from(view) }
         }
+        function recordReport(id) {
+          const counts = window.tests.results.fanoutCounts || {}
+          counts[id] = (counts[id] || 0) + 1
+          window.tests.results.fanoutCounts = counts
+        }
 
         function createRemoteConsumer(id) {
           const ready = Promise.withResolvers()
@@ -32,7 +37,10 @@
           const consumer = remoteConsumers.get(message.id)
           if (!consumer) return
           if (message.type === 'ready') consumer.ready.resolve()
-          else if (message.type === 'report') consumer.report.resolve(message.value)
+          else if (message.type === 'report') {
+            recordReport(message.id)
+            consumer.report.resolve(message.value)
+          }
           else if (message.type === 'error') {
             const error = new Error(message.message)
             consumer.ready.reject(error)
@@ -48,7 +56,10 @@
             .then(async (devices) => {
               const device = devices[0]
               if (!device) throw new Error('no paired device for ' + id)
-              device.oninputreport = (event) => report.resolve(reportFromEvent(event))
+              device.oninputreport = (event) => {
+                recordReport(id)
+                report.resolve(reportFromEvent(event))
+              }
               await device.open()
               ready.resolve()
             })
@@ -103,6 +114,7 @@
         window.tests.helper = window.tests.helper || {}
         window.tests.results = window.tests.results || {}
         window.tests.results.fanoutReady = false
+        window.tests.results.fanoutCounts = {}
         window.addEventListener('message', (event) => {
           const message = event.data
           if (!message || message.type !== 'startFanout' || started) return

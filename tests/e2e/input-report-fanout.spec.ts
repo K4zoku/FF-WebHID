@@ -229,6 +229,16 @@ test.describe.serial('Public input report fan-out', () => {
         { timeout: 15000 }
       )
     } finally {
+      await sharedPage.evaluate(async () => {
+        for (const device of await navigator.hid.getDevices()) {
+          if (device.opened) await device.close()
+          await device.forget()
+        }
+      })
+      await sharedPage.waitForFunction(
+        async () => (await navigator.hid.getDevices()).length === 0,
+        { timeout: 15000 }
+      )
       await backgroundPage.evaluate((siteOrigin: string) => {
         return browser.storage.local.set({ [`settings :: ${siteOrigin} :: dataPlane`]: 'nm' })
       }, origin)
