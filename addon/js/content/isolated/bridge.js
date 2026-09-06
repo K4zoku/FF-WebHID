@@ -184,6 +184,7 @@
     }
     frameContexts.set(context.key, context)
     frameContextByPort.set(port, context)
+    clientSessions.set(port, context.sessions)
     clientKeysByPort.set(port, 'window')
     if (source) frameContextBySource.set(source, context)
     return context
