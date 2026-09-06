@@ -572,8 +572,6 @@
   let nextReqId = 0
   /** @type {{object}} */
   const pending = {}
-  /** @type {WeakMap<object, {clientKey: string|null, terminated: boolean, sent: boolean}>} */
-  const workerClientStates = new NativeWeakMap()
   if (!nativeCryptoRandomUUID) {
     throw new NativeError('WebHID polyfill requires crypto.randomUUID (secure context)')
   }
@@ -1916,7 +1914,6 @@
   function PatchedWorker(url, opts) {
     const instance = new NativeWorker(url, opts)
     const state = { clientKey: null, terminated: false, sent: false }
-    workerClientStates.set(instance, state)
     object.defineProperty(instance, 'terminate', {
       value: () => {
         state.terminated = true

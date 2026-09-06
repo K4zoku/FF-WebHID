@@ -30,6 +30,7 @@
     registerFrameLifetime,
     isFrameLifetimeActive,
     purgeFrame,
+    purgeBridge,
     forTabsOfOrigin,
     collectDeviceSessionsForOrigin,
     getDeviceSessionOwner,
@@ -1144,8 +1145,15 @@
     })
     browser.runtime.onConnect.addListener((port) => {
       registerContentPort(port)
+      let bridgeInstanceId = null
       port.onMessage.addListener((request) => {
         const handler = HANDLERS[request.action]
+        if (
+          port.name === 'webhid-control' &&
+          bridgeInstanceId === null &&
+          typeof request.bridgeInstanceId === 'string'
+        )
+          bridgeInstanceId = request.bridgeInstanceId
         if (!handler) return
         let responded = false
         const sendPortResponse = (response) => {
@@ -1166,6 +1174,17 @@
           sendPortResponse({ s: 500 })
         }
       })
+      if (port.name === 'webhid-control') {
+        port.onDisconnect.addListener(() => {
+          const tabId = port.sender && port.sender.tab ? port.sender.tab.id : undefined
+          if (!bridgeInstanceId || tabId == null) return
+          purgeBridge(
+            tabId,
+            bridgeInstanceId,
+            (deviceId, token) => NativeMessaging.closeDevice(deviceId, token)
+          ).catch((e) => logger.debug('bridge session cleanup failed', e))
+        })
+      }
     })
   }
 
