@@ -242,6 +242,7 @@ test.describe.serial('Public input report fan-out', () => {
       await backgroundPage.evaluate((siteOrigin: string) => {
         return browser.storage.local.set({ [`settings :: ${siteOrigin} :: dataPlane`]: 'nm' })
       }, origin)
+      await sharedPage.goto(`${origin}/tests/test-page.html`, { waitUntil: 'domcontentloaded' })
     }
   })
 })

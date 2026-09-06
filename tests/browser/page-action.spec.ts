@@ -156,6 +156,94 @@ test.describe('extension action surfaces', () => {
     await expect(sharedPage.locator('#view-devices')).toBeVisible()
     await expect(sharedPage.locator('#view-settings')).toBeHidden()
   })
+  test('popup scopes status requests to its selected origin', async ({
+    backgroundPage,
+    sharedPage,
+    page,
+    pageUrl
+  }) => {
+    const activeOrigin = new URL(pageUrl('/')).origin
+    const selectedOrigin = `${activeOrigin}-selected`
+    await sharedPage.goto(pageUrl('/test-page.html'), { waitUntil: 'domcontentloaded' })
+    await page.addInitScript((origin) => {
+      const calls: Array<{ action: string; origin: unknown }> = []
+      Object.defineProperty(globalThis, '__popupStatusCalls', { value: calls })
+      const runtimeSendMessage = browser.runtime.sendMessage as unknown as (
+        message: unknown
+      ) => Promise<unknown>
+      const tabsSendMessage = browser.tabs.sendMessage as unknown as (
+        tabId: number,
+        message: unknown
+      ) => Promise<unknown>
+      browser.runtime.sendMessage = async (message) => {
+        const request = message as { action?: unknown }
+        if (request.action === 'getFrameOrigins')
+          return { origins: [origin.active, origin.selected] }
+        if (request.action === 'getBackendStatus')
+          return { nmConnected: true, daemonReachable: true, hidPermission: 0 }
+        if (request.action === 'getPairedDevices') return { success: true, hashes: ['1'] }
+        return runtimeSendMessage(message)
+      }
+      browser.tabs.sendMessage = async (tabId, message) => {
+        const request = message as { action?: unknown; origin?: unknown }
+        const action = typeof request.action === 'string' ? request.action : ''
+        if (action === 'getDataPlaneStatus' || action === 'getOpenDeviceIds')
+          calls.push({ action, origin: request.origin })
+        if (action === 'getDataPlaneStatus') {
+          return request.origin === origin.selected
+            ? { planes: [{ deviceId: '1', plane: 'ws', mode: 'worker' }], defaultPlane: 'nm' }
+            : { planes: [], defaultPlane: 'nm' }
+        }
+        if (action === 'getOpenDeviceIds')
+          return request.origin === origin.selected ? { ids: ['1'] } : { ids: [] }
+        return tabsSendMessage(tabId, message)
+      }
+    }, { active: activeOrigin, selected: selectedOrigin })
+    const popupUrl = await backgroundPage.evaluate(() =>
+      browser.runtime.getURL('js/internal/pages/popup/index.html')
+    )
+    await page.goto(popupUrl, { waitUntil: 'domcontentloaded', timeout: 15000 })
+    const before = await page.evaluate(() => {
+      const value = (globalThis as unknown as { __popupStatusCalls?: unknown }).__popupStatusCalls
+      return Array.isArray(value) ? value.length : 0
+    })
+    await page.locator('#site-name').click()
+    await page.locator('#origin-list li').nth(1).click()
+    await expect(page.locator('#site-name-text')).toHaveText(selectedOrigin)
+    await expect(page.locator('#status')).toHaveClass(/state-warn/)
+    await page.waitForFunction(
+      ({ start, origin }) => {
+        const calls = (globalThis as unknown as { __popupStatusCalls?: unknown }).__popupStatusCalls
+        if (!Array.isArray(calls)) return false
+        const after = calls.slice(start)
+        return (
+          after.some((entry) => {
+            const call = entry as { action?: unknown; origin?: unknown }
+            return call.action === 'getDataPlaneStatus' && call.origin === origin
+          }) &&
+          after.some((entry) => {
+            const call = entry as { action?: unknown; origin?: unknown }
+            return call.action === 'getOpenDeviceIds' && call.origin === origin
+          })
+        )
+      },
+      { start: before, origin: selectedOrigin },
+      { timeout: 15000 }
+    )
+    const calls = await page.evaluate(() => {
+      const value = (globalThis as unknown as { __popupStatusCalls?: unknown }).__popupStatusCalls
+      return Array.isArray(value)
+        ? (value as Array<{ action: string; origin: unknown }>)
+        : []
+    })
+    const afterSelection = calls.slice(before)
+    expect(afterSelection).toEqual(
+      expect.arrayContaining([
+        { action: 'getDataPlaneStatus', origin: selectedOrigin },
+        { action: 'getOpenDeviceIds', origin: selectedOrigin }
+      ])
+    )
+  })
   test('hidden page action stays visible during its pending picker', async ({
     backgroundPage,
     sharedPage,
