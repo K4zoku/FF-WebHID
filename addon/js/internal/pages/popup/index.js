@@ -349,7 +349,10 @@
     let planes = []
     if (origin && tab && tab.id != null) {
       try {
-        const r = await browser.tabs.sendMessage(tab.id, { action: 'getDataPlaneStatus' })
+        const r = await browser.tabs.sendMessage(tab.id, {
+          action: 'getDataPlaneStatus',
+          origin
+        })
         planes = (r && r.planes) || []
       } catch (e) {
         logger.debug('getDataPlaneStatus failed', e)
@@ -546,7 +549,8 @@
     let openIds = new Set()
     try {
       const r = await browser.tabs.sendMessage(tab.id, {
-        action: 'getOpenDeviceIds'
+        action: 'getOpenDeviceIds',
+        origin
       })
       const rIds = r != null ? r.ids : undefined
       if (rIds) openIds = new Set(rIds.map((id) => Number(id)))
