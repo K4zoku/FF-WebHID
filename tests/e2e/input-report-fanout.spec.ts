@@ -127,6 +127,50 @@ test.describe.serial('Public input report fan-out', () => {
       { reportId: 1, bytes: PACKET }
     ])
   })
+  test('worker close leaves the window client operational', async ({
+    sharedPage,
+    backgroundPage,
+    vendorDevice
+  }) => {
+    await prepareFanoutPage(sharedPage, backgroundPage, true)
+    try {
+      await sharedPage.evaluate(() => {
+        window.postMessage({ type: 'startFanout', iframeCount: 0, includeWorker: true }, location.origin)
+      })
+      await sharedPage.waitForFunction(
+        () => window.tests?.results?.fanoutReady === true,
+        { timeout: 15000 }
+      )
+      await sleep(300)
+      sendInput(vendorDevice, 1, PACKET)
+      await sharedPage.waitForFunction(
+        () => {
+          const counts = window.tests?.results?.fanoutCounts
+          return counts?.page === 1 && counts.worker === 1
+        },
+        { timeout: 15000 }
+      )
+      sendInput(vendorDevice, 1, PACKET)
+      await sharedPage.waitForFunction(
+        () => window.tests?.results?.fanoutCounts?.page === 2,
+        { timeout: 15000 }
+      )
+      await expect(sharedPage.evaluate(() => window.tests?.results?.fanoutCounts)).resolves.toEqual({
+        page: 2,
+        worker: 1
+      })
+    } finally {
+      await sharedPage.evaluate(async () => {
+        for (const device of await navigator.hid.getDevices()) {
+          if (device.opened) await device.close()
+          await device.forget()
+        }
+      })
+      await sharedPage.goto(`${new URL(sharedPage.url()).origin}/tests/test-page.html`, {
+        waitUntil: 'domcontentloaded'
+      })
+    }
+  })
 
   test('page and two iframes all open and listen for input reports', async ({
     sharedPage,
