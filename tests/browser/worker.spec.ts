@@ -144,6 +144,11 @@ test.describe('Worker polyfill gating', () => {
         }),
       crossUrl('')
     )
+    await backgroundPage.evaluate(async (origin) => {
+      const tabs = await browser.tabs.query({})
+      const tab = tabs.find((entry) => entry.url && entry.url.startsWith(origin))
+      if (tab && tab.id != null) await browser.tabs.sendMessage(tab.id, { action: 'globalReset' })
+    }, crossUrl(''))
     let ok = false
     for (let i = 0; i < 20 && !ok; i++) {
       const r = await page.evaluate(async () => {

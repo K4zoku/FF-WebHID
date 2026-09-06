@@ -1577,13 +1577,39 @@
     context.sessions.clear()
   }
 
+  /**
+   * Clears daemon-derived ownership while retaining live browser frame ports.
+   * @returns {Promise<void>}
+   */
+  async function resetAuthorityState() {
+    const contexts = [...frameContexts.values()]
+    for (const context of contexts) {
+      const deviceIds = [...context.sessions.keys()]
+      for (const deviceId of deviceIds) {
+        clearFrameDevice(context, deviceId)
+        await despawnDataPlane(context, deviceId)
+        try {
+          context.port.postMessage({
+            type: 'event',
+            event: { eventType: 'disconnect', deviceId }
+          })
+        } catch (e) {
+          logger.debug('authority reset notification failed', e)
+        }
+      }
+    }
+  }
+
   /** @returns {void} */
   function handleGlobalReset() {
-    logger.warn('global reset: clearing bridge frame state')
-    const contexts = [...frameContexts.values()]
-    for (const context of contexts) destroyFrameContext(context, { close: false, notify: true })
-    sendBackgroundRequest({ action: 'deviceCountChanged', count: 0 })
-      .catch((e) => logger.debug('deviceCountChanged (reset) failed', e))
+    logger.warn('global reset: clearing daemon state')
+    resetAuthorityState()
+      .catch((e) => logger.debug('authority reset failed', e))
+      .finally(() => {
+        sendBackgroundRequest({ action: 'deviceCountChanged', count: 0 }).catch((e) =>
+          logger.debug('deviceCountChanged (reset) failed', e)
+        )
+      })
   }
 
   /**
