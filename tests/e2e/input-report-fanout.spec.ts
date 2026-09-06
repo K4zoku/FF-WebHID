@@ -14,9 +14,14 @@ async function prepareFanoutPage(
   enableWorker: boolean
 ): Promise<void> {
   const origin = new URL(sharedPage.url()).origin
-  await backgroundPage.evaluate((siteOrigin: string) => {
-    return browser.storage.local.set({ [`settings :: ${siteOrigin} :: dataPlane`]: 'nm' })
-  }, origin)
+  await backgroundPage.evaluate(
+    ({ siteOrigin, enableWorker }) =>
+      browser.storage.local.set({
+        [`settings :: ${siteOrigin} :: dataPlane`]: 'nm',
+        [`settings :: ${siteOrigin} :: workerPolyfillEnabled`]: enableWorker
+      }),
+    { siteOrigin: origin, enableWorker }
+  )
   await sharedPage.goto(`${origin}/tests/test-page.html`, {
     waitUntil: 'domcontentloaded'
   })
@@ -24,11 +29,6 @@ async function prepareFanoutPage(
   expect(await grantDevicePermission(sharedPage, [VENDOR])).toBe(1)
 
   if (enableWorker) {
-    await backgroundPage.evaluate((siteOrigin: string) => {
-      return browser.storage.local.set({
-        [`settings :: ${siteOrigin} :: workerPolyfillEnabled`]: true
-      })
-    }, origin)
     await sleep(500)
     await sharedPage.reload({ waitUntil: 'domcontentloaded' })
     await sharedPage.waitForFunction(() => typeof navigator.hid !== 'undefined', { timeout: 15000 })
@@ -46,48 +46,60 @@ async function runFanout(
   iframeCount: number,
   includeWorker: boolean
 ): Promise<unknown> {
-  await prepareFanoutPage(sharedPage, backgroundPage, includeWorker)
-  await sharedPage.evaluate(
-    ({ iframeCount: count, includeWorker: worker }) => {
-      window.postMessage(
-        { type: 'startFanout', iframeCount: count, includeWorker: worker },
-        location.origin
-      )
-    },
-    { iframeCount, includeWorker }
-  )
-  await sharedPage.waitForFunction(
-    () => {
-      const results = window.tests?.results
-      const error = results?.fanoutError
-      if (typeof error === 'string') throw new Error(error)
-      return results?.fanoutReady === true
-    },
-    { timeout: 15000 }
-  )
-  await sleep(300)
-  sendInput(vendorDevice, 1, PACKET)
-  const expectedRecipients = 1 + iframeCount + (includeWorker ? 1 : 0)
-  await sharedPage.waitForFunction(
-    (expected) => {
-      const reports = window.tests?.results?.fanoutReports
-      return Array.isArray(reports) && reports.length === expected
-    },
-    expectedRecipients,
-    { timeout: 15000 }
-  )
-  const reports = await sharedPage.evaluate(() => window.tests?.results?.fanoutReports)
-  await sharedPage.evaluate(async () => {
-    const device = (await navigator.hid.getDevices())[0]
-    if (!device) return
-    if (device.opened) await device.close()
-    await device.forget()
-  })
   const origin = new URL(sharedPage.url()).origin
-  await sharedPage.goto(`${origin}/tests/test-page.html`, {
-    waitUntil: 'domcontentloaded'
-  })
-  return reports
+  const settingKeys = [
+    `settings :: ${origin} :: dataPlane`,
+    `settings :: ${origin} :: workerPolyfillEnabled`
+  ]
+  const previous = await backgroundPage.evaluate((keys) => browser.storage.local.get(keys), settingKeys)
+  try {
+    await prepareFanoutPage(sharedPage, backgroundPage, includeWorker)
+    await sharedPage.evaluate(
+      ({ iframeCount: count, includeWorker: worker }) => {
+        window.postMessage(
+          { type: 'startFanout', iframeCount: count, includeWorker: worker },
+          location.origin
+        )
+      },
+      { iframeCount, includeWorker }
+    )
+    await sharedPage.waitForFunction(
+      () => {
+        const results = window.tests?.results
+        const error = results?.fanoutError
+        if (typeof error === 'string') throw new Error(error)
+        return results?.fanoutReady === true
+      },
+      { timeout: 15000 }
+    )
+    await sleep(300)
+    sendInput(vendorDevice, 1, PACKET)
+    const expectedRecipients = 1 + iframeCount + (includeWorker ? 1 : 0)
+    await sharedPage.waitForFunction(
+      (expected) => {
+        const reports = window.tests?.results?.fanoutReports
+        return Array.isArray(reports) && reports.length === expected
+      },
+      expectedRecipients,
+      { timeout: 15000 }
+    )
+    return await sharedPage.evaluate(() => window.tests?.results?.fanoutReports)
+  } finally {
+    await sharedPage.evaluate(async () => {
+      for (const device of await navigator.hid.getDevices()) {
+        if (device.opened) await device.close()
+        await device.forget()
+      }
+    })
+    await backgroundPage.evaluate(
+      ({ keys, values }) => {
+        const missing = keys.filter((key) => !(key in values))
+        return browser.storage.local.remove(missing).then(() => browser.storage.local.set(values))
+      },
+      { keys: settingKeys, values: previous }
+    )
+    await sharedPage.goto(`${origin}/tests/test-page.html`, { waitUntil: 'domcontentloaded' })
+  }
 }
 
 test.describe.serial('Public input report fan-out', () => {
@@ -135,9 +147,13 @@ test.describe.serial('Public input report fan-out', () => {
   }) => {
     test.setTimeout(60000)
     const origin = new URL(sharedPage.url()).origin
-    await backgroundPage.evaluate((siteOrigin: string) => {
-      return browser.storage.local.set({ [`settings :: ${siteOrigin} :: dataPlane`]: 'ws' })
-    }, origin)
+    const settingKeys = [
+      `settings :: ${origin} :: dataPlane`,
+      `settings :: ${origin} :: workerPolyfillEnabled`
+    ]
+    const previous = await backgroundPage.evaluate((keys) => browser.storage.local.get(keys), settingKeys)
+    await backgroundPage.evaluate((keys) =>
+      browser.storage.local.set({ [keys[0]]: 'ws', [keys[1]]: false }), settingKeys)
     try {
       await sharedPage.goto(`${origin}/tests/test-page.html`, {
         waitUntil: 'domcontentloaded'
@@ -239,9 +255,13 @@ test.describe.serial('Public input report fan-out', () => {
         async () => (await navigator.hid.getDevices()).length === 0,
         { timeout: 15000 }
       )
-      await backgroundPage.evaluate((siteOrigin: string) => {
-        return browser.storage.local.set({ [`settings :: ${siteOrigin} :: dataPlane`]: 'nm' })
-      }, origin)
+      await backgroundPage.evaluate(
+        ({ keys, values }) => {
+          const missing = keys.filter((key) => !(key in values))
+          return browser.storage.local.remove(missing).then(() => browser.storage.local.set(values))
+        },
+        { keys: settingKeys, values: previous }
+      )
       await sharedPage.goto(`${origin}/tests/test-page.html`, { waitUntil: 'domcontentloaded' })
     }
   })
