@@ -3,6 +3,7 @@
 
   /** @type {import("./types.js").Logger} */
   const logger = webhid.import('logger')
+  const pristine = webhid.import('pristine')
   const isChromium = webhid.import('isChromium')
   const http = webhid.import('http')
   const createSettingsStore = webhid.import('createSettingsStore')
@@ -11,6 +12,9 @@
   const parseSettingsKey = webhid.import('parseSettingsKey')
   const WebHidDevicePicker = webhid.import('WebHidDevicePicker')
   logger.initLogger('bridge')
+  if (typeof pristine.host.cryptoRandomUUID !== 'function')
+    throw new Error('WebHID bridge requires pristine crypto.randomUUID')
+  const bridgeInstanceId = 'bridge-' + pristine.host.cryptoRandomUUID()
   const controlPort = browser.runtime.connect({ name: 'webhid-control' })
   const controlQueue = []
   let controlPending = null
@@ -21,7 +25,7 @@
     if (controlPending || controlQueue.length === 0) return
     controlPending = controlQueue.shift()
     try {
-      controlPort.postMessage(controlPending.request)
+      controlPort.postMessage({ ...controlPending.request, bridgeInstanceId })
     } catch (error) {
       controlPending.reject(error)
       controlPending = null
@@ -48,7 +52,7 @@
       const reqId = 'handshake:' + ++nextHandshakeReqId
       handshakePending.set(reqId, { resolve, reject })
       try {
-        controlPort.postMessage({ action: 'handshake', reqId })
+        controlPort.postMessage({ action: 'handshake', reqId, bridgeInstanceId })
       } catch (error) {
         handshakePending.delete(reqId)
         reject(error)
@@ -154,6 +158,10 @@
   const frameContexts = new Map()
   /** @type {Map<MessagePort, FrameContext>} */
   const frameContextByPort = new Map()
+  /** @type {Map<MessagePort, Map<string, string>>} */
+  const clientSessions = new Map()
+  /** @type {Map<MessagePort, string>} */
+  const clientKeysByPort = new Map()
   /** @type {Map<Window, FrameContext>} */
   const frameContextBySource = new Map()
   let nextFrameGeneration = 0
@@ -166,7 +174,7 @@
    */
   function createFrameContext(port, source, origin) {
     const context = {
-      key: 'frame-' + ++nextFrameGeneration,
+      key: bridgeInstanceId + '/frame-' + ++nextFrameGeneration,
       generation: nextFrameGeneration,
       port,
       source,
@@ -176,6 +184,7 @@
     }
     frameContexts.set(context.key, context)
     frameContextByPort.set(port, context)
+    clientKeysByPort.set(port, 'window')
     if (source) frameContextBySource.set(source, context)
     return context
   }
@@ -197,29 +206,114 @@
   function planeKey(context, deviceId) {
     return context.key + '\u0000' + deviceId
   }
+  /**
+   * @param {string} key
+   * @returns {FrameContext|null}
+   */
+  function contextForPlaneKey(key) {
+    const separator = key.indexOf('\u0000')
+    return separator >= 0 ? frameContexts.get(key.slice(0, separator)) || null : null
+  }
 
-  /** @returns {Set<string>} */
-  function getOpenDeviceIds() {
+  /**
+   * @param {string} key
+   * @returns {string}
+   */
+  function deviceIdForPlaneKey(key) {
+    const separator = key.indexOf('\u0000')
+    if (separator < 0) return key
+    const rest = key.slice(separator + 1)
+    const clientSeparator = rest.indexOf('\u0000')
+    return clientSeparator < 0 ? rest : rest.slice(0, clientSeparator)
+  }
+
+  /**
+   * @param {string} [origin]
+   * @returns {Set<string>}
+   */
+  function getOpenDeviceIds(origin) {
     const ids = new Set()
-    for (const context of frameContexts.values()) {
-      for (const deviceId of context.sessions.keys()) ids.add(deviceId)
+    for (const [port, context] of frameContextByPort) {
+      if (origin && context.origin !== origin) continue
+      for (const deviceId of (clientSessions.get(port) || context.sessions).keys())
+        ids.add(deviceId)
     }
     return ids
+  }
+  /**
+   * @param {FrameContext} context
+   * @returns {Array<{port: MessagePort, sessions: Map<string, string>}>}
+   */
+  function sessionsForContext(context) {
+    const result = []
+    for (const [port, owner] of frameContextByPort) {
+      if (owner !== context) continue
+      result.push({ port, sessions: clientSessions.get(port) || context.sessions })
+    }
+    return result
+  }
+  /**
+   * @param {Map<string, string>} sessions
+   * @returns {string}
+   */
+  function clientKeyForSessions(sessions) {
+    for (const [port, ownerSessions] of clientSessions) {
+      if (ownerSessions === sessions) return clientKeysByPort.get(port) || 'window'
+    }
+    return 'window'
+  }
+  /**
+   * @param {Map<string, string>} sessions
+   * @returns {MessagePort|null}
+   */
+  function clientPortForSessions(sessions) {
+    for (const [port, ownerSessions] of clientSessions) {
+      if (ownerSessions === sessions) return port
+    }
+    return null
+  }
+  /**
+   * @param {FrameContext} context
+   * @param {string} deviceId
+   * @param {string} clientKey
+   * @returns {string}
+   */
+  function planeKeyForClient(context, deviceId, clientKey) {
+    return clientKey === 'window'
+      ? planeKey(context, deviceId)
+      : planeKey(context, deviceId) + '\u0000' + clientKey
+  }
+  /**
+   * @param {FrameContext} context
+   * @param {string} clientKey
+   * @returns {{port: MessagePort, sessions: Map<string, string>}|null}
+   */
+  function clientForKey(context, clientKey) {
+    for (const [port, owner] of frameContextByPort) {
+      if (owner !== context || clientKeysByPort.get(port) !== clientKey) continue
+      return { port, sessions: clientSessions.get(port) || context.sessions }
+    }
+    return null
   }
 
 
   /**
    * @param {FrameContext} context
    * @param {string} deviceId
-   * @returns {void}
+   * @returns {boolean}
    */
-  function clearFrameDevice(context, deviceId) {
-    if (context) context.sessions.delete(deviceId)
+  function frameHasDeviceSession(context, deviceId) {
+    for (const [port, owner] of frameContextByPort) {
+      if (owner !== context) continue
+      const sessions = clientSessions.get(port)
+      if (sessions && sessions.has(deviceId)) return true
+    }
+    return false
   }
-
   browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    const origin = typeof request.origin === 'string' ? request.origin : ''
     if (request.action === 'getOpenDeviceIds') {
-      sendResponse({ ids: Array.from(getOpenDeviceIds()) })
+      sendResponse({ ids: Array.from(getOpenDeviceIds(origin)) })
       return true
     }
     if (request.action === 'getFrameOrigins') {
@@ -229,17 +323,20 @@
     if (request.action === 'getDataPlaneStatus') {
       const planes = []
       for (const [key, transport] of deviceTransports) {
-        const separator = key.indexOf('\u0000')
-        const deviceId = key.slice(separator + 1)
+        const context = contextForPlaneKey(key)
+        if (!context || (origin && context.origin !== origin)) continue
+        const deviceId = deviceIdForPlaneKey(key)
         if (workers.has(key)) planes.push({ deviceId, plane: transport, mode: 'worker' })
       }
       for (const key of inPageDevices) {
-        const separator = key.indexOf('\u0000')
-        planes.push({ deviceId: key.slice(separator + 1), plane: 'wt', mode: 'inpage' })
+        const context = contextForPlaneKey(key)
+        if (!context || (origin && context.origin !== origin)) continue
+        planes.push({ deviceId: deviceIdForPlaneKey(key), plane: 'wt', mode: 'inpage' })
       }
       for (const key of nmPlanes) {
-        const separator = key.indexOf('\u0000')
-        planes.push({ deviceId: key.slice(separator + 1), plane: 'nm', mode: null })
+        const context = contextForPlaneKey(key)
+        if (!context || (origin && context.origin !== origin)) continue
+        planes.push({ deviceId: deviceIdForPlaneKey(key), plane: 'nm', mode: null })
       }
       sendResponse({ planes, defaultPlane: settings.dataPlane })
       return true
@@ -292,10 +389,11 @@
    * the worker is still spawning (or absent).
    * @param {FrameContext} context
    * @param {string} deviceId
+   * @param {string} [clientKey]
    * @returns {object|null}
    */
-  function getWorker(context, deviceId) {
-    const entry = workers.get(planeKey(context, deviceId))
+  function getWorker(context, deviceId, clientKey = 'window') {
+    const entry = workers.get(planeKeyForClient(context, deviceId, clientKey))
     return entry ? entry.worker : null
   }
   /** @type {Set<string>} */
@@ -480,11 +578,12 @@
   /**
    * @param {FrameContext} context
    * @param {string} deviceId
-   * @param {{keepPort?: boolean}} [opts]
+   * @param {{keepPort?: boolean, clientKey?: string}} [opts]
    * @returns {Promise<void>}
    */
-  async function despawnDataPlane(context, deviceId, { keepPort = false } = {}) {
-    const key = planeKey(context, deviceId)
+  async function despawnDataPlane(context, deviceId, { keepPort = false, clientKey = 'window' } = {}) {
+    const key = planeKeyForClient(context, deviceId, clientKey)
+    const frameKey = planeKey(context, deviceId)
     const gen = (spawnGen.get(key) || 0) + 1
     spawnGen.set(key, gen)
     if (inPageDevices.has(key)) {
@@ -529,31 +628,35 @@
     }
     connectParams.delete(key)
     deviceTransports.delete(key)
-    nmPlanes.delete(key)
+    if (clientKey === 'window' || !frameHasDeviceSession(context, deviceId))
+      nmPlanes.delete(frameKey)
     maybeDisconnectRuntimeDataPort(deviceId)
     spawnGen.delete(key)
   }
 
   /**
-   * Re-attaches the frame/device data plane after an auth failure using the
-   * same frame-owned daemon Session token. No sibling session can be reused.
+   * Re-attaches a client/device data plane after an auth failure.
    * @param {FrameContext} context
    * @param {string} deviceId
+   * @param {string} [clientKey]
    * @returns {Promise<void>}
    */
-  async function refreshDataPlaneToken(context, deviceId) {
-    const key = planeKey(context, deviceId)
+  async function refreshDataPlaneToken(context, deviceId, clientKey = 'window') {
+    const key = planeKeyForClient(context, deviceId, clientKey)
     if (workers.has(key)) return
-    const token = context.sessions.get(deviceId)
+    const client = clientForKey(context, clientKey)
+    const sessions = client ? client.sessions : context.sessions
+    const token = sessions.get(deviceId)
     if (!token) {
       logger.warn('data plane refresh: no open session for', deviceId, '; plane stays down')
       return
     }
-    logger.info('data plane refresh for', deviceId, 'using its frame session')
+    const opts = { clientKey, clientPort: client ? client.port : context.port, rewire: true }
+    logger.info('data plane refresh for', deviceId, 'using its client session')
     if (wtPort != null && settings.dataPlane === 'wt') {
-      await spawnDataPlane(context, deviceId, token, null, { wtPort, wtCertHash, rewire: true })
+      await spawnDataPlane(context, deviceId, token, null, { ...opts, wtPort, wtCertHash })
     } else {
-      await spawnDataPlane(context, deviceId, token, wsPort, { rewire: true })
+      await spawnDataPlane(context, deviceId, token, wsPort, opts)
     }
   }
 
@@ -624,10 +727,11 @@
   /**
    * @param {FrameContext} context
    * @param {object} payload
+   * @param {MessagePort} [clientPort]
    * @returns {Promise<object>}
    */
-  function requestMainWorldSpawn(context, payload) {
-    const port = context.port
+  function requestMainWorldSpawn(context, payload, clientPort = context.port) {
+    const port = clientPort
     if (!port) return Promise.reject(new Error('no page port for worker spawn'))
     return new Promise((resolve, reject) => {
       const id = 'spawn:' + ++spawnReqSeq
@@ -675,17 +779,22 @@
    * @param {FrameContext} context
    * @param {string} deviceId
    * @param {string} mode
+   * @param {MessagePort} [clientPort]
    * @returns {Promise<object>}
    */
-  async function attemptWorkerSpawn(context, deviceId, mode) {
+  async function attemptWorkerSpawn(context, deviceId, mode, clientPort) {
     if (mode === 'blob') {
-      return requestMainWorldSpawn(context, {
-        mode: 'blob',
-        bundleText: await fetchWorkerBundle(),
-        deviceId
-      })
+      return requestMainWorldSpawn(
+        context,
+        {
+          mode: 'blob',
+          bundleText: await fetchWorkerBundle(),
+          deviceId
+        },
+        clientPort
+      )
     }
-    return requestMainWorldSpawn(context, { mode: 'shadow', deviceId })
+    return requestMainWorldSpawn(context, { mode: 'shadow', deviceId }, clientPort)
   }
 
   /**
@@ -695,37 +804,38 @@
    * @param {number} wsPort
    * @param {object} [opts]
    * @param {number} [opts.reportSize]
+   * @param {string} [opts.clientKey]
    * @param {number} gen
    * @returns {Promise<boolean>}
    */
   async function spawnWorker(context, deviceId, sessionToken, wsPort, opts = {}, gen) {
-    const key = planeKey(context, deviceId)
+    const key = planeKeyForClient(context, deviceId, opts.clientKey || 'window')
     if (workers.has(key)) return true
     const wsAuthHash = await computeWsAuthHash(sessionToken)
     if (!wsAuthHash) {
-      logger.warn(
-        'cannot derive WS auth hash for',
-        deviceId,
-        '; wsNonce missing, falling back to NM'
-      )
+      logger.warn('cannot derive WS auth hash for', deviceId, '; wsNonce missing, falling back to NM')
       return false
     }
     let spawnResult = null
     const spawnMode = await resolveSpawnMode()
-    if (spawnMode === 'nm') {
-      logger.info('page CSP blocks all worker spawn modes for', deviceId, '; using NM data plane')
-      return false
-    }
+    if (spawnMode === 'nm') return false
     try {
-      spawnResult = await attemptWorkerSpawn(context, deviceId, spawnMode)
+      spawnResult = await attemptWorkerSpawn(
+        context,
+        deviceId,
+        spawnMode,
+        opts.clientPort || context.port
+      )
     } catch (e) {
       logger.warn('worker spawn failed for', deviceId, '(', spawnMode, '):', e.message)
     }
     if (!spawnResult || !spawnResult.ok) return false
-
     if (spawnGen.get(key) !== gen) {
-      logger.info('worker spawn stale, discarding for', deviceId)
-      requestMainWorldSpawn(context, { mode: 'terminate', deviceId }).catch(() => {})
+      requestMainWorldSpawn(
+        context,
+        { mode: 'terminate', deviceId },
+        opts.clientPort || context.port
+      ).catch(() => {})
       return false
     }
     workers.set(key, { state: 'spawning', worker: null })
@@ -751,10 +861,8 @@
    */
   async function spawnInPageDataPlane(context, deviceId, sessionToken, opts) {
     const wsAuthHash = await computeWsAuthHash(sessionToken)
-    if (!wsAuthHash) return false
-    const port = context.port
-    if (!port) return false
-    const key = planeKey(context, deviceId)
+    if (!wsAuthHash || !context.port) return false
+    const key = planeKeyForClient(context, deviceId, opts.clientKey || 'window')
     return new Promise((resolve) => {
       const id = 'plane:' + ++planeReqSeq
       const timer = setTimeout(() => {
@@ -764,7 +872,7 @@
       }, 10000)
       pendingPlaneSpawns.set(id, { resolve, timer, key })
       inPageDevices.add(key)
-      port.postMessage({
+      context.port.postMessage({
         type: 'dataPlaneConnect',
         id,
         deviceId,
@@ -789,7 +897,7 @@
    * @returns {Promise<void>}
    */
   async function spawnDataPlane(context, deviceId, sessionToken, wsPort, opts = {}) {
-    const key = planeKey(context, deviceId)
+    const key = planeKeyForClient(context, deviceId, opts.clientKey || 'window')
     const gen = (spawnGen.get(key) || 0) + 1
     spawnGen.set(key, gen)
     let ok
@@ -802,7 +910,7 @@
     if (!ok && spawnGen.get(key) === gen) {
       logger.warn('data plane spawn failed for', deviceId, '; falling back to NM')
       ensureRuntimeDataPort(deviceId)
-      nmPlanes.add(key)
+      nmPlanes.add(planeKey(context, deviceId))
       deviceTransports.delete(key)
       sendBackgroundRequest({
         action: 'setDataPlane',
@@ -918,14 +1026,15 @@
     const context = frameContextForPort(port)
     if (!context) return
     const deviceId = data.deviceId
-    const key = planeKey(context, deviceId)
+    const clientKey = clientKeysByPort.get(port) || 'window'
+    const key = planeKeyForClient(context, deviceId, clientKey)
     const ev = data.event || {}
     if (ev.type === 'closed') {
       inPageDevices.delete(key)
       handleWorkerErrorEvent({ deviceId, message: 'in-page transport closed' }, port)
     } else if (ev.type === 'auth-failed') {
       inPageDevices.delete(key)
-      refreshDataPlaneToken(context, deviceId)
+      refreshDataPlaneToken(context, deviceId, clientKey)
     }
   }
 
@@ -938,25 +1047,28 @@
     const context = frameContextForPort(port)
     if (!context) return
     const deviceId = data.deviceId
-    const key = planeKey(context, deviceId)
+    const clientKey = clientKeysByPort.get(port) || 'window'
+    const key = planeKeyForClient(context, deviceId, clientKey)
+    const sessions = clientSessions.get(port) || context.sessions
     logger.warn('worker errored for', deviceId, ':', data.message)
     workers.delete(key)
     workerReadyDevices.delete(key)
     connectParams.delete(key)
-    if (!context.sessions.has(deviceId)) return
+    if (!sessions.has(deviceId)) return
     ensureRuntimeDataPort(deviceId)
-    nmPlanes.add(key)
+    nmPlanes.add(planeKey(context, deviceId))
     deviceTransports.delete(key)
-    const token = context.sessions.get(deviceId) || null
+    const token = sessions.get(deviceId) || null
     sendBackgroundRequest({
       action: 'setDataPlane',
       deviceId,
       mode: 'nm',
       sessionToken: token,
       frameKey: context.key,
-      origin: context.origin
+      origin: context.origin,
+      clientKey
     }).catch((e) => logger.debug('setDataPlane NM fallback failed', e))
-    context.port.postMessage({ type: 'wireWorkerPort', deviceId })
+    port.postMessage({ type: 'wireWorkerPort', deviceId })
   }
 
   /**
@@ -1071,6 +1183,9 @@
     const context = frameContextForPort(requestPort)
     if (!p || !context) return
     frameContextByPort.set(p, context)
+    clientSessions.set(p, new Map())
+    const clientKey = 'worker-' + ++nextFrameGeneration
+    clientKeysByPort.set(p, clientKey)
     let workerPorts = workerPagePorts.get(context)
     if (!workerPorts) {
       workerPorts = new Set()
@@ -1080,7 +1195,11 @@
     portOrigin.set(p, context.origin)
     p.onmessage = (event) => dispatchPortMessage(p, event, null)
     if (typeof p.start === 'function') p.start()
-    requestPort.postMessage({ type: 'response', id: data.id, result: { ok: true } })
+    requestPort.postMessage({
+      type: 'response',
+      id: data.id,
+      result: { ok: true, clientKey }
+    })
   }
 
   /**
@@ -1107,7 +1226,8 @@
       }
       return
     }
-    const key = planeKey(context, deviceId)
+    const clientKey = clientKeysByPort.get(requestPort) || 'window'
+    const key = planeKeyForClient(context, deviceId, clientKey)
     if (workers.has(key)) {
       const proxy = makeWorkerProxy(port)
       workers.set(key, { state: 'ready', worker: proxy })
@@ -1126,16 +1246,16 @@
         }
         if (data.type === 'auth-failed') {
           logger.warn('worker auth-failed for', deviceId, 'code=' + data.code + '; re-opening')
-          if (getWorker(context, deviceId) === proxy) {
+          if (getWorker(context, deviceId, clientKey) === proxy) {
             workers.delete(key)
             workerReadyDevices.delete(key)
-            refreshDataPlaneToken(context, deviceId)
+            refreshDataPlaneToken(context, deviceId, clientKey)
           }
           return
         }
         if (data.type === 'closed') {
           logger.warn('worker closed for', deviceId)
-          if (getWorker(context, deviceId) === proxy) {
+          if (getWorker(context, deviceId, clientKey) === proxy) {
             workers.delete(key)
             workerReadyDevices.delete(key)
             handleWorkerErrorEvent({ deviceId, message: 'transport closed' }, requestPort)
@@ -1157,7 +1277,8 @@
     }
     devicePorts.add(port)
     logger.debug('data port received for device', deviceId, context.key)
-    port.onmessage = (event) => onDataPortMessage(context, deviceId, event.data, port)
+    port.onmessage = (event) =>
+      onDataPortMessage(context, deviceId, event.data, port, clientKey)
   }
   /**
    * @param {object} data
@@ -1299,13 +1420,14 @@
    * Runs the post-open data-plane spawn for a device.
    * @param {object} response
    * @param {FrameContext} context
+   * @param {Map<string, string>} sessions
    * @returns {Promise<boolean>}
    */
-  async function handleOpenSuccess(response, context) {
+  async function handleOpenSuccess(response, context, sessions) {
     const deviceId = response.i
     if (!context || context.destroyed || !frameContexts.has(context.key)) return false
-    const key = planeKey(context, deviceId)
-    context.sessions.set(deviceId, response.t)
+    const frameKey = planeKey(context, deviceId)
+    sessions.set(deviceId, response.t)
     sendBackgroundRequest({
       action: 'deviceCountChanged',
       count: getOpenDeviceIds().size
@@ -1314,16 +1436,30 @@
     logger.debug('open ok deviceId=' + deviceId + ' wsPort=' + response.w)
 
     const dataPlane = settings.dataPlane
-    if (dataPlane === 'nm' || nmPlanes.has(key)) {
-      nmPlanes.add(key)
+    if (dataPlane === 'nm' || nmPlanes.has(frameKey)) {
+      nmPlanes.add(frameKey)
       ensureRuntimeDataPort(deviceId)
-    } else if (dataPlane === 'ws') {
-      await spawnDataPlane(context, deviceId, response.t, response.w || wsPort)
+    }
+    const clientKey = clientKeyForSessions(sessions)
+    const clientPort = clientPortForSessions(sessions)
+    if (dataPlane === 'ws') {
+      await spawnDataPlane(context, deviceId, response.t, response.w || wsPort, {
+        clientKey,
+        clientPort
+      })
     } else if (dataPlane === 'wt') {
       if (wtPort != null) {
-        await spawnDataPlane(context, deviceId, response.t, null, { wtPort, wtCertHash })
+        await spawnDataPlane(context, deviceId, response.t, null, {
+          wtPort,
+          wtCertHash,
+          clientKey,
+          clientPort
+        })
       } else {
-        await spawnDataPlane(context, deviceId, response.t, response.w || wsPort)
+        await spawnDataPlane(context, deviceId, response.t, response.w || wsPort, {
+          clientKey,
+          clientPort
+        })
       }
     }
     return true
@@ -1333,20 +1469,21 @@
    * Tears down the data plane after a device close.
    * @param {object} payload
    * @param {FrameContext} context
+   * @param {Map<string, string>} sessions
    * @returns {void}
    */
-  function handleCloseSuccess(payload, context) {
+  function handleCloseSuccess(payload, context, sessions) {
     const deviceId = payload.deviceId
     logger.debug('close deviceId=' + deviceId)
-    clearFrameDevice(context, deviceId)
+    sessions.delete(deviceId)
     sendBackgroundRequest({
       action: 'deviceCountChanged',
       count: getOpenDeviceIds().size
     })
       .catch((e) => logger.debug('deviceCountChanged (close) failed', e))
-    despawnDataPlane(context, deviceId)
+    if (!frameHasDeviceSession(context, deviceId))
+      despawnDataPlane(context, deviceId, { clientKey: clientKeyForSessions(sessions) })
   }
-
   /**
    *
    * @param {string} origin
@@ -1382,6 +1519,7 @@
   async function handleGenericRequest(data, requestPort) {
     const { id, action, payload } = data
     const context = frameContextForPort(requestPort)
+    const sessions = clientSessions.get(requestPort) || (context && context.sessions)
     const origin = context ? context.origin : getRequestOrigin(data)
     let nmOpenAttempt = false
     try {
@@ -1389,7 +1527,7 @@
         replyToPage({ type: 'response', id, result: { s: 403 } })
         return
       }
-      if ((action === 'open' || action === 'close') && !context) {
+      if ((action === 'open' || action === 'close') && (!context || !sessions)) {
         replyToPage({ type: 'response', id, result: { s: 403 } })
         return
       }
@@ -1413,19 +1551,21 @@
         }
       }
       const effectiveAction = action === 'enumerate' ? 'enumeratePaired' : action
-      const msg = Object.assign(
-        { action: effectiveAction, origin, frameKey: context ? context.key : undefined },
-        payload || {}
-      )
+      const msg = Object.assign({}, payload || {}, {
+        action: effectiveAction,
+        origin,
+        frameKey: context ? context.key : undefined,
+        clientKey: clientKeysByPort.get(requestPort)
+      })
       let reservedToken = null
       if (action === 'close') {
-        reservedToken = context.sessions.get(deviceId) || null
+        reservedToken = sessions.get(deviceId) || null
         if (reservedToken) msg.T = reservedToken
       }
       response = await sendBackgroundRequest(msg)
 
       if (action === 'open' && http.isOk(response.s) && response.t) {
-        const accepted = await handleOpenSuccess(response, context)
+        const accepted = await handleOpenSuccess(response, context, sessions)
         if (!accepted) {
           sendBackgroundRequest({
             action: 'cleanupSession',
@@ -1449,9 +1589,9 @@
 
       if (action === 'close') {
         if (http.isOk(response.s)) {
-          handleCloseSuccess(payload, context)
+          handleCloseSuccess(payload, context, sessions)
         } else if (reservedToken) {
-          context.sessions.set(deviceId, reservedToken)
+          sessions.set(deviceId, reservedToken)
         }
       }
 
@@ -1469,9 +1609,48 @@
     }
   }
 
+  /**
+   * Cleans up sessions owned by a terminated worker client.
+   * @param {object} data
+   * @param {MessagePort} requestPort
+   * @returns {Promise<void>}
+   */
+  async function handleWorkerClientDestroyed(data, requestPort) {
+    const context = frameContextForPort(requestPort)
+    const clientKey = data.payload && data.payload.clientKey
+    if (!context || typeof clientKey !== 'string') return
+    const workerPort = [...clientKeysByPort.entries()].find(
+      ([port, key]) => key === clientKey && frameContextByPort.get(port) === context
+    )?.[0]
+    if (!workerPort) return
+    const sessions = clientSessions.get(workerPort)
+    if (sessions) {
+      for (const [deviceId, token] of sessions) {
+        await sendBackgroundRequest({
+          action: 'close',
+          deviceId,
+          T: token,
+          origin: context.origin,
+          frameKey: context.key,
+          clientKey
+        }).catch(() => {})
+        await despawnDataPlane(context, deviceId, { clientKey })
+      }
+      sessions.clear()
+    }
+    clientSessions.delete(workerPort)
+    clientKeysByPort.delete(workerPort)
+    frameContextByPort.delete(workerPort)
+    const workerPorts = workerPagePorts.get(context)
+    if (workerPorts) {
+      workerPorts.delete(workerPort)
+      if (workerPorts.size === 0) workerPagePorts.delete(context)
+    }
+  }
   /** @type {object} */
   const REQUEST_HANDLERS = {
     workerPort: handleWorkerPortRequest,
+    workerClientDestroyed: handleWorkerClientDestroyed,
     dataPort: handleDataPortRequest,
     getCspInfo: handleGetCspInfoRequest,
     getPolicy: handleGetPolicyRequest,
@@ -1508,9 +1687,12 @@
   async function destroyFrameContext(context, { close = true, notify = false } = {}) {
     if (!context || context.destroyed || !frameContexts.has(context.key)) return
     context.destroyed = true
-    const sessions = [...context.sessions.entries()]
+    const clientSessionsForFrame = sessionsForContext(context)
     const planePrefix = context.key + '\u0000'
-    const planeDeviceIds = new Set(sessions.map(([deviceId]) => deviceId))
+    const planeDeviceIds = new Set()
+    for (const { sessions } of clientSessionsForFrame) {
+      for (const deviceId of sessions.keys()) planeDeviceIds.add(deviceId)
+    }
     const planeKeys = [
       workers.keys(),
       workerReadyDevices,
@@ -1535,16 +1717,20 @@
     }
     frameContexts.delete(context.key)
     frameContextByPort.delete(context.port)
+    clientKeysByPort.delete(context.port)
     if (frameContextBySource.get(context.source) === context) {
       frameContextBySource.delete(context.source)
       pagePorts.delete(context.source)
     }
     pageSourceByPort.delete(context.port)
+    clientKeysByPort.delete(context.port)
     portOrigin.delete(context.port)
     const workerPorts = workerPagePorts.get(context)
     if (workerPorts) {
       for (const port of workerPorts) {
         frameContextByPort.delete(port)
+        clientKeysByPort.delete(port)
+        clientSessions.delete(port)
         portOrigin.delete(port)
         try {
           port.onmessage = null
@@ -1561,8 +1747,15 @@
       )
     }
     for (const deviceId of planeDeviceIds) {
-      const hadSession = context.sessions.has(deviceId)
-      await despawnDataPlane(context, deviceId)
+      const hadSession = clientSessionsForFrame.some(({ sessions }) => sessions.has(deviceId))
+      const clientKeys = clientSessionsForFrame.map(({ sessions }) => clientKeyForSessions(sessions))
+      if (clientKeys.length === 0) {
+        await despawnDataPlane(context, deviceId)
+      } else {
+        for (const clientKey of clientKeys) {
+          await despawnDataPlane(context, deviceId, { clientKey })
+        }
+      }
       if (notify && hadSession) {
         try {
           context.port.postMessage({
@@ -1574,7 +1767,7 @@
         }
       }
     }
-    context.sessions.clear()
+    for (const { sessions } of clientSessionsForFrame) sessions.clear()
   }
 
   /**
@@ -1584,9 +1777,13 @@
   async function resetAuthorityState() {
     const contexts = [...frameContexts.values()]
     for (const context of contexts) {
-      const deviceIds = [...context.sessions.keys()]
+      const clientSessionsForFrame = sessionsForContext(context)
+      const deviceIds = new Set()
+      for (const { sessions } of clientSessionsForFrame) {
+        for (const deviceId of sessions.keys()) deviceIds.add(deviceId)
+      }
       for (const deviceId of deviceIds) {
-        clearFrameDevice(context, deviceId)
+        for (const { sessions } of clientSessionsForFrame) sessions.delete(deviceId)
         await despawnDataPlane(context, deviceId)
         try {
           context.port.postMessage({
@@ -1619,13 +1816,16 @@
    * @returns {Promise<void>}
    */
   async function reconcileFrameDevice(context, deviceId, messageEvent) {
-    if (!context.sessions.has(deviceId)) return
-    clearFrameDevice(context, deviceId)
+    const clients = sessionsForContext(context).filter(({ sessions }) => sessions.has(deviceId))
+    if (clients.length === 0) return
+    for (const { sessions } of clients) sessions.delete(deviceId)
     await despawnDataPlane(context, deviceId)
-    try {
-      context.port.postMessage({ type: 'event', event: messageEvent })
-    } catch (e) {
-      logger.debug('frame device reconciliation failed', e)
+    for (const { port } of clients) {
+      try {
+        port.postMessage({ type: 'event', event: messageEvent })
+      } catch (e) {
+        logger.debug('frame device reconciliation failed', e)
+      }
     }
   }
   /**
@@ -1760,9 +1960,10 @@
    * @param {string} deviceId
    * @param {object} msg
    * @param {MessagePort} port
+   * @param {string} [clientKey]
    * @returns {void}
    */
-  function onDataPortMessage(context, deviceId, msg, port) {
+  function onDataPortMessage(context, deviceId, msg, port, clientKey = 'window') {
     if (!msg) return
     if (msg.type === 'send' || msg.type === 'sendFeature' || msg.type === 'receiveFeature') {
       const action =
@@ -1777,7 +1978,7 @@
       const reqId = allocateDataReqId()
       const request = Object.assign({ action, reqId }, payload)
       const dataPort = ensureRuntimeDataPort(deviceId)
-      const key = planeKey(context, deviceId)
+      const key = planeKeyForClient(context, deviceId, clientKey)
       dataPending.set(reqId, { msg, port, key, deviceId })
       try {
         dataPort.postMessage(request)
@@ -1796,15 +1997,20 @@
   function respawnPlanesForMode(dp) {
     if (dp !== 'ws' && dp !== 'wt') return
     for (const context of frameContexts.values()) {
-      for (const [deviceId, token] of context.sessions) {
-        if (dp === 'wt' && wtPort != null) {
-          spawnDataPlane(context, deviceId, token, null, {
-            wtPort,
-            wtCertHash,
-            rewire: true
-          })
-        } else {
-          spawnDataPlane(context, deviceId, token, wsPort, { rewire: true })
+      for (const { sessions } of sessionsForContext(context)) {
+        const clientKey = clientKeyForSessions(sessions)
+        const clientPort = clientPortForSessions(sessions)
+        for (const [deviceId, token] of sessions) {
+          const opts = { clientKey, clientPort, rewire: true }
+          if (dp === 'wt' && wtPort != null) {
+            spawnDataPlane(context, deviceId, token, null, {
+              ...opts,
+              wtPort,
+              wtCertHash
+            })
+          } else {
+            spawnDataPlane(context, deviceId, token, wsPort, opts)
+          }
         }
       }
     }
@@ -1817,10 +2023,16 @@
   async function applyDataPlane(dp) {
     const active = []
     for (const context of frameContexts.values()) {
-      for (const [deviceId, token] of context.sessions) active.push({ context, deviceId, token })
+      for (const { sessions } of sessionsForContext(context)) {
+        const clientKey = clientKeyForSessions(sessions)
+        const clientPort = clientPortForSessions(sessions)
+        for (const [deviceId, token] of sessions) {
+          active.push({ context, deviceId, token, clientKey, clientPort })
+        }
+      }
     }
-    for (const { context, deviceId } of active) {
-      await despawnDataPlane(context, deviceId, { keepPort: true })
+    for (const { context, deviceId, clientKey } of active) {
+      await despawnDataPlane(context, deviceId, { keepPort: true, clientKey })
     }
     if (dp === 'nm') {
       for (const { context, deviceId } of active) {
@@ -1830,14 +2042,15 @@
       }
     }
     respawnPlanesForMode(dp)
-    for (const { context, deviceId, token } of active) {
+    for (const { context, deviceId, token, clientKey } of active) {
       sendBackgroundRequest({
         action: 'setDataPlane',
         deviceId,
         mode: dp,
         sessionToken: token,
         frameKey: context.key,
-        origin: context.origin
+        origin: context.origin,
+        clientKey
       }).catch((e) => logger.debug('applyDataPlane failed for device', deviceId, e))
     }
     logger.info('data plane changed:', dp, 'open devices:', active.length)

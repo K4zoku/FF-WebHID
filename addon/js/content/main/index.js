@@ -53,6 +53,9 @@
     ? types.Worker.getDescriptor('addEventListener').value
     : null
   const nativeWindowPostMessage = !isWorker ? host.windowPostMessageMethod : null
+  const nativeWorkerTerminate = types.Worker
+    ? types.Worker.getDescriptor('terminate').value
+    : null
   const nativeWindowAddEventListener = host.windowAddEventListener
   const nativeWindowRemoveEventListener = host.windowRemoveEventListener
   const nativeCreateObjectURL = host.url.createObjectURL
@@ -569,6 +572,8 @@
   let nextReqId = 0
   /** @type {{object}} */
   const pending = {}
+  /** @type {WeakMap<object, {clientKey: string|null, terminated: boolean, sent: boolean}>} */
+  const workerClientStates = new NativeWeakMap()
   if (!nativeCryptoRandomUUID) {
     throw new NativeError('WebHID polyfill requires crypto.randomUUID (secure context)')
   }
@@ -1893,26 +1898,48 @@
   installNavigatorHid()
 
   /**
+   * @param {{clientKey: string|null, terminated: boolean, sent: boolean}} state
+   * @returns {void}
+   */
+  function destroyWorkerClient(state) {
+    if (state.sent || !state.clientKey) return
+    state.sent = true
+    sendRequest('workerClientDestroyed', { clientKey: state.clientKey }, { timeoutMs: 500 }).catch(
+      () => {}
+    )
+  }
+  /**
    * @param {string|URL} url
    * @param {object} [opts]
    * @returns {Worker}
    */
   function PatchedWorker(url, opts) {
     const instance = new NativeWorker(url, opts)
+    const state = { clientKey: null, terminated: false, sent: false }
+    workerClientStates.set(instance, state)
+    object.defineProperty(instance, 'terminate', {
+      value: () => {
+        state.terminated = true
+        destroyWorkerClient(state)
+        callNative(nativeWorkerTerminate, instance)
+      }
+    })
     if (nativeWorkerAddEventListener) {
       callNative(nativeWorkerAddEventListener, instance, 'message', (e) => {
         if (e.data === null && e.ports && e.ports[0]) {
           e.stopImmediatePropagation()
           promiseOps.then(bridgeReady, () => {
             if (!bridgePort) return
+            const id = frameNonce + ':' + ++nextReqId
+            pending[id] = (result) => {
+              if (!result || typeof result.clientKey !== 'string') return
+              state.clientKey = result.clientKey
+              if (state.terminated) destroyWorkerClient(state)
+            }
             callNative(
               nativeMessagePortPostMessage,
               bridgePort,
-              {
-                id: frameNonce + ':' + ++nextReqId,
-                action: 'workerPort',
-                payload: {}
-              },
+              { id, action: 'workerPort', payload: {} },
               [e.ports[0]]
             )
           })

@@ -132,10 +132,10 @@
 
   /**
    * Records one daemon session token with its owner.
-   * `deviceSessions` is `deviceId -> Map<token, { tabId, origin, frameKey }>`.
+   * `deviceSessions` is `deviceId -> Map<token, { tabId, origin, frameKey, bridgeInstanceId, clientKey }>` .
    * @param {number} deviceId
    * @param {string} token
-   * @param {{tabId: number, origin: string, frameKey?: string}} owner
+   * @param {{tabId: number, origin: string, frameKey?: string, bridgeInstanceId?: string, clientKey?: string}} owner
    * @returns {boolean}
    */
   function registerDeviceSession(deviceId, token, owner) {
@@ -149,7 +149,13 @@
       byToken = new Map()
       deviceSessions.set(deviceId, byToken)
     }
-    byToken.set(token, { tabId: owner.tabId, origin: owner.origin, frameKey })
+    byToken.set(token, {
+      tabId: owner.tabId,
+      origin: owner.origin,
+      frameKey,
+      bridgeInstanceId: owner.bridgeInstanceId || '',
+      clientKey: owner.clientKey || ''
+    })
     logger.debug('register session device ' + deviceId + ' tab ' + owner.tabId)
     return true
   }
@@ -331,9 +337,10 @@
    * @param {string} origin
    * @param {number} [tabId]
    * @param {string} [frameKey]
+   * @param {string} [clientKey]
    * @returns {boolean}
    */
-  function isSessionOwnedBy(deviceId, token, origin, tabId, frameKey) {
+  function isSessionOwnedBy(deviceId, token, origin, tabId, frameKey, clientKey) {
     const byToken = deviceSessions.get(deviceId)
     if (!byToken) return false
     const owner = byToken.get(token)
@@ -341,6 +348,7 @@
     if (owner.origin !== origin) return false
     if (tabId != null && owner.tabId !== tabId) return false
     if (frameKey != null && owner.frameKey !== frameKey) return false
+    if (clientKey != null && owner.clientKey !== clientKey) return false
     return true
   }
 
@@ -361,6 +369,38 @@
       for (const token of tokens) {
         unregisterDeviceTab(deviceId, tabId)
         pending.push(closeForCleanup(deviceId, token, closeDeviceFn))
+      }
+      const tabs = deviceTabMap.get(deviceId)
+      if (tabs && tabs.size === 0) deviceTabMap.delete(deviceId)
+    }
+    await Promise.all(pending)
+  }
+  /**
+   * Retires all frame lifetimes and sessions owned by one bridge instance.
+   * @param {number} tabId
+   * @param {string} bridgeInstanceId
+   * @param {Function} closeDeviceFn
+   * @returns {Promise<void>}
+   */
+  async function purgeBridge(tabId, bridgeInstanceId, closeDeviceFn) {
+    if (tabId == null || !bridgeInstanceId) return
+    const frames = frameLifetimes.get(tabId)
+    const prefix = bridgeInstanceId + '/'
+    if (frames) {
+      for (const frameKey of frames.keys()) {
+        if (frameKey.startsWith(prefix)) frames.set(frameKey, 0)
+      }
+    }
+    const deviceIds = new Set([...deviceSessions.keys(), ...deviceTabMap.keys()])
+    const pending = []
+    for (const deviceId of deviceIds) {
+      const byToken = deviceSessions.get(deviceId)
+      if (byToken) {
+        for (const [token, owner] of byToken) {
+          if (owner.tabId !== tabId || owner.bridgeInstanceId !== bridgeInstanceId) continue
+          unregisterDeviceTab(deviceId, tabId)
+          pending.push(closeForCleanup(deviceId, token, closeDeviceFn))
+        }
       }
       const tabs = deviceTabMap.get(deviceId)
       if (tabs && tabs.size === 0) deviceTabMap.delete(deviceId)
@@ -467,7 +507,6 @@
     orphanCleanup.clear()
   }
 
-
   /**
    * Clears all browser ownership derived from one physical device lifetime.
    * @param {number} deviceId
@@ -503,6 +542,7 @@
     isFrameLifetimeActive,
     retireFrameLifetime,
     purgeFrame,
+    purgeBridge,
     purgeTab,
     broadcastGlobalReset,
     clearAuthorityOwnership,

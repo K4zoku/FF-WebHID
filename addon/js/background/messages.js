@@ -324,7 +324,9 @@
                 sessionRegistered = registerDeviceSession(response.i, response.t, {
                   tabId,
                   origin: request.origin,
-                  frameKey: ownerFrameKey
+                  frameKey: ownerFrameKey,
+                  bridgeInstanceId: request.bridgeInstanceId,
+                  clientKey: request.clientKey
                 })
               }
               if (!sessionRegistered) {
@@ -371,7 +373,14 @@
     }
     if (
       request.T &&
-      !isSessionOwnedBy(request.deviceId, request.T, request.origin, tabId, frame)
+      !isSessionOwnedBy(
+        request.deviceId,
+        request.T,
+        request.origin,
+        tabId,
+        frame,
+        request.clientKey
+      )
     ) {
       sendResponse({ s: 403 })
       return true
@@ -474,7 +483,8 @@
           request.sessionToken,
           request.origin,
           tabId,
-          frame
+          frame,
+          request.clientKey
         )
       ) {
         sendResponse({ s: 403 })
