@@ -523,6 +523,85 @@ test.describe.serial('WebHID E2E (WebTransport data plane)', () => {
     await sleep(2500)
   })
 
+  test('failed live NM switch makes an open device fail fast', async ({
+    sharedPage,
+    backgroundPage
+  }) => {
+    const origin = new URL(sharedPage.url()).origin
+    const key = `settings :: ${origin} :: dataPlane`
+    await backgroundPage.evaluate(() => {
+      const state = globalThis as unknown as {
+        webhid: { import(name: string): { sendRequest: (request: object) => Promise<object> } }
+        __originalNmSendRequest?: (request: object) => Promise<object>
+        __nmSetDataPlaneCalls?: number
+      }
+      const nm = state.webhid.import('NativeMessaging')
+      state.__originalNmSendRequest = nm.sendRequest.bind(nm)
+      state.__nmSetDataPlaneCalls = 0
+      nm.sendRequest = async (request: object) => {
+        if ((request as { a?: unknown }).a === 7) {
+          state.__nmSetDataPlaneCalls = (state.__nmSetDataPlaneCalls || 0) + 1
+          return { s: 403 }
+        }
+        return state.__originalNmSendRequest!(request)
+      }
+    })
+    try {
+      await backgroundPage.evaluate(
+        (settingKey) => browser.storage.local.set({ [settingKey]: 'nm' }),
+        key
+      )
+      await expect
+        .poll(() =>
+          backgroundPage.evaluate(
+            () =>
+              (globalThis as unknown as { __nmSetDataPlaneCalls?: number }).__nmSetDataPlaneCalls ||
+              0
+          )
+        )
+        .toBeGreaterThan(0)
+      await sharedPage.evaluate((ctx: VendorCtx) => {
+        const state = window as unknown as { planeFailure?: string }
+        state.planeFailure = undefined
+        void navigator.hid.getDevices().then(async (devices) => {
+          const device = devices.find((entry) => entry.vendorId === ctx.f.vendorId)
+          if (!device) throw new Error('no paired vendor device')
+          try {
+            await device.sendReport(ctx.outputId, new Uint8Array(ctx.size))
+            state.planeFailure = 'ok'
+          } catch (error) {
+            state.planeFailure = error instanceof Error ? error.name : String(error)
+          }
+        })
+      }, VENDOR_CTX)
+      await expect
+        .poll(() =>
+          sharedPage.evaluate(() => (window as unknown as { planeFailure?: string }).planeFailure)
+        )
+        .toBe('NetworkError')
+      await expect
+        .poll(() =>
+          sharedPage.evaluate(async () => {
+            const device = (await navigator.hid.getDevices())[0]
+            return device ? device.opened : false
+          })
+        )
+        .toBe(true)
+    } finally {
+      await backgroundPage.evaluate(() => {
+        const state = globalThis as unknown as {
+          webhid: { import(name: string): { sendRequest: (request: object) => Promise<object> } }
+          __originalNmSendRequest?: (request: object) => Promise<object>
+        }
+        const nm = state.webhid.import('NativeMessaging')
+        if (state.__originalNmSendRequest) nm.sendRequest = state.__originalNmSendRequest
+      })
+      await backgroundPage.evaluate(
+        (settingKey) => browser.storage.local.set({ [settingKey]: 'wt' }),
+        key
+      )
+    }
+  })
   test('WT data plane runs in-page when useWorker is off (per-site)', async ({
     sharedPage,
     vendorDevice,
