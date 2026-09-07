@@ -10,6 +10,7 @@
     deviceCache,
     pendingPicker,
     permissionsPolicy,
+    frameContextOwners,
     allowedCrossOrigin,
     pageActionVisibility
   } = webhid.import('bgState')
@@ -412,6 +413,9 @@
    */
   async function handleFrameDestroyed(request, sender, sendResponse) {
     const tabId = sender.tab != null ? sender.tab.id : undefined
+    if (tabId != null && typeof request.frameKey === 'string') {
+      frameContextOwners.delete(request.frameKey)
+    }
     await purgeFrame(tabId, request.frameKey, (deviceId, token) =>
       NativeMessaging.closeDevice(deviceId, token)
     )
@@ -936,6 +940,25 @@
   }
 
   /**
+   * Registers the browser frame identity for a trusted bridge context.
+   * @param {object} request
+   * @param {object} sender
+   * @param {function(*): void} sendResponse
+   * @returns {boolean}
+   */
+  function handleRegisterFrameContext(request, sender, sendResponse) {
+    const tabId = sender.tab?.id
+    const frameId = sender.frameId
+    if (tabId == null || frameId == null || typeof request.frameKey !== 'string') {
+      sendResponse({ ok: false })
+      return false
+    }
+    frameContextOwners.set(request.frameKey, { tabId, frameId })
+    sendResponse({ ok: true })
+    return false
+  }
+
+  /**
    * Computes the effective `hid` policy for the authenticated sender frame.
    * @param {object} request
    * @param {object} sender
@@ -944,42 +967,36 @@
   function policyForRequest(request, sender) {
     const tid = sender.tab?.id
     const requestedOrigin = urlOrigin(request.origin || '')
-    if (tid == null || !requestedOrigin) return { policy: { hid: 'none' } }
-
-    const senderEntry = permissionsPolicy.get(`${tid}:${sender.frameId ?? 0}`)
-    let entries = []
-    if (senderEntry && senderEntry.origin === requestedOrigin) {
-      entries = [senderEntry]
-    } else {
-      for (const entry of permissionsPolicy.values()) {
-        if (entry.origin === requestedOrigin) entries.push(entry)
-      }
+    const owner =
+      typeof request.frameKey === 'string' ? frameContextOwners.get(request.frameKey) : null
+    if (tid == null || !requestedOrigin) {
+      return { policy: { hid: 'none' } }
     }
-    if (entries.length === 0) return { policy: { hid: 'none' } }
-
-    for (const entry of entries) {
-      if (entry.effective.kind === 'none') return { policy: { hid: 'none' } }
-      const parent =
-        entry.parentFrameId >= 0
-          ? permissionsPolicy.get(`${tid}:${entry.parentFrameId}`)
-          : null
-      if (entry.parentFrameId >= 0 && (!parent || !parent.origin)) {
-        return { policy: { hid: 'none' } }
-      }
-      if (parent && parent.origin !== entry.origin) {
-        const frameAllowed = allowedCrossOrigin.has(
-          frameKey(tid, sender.frameId ?? 0, entry.origin)
-        )
-        if (request.isCrossOrigin !== true || (request.hasAllowAttr !== true && !frameAllowed)) {
-          return { policy: { hid: 'none' } }
-        }
-      }
-      const eff = entry.effective
-      if (eff.kind !== 'all' && !(eff.kind === 'list' && eff.origins.includes(entry.origin))) {
+    let entry = null
+    if (owner && owner.tabId === tid) {
+      entry = permissionsPolicy.get(`${tid}:${owner.frameId}`) || null
+      if (entry && entry.origin !== requestedOrigin) entry = null
+    }
+    if (!entry) return { policy: { hid: 'none' } }
+    if (entry.effective.kind === 'none') return { policy: { hid: 'none' } }
+    const parent =
+      entry.parentFrameId >= 0
+        ? permissionsPolicy.get(`${tid}:${entry.parentFrameId}`)
+        : null
+    if (entry.parentFrameId >= 0 && (!parent || !parent.origin)) {
+      return { policy: { hid: 'none' } }
+    }
+    if (parent && parent.origin !== entry.origin) {
+      const frameAllowed = allowedCrossOrigin.has(frameKey(tid, owner.frameId, entry.origin))
+      if (request.isCrossOrigin !== true || (request.hasAllowAttr !== true && !frameAllowed)) {
         return { policy: { hid: 'none' } }
       }
     }
-    return { policy: { hid: 'allowed' } }
+    const eff = entry.effective
+    if (eff.kind === 'all' || (eff.kind === 'list' && eff.origins.includes(entry.origin))) {
+      return { policy: { hid: 'allowed' } }
+    }
+    return { policy: { hid: 'none' } }
   }
   /**
    * @param {object} request
@@ -1124,6 +1141,7 @@
     cancelPicker: handleCancelPicker,
     getPendingPicker: handleGetPendingPicker,
     getPolicy: handleGetPolicy,
+    registerFrameContext: handleRegisterFrameContext,
     armShadowSpawn: handleArmShadowSpawn,
     unarmShadowSpawn: handleUnarmShadowSpawn,
     setFrameAllow: handleSetFrameAllow,

@@ -37,6 +37,13 @@
       "js": ["isolated-world.js"],
       "world": "ISOLATED",
       "run_at": "document_start"
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": ["js/content/isolated/frame-identity.js"],
+      "world": "ISOLATED",
+      "run_at": "document_start",
+      "all_frames": true
     }
   ],
   "web_accessible_resources": [],

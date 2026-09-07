@@ -591,6 +591,7 @@
     }
     permissionsPolicy.set(`${details.tabId}:${details.frameId}`, {
       origin,
+      url: details.url,
       parentFrameId: details.parentFrameId ?? -1,
       self,
       effective

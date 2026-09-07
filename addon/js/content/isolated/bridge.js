@@ -189,6 +189,22 @@
     if (source) frameContextBySource.set(source, context)
     return context
   }
+  /**
+   * Announces a bridge context to the all-frame identity probe.
+   * @param {FrameContext} context
+   * @returns {void}
+   */
+  function announceFrameContext(context) {
+    if (!context.source) return
+    try {
+      context.source.postMessage(
+        { type: 'webhidFrameContext', frameKey: context.key },
+        context.origin
+      )
+    } catch (e) {
+      logger.debug('frame identity announcement failed', e)
+    }
+  }
 
   /**
    * @param {MessagePort} port
@@ -1581,6 +1597,7 @@
       source === window ? 'window' : 'child',
       context.key
     )
+    announceFrameContext(context)
   })
 
   /**

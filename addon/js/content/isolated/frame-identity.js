@@ -1,0 +1,10 @@
+;(function () {
+  'use strict'
+
+  window.addEventListener('message', (event) => {
+    const data = event.data
+    if (!data || data.type !== 'webhidFrameContext') return
+    if (typeof data.frameKey !== 'string' || !data.frameKey) return
+    browser.runtime.sendMessage({ action: 'registerFrameContext', frameKey: data.frameKey }).catch(() => {})
+  })
+})()

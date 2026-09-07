@@ -56,6 +56,26 @@ test.describe('Permissions Policy', () => {
   })
 })
 
+test('same-origin document policies stay isolated across tabs', async ({ page, pageUrl }) => {
+  const sibling = await page.context().newPage()
+  try {
+    await page.goto(pageUrl('/policy-check'), {
+      waitUntil: 'domcontentloaded',
+      timeout: 15000
+    })
+    await sibling.goto(pageUrl('/policy-check-blocked'), {
+      waitUntil: 'domcontentloaded',
+      timeout: 15000
+    })
+    const top = await waitForPermResult(page)
+    const blocked = await waitForPermResult(sibling)
+    expect(top?.queryHid).toBe('granted')
+    expect(blocked?.queryHid).toBe('denied')
+  } finally {
+    await sibling.close()
+  }
+})
+
 test.describe('Cross-origin iframe', () => {
   async function waitForFrame(p: Page, urlSubstring: string, timeout = 10000) {
     const deadline = Date.now() + timeout
