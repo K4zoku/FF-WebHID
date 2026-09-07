@@ -6,8 +6,13 @@
   const isChromium = webhid.import('isChromium')
   const globalSettingKey = webhid.import('globalSettingKey')
   const decodeDeviceCollections = webhid.import('decodeDeviceCollections')
-  const { deviceCache, pendingPicker, permissionsPolicy, allowedCrossOrigin } =
-    webhid.import('bgState')
+  const {
+    deviceCache,
+    pendingPicker,
+    permissionsPolicy,
+    allowedCrossOrigin,
+    pageActionVisibility
+  } = webhid.import('bgState')
   const {
     saveDeviceInfoBatch,
     getDeviceInfo,
@@ -407,10 +412,8 @@
    */
   async function handleFrameDestroyed(request, sender, sendResponse) {
     const tabId = sender.tab != null ? sender.tab.id : undefined
-    await purgeFrame(
-      tabId,
-      request.frameKey,
-      (deviceId, token) => NativeMessaging.closeDevice(deviceId, token)
+    await purgeFrame(tabId, request.frameKey, (deviceId, token) =>
+      NativeMessaging.closeDevice(deviceId, token)
     )
     sendResponse({ s: 204 })
     return true
@@ -663,16 +666,9 @@
       sendResponse({})
       return false
     }
-    browser.storage.local
-      .get(globalSettingKey('hidePageAction'))
-      .then((values) => {
-        if (!values[globalSettingKey('hidePageAction')]) {
-          return browser.pageAction.show(tabId)
-        }
-      })
-      .catch((e) => logger.debug('pageAction.show failed', e))
-      .finally(() => sendResponse({}))
-    return true
+    pageActionVisibility.markUsed(tabId).catch((e) => logger.debug('pageAction.show failed', e))
+    sendResponse({})
+    return false
   }
 
   /**
@@ -823,23 +819,14 @@
    */
   function restorePageAction(tabId) {
     if (isChromium || !browser.pageAction || tabId == null) return
-    const key = globalSettingKey('hidePageAction')
-    browser.storage.local
-      .get(key)
-      .then((values) => {
-        const visibility = values[key]
-          ? browser.pageAction.hide(tabId)
-          : browser.pageAction.show(tabId)
-        return Promise.all([
-          visibility,
-          browser.pageAction.setIcon({ tabId, path: 'icons/gamepad.svg' }),
-          browser.pageAction.setPopup({
-            tabId,
-            popup: 'js/internal/pages/popup/index.html'
-          })
-        ])
+    Promise.all([
+      pageActionVisibility.reconcile(tabId),
+      browser.pageAction.setIcon({ tabId, path: 'icons/gamepad.svg' }),
+      browser.pageAction.setPopup({
+        tabId,
+        popup: 'js/internal/pages/popup/index.html'
       })
-      .catch((e) => logger.debug('restore pageAction failed', e))
+    ]).catch((e) => logger.debug('restore pageAction failed', e))
   }
 
   /**
@@ -852,8 +839,8 @@
    */
   function openPickerPageAction(tabId, origin) {
     if (isChromium) return
-    browser.pageAction
-      .show(tabId)
+    pageActionVisibility
+      .reconcile(tabId)
       .then(() =>
         Promise.all([
           browser.pageAction.setIcon({
@@ -1054,7 +1041,6 @@
     return false
   }
 
-
   /**
    * @param {object} request
    * @param {object} sender
@@ -1178,10 +1164,8 @@
         port.onDisconnect.addListener(() => {
           const tabId = port.sender && port.sender.tab ? port.sender.tab.id : undefined
           if (!bridgeInstanceId || tabId == null) return
-          purgeBridge(
-            tabId,
-            bridgeInstanceId,
-            (deviceId, token) => NativeMessaging.closeDevice(deviceId, token)
+          purgeBridge(tabId, bridgeInstanceId, (deviceId, token) =>
+            NativeMessaging.closeDevice(deviceId, token)
           ).catch((e) => logger.debug('bridge session cleanup failed', e))
         })
       }

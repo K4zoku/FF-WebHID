@@ -15,6 +15,61 @@
   const pendingPicker = new Map()
   const workerPolyfillSites = new Set()
   const shadowArms = new Map()
+  const pageActionVisibility = {
+    hidePageAction: false,
+    usedTabs: new Set(),
+    chains: new Map()
+  }
+
+  function pageActionDesired(tabId) {
+    return (
+      pendingPicker.get(tabId)?.mode === 'pageAction' ||
+      (!pageActionVisibility.hidePageAction && pageActionVisibility.usedTabs.has(tabId))
+    )
+  }
+
+  function reconcilePageAction(tabId) {
+    if (tabId == null || !browser.pageAction) return Promise.resolve()
+    const previous = pageActionVisibility.chains.get(tabId) || Promise.resolve()
+    const current = previous
+      .catch(() => {})
+      .then(async () => {
+        for (;;) {
+          const visible = pageActionDesired(tabId)
+          try {
+            await browser.pageAction[visible ? 'show' : 'hide'](tabId)
+          } catch {}
+          if (pageActionDesired(tabId) === visible) return
+        }
+      })
+      .finally(() => {
+        if (pageActionVisibility.chains.get(tabId) === current)
+          pageActionVisibility.chains.delete(tabId)
+      })
+    pageActionVisibility.chains.set(tabId, current)
+    return current
+  }
+
+  pageActionVisibility.reconcile = reconcilePageAction
+
+  pageActionVisibility.setHidden = (hidden) => {
+    pageActionVisibility.hidePageAction = !!hidden
+    return browser.tabs
+      .query({})
+      .then((tabs) =>
+        Promise.all(tabs.filter((tab) => tab.id != null).map((tab) => reconcilePageAction(tab.id)))
+      )
+  }
+
+  pageActionVisibility.markUsed = (tabId) => {
+    if (tabId != null) pageActionVisibility.usedTabs.add(tabId)
+    return reconcilePageAction(tabId)
+  }
+
+  pageActionVisibility.clearTab = (tabId) => {
+    pageActionVisibility.usedTabs.delete(tabId)
+    pageActionVisibility.chains.delete(tabId)
+  }
 
   webhid.export('bgState', {
     deviceCache,
@@ -24,6 +79,7 @@
     orphanCleanup,
     permissionsPolicy,
     allowedCrossOrigin,
+    pageActionVisibility,
     pendingPicker,
     workerPolyfillSites,
     shadowArms

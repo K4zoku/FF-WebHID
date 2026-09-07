@@ -8,7 +8,8 @@
   const { object, reflect, types, host } = pristine
   const NativeWindow = types.Window && types.Window.constructor
   const windowObject = host.window
-  const isWorker = typeof windowObject === 'undefined' || !NativeWindow || !(windowObject instanceof NativeWindow)
+  const isWorker =
+    typeof windowObject === 'undefined' || !NativeWindow || !(windowObject instanceof NativeWindow)
   if (!isWorker && !windowObject.isSecureContext) {
     webhid.import('logger').warn('NO POLYFILL')
     return
@@ -53,9 +54,7 @@
     ? types.Worker.getDescriptor('addEventListener').value
     : null
   const nativeWindowPostMessage = !isWorker ? host.windowPostMessageMethod : null
-  const nativeWorkerTerminate = types.Worker
-    ? types.Worker.getDescriptor('terminate').value
-    : null
+  const nativeWorkerTerminate = types.Worker ? types.Worker.getDescriptor('terminate').value : null
   const nativeWindowAddEventListener = host.windowAddEventListener
   const nativeWindowRemoveEventListener = host.windowRemoveEventListener
   const nativeCreateObjectURL = host.url.createObjectURL
@@ -82,9 +81,7 @@
   const executionGlobal = isWorker ? host.self : windowObject
   const trustedTypes = host.trustedTypes
   const Navigator = types.Navigator ? types.Navigator.constructor : null
-  const TrustedTypePolicy = types.TrustedTypePolicy
-    ? types.TrustedTypePolicy.constructor
-    : null
+  const TrustedTypePolicy = types.TrustedTypePolicy ? types.TrustedTypePolicy.constructor : null
   const nativePermissionsQuery =
     host.permissionsQuery ||
     (permissionsObject && typeof permissionsObject.query === 'function'
@@ -224,7 +221,8 @@
         })
       },
       onBinary: (batch) => {
-        if (batch.length > 0 && batch[0] >= 0x81) return handleControlResponseShared(batch, inPagePending)
+        if (batch.length > 0 && batch[0] >= 0x81)
+          return handleControlResponseShared(batch, inPagePending)
         const offset = batch.length > 0 && batch[0] === MSG_INPUT_BATCH ? 1 : 0
         pushInPageBatch(deviceId, batch, offset)
       }
@@ -241,7 +239,12 @@
    */
   function pushInPageBatch(deviceId, batch, offset) {
     for (const r of parseInputReports(batch, offset)) {
-      dispatchDeviceEvent({ eventType: 'input_report', deviceId, reportId: r.reportId, data: r.data })
+      dispatchDeviceEvent({
+        eventType: 'input_report',
+        deviceId,
+        reportId: r.reportId,
+        data: r.data
+      })
     }
   }
 
@@ -296,7 +299,9 @@
           if (e && e.blocked) {
             reject(new NativeDOMException('Report is blocked', 'NotAllowedError'))
           } else {
-            reject(new NativeDOMException((e && e.message) || e || 'request failed', 'NetworkError'))
+            reject(
+              new NativeDOMException((e && e.message) || e || 'request failed', 'NetworkError')
+            )
           }
         }
       })
@@ -307,7 +312,7 @@
     })
   }
 
-  /** @type {Map<string, Worker>} */
+  /** @type {Map<string, {worker: Worker, generation: number}>} */
   const mainWorldWorkers = hardenMap(new NativeMap())
 
   /**
@@ -318,7 +323,9 @@
     const payload = req.payload || {}
     if (payload.mode === 'terminate') {
       const existing = mainWorldWorkers.get(payload.deviceId)
-      if (existing) existing.terminate()
+      if (!existing || (payload.generation != null && existing.generation !== payload.generation))
+        return { result: { ok: true }, transfer: null }
+      callNative(nativeWorkerTerminate, existing.worker)
       if (mainWorldWorkers.get(payload.deviceId) === existing) {
         mainWorldWorkers.delete(payload.deviceId)
       }
@@ -344,7 +351,11 @@
           throw e
         }
       } else {
-        await sendRequest('armShadowSpawn', { url: executionGlobal.location.href }, { timeoutMs: 2000 })
+        await sendRequest(
+          'armShadowSpawn',
+          { url: executionGlobal.location.href },
+          { timeoutMs: 2000 }
+        )
         worker = new NativeWorker(makeUrl(executionGlobal.location.href))
       }
     } catch (e) {
@@ -352,20 +363,22 @@
       return { result: { ok: false, error: stringConstructor(e && e.message) }, transfer: null }
     }
     const previous = mainWorldWorkers.get(payload.deviceId)
-    if (previous && previous !== worker) previous.terminate()
-    mainWorldWorkers.set(payload.deviceId, worker)
+    if (previous && previous.worker !== worker) callNative(nativeWorkerTerminate, previous.worker)
+    const entry = { worker, generation: payload.generation }
+    mainWorldWorkers.set(payload.deviceId, entry)
     worker.onerror = (event) => {
       logger.debug('worker error:', event && event.message)
-      if (mainWorldWorkers.get(payload.deviceId) === worker) {
+      if (mainWorldWorkers.get(payload.deviceId) === entry) {
         mainWorldWorkers.delete(payload.deviceId)
-      }
-      sendRequest('unarmShadowSpawn', { url: executionGlobal.location.href }, { timeoutMs: 500 })
-      if (bridgePort) {
-        callNative(nativeMessagePortPostMessage, bridgePort, {
-          type: 'workerError',
-          deviceId: payload.deviceId,
-          message: (event && event.message) || 'unknown'
-        })
+        sendRequest('unarmShadowSpawn', { url: executionGlobal.location.href }, { timeoutMs: 500 })
+        if (bridgePort) {
+          callNative(nativeMessagePortPostMessage, bridgePort, {
+            type: 'workerError',
+            deviceId: payload.deviceId,
+            generation: payload.generation,
+            message: (event && event.message) || 'unknown'
+          })
+        }
       }
     }
     return { result: { ok: true }, transfer: null }
@@ -384,9 +397,12 @@
     if (state.dataPort) {
       try {
         if (state.dataPortHandler) {
-          callNative(nativeMessagePortRemoveEventListener, state.dataPort,
-          'message',
-          state.dataPortHandler)
+          callNative(
+            nativeMessagePortRemoveEventListener,
+            state.dataPort,
+            'message',
+            state.dataPortHandler
+          )
           state.dataPortHandler = null
         }
         callNative(nativeMessagePortClose, state.dataPort)
@@ -400,20 +416,27 @@
     state.dataPortHandler = (event) => onDataPortMessage(state, event.data)
     callNative(nativeMessagePortAddEventListener, state.dataPort, 'message', state.dataPortHandler)
     callNative(nativeMessagePortStart, state.dataPort)
-    const worker = mainWorldWorkers.get(state.deviceId)
+    const workerEntry = mainWorldWorkers.get(state.deviceId)
+    const worker = workerEntry && workerEntry.worker
     const payload = { deviceId: state.deviceId, generation }
     if (worker) {
       const controlChannel = new NativeMessageChannel()
-      callNative(nativeWorkerPostMessage, worker,
-      { type: 'setPorts', controlPort: controlChannel.port2, dataPort: dataChannel.port2 },
-      [controlChannel.port2, dataChannel.port2])
-      callNative(nativeMessagePortPostMessage, bridgePort,
-      { id: 0, action: 'dataPort', payload: { ...payload } },
-      [controlChannel.port1])
+      callNative(
+        nativeWorkerPostMessage,
+        worker,
+        { type: 'setPorts', controlPort: controlChannel.port2, dataPort: dataChannel.port2 },
+        [controlChannel.port2, dataChannel.port2]
+      )
+      callNative(
+        nativeMessagePortPostMessage,
+        bridgePort,
+        { id: 0, action: 'dataPort', payload: { ...payload } },
+        [controlChannel.port1]
+      )
     } else {
-      callNative(nativeMessagePortPostMessage, bridgePort,
-      { id: 0, action: 'dataPort', payload },
-      [dataChannel.port2])
+      callNative(nativeMessagePortPostMessage, bridgePort, { id: 0, action: 'dataPort', payload }, [
+        dataChannel.port2
+      ])
     }
   }
 
@@ -469,8 +492,7 @@
       const names = arrayIsArray(info && info.trustedTypesNames) ? info.trustedTypesNames : []
       const candidates = names.length ? names : ['webhid-worker']
       for (const name of candidates) {
-        if (typeof name !== 'string' || name === "'none'" || name === "'allow-duplicates'")
-          continue
+        if (typeof name !== 'string' || name === "'none'" || name === "'allow-duplicates'") continue
         const policy = claim(name)
         if (policy) {
           markCaptured(policy)
@@ -490,9 +512,7 @@
    * @returns {object}
    */
   function makeWrappedPolicy(policy, name, pageRules) {
-    const proto = TrustedTypePolicy
-      ? types.TrustedTypePolicy.prototype
-      : types.Object.prototype
+    const proto = TrustedTypePolicy ? types.TrustedTypePolicy.prototype : types.Object.prototype
     const wrapperProto = object.create(proto)
     const wrapper = object.create(wrapperProto)
     const rules = pageRules || {}
@@ -593,11 +613,7 @@
     : new Promise((resolve) => {
         const target = windowObject === windowObject.top ? windowObject : windowObject.top
         const onReady = (event) => {
-          if (
-            !event.data ||
-            event.data.type !== 'webhidBridgeReady' ||
-            event.source !== target
-          )
+          if (!event.data || event.data.type !== 'webhidBridgeReady' || event.source !== target)
             return
           callNative(nativeWindowRemoveEventListener, windowObject, 'message', onReady)
           const channel = new NativeMessageChannel()
@@ -711,7 +727,12 @@
       if (payload && payload.data instanceof Uint8Array) {
         transfers.push(payload.data.buffer)
       }
-      callNative(nativeMessagePortPostMessage, bridgePort, msg, transfers.length ? transfers : undefined)
+      callNative(
+        nativeMessagePortPostMessage,
+        bridgePort,
+        msg,
+        transfers.length ? transfers : undefined
+      )
     })
   }
 
@@ -846,13 +867,18 @@
           if (e && e.blocked) {
             reject(new NativeDOMException('Report is blocked', 'NotAllowedError'))
           } else {
-            reject(new NativeDOMException((e && e.message) || e || opts.failMessage, 'NetworkError'))
+            reject(
+              new NativeDOMException((e && e.message) || e || opts.failMessage, 'NetworkError')
+            )
           }
         }
       })
-      callNative(nativeMessagePortPostMessage, state.dataPort,
-      msg,
-      transfers.length ? transfers : undefined)
+      callNative(
+        nativeMessagePortPostMessage,
+        state.dataPort,
+        msg,
+        transfers.length ? transfers : undefined
+      )
     })
   }
 
@@ -941,8 +967,10 @@
         if (!state) throw new NativeDOMException('Invalid state', 'InvalidStateError')
         if (state.forgotten)
           throw new NativeDOMException('Device has been forgotten', 'InvalidStateError')
-        if (state.opened) throw new NativeDOMException('Device is already open', 'InvalidStateError')
-        if (state.opening) throw new NativeDOMException('Device is already open', 'InvalidStateError')
+        if (state.opened)
+          throw new NativeDOMException('Device is already open', 'InvalidStateError')
+        if (state.opening)
+          throw new NativeDOMException('Device is already open', 'InvalidStateError')
         state.opening = true
         try {
           const response = await sendRequest('open', {
@@ -971,9 +999,12 @@
             if (!ready || !ready.ok) {
               if (state.dataPort) {
                 if (state.dataPortHandler) {
-                  callNative(nativeMessagePortRemoveEventListener, state.dataPort,
-                  'message',
-                  state.dataPortHandler)
+                  callNative(
+                    nativeMessagePortRemoveEventListener,
+                    state.dataPort,
+                    'message',
+                    state.dataPortHandler
+                  )
                   state.dataPortHandler = null
                 }
                 callNative(nativeMessagePortClose, state.dataPort)
@@ -981,16 +1012,15 @@
               }
               await sendRequest('close', { deviceId: state.deviceId }).catch(() => {})
               throw new NativeError(
-                'Client data plane is not ready: ' + (ready && ready.error ? ready.error : 'unknown')
+                'Client data plane is not ready: ' +
+                  (ready && ready.error ? ready.error : 'unknown')
               )
             }
             state.opened = true
             logger.info('open deviceId=' + state.deviceId)
             this.dispatchEvent(new NativeEvent('open'))
           } else {
-            throw new NativeError(
-              'Open failed: ' + (response.error || http.name(response.s || 0))
-            )
+            throw new NativeError('Open failed: ' + (response.error || http.name(response.s || 0)))
           }
         } catch (error) {
           throw error instanceof NativeDOMException
@@ -1022,9 +1052,12 @@
             rejectPendingReports(state, new NativeDOMException('Device closed', 'AbortError'))
             if (state.dataPort) {
               if (state.dataPortHandler) {
-                callNative(nativeMessagePortRemoveEventListener, state.dataPort,
-                'message',
-                state.dataPortHandler)
+                callNative(
+                  nativeMessagePortRemoveEventListener,
+                  state.dataPort,
+                  'message',
+                  state.dataPortHandler
+                )
                 state.dataPortHandler = null
               }
               callNative(nativeMessagePortClose, state.dataPort)
@@ -1286,10 +1319,7 @@
     state.opened = false
     rejectPendingReports(
       state,
-      new NativeDOMException(
-        forgotten ? 'Device forgotten' : 'Device disconnected',
-        'AbortError'
-      )
+      new NativeDOMException(forgotten ? 'Device forgotten' : 'Device disconnected', 'AbortError')
     )
     if (state.dataPort) {
       if (state.dataPortHandler) {
@@ -1429,7 +1459,9 @@
     if (device && arrayIsArray(data.reports)) {
       for (const r of data.reports) {
         if (r == null) continue
-        const dataView = r.data ? new NativeDataView(r.data) : new NativeDataView(new NativeArrayBuffer(0))
+        const dataView = r.data
+          ? new NativeDataView(r.data)
+          : new NativeDataView(new NativeArrayBuffer(0))
         device.dispatchEvent(
           new HIDInputReportEvent('inputreport', {
             device: device,
@@ -1447,7 +1479,9 @@
    * @returns {void}
    */
   function handleInputReport(state, data) {
-    const dataView = data.data ? new NativeDataView(data.data) : new NativeDataView(new NativeArrayBuffer(0))
+    const dataView = data.data
+      ? new NativeDataView(data.data)
+      : new NativeDataView(new NativeArrayBuffer(0))
     const device = state.self
     if (device)
       device.dispatchEvent(
@@ -1757,7 +1791,9 @@
       const id = frameNonce + ':' + ++nextReqId
       pending[id] = (result) => {
         promiseOps.then(grantRequestedDevices(result), resolve, (e) =>
-          reject(new NativeDOMException(e != null ? e.message : 'requestDevice failed', 'NetworkError'))
+          reject(
+            new NativeDOMException(e != null ? e.message : 'requestDevice failed', 'NetworkError')
+          )
         )
       }
       callNative(nativeMessagePortPostMessage, bridgePort, {
@@ -1774,7 +1810,10 @@
       value: async function () {
         const policy = await getPolicy()
         if (policy && policy.hid === 'none') {
-          throw new NativeDOMException('Access to HID is blocked by Permissions Policy', 'SecurityError')
+          throw new NativeDOMException(
+            'Access to HID is blocked by Permissions Policy',
+            'SecurityError'
+          )
         }
         try {
           const pairedHashes = await getPairedDevices()

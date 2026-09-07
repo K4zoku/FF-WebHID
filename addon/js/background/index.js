@@ -12,7 +12,8 @@
   const saveGlobalSetting = webhid.import('saveGlobalSetting')
   logger.initLogger('bg')
 
-  const { workerPolyfillSites, pendingPicker, shadowArms } = webhid.import('bgState')
+  const { workerPolyfillSites, pendingPicker, shadowArms, pageActionVisibility } =
+    webhid.import('bgState')
   const { openDb, txDone } = webhid.import('bgStorage')
   const { purgeTab, retryOrphanCleanup } = webhid.import('bgStateOps')
   const NativeMessaging = webhid.import('NativeMessaging')
@@ -170,12 +171,15 @@
     const stored = await browser.storage.local.get(key)
     if (stored[key] === undefined) {
       const platformInfo = await browser.runtime.getPlatformInfo()
-      if (platformInfo.os === 'win' || platformInfo.os === "mac") {
+      if (platformInfo.os === 'win' || platformInfo.os === 'mac') {
         global.daemonAsNmHost = true
         await saveGlobalSetting('daemonAsNmHost', true)
       }
     }
     settings.set(global)
+    pageActionVisibility
+      .setHidden(!!global.hidePageAction)
+      .catch((e) => logger.debug('pageAction visibility init failed', e))
     NativeMessaging.nmHostName = nmHostName()
     logger.info('NM host:', nmHostName())
   }
@@ -263,17 +267,7 @@
    * @returns {void}
    */
   function hidePageActions() {
-    if (!browser.pageAction) return
-    browser.tabs
-      .query({})
-      .then((tabs) =>
-        Promise.all(
-          tabs
-            .filter((tab) => tab.id != null && pendingPicker.get(tab.id)?.mode !== 'pageAction')
-            .map((tab) => browser.pageAction.hide(tab.id))
-        )
-      )
-      .catch((e) => logger.debug('pageAction.hide failed', e))
+    pageActionVisibility.setHidden(true).catch((e) => logger.debug('pageAction.hide failed', e))
   }
 
   browser.storage.onChanged.addListener((changes, area) => {
@@ -292,10 +286,15 @@
     if (hasSiteChange) refreshWorkerPolyfillSites()
     if (Object.keys(patch).length === 0) return
     settings.set(patch)
-    if (patch.hidePageAction) hidePageActions()
+    if ('hidePageAction' in patch) {
+      pageActionVisibility
+        .setHidden(!!patch.hidePageAction)
+        .catch((e) => logger.debug('pageAction visibility update failed', e))
+    }
   })
 
   browser.tabs.onRemoved.addListener((tabId) => {
+    pageActionVisibility.clearTab(tabId)
     browser.storage.session.get(null).then((all) => {
       const keys = Object.keys(all).filter((k) => k.startsWith(`csp:${tabId}:`))
       if (keys.length) browser.storage.session.remove(keys).catch(() => {})
