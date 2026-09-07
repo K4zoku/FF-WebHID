@@ -380,7 +380,7 @@
    * @param {object} state
    * @returns {void}
    */
-  function wireDevicePort(state) {
+  function wireDevicePort(state, generation = state.planeGeneration) {
     if (state.dataPort) {
       try {
         if (state.dataPortHandler) {
@@ -394,23 +394,25 @@
         logger.debug('close stale dataPort failed', e)
       }
     }
+    state.planeGeneration = generation
     const dataChannel = new NativeMessageChannel()
     state.dataPort = dataChannel.port1
     state.dataPortHandler = (event) => onDataPortMessage(state, event.data)
     callNative(nativeMessagePortAddEventListener, state.dataPort, 'message', state.dataPortHandler)
     callNative(nativeMessagePortStart, state.dataPort)
     const worker = mainWorldWorkers.get(state.deviceId)
+    const payload = { deviceId: state.deviceId, generation }
     if (worker) {
       const controlChannel = new NativeMessageChannel()
       callNative(nativeWorkerPostMessage, worker,
       { type: 'setPorts', controlPort: controlChannel.port2, dataPort: dataChannel.port2 },
       [controlChannel.port2, dataChannel.port2])
       callNative(nativeMessagePortPostMessage, bridgePort,
-      { id: 0, action: 'dataPort', payload: { deviceId: state.deviceId } },
+      { id: 0, action: 'dataPort', payload: { ...payload } },
       [controlChannel.port1])
     } else {
       callNative(nativeMessagePortPostMessage, bridgePort,
-      { id: 0, action: 'dataPort', payload: { deviceId: state.deviceId } },
+      { id: 0, action: 'dataPort', payload },
       [dataChannel.port2])
     }
   }
@@ -422,8 +424,8 @@
   function handleWireWorkerPort(data) {
     const device = data.deviceId ? deviceRegistry.get(data.deviceId) : null
     const state = device ? devState.get(device) : null
-    if (!state || !state.opened) return
-    wireDevicePort(state)
+    if (!state || (!state.opened && !state.opening) || typeof data.generation !== 'number') return
+    wireDevicePort(state, data.generation)
   }
 
   /** @returns {void} */
@@ -957,12 +959,38 @@
               promiseOps.catch(sendRequest('close', { deviceId: state.deviceId }), () => {})
               throw new NativeDOMException('Device has been forgotten', 'InvalidStateError')
             }
-            wireDevicePort(state)
+            if (typeof response.clientPlaneGeneration !== 'number') {
+              throw new NativeError('Open did not establish a client data plane')
+            }
+            state.planeGeneration = response.clientPlaneGeneration
+            wireDevicePort(state, state.planeGeneration)
+            const ready = await sendRequest('waitDataPlaneReady', {
+              deviceId: state.deviceId,
+              generation: state.planeGeneration
+            })
+            if (!ready || !ready.ok) {
+              if (state.dataPort) {
+                if (state.dataPortHandler) {
+                  callNative(nativeMessagePortRemoveEventListener, state.dataPort,
+                  'message',
+                  state.dataPortHandler)
+                  state.dataPortHandler = null
+                }
+                callNative(nativeMessagePortClose, state.dataPort)
+                state.dataPort = null
+              }
+              await sendRequest('close', { deviceId: state.deviceId }).catch(() => {})
+              throw new NativeError(
+                'Client data plane is not ready: ' + (ready && ready.error ? ready.error : 'unknown')
+              )
+            }
             state.opened = true
             logger.info('open deviceId=' + state.deviceId)
             this.dispatchEvent(new NativeEvent('open'))
           } else {
-            throw new NativeError('Open failed: ' + http.name(response.s || 0))
+            throw new NativeError(
+              'Open failed: ' + (response.error || http.name(response.s || 0))
+            )
           }
         } catch (error) {
           throw error instanceof NativeDOMException
@@ -1498,6 +1526,7 @@
       collections: deepFreeze(deviceInfo.collections || []),
       opened: false,
       opening: false,
+      planeGeneration: 0,
       dataPort: null,
       dataPending: null,
       maxInputReportSize: deviceInfo.maxInputReportSize || 64,
