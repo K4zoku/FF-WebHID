@@ -1,7 +1,6 @@
 import { test, expect } from '../helpers/e2e.js'
 import { grantDevicePermission, mockIdFor } from '../helpers/e2e-devices.js'
 import { sendInput } from '../helpers/e2e-process.js'
-import { sleep } from '../helpers/test-utils.js'
 
 const VENDOR = mockIdFor('vendor')
 const PACKET = [0x10, 0x20, 0x30, 0x40, 0x50].concat(new Array(59).fill(0))
@@ -13,9 +12,14 @@ test.describe.serial('NM runtime port topology', () => {
     vendorDevice
   }) => {
     const origin = new URL(sharedPage.url()).origin
-    await backgroundPage.evaluate((siteOrigin: string) => {
-      return browser.storage.local.set({ [`settings :: ${siteOrigin} :: dataPlane`]: 'nm' })
-    }, origin)
+    const settingKey = `settings :: ${origin} :: dataPlane`
+    const previous = await backgroundPage.evaluate(
+      (key: string) => browser.storage.local.get(key),
+      settingKey
+    )
+    await backgroundPage.evaluate((key: string) => {
+      return browser.storage.local.set({ [key]: 'nm' })
+    }, settingKey)
     try {
       await sharedPage.goto(`${origin}/tests/test-page.html`, { waitUntil: 'domcontentloaded' })
       await sharedPage.waitForFunction(() => typeof navigator.hid !== 'undefined', {
@@ -37,7 +41,6 @@ test.describe.serial('NM runtime port topology', () => {
         },
         { timeout: 15000 }
       )
-      await sleep(300)
       sendInput(vendorDevice, 1, PACKET)
       await sharedPage.waitForFunction(
         () => {
@@ -50,7 +53,21 @@ test.describe.serial('NM runtime port topology', () => {
         { timeout: 15000 }
       )
       await sharedPage.evaluate(() => document.querySelector('iframe')?.remove())
-      await sleep(500)
+      await expect
+        .poll(
+          () =>
+            backgroundPage.evaluate(async () => {
+              const tabs = await browser.tabs.query({ active: true, currentWindow: true })
+              const tab = tabs[0]
+              if (!tab || tab.id == null) return 0
+              const status = (await browser.tabs.sendMessage(tab.id, {
+                action: 'getDataPlaneStatus'
+              })) as { planes?: unknown[] } | null
+              return status?.planes?.length || 0
+            }),
+          { timeout: 15000 }
+        )
+        .toBe(1)
       sendInput(vendorDevice, 1, PACKET)
       await sharedPage.waitForFunction(
         () => {
@@ -76,9 +93,15 @@ test.describe.serial('NM runtime port topology', () => {
         async () => (await navigator.hid.getDevices()).length === 0,
         { timeout: 15000 }
       )
-      await backgroundPage.evaluate((siteOrigin: string) => {
-        return browser.storage.local.set({ [`settings :: ${siteOrigin} :: dataPlane`]: 'nm' })
-      }, origin)
+      await backgroundPage.evaluate(
+        ({ key, values }) => {
+          const missing = !(key in values)
+          return browser.storage.local
+            .remove(missing ? [key] : [])
+            .then(() => (missing ? undefined : browser.storage.local.set(values)))
+        },
+        { key: settingKey, values: previous }
+      )
       await sharedPage.goto(`${origin}/tests/test-page.html`, { waitUntil: 'domcontentloaded' })
     }
   })
