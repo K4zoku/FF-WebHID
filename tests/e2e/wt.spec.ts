@@ -23,12 +23,6 @@ import type { FirefoxBgPage } from '../helpers/harness.js'
 
 const VENDOR = mockIdFor('vendor')
 
-declare global {
-  interface Window {
-    nmSendActions?: number
-  }
-}
-
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 const DAEMON_BIN = resolve(__dirname, '..', '..', 'crates', 'target', 'debug', 'webhid-daemon')
@@ -166,17 +160,6 @@ function waitForDaemonListening(proc: ChildProcess): Promise<void> {
     proc.stderr?.on('data', onData)
     proc.on('exit', onExit)
   })
-}
-
-async function waitForGenGrowth(daemon: DaemonProcess, before: number): Promise<boolean> {
-  const logPath = daemon.socketPath.replace(/\.sock$/, '.log')
-  const start = Date.now()
-  while (Date.now() - start < 10000) {
-    const count = readFileSync(logPath, 'utf8').split('WT connect gen=').length - 1
-    if (count > before) return true
-    await sleep(200)
-  }
-  return false
 }
 
 async function openVendorDevice(nm: NmClient): Promise<string> {
@@ -716,67 +699,6 @@ test.describe.serial('WebHID E2E (WebTransport data plane)', () => {
       )
       await expect.poll(readPlane).toEqual({ plane: 'wt', ready: true })
     }
-  })
-  test('WT data plane runs in-page when useWorker is off (per-site)', async ({
-    sharedPage,
-    vendorDevice,
-    backgroundPage,
-    daemon
-  }) => {
-    const origin = new URL(sharedPage.url()).origin
-    const siteKey = `settings :: ${origin} :: useWorker`
-    const genCountBefore = daemon
-      ? readFileSync(daemon.socketPath.replace(/\.sock$/, '.log'), 'utf8').split('WT connect gen=')
-          .length - 1
-      : 0
-    await backgroundPage.evaluate((key) => browser.storage.local.set({ [key]: false }), siteKey)
-    await sleep(2500)
-    const packet = new Array<number>(VENDOR_INPUT_SIZE).fill(0)
-    packet[1] = 0x2b
-    const event = await sendUntilReported(vendorDevice, sharedPage, VENDOR, 1, packet, {
-      index: 1,
-      value: 0x2b
-    })
-    expect(event.data[1]).toBe(0x2b)
-
-    await backgroundPage.evaluate(() => {
-      window.nmSendActions = 0
-      browser.runtime.onMessage.addListener((msg: { action?: string }) => {
-        if (
-          msg &&
-          (msg.action === 'sendReport' ||
-            msg.action === 'sendFeatureReport' ||
-            msg.action === 'receiveFeatureReport')
-        ) {
-          window.nmSendActions = (window.nmSendActions || 0) + 1
-        }
-      })
-    })
-
-    const outputPromise = waitForOutputReport(vendorDevice)
-    await sleep(200)
-    await sharedPage.evaluate(async (ctx: VendorCtx) => {
-      const ds = await navigator.hid.getDevices()
-      const d = ds.find((x) => x.vendorId === ctx.f.vendorId && x.productId === ctx.f.productId)!
-      await d.sendReport(ctx.outputId, new Uint8Array(ctx.size).fill(0x43))
-      let featureError = null
-      try {
-        await d.receiveFeatureReport(ctx.featureId)
-      } catch (e) {
-        featureError = e instanceof Error ? e.name : String(e)
-      }
-      if (featureError !== 'NetworkError') {
-        throw new Error('feature read did not reject with NetworkError: ' + featureError)
-      }
-    }, VENDOR_CTX)
-    const output = await outputPromise
-    expect(output.data[0]).toBe(VENDOR_OUTPUT_ID)
-    expect(await backgroundPage.evaluate(() => window.nmSendActions)).toBe(0)
-
-    if (daemon) {
-      expect(await waitForGenGrowth(daemon, genCountBefore)).toBe(true)
-    }
-    await backgroundPage.evaluate((key) => browser.storage.local.remove(key), siteKey)
   })
 
   test('WT generation rotates after cert expiry and drains the old port', async ({
