@@ -602,6 +602,121 @@ test.describe.serial('WebHID E2E (WebTransport data plane)', () => {
       )
     }
   })
+  test('live plane switch rejects reports before replacement readiness', async ({
+    sharedPage,
+    backgroundPage,
+    vendorDevice: _vendorDevice
+  }) => {
+    const origin = new URL(sharedPage.url()).origin
+    const key = `settings :: ${origin} :: dataPlane`
+    const readPlane = () =>
+      backgroundPage.evaluate(async () => {
+        const tabs = await browser.tabs.query({ active: true, currentWindow: true })
+        if (!tabs[0] || tabs[0].id == null) return null
+        const rawStatus: unknown = await browser.tabs.sendMessage(tabs[0].id, {
+          action: 'getDataPlaneStatus'
+        })
+        const status = rawStatus as { planes?: Array<{ plane?: string; ready?: boolean }> } | null
+        const plane = status?.planes?.[0]
+        return plane ? { plane: plane.plane, ready: plane.ready } : null
+      })
+    await backgroundPage.evaluate(
+      (settingKey) => browser.storage.local.set({ [settingKey]: 'wt' }),
+      key
+    )
+    await expect.poll(readPlane).toEqual({ plane: 'wt', ready: true })
+    await sharedPage.evaluate(async () => {
+      const device = (await navigator.hid.getDevices())[0]
+      if (!device) throw new Error('no paired vendor device')
+      ;(
+        window as unknown as {
+          transportTestDevice?: {
+            sendReport: (reportId: number, data: Uint8Array) => Promise<void>
+          }
+        }
+      ).transportTestDevice = device
+    })
+
+    await backgroundPage.evaluate(() => {
+      const state = globalThis as unknown as {
+        webhid: { import(name: string): { sendRequest: (request: object) => Promise<object> } }
+        __originalNmSendRequest?: (request: object) => Promise<object>
+        __switchEntered?: boolean
+        __releaseSwitch?: () => void
+        __switchBarrier?: Promise<object>
+      }
+      const nm = state.webhid.import('NativeMessaging')
+      state.__originalNmSendRequest = nm.sendRequest.bind(nm)
+      state.__switchEntered = false
+      state.__switchBarrier = new Promise<object>((resolve) => {
+        state.__releaseSwitch = () => resolve({ s: 200 })
+      })
+      nm.sendRequest = async (request: object) => {
+        if ((request as { a?: unknown }).a === 7) {
+          state.__switchEntered = true
+          await state.__switchBarrier!
+        }
+        return state.__originalNmSendRequest!(request)
+      }
+    })
+    try {
+      await backgroundPage.evaluate(
+        (settingKey) => browser.storage.local.set({ [settingKey]: 'nm' }),
+        key
+      )
+      await expect
+        .poll(() =>
+          backgroundPage.evaluate(
+            () => (globalThis as unknown as { __switchEntered?: boolean }).__switchEntered === true
+          )
+        )
+        .toBe(true)
+      await sharedPage.evaluate((ctx: VendorCtx) => {
+        const state = window as unknown as {
+          planeFailure?: string
+          transportTestDevice?: {
+            sendReport: (reportId: number, data: Uint8Array) => Promise<void>
+          }
+        }
+        state.planeFailure = undefined
+        void (async () => {
+          try {
+            if (!state.transportTestDevice) throw new Error('no paired vendor device')
+            await state.transportTestDevice.sendReport(ctx.outputId, new Uint8Array(ctx.size))
+            state.planeFailure = 'ok'
+          } catch (error) {
+            state.planeFailure = error instanceof Error ? error.name : String(error)
+          }
+        })()
+      }, VENDOR_CTX)
+      await expect
+        .poll(() =>
+          sharedPage.evaluate(() => (window as unknown as { planeFailure?: string }).planeFailure)
+        )
+        .toBe('NetworkError')
+
+      await backgroundPage.evaluate(() =>
+        (globalThis as unknown as { __releaseSwitch?: () => void }).__releaseSwitch?.()
+      )
+      await expect.poll(readPlane).toEqual({ plane: 'nm', ready: true })
+    } finally {
+      await backgroundPage.evaluate(() => {
+        const state = globalThis as unknown as {
+          webhid: { import(name: string): { sendRequest: (request: object) => Promise<object> } }
+          __originalNmSendRequest?: (request: object) => Promise<object>
+          __releaseSwitch?: () => void
+        }
+        state.__releaseSwitch?.()
+        const nm = state.webhid.import('NativeMessaging')
+        if (state.__originalNmSendRequest) nm.sendRequest = state.__originalNmSendRequest
+      })
+      await backgroundPage.evaluate(
+        (settingKey) => browser.storage.local.set({ [settingKey]: 'wt' }),
+        key
+      )
+      await expect.poll(readPlane).toEqual({ plane: 'wt', ready: true })
+    }
+  })
   test('WT data plane runs in-page when useWorker is off (per-site)', async ({
     sharedPage,
     vendorDevice,
