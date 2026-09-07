@@ -311,6 +311,11 @@
       ? planeKey(context, deviceId)
       : planeKey(context, deviceId) + '\u0000' + clientKey
   }
+  /**
+   * @param {FrameContext} context
+   * @param {string} clientKey
+   * @returns {object|null}
+   */
   function clientForKey(context, clientKey) {
     for (const [port, owner] of frameContextByPort) {
       if (owner !== context || clientKeysByPort.get(port) !== clientKey) continue
@@ -332,21 +337,27 @@
     }
     if (request.action === 'getDataPlaneStatus') {
       const planes = []
+      const statusFor = (key, plane, mode) => ({
+        deviceId: deviceIdForPlaneKey(key),
+        plane,
+        mode,
+        generation: spawnGen.get(key),
+        ready: readyGenerations.get(key) === spawnGen.get(key)
+      })
       for (const [key, transport] of deviceTransports) {
         const context = contextForPlaneKey(key)
         if (!context || (origin && context.origin !== origin)) continue
-        const deviceId = deviceIdForPlaneKey(key)
-        if (workers.has(key)) planes.push({ deviceId, plane: transport, mode: 'worker' })
+        if (workers.has(key)) planes.push(statusFor(key, transport, 'worker'))
       }
       for (const key of inPageDevices) {
         const context = contextForPlaneKey(key)
         if (!context || (origin && context.origin !== origin)) continue
-        planes.push({ deviceId: deviceIdForPlaneKey(key), plane: 'wt', mode: 'inpage' })
+        planes.push(statusFor(key, 'wt', 'inpage'))
       }
       for (const key of nmPlanes) {
         const context = contextForPlaneKey(key)
         if (!context || (origin && context.origin !== origin)) continue
-        planes.push({ deviceId: deviceIdForPlaneKey(key), plane: 'nm', mode: null })
+        planes.push(statusFor(key, 'nm', null))
       }
       sendResponse({ planes, defaultPlane: settings.dataPlane })
       return true
@@ -713,20 +724,34 @@
   /**
    * @param {FrameContext} context
    * @param {string} deviceId
-   * @param {{keepPort?: boolean, clientKey?: string, clientPort?: MessagePort}} [opts]
+   * @param {{keepPort?: boolean, clientKey?: string, clientPort?: MessagePort, notifyUnavailable?: boolean, unavailableReason?: string}} [opts]
    * @returns {Promise<void>}
    */
   async function despawnDataPlane(
     context,
     deviceId,
-    { keepPort = false, clientKey = 'window', clientPort } = {}
+    {
+      keepPort = false,
+      clientKey = 'window',
+      clientPort,
+      notifyUnavailable = false,
+      unavailableReason = 'data plane unavailable'
+    } = {}
   ) {
     const key = planeKeyForClient(context, deviceId, clientKey)
+    const currentGeneration = spawnGen.get(key)
+    if (notifyUnavailable && currentGeneration != null)
+      notifyPlaneUnavailable(key, currentGeneration, unavailableReason)
     beginPlaneGeneration(key)
     if (inPageDevices.has(key)) {
       inPageDevices.delete(key)
       const targetPort = clientPort || clientForKey(context, clientKey)?.port || context.port
-      if (targetPort) targetPort.postMessage({ type: 'dataPlaneDisconnect', deviceId })
+      if (targetPort)
+        targetPort.postMessage({
+          type: 'dataPlaneDisconnect',
+          deviceId,
+          generation: currentGeneration
+        })
     }
     const entry = workers.get(key)
     const record = workerGenerations.get(key)
@@ -1076,7 +1101,12 @@
     const key = planeKeyForClient(context, deviceId, clientKey)
     if (spawnGen.get(key) !== generation) return null
     if (retire) {
-      await despawnDataPlane(context, deviceId, { clientKey, clientPort })
+      await despawnDataPlane(context, deviceId, {
+        clientKey,
+        clientPort,
+        notifyUnavailable: true,
+        unavailableReason: 'data plane recovery'
+      })
       generation = spawnGen.get(key)
     }
     if (context.destroyed || !frameContexts.has(context.key) || spawnGen.get(key) !== generation)
@@ -1381,7 +1411,12 @@
   ) {
     const key = planeKeyForClient(context, deviceId, clientKey)
     if (spawnGen.get(key) !== failedGeneration) return null
-    await despawnDataPlane(context, deviceId, { clientKey, clientPort })
+    await despawnDataPlane(context, deviceId, {
+      clientKey,
+      clientPort,
+      notifyUnavailable: true,
+      unavailableReason: 'data plane recovery'
+    })
     const generation = spawnGen.get(key)
     if (context.destroyed || !frameContexts.has(context.key)) return null
     if (settings.dataPlane === 'nm') {
@@ -2523,7 +2558,12 @@
       }
     }
     for (const { context, deviceId, clientKey } of active) {
-      await despawnDataPlane(context, deviceId, { keepPort: true, clientKey })
+      await despawnDataPlane(context, deviceId, {
+        keepPort: true,
+        clientKey,
+        notifyUnavailable: true,
+        unavailableReason: 'data plane switching'
+      })
     }
     if (dp === 'nm') {
       for (const { context, deviceId, token, clientKey, clientPort } of active) {
