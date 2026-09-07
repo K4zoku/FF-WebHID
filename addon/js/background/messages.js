@@ -936,38 +936,51 @@
   }
 
   /**
-   * Computes the effective `hid` policy for a frame.
+   * Computes the effective `hid` policy for the authenticated sender frame.
    * @param {object} request
    * @param {object} sender
    * @returns {{policy: {hid: string}}}
    */
   function policyForRequest(request, sender) {
-    const sid = sender.frameId
     const tid = sender.tab?.id
-    const origin = urlOrigin(request.url || (sender.tab && sender.tab.url) || '')
-    const entry = tid != null ? permissionsPolicy.get(`${tid}:${sid}`) : null
-    if (entry && entry.effective.kind === 'none') {
-      return { policy: { hid: 'none' } }
-    }
-    if (request.isCrossOrigin) {
-      if (request.hasAllowAttr) return { policy: { hid: 'allowed' } }
-      const allowKey = tid != null ? frameKey(tid, sid, origin) : null
-      if (allowKey && allowedCrossOrigin.has(allowKey)) return { policy: { hid: 'allowed' } }
-      const urlKey = `url:${urlOrigin(sender.tab && sender.tab.url)}:${request.url}`
-      if (allowedCrossOrigin.has(urlKey)) return { policy: { hid: 'allowed' } }
-      return { policy: { hid: 'none' } }
-    }
-    if (entry) {
-      const eff = entry.effective
-      if (eff.kind === 'all') return { policy: { hid: 'allowed' } }
-      if (eff.kind === 'list' && eff.origins.includes(origin)) {
-        return { policy: { hid: 'allowed' } }
+    const requestedOrigin = urlOrigin(request.origin || '')
+    if (tid == null || !requestedOrigin) return { policy: { hid: 'none' } }
+
+    const senderEntry = permissionsPolicy.get(`${tid}:${sender.frameId ?? 0}`)
+    let entries = []
+    if (senderEntry && senderEntry.origin === requestedOrigin) {
+      entries = [senderEntry]
+    } else {
+      for (const entry of permissionsPolicy.values()) {
+        if (entry.origin === requestedOrigin) entries.push(entry)
       }
-      return { policy: { hid: 'none' } }
+    }
+    if (entries.length === 0) return { policy: { hid: 'none' } }
+
+    for (const entry of entries) {
+      if (entry.effective.kind === 'none') return { policy: { hid: 'none' } }
+      const parent =
+        entry.parentFrameId >= 0
+          ? permissionsPolicy.get(`${tid}:${entry.parentFrameId}`)
+          : null
+      if (entry.parentFrameId >= 0 && (!parent || !parent.origin)) {
+        return { policy: { hid: 'none' } }
+      }
+      if (parent && parent.origin !== entry.origin) {
+        const frameAllowed = allowedCrossOrigin.has(
+          frameKey(tid, sender.frameId ?? 0, entry.origin)
+        )
+        if (request.isCrossOrigin !== true || (request.hasAllowAttr !== true && !frameAllowed)) {
+          return { policy: { hid: 'none' } }
+        }
+      }
+      const eff = entry.effective
+      if (eff.kind !== 'all' && !(eff.kind === 'list' && eff.origins.includes(entry.origin))) {
+        return { policy: { hid: 'none' } }
+      }
     }
     return { policy: { hid: 'allowed' } }
   }
-
   /**
    * @param {object} request
    * @param {object} sender

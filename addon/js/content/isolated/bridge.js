@@ -1744,40 +1744,41 @@
    * @param {object} data
    * @returns {Promise<void>}
    */
-  async function handleGetPolicyRequest(data) {
+  async function handleGetPolicyRequest(data, _ports, requestPort) {
     try {
-      const payload = data.payload || {}
-      const isCrossOrigin = payload.isCrossOrigin ? true : false
-      const url = getRequestOrigin(data) || location.href
+      const context = frameContextForPort(requestPort)
+      if (!context || context.destroyed) {
+        replyToPage({ type: 'response', id: data.id, result: { hid: 'none' } })
+        return
+      }
+      const origin = context.origin
+      const isCrossOrigin = origin !== window.location.origin
       let hasAllowAttr = false
-      if (window === window.top) {
-        const port = requestPortMap.get(data.id)
-        const source = port ? pageSourceByPort.get(port) : null
-        if (source) {
-          for (const iframe of document.querySelectorAll('iframe[allow*="hid" i]')) {
-            if (iframe.contentWindow !== source) continue
-            try {
-              hasAllowAttr = new URL(iframe.src).origin === new URL(url).origin
-            } catch {
-              hasAllowAttr = false
-            }
-            break
+      if (context.source && context.source !== window) {
+        for (const iframe of document.querySelectorAll('iframe[allow*="hid" i]')) {
+          if (iframe.contentWindow !== context.source) continue
+          try {
+            hasAllowAttr = new URL(iframe.src).origin === origin
+          } catch {
+            hasAllowAttr = false
           }
+          break
         }
       }
       const resp = await sendBackgroundRequest({
         action: 'getPolicy',
+        frameKey: context.key,
+        origin,
         isCrossOrigin,
-        url,
         hasAllowAttr
       })
-      const result = resp ? resp.policy || { hid: 'allowed' } : { hid: 'allowed' }
+      const result = resp ? resp.policy || { hid: 'none' } : { hid: 'none' }
       replyToPage({ type: 'response', id: data.id, result })
     } catch (e) {
       replyToPage({
         type: 'response',
         id: data.id,
-        result: { hid: 'allowed', _err: String(e) }
+        result: { hid: 'none', _err: String(e) }
       })
     }
   }

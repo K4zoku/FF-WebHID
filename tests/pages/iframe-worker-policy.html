@@ -1,0 +1,25 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Iframe Worker Policy</title>
+  </head>
+  <body>
+    <script>
+      ;(async function () {
+        const worker = new Worker('/worker-policy.js?_=' + Date.now())
+        const result = await new Promise((resolve, reject) => {
+          worker.onmessage = (event) => resolve(event.data)
+          worker.onerror = (event) => reject(new Error(event.message))
+          setTimeout(() => reject(new Error('worker policy timeout')), 10000)
+        })
+        worker.terminate()
+        window.tests = window.tests || { helper: {}, results: {} }
+        window.tests.results.workerPolicy = result
+      })().catch((error) => {
+        window.tests = window.tests || { helper: {}, results: {} }
+        window.tests.results.workerPolicy = { error: String(error) }
+      })
+    </script>
+  </body>
+</html>

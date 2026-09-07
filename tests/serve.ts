@@ -40,6 +40,8 @@ const PAGES: Record<string, string> = {
   '/iframe-parent-blocked': loadPage('iframe-parent.html'),
   '/iframe-child-no-allow': loadPage('iframe-child.html'),
   '/iframe-child-with-allow': loadPage('iframe-child.html'),
+  '/iframe-worker-policy': loadPage('iframe-worker-policy.html'),
+  '/worker-policy.js': loadPage('worker-policy.js'),
   '/iframe-child-forge': loadPage('iframe-child-forge.html'),
   '/tt-policy': loadPage('tt-policy.html'),
   '/tt-policy-sinks': loadPage('tt-policy-sinks.html'),

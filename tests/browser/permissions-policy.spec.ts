@@ -171,4 +171,52 @@ test.describe('Cross-origin iframe', () => {
     expect(raw!.queryHid).toBe('denied')
     expect(raw!.hidUndefined).toBe(false)
   })
+
+  test('cross-origin iframe worker cannot bypass policy without delegation', async ({
+    page,
+    pageUrl,
+    crossUrl,
+    backgroundPage
+  }) => {
+    await backgroundPage.evaluate(
+      (origin) =>
+        browser.storage.local.set({
+          [`settings :: ${origin} :: workerPolyfillEnabled`]: true
+        }),
+      crossUrl('')
+    )
+    await page.goto(pageUrl('/iframe-parent'), {
+      waitUntil: 'domcontentloaded',
+      timeout: 15000
+    })
+    await page.evaluate((crossUrl) => {
+      const iframe = document.createElement('iframe')
+      iframe.src = crossUrl + '/iframe-worker-policy'
+      document.body.appendChild(iframe)
+    }, crossUrl(''))
+    const childFrame = await waitForFrame(page, '/iframe-worker-policy')
+    await childFrame.waitForFunction(
+      () => {
+        const result = (window as unknown as { tests?: { results?: Record<string, unknown> } }).tests
+          ?.results?.workerPolicy
+        return result !== null && typeof result === 'object'
+      },
+      { timeout: 15000 }
+    )
+    const result = await childFrame.evaluate<{
+      queryHid?: string
+      getDevices?: { ok: boolean; name?: string }
+      error?: string
+    } | null>(() => {
+      const result = (window as unknown as { tests?: { results?: Record<string, unknown> } }).tests
+        ?.results?.workerPolicy
+      return result && typeof result === 'object'
+        ? (result as { queryHid?: string; getDevices?: { ok: boolean; name?: string }; error?: string })
+        : null
+    })
+    expect(result).not.toBeNull()
+    expect(result!.error).toBeUndefined()
+    expect(result!.queryHid).toBe('denied')
+    expect(result!.getDevices).toEqual(expect.objectContaining({ ok: false, name: 'SecurityError' }))
+  })
 })

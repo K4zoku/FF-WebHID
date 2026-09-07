@@ -886,18 +886,9 @@
       logger.info('data plane: ' + settings.dataPlane)
     })
   })
-  /** @returns {{isCrossOrigin: boolean}} */
+  /** @returns {object} */
   function getPolicyContext() {
-    if (isWorker) return { isCrossOrigin: false }
-    let isCrossOrigin = false
-    if (windowObject !== windowObject.top) {
-      try {
-        windowObject.parent.location.origin
-      } catch {
-        isCrossOrigin = true
-      }
-    }
-    return { isCrossOrigin }
+    return {}
   }
 
   /** @returns {Promise<object>} */
