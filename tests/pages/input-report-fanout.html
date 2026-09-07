@@ -27,8 +27,9 @@
         function createRemoteConsumer(id) {
           const ready = Promise.withResolvers()
           const report = Promise.withResolvers()
-          remoteConsumers.set(id, { ready, report })
-          return { ready: ready.promise, report: report.promise }
+          const closed = Promise.withResolvers()
+          remoteConsumers.set(id, { ready, report, closed })
+          return { ready: ready.promise, report: report.promise, closed: closed.promise }
         }
 
         window.addEventListener('message', (event) => {
@@ -40,11 +41,14 @@
           else if (message.type === 'report') {
             recordReport(message.id)
             consumer.report.resolve(message.value)
-          }
-          else if (message.type === 'error') {
+          } else if (message.type === 'closed') {
+            consumer.closed.resolve()
+            if (message.id === 'worker') window.tests.results.workerClosed = true
+          } else if (message.type === 'error') {
             const error = new Error(message.message)
             consumer.ready.reject(error)
             consumer.report.reject(error)
+            consumer.closed.reject(error)
           }
         })
 
@@ -100,7 +104,6 @@
               )
             }
             worker.postMessage({ type: 'start', id })
-            consumer.report.then(() => worker.terminate())
             consumers.push(consumer)
           }
 
@@ -114,6 +117,7 @@
         window.tests.helper = window.tests.helper || {}
         window.tests.results = window.tests.results || {}
         window.tests.results.fanoutReady = false
+        window.tests.results.workerClosed = false
         window.tests.results.fanoutCounts = {}
         window.addEventListener('message', (event) => {
           const message = event.data

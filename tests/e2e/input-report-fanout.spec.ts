@@ -2,7 +2,6 @@ import { test, expect } from '../helpers/e2e.js'
 import type { Page } from '@playwright/test'
 import { grantDevicePermission, mockIdFor } from '../helpers/e2e-devices.js'
 import { sendInput, type WebhidMockProcess } from '../helpers/e2e-process.js'
-import { sleep } from '../helpers/test-utils.js'
 import type { FirefoxBgPage } from '../helpers/harness.js'
 
 const VENDOR = mockIdFor('vendor')
@@ -29,7 +28,6 @@ async function prepareFanoutPage(
   expect(await grantDevicePermission(sharedPage, [VENDOR])).toBe(1)
 
   if (enableWorker) {
-    await sleep(500)
     await sharedPage.reload({ waitUntil: 'domcontentloaded' })
     await sharedPage.waitForFunction(() => typeof navigator.hid !== 'undefined', { timeout: 15000 })
   }
@@ -37,6 +35,23 @@ async function prepareFanoutPage(
   await sharedPage.goto(`${origin}/tests/pages/input-report-fanout.html`, {
     waitUntil: 'domcontentloaded'
   })
+}
+async function waitForPlaneCount(backgroundPage: FirefoxBgPage, count: number): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        backgroundPage.evaluate(async () => {
+          const tabs = await browser.tabs.query({ active: true, currentWindow: true })
+          const tab = tabs[0]
+          if (!tab || tab.id == null) return 0
+          const status = (await browser.tabs.sendMessage(tab.id, {
+            action: 'getDataPlaneStatus'
+          })) as { planes?: unknown[] } | null
+          return status?.planes?.length || 0
+        }),
+      { timeout: 15000 }
+    )
+    .toBe(count)
 }
 
 async function runFanout(
@@ -72,7 +87,6 @@ async function runFanout(
       },
       { timeout: 15000 }
     )
-    await sleep(300)
     sendInput(vendorDevice, 1, PACKET)
     const expectedRecipients = 1 + iframeCount + (includeWorker ? 1 : 0)
     await sharedPage.waitForFunction(
@@ -132,8 +146,14 @@ test.describe.serial('Public input report fan-out', () => {
     backgroundPage,
     vendorDevice
   }) => {
-    await prepareFanoutPage(sharedPage, backgroundPage, true)
+    const origin = new URL(sharedPage.url()).origin
+    const settingKeys = [
+      `settings :: ${origin} :: dataPlane`,
+      `settings :: ${origin} :: workerPolyfillEnabled`
+    ]
+    const previous = await backgroundPage.evaluate((keys) => browser.storage.local.get(keys), settingKeys)
     try {
+      await prepareFanoutPage(sharedPage, backgroundPage, true)
       await sharedPage.evaluate(() => {
         window.postMessage({ type: 'startFanout', iframeCount: 0, includeWorker: true }, location.origin)
       })
@@ -141,13 +161,16 @@ test.describe.serial('Public input report fan-out', () => {
         () => window.tests?.results?.fanoutReady === true,
         { timeout: 15000 }
       )
-      await sleep(300)
       sendInput(vendorDevice, 1, PACKET)
       await sharedPage.waitForFunction(
         () => {
           const counts = window.tests?.results?.fanoutCounts
           return counts?.page === 1 && counts.worker === 1
         },
+        { timeout: 15000 }
+      )
+      await sharedPage.waitForFunction(
+        () => window.tests?.results?.workerClosed === true,
         { timeout: 15000 }
       )
       sendInput(vendorDevice, 1, PACKET)
@@ -166,9 +189,14 @@ test.describe.serial('Public input report fan-out', () => {
           await device.forget()
         }
       })
-      await sharedPage.goto(`${new URL(sharedPage.url()).origin}/tests/test-page.html`, {
-        waitUntil: 'domcontentloaded'
-      })
+      await backgroundPage.evaluate(
+        ({ keys, values }) => {
+          const missing = keys.filter((key) => !(key in values))
+          return browser.storage.local.remove(missing).then(() => browser.storage.local.set(values))
+        },
+        { keys: settingKeys, values: previous }
+      )
+      await sharedPage.goto(`${origin}/tests/test-page.html`, { waitUntil: 'domcontentloaded' })
     }
   })
 
@@ -244,7 +272,6 @@ test.describe.serial('Public input report fan-out', () => {
           value: () => reports
         })
       })
-      await sleep(300)
       sendInput(vendorDevice, 1, PACKET)
       await sharedPage.waitForFunction(
         () => (window as typeof window & { __getReports?: () => number }).__getReports?.() === 1,
@@ -270,7 +297,6 @@ test.describe.serial('Public input report fan-out', () => {
           value: () => reports
         })
       })
-      await sleep(300)
       sendInput(vendorDevice, 1, PACKET)
       await sharedPage.waitForFunction(
         () => (window as typeof window & { __getReports?: () => number }).__getReports?.() === 2,
@@ -282,7 +308,7 @@ test.describe.serial('Public input report fan-out', () => {
         { timeout: 15000 }
       )
       await sharedPage.evaluate(() => document.querySelector('#frame-owner')?.remove())
-      await sleep(500)
+      await waitForPlaneCount(backgroundPage, 1)
       sendInput(vendorDevice, 1, PACKET)
       await sharedPage.waitForFunction(
         () => (window as typeof window & { __getReports?: () => number }).__getReports?.() === 3,
