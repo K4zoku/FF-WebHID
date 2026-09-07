@@ -190,6 +190,7 @@
    */
   function handleDataPlaneConnect(req) {
     const deviceId = req.deviceId
+    const generation = req.generation
     let readyNotified = false
     const wt = createWtTransport({
       onReady: () => {
@@ -208,6 +209,7 @@
         callNative(nativeMessagePortPostMessage, bridgePort, {
           type: 'dataPlaneEvent',
           deviceId,
+          generation,
           event: { type: 'closed' }
         })
       },
@@ -217,6 +219,7 @@
         callNative(nativeMessagePortPostMessage, bridgePort, {
           type: 'dataPlaneEvent',
           deviceId,
+          generation,
           event: { type: 'auth-failed', code }
         })
       },
@@ -227,7 +230,7 @@
         pushInPageBatch(deviceId, batch, offset)
       }
     })
-    inPagePlanes.set(deviceId, { wt, deviceId })
+    inPagePlanes.set(deviceId, { wt, deviceId, generation })
     wt.connect(req.payload || {})
   }
 
@@ -411,6 +414,7 @@
       }
     }
     state.planeGeneration = generation
+    state.planeReady = false
     const dataChannel = new NativeMessageChannel()
     state.dataPort = dataChannel.port1
     state.dataPortHandler = (event) => onDataPortMessage(state, event.data)
@@ -438,6 +442,66 @@
         dataChannel.port2
       ])
     }
+  }
+  /**
+   * @param {object} state
+   * @returns {void}
+   */
+  function detachDataPort(state) {
+    if (!state.dataPort) return
+    try {
+      if (state.dataPortHandler) {
+        callNative(
+          nativeMessagePortRemoveEventListener,
+          state.dataPort,
+          'message',
+          state.dataPortHandler
+        )
+        state.dataPortHandler = null
+      }
+      callNative(nativeMessagePortClose, state.dataPort)
+    } catch (e) {
+      logger.debug('close dataPort failed', e)
+    }
+    state.dataPort = null
+  }
+
+  /**
+   * @param {object} data
+   * @returns {void}
+   */
+  function handleDataPlaneReady(data) {
+    const device = data.deviceId ? deviceRegistry.get(data.deviceId) : null
+    const state = device ? devState.get(device) : null
+    if (!state || typeof data.generation !== 'number') return
+    if (data.generation < state.planeGeneration) return
+    state.planeGeneration = data.generation
+    state.planeReady = true
+    state.planeUnavailable = false
+  }
+
+  /**
+   * @param {object} data
+   * @returns {void}
+   */
+  function handleDataPlaneUnavailable(data) {
+    const device = data.deviceId ? deviceRegistry.get(data.deviceId) : null
+    const state = device ? devState.get(device) : null
+    if (
+      !state ||
+      typeof data.generation !== 'number' ||
+      data.generation < state.planeGeneration ||
+      (!state.opened && !state.opening)
+    )
+      return
+    state.planeGeneration = data.generation
+    state.planeReady = false
+    state.planeUnavailable = true
+    rejectPendingReports(
+      state,
+      new NativeDOMException(data.reason || 'Data plane unavailable', 'NetworkError')
+    )
+    detachDataPort(state)
   }
 
   /**
@@ -680,6 +744,8 @@
   const BRIDGE_MESSAGE_HANDLERS = {
     dataPlaneConnect: handleDataPlaneConnect,
     dataPlaneDisconnect: handleDataPlaneDisconnect,
+    dataPlaneReady: handleDataPlaneReady,
+    dataPlaneUnavailable: handleDataPlaneUnavailable,
     spawnWorkerRequest: handleSpawnWorkerMessage,
     wireWorkerPort: handleWireWorkerPort,
     response: handleResponseMessage,
@@ -843,6 +909,7 @@
    * @returns {Promise<unknown>}
    */
   function sendDeviceRequest(state, opts) {
+    if (state.planeUnavailable) throw new NativeError('data plane unavailable')
     const inPage = inPageRequest(
       inPagePlanes.get(state.deviceId),
       opts.inPageType,
@@ -851,6 +918,7 @@
       opts.mapResolve
     )
     if (inPage) return inPage
+    if (!state.planeReady) throw new NativeError('data plane unavailable')
     if (!state.dataPort) throw new NativeError('data port not connected')
     const reqId = ++nextReqId
     const msg = { type: opts.portType, reqId, reportId: opts.reportId }
@@ -1016,8 +1084,9 @@
                   (ready && ready.error ? ready.error : 'unknown')
               )
             }
+            state.planeReady = true
+            state.planeUnavailable = false
             state.opened = true
-            logger.info('open deviceId=' + state.deviceId)
             this.dispatchEvent(new NativeEvent('open'))
           } else {
             throw new NativeError('Open failed: ' + (response.error || http.name(response.s || 0)))
@@ -1049,6 +1118,8 @@
           })
           if (http.isOk(response.s)) {
             state.opened = false
+            state.planeReady = false
+            state.planeUnavailable = false
             rejectPendingReports(state, new NativeDOMException('Device closed', 'AbortError'))
             if (state.dataPort) {
               if (state.dataPortHandler) {
@@ -1248,7 +1319,7 @@
         try {
           device = await resolvePairedDevice(detail.deviceId)
         } catch (e) {
-          logger.warn(
+          logger.debug(
             'connect event lookup failed:',
             e != null ? (e.message != null ? e.message : e) : e
           )
@@ -1317,6 +1388,8 @@
     state.opening = false
     if (forgotten) state.forgotten = true
     state.opened = false
+    state.planeReady = false
+    state.planeUnavailable = false
     rejectPendingReports(
       state,
       new NativeDOMException(forgotten ? 'Device forgotten' : 'Device disconnected', 'AbortError')
@@ -1561,6 +1634,8 @@
       opened: false,
       opening: false,
       planeGeneration: 0,
+      planeReady: false,
+      planeUnavailable: false,
       dataPort: null,
       dataPending: null,
       maxInputReportSize: deviceInfo.maxInputReportSize || 64,

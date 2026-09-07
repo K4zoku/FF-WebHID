@@ -238,6 +238,17 @@
     const clientSeparator = rest.indexOf('\u0000')
     return clientSeparator < 0 ? rest : rest.slice(0, clientSeparator)
   }
+  /**
+   * @param {string} key
+   * @returns {string}
+   */
+  function clientKeyForPlaneKey(key) {
+    const separator = key.indexOf('\u0000')
+    if (separator < 0) return 'window'
+    const rest = key.slice(separator + 1)
+    const clientSeparator = rest.indexOf('\u0000')
+    return clientSeparator < 0 ? 'window' : rest.slice(clientSeparator + 1)
+  }
 
   /**
    * @param {string} [origin]
@@ -542,7 +553,9 @@
     }
     state[prerequisite] = true
     if (!state.local || !state.authoritative) return
+    const wasReady = readyGenerations.get(key) === generation
     readyGenerations.set(key, generation)
+    if (!wasReady) notifyPlaneReady(key, generation)
     const pending = pendingPlaneReady.get(key)
     if (!pending || pending.generation !== generation) return
     clearTimeout(pending.timer)
@@ -577,10 +590,52 @@
   function markPlaneAuthoritativeReady(key, generation) {
     markPlanePrerequisite(key, generation, 'authoritative')
   }
+  /**
+   * @param {string} key
+   * @param {number} generation
+   * @returns {void}
+   */
+  function notifyPlaneReady(key, generation) {
+    if (spawnGen.get(key) !== generation) return
+    const context = contextForPlaneKey(key)
+    if (!context) return
+    const client = clientForKey(context, clientKeyForPlaneKey(key))
+    if (!client) return
+    try {
+      client.port.postMessage({
+        type: 'dataPlaneReady',
+        deviceId: deviceIdForPlaneKey(key),
+        generation
+      })
+    } catch (e) {
+      logger.debug('data plane ready notification failed', e)
+    }
+  }
 
-  /** @type {Map<string, Set<string>>} origin -> allowed device ids. The
-   * bridge serves ports from several frame origins; a single top-origin set
-   * would reject delegated children and disagree with background state. */
+  /**
+   * @param {string} key
+   * @param {number} generation
+   * @param {string} reason
+   * @returns {void}
+   */
+  function notifyPlaneUnavailable(key, generation, reason) {
+    if (spawnGen.get(key) !== generation) return
+    const context = contextForPlaneKey(key)
+    if (!context) return
+    const client = clientForKey(context, clientKeyForPlaneKey(key))
+    if (!client) return
+    try {
+      client.port.postMessage({
+        type: 'dataPlaneUnavailable',
+        deviceId: deviceIdForPlaneKey(key),
+        generation,
+        reason
+      })
+    } catch (e) {
+      logger.debug('data plane unavailable notification failed', e)
+    }
+  }
+  /** @type {Map<string, Set<string>>} origin -> allowed device ids */
   const allowedByOrigin = new Map()
   /** @type {Set<string>} origins whose allowed set is loaded. */
   const loadedOrigins = new Set()
@@ -984,6 +1039,7 @@
       pendingPlaneSpawns.set(id, { resolve, timer, key, generation: opts.generation })
       inPageDevices.add(key)
       clientPort.postMessage({
+        generation: opts.generation,
         type: 'dataPlaneConnect',
         id,
         deviceId,
@@ -1041,8 +1097,10 @@
       logger.debug('setDataPlane NM fallback failed', e)
     }
     if (!response || !http.isOk(response.s)) {
-      if (spawnGen.get(key) === generation)
+      if (spawnGen.get(key) === generation) {
         await despawnDataPlane(context, deviceId, { clientKey, clientPort })
+        notifyPlaneUnavailable(key, spawnGen.get(key), 'NM fallback rejected')
+      }
       return null
     }
     if (context.destroyed || !frameContexts.has(context.key) || spawnGen.get(key) !== generation) {
@@ -1056,8 +1114,10 @@
     if (rewire) {
       const targetPort = clientPort || clientForKey(context, clientKey)?.port || context.port
       if (!targetPort) {
-        if (spawnGen.get(key) === generation)
+        if (spawnGen.get(key) === generation) {
           await despawnDataPlane(context, deviceId, { clientKey, clientPort })
+          notifyPlaneUnavailable(key, spawnGen.get(key), 'NM fallback wiring unavailable')
+        }
         return null
       }
       targetPort.postMessage({
@@ -1284,14 +1344,72 @@
     const deviceId = data.deviceId
     const clientKey = client.clientKey
     const key = planeKeyForClient(context, deviceId, clientKey)
+    const generation = data.generation
+    if (typeof generation !== 'number' || spawnGen.get(key) !== generation) return
     const ev = data.event || {}
-    if (ev.type === 'closed') {
+    if (ev.type === 'closed' || ev.type === 'auth-failed') {
       inPageDevices.delete(key)
-      handleWorkerErrorEvent({ deviceId, message: 'in-page transport closed' }, port)
-    } else if (ev.type === 'auth-failed') {
-      inPageDevices.delete(key)
-      refreshDataPlaneToken(context, deviceId, clientKey)
+      handleWorkerErrorEvent(
+        {
+          deviceId,
+          generation,
+          message:
+            ev.type === 'auth-failed' ? 'in-page transport auth failed' : 'in-page transport closed'
+        },
+        port,
+        generation
+      ).catch((e) => logger.debug('in-page transport recovery failed', e))
     }
+  }
+
+  /**
+   * @param {FrameContext} context
+   * @param {string} deviceId
+   * @param {string} token
+   * @param {string} clientKey
+   * @param {MessagePort} clientPort
+   * @param {number} failedGeneration
+   * @returns {Promise<number|null>}
+   */
+  async function recoverDataPlane(
+    context,
+    deviceId,
+    token,
+    clientKey,
+    clientPort,
+    failedGeneration
+  ) {
+    const key = planeKeyForClient(context, deviceId, clientKey)
+    if (spawnGen.get(key) !== failedGeneration) return null
+    await despawnDataPlane(context, deviceId, { clientKey, clientPort })
+    const generation = spawnGen.get(key)
+    if (context.destroyed || !frameContexts.has(context.key)) return null
+    if (settings.dataPlane === 'nm') {
+      return fallbackToNm(context, deviceId, token, clientKey, generation, {
+        rewire: true,
+        clientPort
+      })
+    }
+    if (settings.dataPlane === 'wt' && wtPort != null) {
+      return spawnDataPlane(context, deviceId, token, null, {
+        wtPort,
+        wtCertHash,
+        clientKey,
+        clientPort,
+        rewire: true
+      })
+    }
+    if (settings.dataPlane === 'ws' || settings.dataPlane === 'wt') {
+      return spawnDataPlane(context, deviceId, token, wsPort, {
+        clientKey,
+        clientPort,
+        rewire: true
+      })
+    }
+    return fallbackToNm(context, deviceId, token, clientKey, generation, {
+      rewire: true,
+      clientPort
+    })
   }
 
   /**
@@ -1316,11 +1434,7 @@
       await despawnDataPlane(context, deviceId, { clientKey, clientPort: port })
       return
     }
-    await fallbackToNm(context, deviceId, token, clientKey, currentGeneration, {
-      rewire: true,
-      retire: true,
-      clientPort: port
-    })
+    await recoverDataPlane(context, deviceId, token, clientKey, port, currentGeneration)
   }
 
   /**
@@ -1339,7 +1453,10 @@
     spawnWorkerResponse: handleSpawnWorkerResponse,
     dataPlaneResponse: handlePlaneResponse,
     dataPlaneEvent: handleDataPlaneEvent,
-    workerError: handleWorkerErrorEvent,
+    workerError: (data, port) =>
+      handleWorkerErrorEvent(data, port).catch((e) =>
+        logger.debug('worker error recovery failed', e)
+      ),
     frameDestroyed: handleFrameDestroyedMessage
   }
   /**
@@ -1533,15 +1650,16 @@
           return
         }
         if (data.type === 'auth-failed') {
-          logger.warn('worker auth-failed for', deviceId, 'code=' + data.code + '; re-opening')
+          logger.warn('worker auth-failed for', deviceId, 'code=' + data.code + '; recovering')
           if (
             getWorker(context, deviceId, clientKey) === proxy &&
             spawnGen.get(key) === generation
           ) {
-            workers.delete(key)
-            workerReadyDevices.delete(key)
-            connectParams.delete(key)
-            refreshDataPlaneToken(context, deviceId, clientKey)
+            handleWorkerErrorEvent(
+              { deviceId, generation, message: 'worker transport auth failed' },
+              requestPort,
+              generation
+            ).catch((e) => logger.debug('worker auth recovery failed', e))
           }
           return
         }
@@ -1549,10 +1667,10 @@
           logger.warn('worker closed for', deviceId)
           if (getWorker(context, deviceId, clientKey) === proxy) {
             handleWorkerErrorEvent(
-              { deviceId, message: 'transport closed' },
+              { deviceId, generation, message: 'transport closed' },
               requestPort,
               generation
-            )
+            ).catch((e) => logger.debug('worker recovery failed', e))
           }
         }
       }
@@ -2426,6 +2544,7 @@
         }
         if (!response || !http.isOk(response.s)) {
           await despawnDataPlane(context, deviceId, { clientKey, clientPort })
+          notifyPlaneUnavailable(key, spawnGen.get(key), 'live NM switch rejected')
           continue
         }
         ensureRuntimeDataPort(deviceId)
