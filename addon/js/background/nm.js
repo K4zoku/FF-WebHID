@@ -116,16 +116,18 @@
       if (this.port) return Promise.resolve()
       logger.debug('connecting to ' + this.nmHostName + '...')
       try {
-        this.port = browser.runtime.connectNative(this.nmHostName)
+        const port = browser.runtime.connectNative(this.nmHostName)
+        this.port = port
         this.reconnectDelay = 1000
         this.lastError = null
         logger.debug('connected')
 
-        this.port.onMessage.addListener((message) => {
+        port.onMessage.addListener((message) => {
           this.handleNativeMessage(message)
         })
 
-        this.port.onDisconnect.addListener(() => {
+        port.onDisconnect.addListener(() => {
+          if (!this.retirePort(port)) return
           logger.warn(
             'disconnected; will retry in ' +
               this.reconnectDelay +
@@ -133,11 +135,6 @@
               'If persistent: check daemon status (systemctl status webhid-daemon), ' +
               'group membership (groups), and NM host manifest.'
           )
-          this.port = null
-          for (const [, p] of this.pending) p.resolve({ s: 503 })
-          this.pending.clear()
-          clearAuthorityOwnership()
-          broadcastGlobalReset()
           this.scheduleReconnect()
         })
 
@@ -149,14 +146,30 @@
       }
     },
 
+    /**
+     * Retires one exact Native Messaging port and its authority lifetime.
+     * @param {object} port
+     * @returns {boolean}
+     */
+    retirePort(port) {
+      if (this.port !== port) return false
+      this.port = null
+      for (const [, p] of this.pending) p.resolve({ s: 503 })
+      this.pending.clear()
+      clearAuthorityOwnership()
+      broadcastGlobalReset()
+      return true
+    },
+
     reconnectWithNewHost() {
-      if (this.port) {
+      const port = this.port
+      if (port) {
+        this.retirePort(port)
         try {
-          this.port.disconnect()
+          port.disconnect()
         } catch (e) {
           logger.debug('port disconnect failed', e)
         }
-        this.port = null
       }
       if (this.reconnectTimer) {
         clearTimeout(this.reconnectTimer)
