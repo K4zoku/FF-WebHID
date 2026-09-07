@@ -829,7 +829,7 @@
       const msg = { id, action, payload: payload || {} }
       const transfers = []
       if (payload && payload.data instanceof Uint8Array) {
-        transfers.push(payload.data.buffer)
+        arrayOps.push(transfers, payload.data.buffer)
       }
       callNative(
         nativeMessagePortPostMessage,
@@ -955,7 +955,7 @@
     const transfers = []
     if (opts.payload) {
       msg.data = opts.payload
-      transfers.push(opts.payload.buffer)
+      arrayOps.push(transfers, opts.payload.buffer)
     }
     return new Promise((resolve, reject) => {
       state.dataPending = state.dataPending || hardenMap(new NativeMap())
@@ -1115,7 +1115,7 @@
                 callNative(nativeMessagePortClose, state.dataPort)
                 state.dataPort = null
               }
-              await sendRequest('close', { deviceId: state.deviceId }).catch(() => {})
+              await promiseOps.catch(sendRequest('close', { deviceId: state.deviceId }), () => {})
               throw new NativeError(
                 'Client data plane is not ready: ' +
                   (ready && ready.error ? ready.error : 'unknown')
@@ -1462,8 +1462,8 @@
       ...(collection.outputReports || []),
       ...(collection.featureReports || [])
     ]
-    if (reports.some((r) => r.reportId !== 0)) return true
-    return (collection.children || []).some(collectionUsesReportIds)
+    if (arrayOps.some(reports, (r) => r.reportId !== 0)) return true
+    return arrayOps.some(collection.children || [], collectionUsesReportIds)
   }
 
   /**
@@ -1471,7 +1471,7 @@
    * @returns {boolean}
    */
   function deviceUsesReportIds(collections) {
-    return (collections || []).some(collectionUsesReportIds)
+    return arrayOps.some(collections || [], collectionUsesReportIds)
   }
 
   /**
@@ -1826,7 +1826,7 @@
       if (value == null) throw new TypeError(name + ' must be a sequence')
       const values = []
       try {
-        for (const item of value) values.push(item)
+        for (const item of value) arrayOps.push(values, item)
       } catch {
         throw new TypeError(name + ' must be a sequence')
       }
@@ -1941,7 +1941,7 @@
           const granted = []
           for (const hash of pairedHashes) {
             const device = deviceCache.get(hash)
-            if (device) granted.push(getOrCreateDevice(device))
+            if (device) arrayOps.push(granted, getOrCreateDevice(device))
           }
           logger.debug('getDevices returned ' + granted.length + ' device(s)')
           return granted
@@ -2090,7 +2090,8 @@
   function destroyWorkerClient(state) {
     if (state.sent || !state.clientKey) return
     state.sent = true
-    sendRequest('workerClientDestroyed', { clientKey: state.clientKey }, { timeoutMs: 500 }).catch(
+    promiseOps.catch(
+      sendRequest('workerClientDestroyed', { clientKey: state.clientKey }, { timeoutMs: 500 }),
       () => {}
     )
   }

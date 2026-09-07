@@ -324,6 +324,45 @@ test.describe.serial('WebHID E2E', () => {
     }, VENDOR_CTX)
   })
 
+  test('MAIN HID operations survive hostile prototype patches', async ({ sharedPage }) => {
+    const result = await sharedPage.evaluate(async (ctx: VendorCtx) => {
+      const arrayPush = Array.prototype.push
+      const arraySome = Array.prototype.some
+      const promiseCatch = Promise.prototype.catch
+      const stringIncludes = String.prototype.includes
+      Array.prototype.push = () => {
+        throw new Error('poisoned Array.push')
+      }
+      Array.prototype.some = () => {
+        throw new Error('poisoned Array.some')
+      }
+      Promise.prototype.catch = () => {
+        throw new Error('poisoned Promise.catch')
+      }
+      String.prototype.includes = () => {
+        throw new Error('poisoned String.includes')
+      }
+      try {
+        const d = (await navigator.hid.getDevices()).find(
+          (x) => x.vendorId === ctx.f.vendorId && x.productId === ctx.f.productId
+        )!
+        await d.open()
+        const opened = d.opened
+        await d.sendReport(ctx.outputId, new Uint8Array(ctx.size))
+        await d.close()
+        return { ok: true, opened, closed: !d.opened }
+      } catch (e) {
+        return { ok: false, error: e instanceof Error ? e.message : String(e) }
+      } finally {
+        Array.prototype.push = arrayPush
+        Array.prototype.some = arraySome
+        Promise.prototype.catch = promiseCatch
+        String.prototype.includes = stringIncludes
+      }
+    }, VENDOR_CTX)
+    expect(result).toEqual({ ok: true, opened: true, closed: true })
+  })
+
   test('forget revokes sibling origin session and permission', async ({ sharedPage, httpPort }) => {
     const siblingPage = await sharedPage.context().newPage()
     try {

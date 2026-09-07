@@ -12,6 +12,7 @@
   const u8Ops = types.Uint8Array.proto.methods
   const dataViewOps = types.DataView.proto.methods
   const mapOps = types.Map.proto.methods
+  const arrayOps = types.Array.proto.methods
 
   const MSG_SEND_REPORT = 0x01
   const MSG_SEND_FEATURE_REPORT = 0x02
@@ -37,9 +38,9 @@
       if (payloadLen > 0) {
         const buffer = new ArrayBuffer(payloadLen)
         u8Ops.set(new Uint8Array(buffer), u8Ops.subarray(batch, offset + 1, offset + len))
-        reports.push({ reportId, data: buffer })
+        arrayOps.push(reports, { reportId, data: buffer })
       } else {
-        reports.push({ reportId, data: null })
+        arrayOps.push(reports, { reportId, data: null })
       }
       offset += len
     }

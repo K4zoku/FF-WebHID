@@ -5,6 +5,7 @@
   const NativeMap = types.Map.constructor
   const NativeString = types.String.constructor
   const mapOps = types.Map.proto.methods
+  const arrayOps = types.Array.proto.methods
   const regexpOps = types.RegExp.proto.methods
   const stringOps = types.String.proto.methods
   const hardenMap = (value) => {
@@ -55,7 +56,7 @@
     for (const device of devices) {
       const name = device.productName || NativeString(device.deviceId)
       if (!groups.has(name)) groups.set(name, [])
-      groups.get(name).push(device)
+      arrayOps.push(groups.get(name), device)
     }
     return groups
   }
