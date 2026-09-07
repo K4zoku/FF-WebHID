@@ -2,7 +2,8 @@
   const webhid = globalThis.webhid
   const logger = webhid.import('logger')
   const isChromium = webhid.import('isChromium')
-  const { workerPolyfillSites, permissionsPolicy, shadowArms } = webhid.import('bgState')
+  const { workerPolyfillSites, permissionsPolicy, allowedCrossOrigin, shadowArms } =
+    webhid.import('bgState')
   const { ensureWorkerBundle, ensureWorkerPolyfillBundle } = webhid.import('bgBundle')
   const {
     parseCspForWorkerSpawn,
@@ -603,6 +604,16 @@
         JSON.stringify(effective)
     )
   }
+  /**
+   * @param {number} tabId
+   * @returns {void}
+   */
+  function clearTabUrlAllows(tabId) {
+    const prefix = `url:${tabId}:`
+    for (const key of allowedCrossOrigin.keys()) {
+      if (key.startsWith(prefix)) allowedCrossOrigin.delete(key)
+    }
+  }
 
   /**
    * Registers all webRequest listeners used by the background page.
@@ -620,6 +631,7 @@
       )
       browser.webRequest.onBeforeRequest.addListener(
         (details) => {
+          if (details.type === 'main_frame') clearTabUrlAllows(details.tabId)
           if (details.tabId === undefined || details.frameId === undefined) return
           permissionsPolicy.delete(`${details.tabId}:${details.frameId}`)
         },
@@ -750,6 +762,7 @@
 
     browser.webRequest.onBeforeRequest.addListener(
       (details) => {
+        if (details.type === 'main_frame') clearTabUrlAllows(details.tabId)
         if (details.tabId === undefined || details.frameId === undefined) return
         const key = `${details.tabId}:${details.frameId}`
         permissionsPolicy.delete(key)

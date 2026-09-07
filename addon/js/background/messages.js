@@ -1,6 +1,6 @@
 ;(function () {
   const webhid = globalThis.webhid
-  const { registerContentPort } = webhid.import('content-ports')
+  const { registerContentPort, postToContentPorts } = webhid.import('content-ports')
   const http = webhid.import('http')
   const logger = webhid.import('logger')
   const isChromium = webhid.import('isChromium')
@@ -10,7 +10,6 @@
     deviceCache,
     pendingPicker,
     permissionsPolicy,
-    frameContextOwners,
     allowedCrossOrigin,
     pageActionVisibility
   } = webhid.import('bgState')
@@ -413,9 +412,6 @@
    */
   async function handleFrameDestroyed(request, sender, sendResponse) {
     const tabId = sender.tab != null ? sender.tab.id : undefined
-    if (tabId != null && typeof request.frameKey === 'string') {
-      frameContextOwners.delete(request.frameKey)
-    }
     await purgeFrame(tabId, request.frameKey, (deviceId, token) =>
       NativeMessaging.closeDevice(deviceId, token)
     )
@@ -939,25 +935,16 @@
     return false
   }
 
-  /**
-   * Registers the browser frame identity for a trusted bridge context.
-   * @param {object} request
-   * @param {object} sender
-   * @param {function(*): void} sendResponse
-   * @returns {boolean}
-   */
-  function handleRegisterFrameContext(request, sender, sendResponse) {
-    const tabId = sender.tab?.id
-    const frameId = sender.frameId
-    if (tabId == null || frameId == null || typeof request.frameKey !== 'string') {
-      sendResponse({ ok: false })
-      return false
-    }
-    frameContextOwners.set(request.frameKey, { tabId, frameId })
-    sendResponse({ ok: true })
-    return false
-  }
 
+  /**
+   * @param {number} tabId
+   * @param {string} embedderOrigin
+   * @param {string} childUrl
+   * @returns {string}
+   */
+  function frameAllowUrlKey(tabId, embedderOrigin, childUrl) {
+    return `url:${tabId}:${embedderOrigin}:${childUrl}`
+  }
   /**
    * Computes the effective `hid` policy for the authenticated sender frame.
    * @param {object} request
@@ -968,7 +955,9 @@
     const tid = sender.tab?.id
     const requestedOrigin = urlOrigin(request.origin || '')
     const owner =
-      typeof request.frameKey === 'string' ? frameContextOwners.get(request.frameKey) : null
+      request.frameAuthority === true && sender.frameId != null
+        ? { tabId: tid, frameId: sender.frameId }
+        : null
     if (tid == null || !requestedOrigin) {
       return { policy: { hid: 'none' } }
     }
@@ -987,8 +976,10 @@
       return { policy: { hid: 'none' } }
     }
     if (parent && parent.origin !== entry.origin) {
-      const frameAllowed = allowedCrossOrigin.has(frameKey(tid, owner.frameId, entry.origin))
-      if (request.isCrossOrigin !== true || (request.hasAllowAttr !== true && !frameAllowed)) {
+      const frameAllowed =
+        allowedCrossOrigin.has(frameKey(tid, owner.frameId, entry.origin)) ||
+        allowedCrossOrigin.has(frameAllowUrlKey(tid, parent.origin, entry.url))
+      if (!frameAllowed) {
         return { policy: { hid: 'none' } }
       }
     }
@@ -1005,8 +996,26 @@
    * @returns {boolean}
    */
   function handleGetPolicy(request, sender, sendResponse) {
-    sendResponse(policyForRequest(request, sender))
-    return true
+    const response = policyForRequest(request, sender)
+    if (
+      request.frameAuthority === true &&
+      typeof request.bridgeInstanceId === 'string' &&
+      typeof request.requestId === 'string' &&
+      sender.tab?.id != null
+    ) {
+      postToContentPorts(
+        [sender.tab.id],
+        {
+          action: 'framePolicyResponse',
+          bridgeInstanceId: request.bridgeInstanceId,
+          requestId: request.requestId,
+          policy: response.policy
+        },
+        'webhid-control'
+      )
+    }
+    sendResponse(response)
+    return false
   }
 
   /**
@@ -1049,19 +1058,36 @@
    * @param {function(*): void} sendResponse
    * @returns {boolean}
    */
+  function handleClearFrameAllows(request, sender, sendResponse) {
+    const tabId = sender.tab?.id
+    if (tabId == null || sender.frameId !== 0) {
+      sendResponse({ ok: false })
+      return false
+    }
+    const prefix = `url:${tabId}:`
+    for (const key of allowedCrossOrigin.keys()) {
+      if (key.startsWith(prefix)) allowedCrossOrigin.delete(key)
+    }
+    sendResponse({ ok: true })
+    return false
+  }
   function handleSetFrameAllow(request, sender, sendResponse) {
     let key
+    const tabId = sender.tab?.id
     const embedderOrigin = urlOrigin(sender.tab && sender.tab.url)
+    if (tabId == null || !embedderOrigin) {
+      sendResponse({ ok: false })
+      return false
+    }
     if (request.frameId === -1 && request.url) {
-      key = `url:${embedderOrigin}:${request.url}`
-    } else {
-      const tid = sender.tab?.id
-      if (tid == null) {
+      if (!urlOrigin(request.url)) {
         sendResponse({ ok: false })
         return false
       }
+      key = frameAllowUrlKey(tabId, embedderOrigin, request.url.split('#', 1)[0])
+    } else {
       key = frameKey(
-        tid,
+        tabId,
         request.frameId,
         urlOrigin(request.url || (sender.tab && sender.tab.url) || '')
       )
@@ -1141,7 +1167,7 @@
     cancelPicker: handleCancelPicker,
     getPendingPicker: handleGetPendingPicker,
     getPolicy: handleGetPolicy,
-    registerFrameContext: handleRegisterFrameContext,
+    clearFrameAllows: handleClearFrameAllows,
     armShadowSpawn: handleArmShadowSpawn,
     unarmShadowSpawn: handleUnarmShadowSpawn,
     setFrameAllow: handleSetFrameAllow,

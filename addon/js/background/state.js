@@ -11,7 +11,6 @@
    * retry after their owner tab is gone. */
   const orphanCleanup = new Map()
   const permissionsPolicy = new Map()
-  const frameContextOwners = new Map()
   const allowedCrossOrigin = new Map()
   const pendingPicker = new Map()
   const workerPolyfillSites = new Set()
@@ -78,7 +77,6 @@
     deviceSessions,
     frameLifetimes,
     orphanCleanup,
-    frameContextOwners,
     permissionsPolicy,
     allowedCrossOrigin,
     pageActionVisibility,

@@ -239,4 +239,56 @@ test.describe('Cross-origin iframe', () => {
     expect(result!.queryHid).toBe('denied')
     expect(result!.getDevices).toEqual(expect.objectContaining({ ok: false, name: 'SecurityError' }))
   })
+  test('same-origin frame identity cannot be rebound through DOM messages', async ({
+    page,
+    pageUrl
+  }) => {
+    await page.addInitScript(() => {
+      ;(window as unknown as { frameKeys?: string[] }).frameKeys = []
+      window.addEventListener('message', (event) => {
+        if (event.data?.type === 'webhidFrameContext') {
+          ;(window as unknown as { frameKeys: string[] }).frameKeys.push(event.data.frameKey)
+        }
+      })
+    })
+    await page.goto(pageUrl('/iframe-same-origin-parent'), {
+      waitUntil: 'domcontentloaded',
+      timeout: 15000
+    })
+    await page.waitForFunction(
+      () =>
+        document.querySelector('#same-origin-allowed')?.contentWindow != null &&
+        document.querySelector('#same-origin-blocked')?.contentWindow != null
+    )
+    const frameKeys = await Promise.all(
+      page.frames().map((frame) =>
+        frame
+          .evaluate(() => (window as unknown as { frameKeys?: string[] }).frameKeys || [])
+          .catch(() => [])
+      )
+    )
+    expect(frameKeys.flat()).toEqual([])
+    await page.evaluate(() => {
+      document
+        .querySelector('#same-origin-allowed')
+        ?.contentWindow?.postMessage({ type: 'webhidFrameContext', frameKey: 'K1' }, '*')
+      document
+        .querySelector('#same-origin-blocked')
+        ?.contentWindow?.postMessage({ type: 'webhidFrameContext', frameKey: 'K2' }, '*')
+      document
+        .querySelector('#same-origin-allowed')
+        ?.contentWindow?.postMessage({ type: 'webhidFrameContext', frameKey: 'K2' }, '*')
+    })
+    const allowed = await readIframeResult(page, '/same-origin-policy-allowed')
+    const blocked = await readIframeResult(page, '/same-origin-policy-blocked')
+    expect(allowed?.queryHid).toBe('granted')
+    expect(blocked?.queryHid).toBe('denied')
+
+    await page.evaluate((url) => {
+      const frame = document.querySelector('#same-origin-blocked') as HTMLIFrameElement
+      frame.src = url
+    }, pageUrl('/same-origin-policy-blocked?frame=recreated'))
+    const recreated = await readIframeResult(page, '/same-origin-policy-blocked?frame=recreated')
+    expect(recreated?.queryHid).toBe('denied')
+  })
 })

@@ -34,6 +34,9 @@ function loadPage(name: string): string {
 const PAGES: Record<string, string> = {
   '/policy-check': loadPage('policy-check.html'),
   '/policy-check-blocked': loadPage('policy-check.html'),
+  '/same-origin-policy-allowed': loadPage('same-origin-policy.html'),
+  '/same-origin-policy-blocked': loadPage('same-origin-policy.html'),
+  '/iframe-same-origin-parent': loadPage('iframe-same-origin-parent.html'),
   '/policy-check-allowed-self': loadPage('policy-check.html'),
   '/policy-check-allowed-all': loadPage('policy-check.html'),
   '/iframe-parent': loadPage('iframe-parent.html'),
@@ -91,6 +94,10 @@ const PAGES: Record<string, string> = {
 const HEADERS: Record<string, Record<string, string | string[]>> = {
   '/policy-check': {},
   '/policy-check-blocked': {
+    'Permissions-Policy': 'hid=()'
+  },
+  '/same-origin-policy-allowed': {},
+  '/same-origin-policy-blocked': {
     'Permissions-Policy': 'hid=()'
   },
   '/iframe-parent-blocked': {

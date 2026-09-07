@@ -19,6 +19,9 @@
   const controlQueue = []
   let controlPending = null
   const handshakePending = new Map()
+  let nextPolicyRequestId = 0
+  /** @type {Map<string, {context: FrameContext, pageRequestId: string}>} */
+  const pendingPolicyRequests = new Map()
   let nextHandshakeReqId = 0
   /** @returns {void} */
   function pumpControlQueue() {
@@ -73,6 +76,22 @@
     }
     if (message && message.action === 'webhidDeviceEvent' && message.event) {
       handleBackgroundEvent(message)
+      return
+    }
+    if (
+      message &&
+      message.action === 'framePolicyResponse' &&
+      message.bridgeInstanceId === bridgeInstanceId &&
+      typeof message.requestId === 'string'
+    ) {
+      const pending = pendingPolicyRequests.get(message.requestId)
+      if (!pending) return
+      pendingPolicyRequests.delete(message.requestId)
+      replyToPage({
+        type: 'response',
+        id: pending.pageRequestId,
+        result: message.policy || { hid: 'none' }
+      })
       return
     }
     if (message && message.reqId != null) {
@@ -188,22 +207,6 @@
     clientKeysByPort.set(port, 'window')
     if (source) frameContextBySource.set(source, context)
     return context
-  }
-  /**
-   * Announces a bridge context to the all-frame identity probe.
-   * @param {FrameContext} context
-   * @returns {void}
-   */
-  function announceFrameContext(context) {
-    if (!context.source) return
-    try {
-      context.source.postMessage(
-        { type: 'webhidFrameContext', frameKey: context.key },
-        context.origin
-      )
-    } catch (e) {
-      logger.debug('frame identity announcement failed', e)
-    }
   }
 
   /**
@@ -1363,21 +1366,27 @@
    * @returns {void}
    */
   function reportIframes() {
-    const iframes = document.querySelectorAll('iframe[allow*="hid" i]')
-    for (const iframe of iframes) {
-      const src = iframe.src || iframe.getAttribute('src') || ''
-      if (!src) continue
-      sendBackgroundRequest({
-        action: 'setFrameAllow',
-        url: src,
-        frameId: -1
-      }).catch((e) => logger.debug('setFrameAllow failed', e))
-    }
+    sendBackgroundRequest({ action: 'clearFrameAllows' })
+      .then(() => {
+        const iframes = document.querySelectorAll('iframe[allow*="hid" i]')
+        for (const iframe of iframes) {
+          const src = iframe.src || iframe.getAttribute('src') || ''
+          if (!src) continue
+          sendBackgroundRequest({
+            action: 'setFrameAllow',
+            url: src,
+            frameId: -1
+          }).catch((e) => logger.debug('setFrameAllow failed', e))
+        }
+      })
+      .catch((e) => logger.debug('clearFrameAllows failed', e))
   }
   if (window === window.top) {
     reportIframes()
     const observer = new MutationObserver(() => reportIframes())
     observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['allow', 'src'],
       childList: true,
       subtree: true
     })
@@ -1568,6 +1577,7 @@
    * @param {MessageEvent} event
    * @returns {void}
    */
+
   window.addEventListener('message', (event) => {
     if (!event.data || event.data.type !== 'webhidBridgeRequest' || !event.source) return
     event.source.postMessage({ type: 'webhidBridgeReady' }, event.origin)
@@ -1597,7 +1607,6 @@
       source === window ? 'window' : 'child',
       context.key
     )
-    announceFrameContext(context)
   })
 
   /**
@@ -1810,48 +1819,40 @@
       replyToPage({ type: 'response', id: data.id, result: {} })
     }
   }
-
   /**
    * @param {object} data
+   * @param {MessagePort[]} _ports
+   * @param {MessagePort} requestPort
    * @returns {Promise<void>}
    */
   async function handleGetPolicyRequest(data, _ports, requestPort) {
-    try {
-      const context = frameContextForPort(requestPort)
-      if (!context || context.destroyed) {
-        replyToPage({ type: 'response', id: data.id, result: { hid: 'none' } })
-        return
-      }
-      const origin = context.origin
-      const isCrossOrigin = origin !== window.location.origin
-      let hasAllowAttr = false
-      if (context.source && context.source !== window) {
-        for (const iframe of document.querySelectorAll('iframe[allow*="hid" i]')) {
-          if (iframe.contentWindow !== context.source) continue
-          try {
-            hasAllowAttr = new URL(iframe.src).origin === origin
-          } catch {
-            hasAllowAttr = false
-          }
-          break
-        }
-      }
-      const resp = await sendBackgroundRequest({
-        action: 'getPolicy',
-        frameKey: context.key,
-        origin,
-        isCrossOrigin,
-        hasAllowAttr
-      })
-      const result = resp ? resp.policy || { hid: 'none' } : { hid: 'none' }
-      replyToPage({ type: 'response', id: data.id, result })
-    } catch (e) {
-      replyToPage({
-        type: 'response',
-        id: data.id,
-        result: { hid: 'none', _err: String(e) }
-      })
+    const context = frameContextForPort(requestPort)
+    if (!context || context.destroyed || !context.source) {
+      replyToPage({ type: 'response', id: data.id, result: { hid: 'none' } })
+      return
     }
+    const origin = context.origin
+    const requestId = bridgeInstanceId + '/policy-' + ++nextPolicyRequestId
+    pendingPolicyRequests.set(requestId, { context, pageRequestId: data.id })
+    try {
+      context.source.postMessage(
+        {
+          type: 'webhidPolicyRequest',
+          requestId
+        },
+        origin
+      )
+    } catch {
+      pendingPolicyRequests.delete(requestId)
+      replyToPage({ type: 'response', id: data.id, result: { hid: 'none' } })
+      return
+    }
+    setTimeout(() => {
+      const pending = pendingPolicyRequests.get(requestId)
+      if (!pending) return
+      pendingPolicyRequests.delete(requestId)
+      replyToPage({ type: 'response', id: pending.pageRequestId, result: { hid: 'none' } })
+    }, 3000)
   }
 
   /**
