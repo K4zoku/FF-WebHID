@@ -1,6 +1,6 @@
 import { test, expect } from '../helpers/browser.js'
 import { navigateToPolicyCheck } from '../helpers/browser-utils.js'
-
+import type { Dialog } from '@playwright/test'
 test.describe('MAIN-world pristine intrinsics', () => {
   test.beforeEach(async ({ sharedPage, pageUrl }) => {
     await navigateToPolicyCheck(sharedPage, pageUrl)
@@ -116,5 +116,38 @@ test.describe('MAIN-world pristine intrinsics', () => {
     expect(result.type).toBe('probe')
     expect(result.deviceIsSame).toBe(true)
     expect(result.nativeConstructorsStillAvailable).toBe(true)
+  })
+  test('live settings updates survive a poisoned array iterator', async ({
+    sharedPage,
+    backgroundPage
+  }) => {
+    const origin = await sharedPage.evaluate(() => location.origin)
+    const dialogPromise = new Promise<Dialog>((resolve) => sharedPage.once('dialog', resolve))
+    const operation = sharedPage.evaluate(async () => {
+      Array.prototype[Symbol.iterator] = () => {
+        throw new Error('poisoned Array iterator')
+      }
+      alert('settings-ready')
+      const devices = await navigator.hid.getDevices()
+      return devices.length
+    })
+    const dialog = await dialogPromise
+    try {
+      await backgroundPage.evaluate(
+        (origin) =>
+          browser.storage.local.set({
+            [`settings :: ${origin} :: dataPlane`]: 'nm'
+          }),
+        origin
+      )
+      await dialog.dismiss()
+      const count = await operation
+      expect(count).toBeGreaterThanOrEqual(0)
+    } finally {
+      await backgroundPage.evaluate(
+        (origin) => browser.storage.local.remove(`settings :: ${origin} :: dataPlane`),
+        origin
+      )
+    }
   })
 })

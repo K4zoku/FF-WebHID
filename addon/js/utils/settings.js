@@ -107,7 +107,9 @@
         const changed = {}
         const entries = object.entries(patch)
         for (let i = 0; i < entries.length; i++) {
-          const [k, v] = entries[i]
+          const entry = entries[i]
+          const k = entry[0]
+          const v = entry[1]
           if (k in api || k === 'on' || k === 'set' || k === 'getAll') continue
           if (values[k] !== v) {
             values[k] = v
@@ -288,7 +290,9 @@
     const site = await loadSiteSettings(origin)
     const entries = object.entries(site)
     for (let i = 0; i < entries.length; i++) {
-      const [k, v] = entries[i]
+      const entry = entries[i]
+      const k = entry[0]
+      const v = entry[1]
       global[k] = v
     }
     return global
