@@ -53,7 +53,8 @@
    */
   function groupDevices(devices) {
     const groups = hardenMap(new NativeMap())
-    for (const device of devices) {
+    for (let i = 0; i < devices.length; i++) {
+      const device = devices[i]
       const name = device.productName || NativeString(device.deviceId)
       if (!groups.has(name)) groups.set(name, [])
       arrayOps.push(groups.get(name), device)

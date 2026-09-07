@@ -349,8 +349,10 @@ test.describe.serial('WebHID E2E', () => {
     const result = await sharedPage.evaluate(async (ctx: VendorCtx) => {
       const arrayPush = Array.prototype.push
       const arraySome = Array.prototype.some
+      const arrayIterator = Array.prototype[Symbol.iterator]
       const promiseCatch = Promise.prototype.catch
       const stringIncludes = String.prototype.includes
+      const eventStopImmediatePropagation = Event.prototype.stopImmediatePropagation
       Array.prototype.push = () => {
         throw new Error('poisoned Array.push')
       }
@@ -363,22 +365,36 @@ test.describe.serial('WebHID E2E', () => {
       String.prototype.includes = () => {
         throw new Error('poisoned String.includes')
       }
+      Array.prototype[Symbol.iterator] = () => {
+        throw new Error('poisoned Array.iterator')
+      }
+      Event.prototype.stopImmediatePropagation = () => {
+        throw new Error('poisoned Event.stopImmediatePropagation')
+      }
+      let phase = 'getDevices'
       try {
-        const d = (await navigator.hid.getDevices()).find(
+        const devices = await navigator.hid.getDevices()
+        phase = 'find'
+        const d = devices.find(
           (x) => x.vendorId === ctx.f.vendorId && x.productId === ctx.f.productId
-        )!
+        )
+        if (!d) return { ok: false, phase: 'find', count: devices.length }
+        phase = 'open'
         await d.open()
         const opened = d.opened
+        phase = 'sendReport'
         await d.sendReport(ctx.outputId, new Uint8Array(ctx.size))
+        phase = 'close'
         await d.close()
         return { ok: true, opened, closed: !d.opened }
-      } catch (e) {
-        return { ok: false, error: e instanceof Error ? e.message : String(e) }
+        return { ok: false, phase, error: e instanceof Error ? e.stack : String(e) }
       } finally {
         Array.prototype.push = arrayPush
         Array.prototype.some = arraySome
         Promise.prototype.catch = promiseCatch
         String.prototype.includes = stringIncludes
+        Array.prototype[Symbol.iterator] = arrayIterator
+        Event.prototype.stopImmediatePropagation = eventStopImmediatePropagation
       }
     }, VENDOR_CTX)
     expect(result).toEqual({ ok: true, opened: true, closed: true })

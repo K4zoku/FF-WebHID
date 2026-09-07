@@ -16,6 +16,7 @@
   const mapOps = types.Map.proto.methods
   const setOps = types.Set.proto.methods
   const arrayOps = types.Array.proto.methods
+  const arrayIsArray = types.Array.getStaticDescriptor('isArray').value
   /**
    * Replaces Map instance methods with captured intrinsic operations.
    * @param {Map} value
@@ -63,7 +64,7 @@
    */
   function createSettingsStore(defaults) {
     /** @type {{[key: string]: any}} */
-    const values = { ...defaults }
+    const values = object.assign({}, defaults)
     /** @type {Map<string, Set<Function>>} */
     const listeners = hardenMap(new Map())
 
@@ -74,7 +75,7 @@
      */
     function emit(key, value) {
       const callbacks = listeners.get(key)
-      if (callbacks) for (const callback of callbacks) callback(value, values)
+      if (callbacks) setOps.forEach(callbacks, (callback) => callback(value, values))
     }
 
     const api = {
@@ -84,13 +85,15 @@
        * @returns {Function}
        */
       on(keys, callback) {
-        if (!Array.isArray(keys)) keys = [keys]
-        for (const k of keys) {
+        if (!arrayIsArray(keys)) keys = [keys]
+        for (let i = 0; i < keys.length; i++) {
+          const k = keys[i]
           if (!listeners.has(k)) listeners.set(k, hardenSet(new Set()))
           listeners.get(k).add(callback)
         }
         return () => {
-          for (const k of keys) {
+          for (let i = 0; i < keys.length; i++) {
+            const k = keys[i]
             var cbs = listeners.get(k)
             if (cbs != null) cbs.delete(callback)
           }
@@ -102,7 +105,9 @@
        */
       set(patch) {
         const changed = {}
-        for (const [k, v] of object.entries(patch)) {
+        const entries = object.entries(patch)
+        for (let i = 0; i < entries.length; i++) {
+          const [k, v] = entries[i]
           if (k in api || k === 'on' || k === 'set' || k === 'getAll') continue
           if (values[k] !== v) {
             values[k] = v
@@ -114,7 +119,7 @@
       },
       /** @returns {object} */
       getAll() {
-        return { ...values }
+        return object.assign({}, values)
       }
     }
 
@@ -239,26 +244,33 @@
    * @returns {Promise<object>}
    */
   async function loadGlobalSettings() {
-    const keys = SETTING_NAMES.map((n) => globalSettingKey(n))
+    const keys = []
+    for (let i = 0; i < SETTING_NAMES.length; i++) {
+      arrayOps.push(keys, globalSettingKey(SETTING_NAMES[i]))
+    }
     const raw = await browser.storage.local.get(keys)
     const result = {}
-    for (const name of SETTING_NAMES) {
+    for (let i = 0; i < SETTING_NAMES.length; i++) {
+      const name = SETTING_NAMES[i]
       const k = globalSettingKey(name)
       result[name] = k in raw ? raw[k] : GLOBAL_DEFAULTS[name]
     }
     return result
   }
-
   /**
    * Loads site-specific settings for the given origin from storage.
    * @param {string} origin
    * @returns {Promise<object>}
    */
   async function loadSiteSettings(origin) {
-    const keys = SITE_SETTING_NAMES.map((n) => siteSettingKey(origin, n))
+    const keys = []
+    for (let i = 0; i < SITE_SETTING_NAMES.length; i++) {
+      arrayOps.push(keys, siteSettingKey(origin, SITE_SETTING_NAMES[i]))
+    }
     const raw = await browser.storage.local.get(keys)
     const result = {}
-    for (const name of SITE_SETTING_NAMES) {
+    for (let i = 0; i < SITE_SETTING_NAMES.length; i++) {
+      const name = SITE_SETTING_NAMES[i]
       const k = siteSettingKey(origin, name)
       if (k in raw) result[name] = raw[k]
     }
@@ -274,7 +286,11 @@
     const global = await loadGlobalSettings()
     if (!origin) return global
     const site = await loadSiteSettings(origin)
-    for (const [k, v] of object.entries(site)) global[k] = v
+    const entries = object.entries(site)
+    for (let i = 0; i < entries.length; i++) {
+      const [k, v] = entries[i]
+      global[k] = v
+    }
     return global
   }
 

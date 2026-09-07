@@ -265,6 +265,7 @@
     'ReadableStream',
     'ReadableStreamDefaultReader',
     'RegExp',
+    'Symbol',
     'TrustedTypePolicy',
     'Set',
     'String',

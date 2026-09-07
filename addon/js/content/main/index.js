@@ -30,6 +30,12 @@
   const NativeWorker = types.Worker ? types.Worker.constructor : null
   const NativeBlob = types.Blob ? types.Blob.constructor : null
   const NativeEvent = types.Event ? types.Event.constructor : null
+  const nativeEventStopImmediatePropagation = types.Event
+    ? types.Event.getDescriptor('stopImmediatePropagation').value
+    : null
+  const nativeSymbolIterator = types.Symbol
+    ? types.Symbol.getStaticDescriptor('iterator').value
+    : null
   const NativeDOMException = types.DOMException ? types.DOMException.constructor : null
   const NativeError = types.Error.constructor
   const NativeTypeError = types.TypeError.constructor
@@ -70,6 +76,9 @@
   const Object = NativeObject
   const arrayIsArray = types.Array.getStaticDescriptor('isArray').value
   const arrayOps = types.Array.proto.methods
+  const nativeArrayIterator = nativeSymbolIterator
+    ? arrayOps[nativeSymbolIterator]
+    : null
   const stringOps = types.String.proto.methods
   const nativeClearTimeout = host.timers.clearTimeout
   const nativeCreateTrustedTypePolicy = host.trustedTypesCreatePolicy
@@ -78,6 +87,21 @@
   const callNative = (fn, receiver, ...args) => reflect.apply(fn, receiver, args)
   const nativeBind = types.Function.proto.methods.bind
   const permissionsObject = host.permissions
+  /**
+   * Gives an internal array an iterator that remains independent of page patches.
+   * @param {Array} items
+   * @returns {Array}
+   */
+  function makePristineIterable(items) {
+    if (!nativeSymbolIterator || !nativeArrayIterator) return items
+    object.defineProperty(items, nativeSymbolIterator, {
+      value: () => nativeArrayIterator(items),
+      writable: false,
+      enumerable: false,
+      configurable: false
+    })
+    return items
+  }
   const executionGlobal = isWorker ? host.self : windowObject
   const trustedTypes = host.trustedTypes
   const Navigator = types.Navigator ? types.Navigator.constructor : null
@@ -88,7 +112,6 @@
       ? nativeBind(permissionsObject.query, permissionsObject)
       : null)
   const promiseOps = types.Promise.proto.methods
-  const promiseAll = types.Promise.getStaticDescriptor('all').value
   const stringConstructor = types.String.constructor
   const uint8Ops = types.Uint8Array.proto.methods
   const nativeNumberIsFinite = host.numberIsFinite
@@ -266,7 +289,9 @@
    * @returns {void}
    */
   function pushInPageBatch(deviceId, batch, offset) {
-    for (const r of parseInputReports(batch, offset)) {
+    const reports = parseInputReports(batch, offset)
+    for (let i = 0; i < reports.length; i++) {
+      const r = reports[i]
       dispatchDeviceEvent({
         eventType: 'input_report',
         deviceId,
@@ -370,7 +395,9 @@
           return { result: { ok: false, error: 'Blob URL creation unavailable' }, transfer: null }
         }
         const blobUrl = nativeCreateObjectURL(
-          new NativeBlob([payload.bundleText || ''], { type: 'application/javascript' })
+          new NativeBlob(makePristineIterable([payload.bundleText || '']), {
+            type: 'application/javascript'
+          })
         )
         try {
           worker = new NativeWorker(makeUrl(blobUrl))
@@ -448,18 +475,21 @@
         nativeWorkerPostMessage,
         worker,
         { type: 'setPorts', controlPort: controlChannel.port2, dataPort: dataChannel.port2 },
-        [controlChannel.port2, dataChannel.port2]
+        makePristineIterable([controlChannel.port2, dataChannel.port2])
       )
       callNative(
         nativeMessagePortPostMessage,
         bridgePort,
-        { id: 0, action: 'dataPort', payload: { ...payload } },
-        [controlChannel.port1]
+        { id: 0, action: 'dataPort', payload: object.assign({}, payload) },
+        makePristineIterable([controlChannel.port1])
       )
     } else {
-      callNative(nativeMessagePortPostMessage, bridgePort, { id: 0, action: 'dataPort', payload }, [
-        dataChannel.port2
-      ])
+      callNative(
+        nativeMessagePortPostMessage,
+        bridgePort,
+        { id: 0, action: 'dataPort', payload },
+        makePristineIterable([dataChannel.port2])
+      )
     }
   }
   /**
@@ -593,7 +623,8 @@
       if (captured) return
       const names = arrayIsArray(info && info.trustedTypesNames) ? info.trustedTypesNames : []
       const candidates = names.length ? names : ['webhid-worker']
-      for (const name of candidates) {
+      for (let i = 0; i < candidates.length; i++) {
+        const name = candidates[i]
         if (typeof name !== 'string' || name === "'none'" || name === "'allow-duplicates'") continue
         const policy = claim(name)
         if (policy) {
@@ -642,7 +673,9 @@
     } else {
       defineMissing('createScriptURL')
     }
-    for (const m of ['createHTML', 'createScript']) {
+    const methods = ['createHTML', 'createScript']
+    for (let i = 0; i < methods.length; i++) {
+      const m = methods[i]
       if (typeof rules[m] === 'function' && typeof policy[m] === 'function') {
         const pageFn = rules[m]
         const orig = nativeBind(policy[m], policy)
@@ -709,7 +742,7 @@
         const ch = new NativeMessageChannel()
         bridgePort = ch.port1
         setupBridgePort()
-        if (nativeSelfPostMessage) nativeSelfPostMessage(null, [ch.port2])
+        if (nativeSelfPostMessage) nativeSelfPostMessage(null, makePristineIterable([ch.port2]))
         return Promise.resolve()
       })()
     : new Promise((resolve) => {
@@ -720,7 +753,7 @@
           callNative(nativeWindowRemoveEventListener, windowObject, 'message', onReady)
           const channel = new NativeMessageChannel()
           bridgePort = channel.port1
-          callNative(nativeWindowPostMessage, target, null, '*', [channel.port2])
+          callNative(nativeWindowPostMessage, target, null, '*', makePristineIterable([channel.port2]))
           setupBridgePort()
           resolve()
         }
@@ -759,7 +792,7 @@
     promiseOps.then(handleSpawnWorkerRequest(data), (r) => {
       const msg = { type: 'spawnWorkerResponse', id: data.id, result: r.result }
       if (r.transfer) {
-        callNative(nativeMessagePortPostMessage, bridgePort, msg, [r.transfer])
+        callNative(nativeMessagePortPostMessage, bridgePort, msg, makePristineIterable([r.transfer]))
       } else {
         callNative(nativeMessagePortPostMessage, bridgePort, msg)
       }
@@ -835,7 +868,7 @@
         nativeMessagePortPostMessage,
         bridgePort,
         msg,
-        transfers.length ? transfers : undefined
+        transfers.length ? makePristineIterable(transfers) : undefined
       )
     })
   }
@@ -865,7 +898,10 @@
       const response = await sendRequest('enumerate')
       const devices = http.isOk(response.s) && arrayIsArray(response.D) ? response.D : []
       deviceInfoCache = hardenMap(new NativeMap())
-      for (const device of devices) deviceInfoCache.set(device.deviceId, device)
+      for (let i = 0; i < devices.length; i++) {
+        const device = devices[i]
+        deviceInfoCache.set(device.deviceId, device)
+      }
       return deviceInfoCache
     } catch {
       deviceInfoCache = hardenMap(new NativeMap())
@@ -978,7 +1014,7 @@
           nativeMessagePortPostMessage,
           state.dataPort,
           msg,
-          transfers.length ? transfers : undefined
+          transfers.length ? makePristineIterable(transfers) : undefined
         )
       } catch (error) {
         state.dataPending.delete(reqId)
@@ -1124,7 +1160,7 @@
             state.planeReady = true
             state.planeUnavailable = false
             state.opened = true
-            this.dispatchEvent(new NativeEvent('open'))
+            eventTargetOps.dispatchEvent(state.eventTarget, new NativeEvent('open'))
           } else {
             throw new NativeError('Open failed: ' + (response.error || http.name(response.s || 0)))
           }
@@ -1173,7 +1209,7 @@
               state.dataPort = null
               state.dataPortGeneration = null
             }
-            this.dispatchEvent(new NativeEvent('close'))
+            eventTargetOps.dispatchEvent(state.eventTarget, new NativeEvent('close'))
           } else {
             throw new NativeError('Failed to close device')
           }
@@ -1338,7 +1374,8 @@
    */
   async function resolvePairedDevice(deviceId) {
     deviceInfoCache = null
-    const [hashes, cache] = await promiseAll([getPairedDevices(), getDeviceCache()])
+    const hashes = await getPairedDevices()
+    const cache = await getDeviceCache()
     if (!arrayOps.includes(hashes, deviceId)) return null
     const info = cache.get(deviceId)
     return info ? getOrCreateDevice(info) : null
@@ -1372,7 +1409,13 @@
       }
       if (hidInstance && device) {
         if (detail.eventType === 'disconnect') deviceInfoCache = null
-        hidInstance.dispatchEvent(new HIDConnectionEvent(detail.eventType, { device: device }))
+        const hidStateValue = hidState.get(hidInstance)
+        if (hidStateValue) {
+          eventTargetOps.dispatchEvent(
+            hidStateValue.eventTarget,
+            new HIDConnectionEvent(detail.eventType, { device: device })
+          )
+        }
         if (detail.eventType === 'disconnect') {
           deviceRegistry.delete(detail.deviceId)
         }
@@ -1389,7 +1432,7 @@
               detail.data.byteLength
             )
           : new NativeDataView(new NativeArrayBuffer(0))
-        device.dispatchEvent(
+        eventTargetOps.dispatchEvent(devState.get(device).eventTarget,
           new HIDInputReportEvent('inputreport', {
             device: device,
             reportId: detail.reportId,
@@ -1457,11 +1500,14 @@
    * @returns {boolean}
    */
   function collectionUsesReportIds(collection) {
-    const reports = [
-      ...(collection.inputReports || []),
-      ...(collection.outputReports || []),
-      ...(collection.featureReports || [])
-    ]
+    const reports = []
+    const appendReports = (items) => {
+      if (!items) return
+      for (let i = 0; i < items.length; i++) arrayOps.push(reports, items[i])
+    }
+    appendReports(collection.inputReports)
+    appendReports(collection.outputReports)
+    appendReports(collection.featureReports)
     if (arrayOps.some(reports, (r) => r.reportId !== 0)) return true
     return arrayOps.some(collection.children || [], collectionUsesReportIds)
   }
@@ -1529,7 +1575,7 @@
       }
     }
     reconcileAuthoritativeLifetime(state, { forgotten: true })
-    if (wasOpened) device.dispatchEvent(new NativeEvent('close'))
+    if (wasOpened) eventTargetOps.dispatchEvent(state.eventTarget, new NativeEvent('close'))
     pairedDevices = null
     deviceInfoCache = null
     deviceRegistry.delete(state.deviceId)
@@ -1573,12 +1619,14 @@
   function handleInputReportBatch(state, data) {
     const device = state.self
     if (device && arrayIsArray(data.reports)) {
-      for (const r of data.reports) {
+      for (let i = 0; i < data.reports.length; i++) {
+        const r = data.reports[i]
         if (r == null) continue
         const dataView = r.data
           ? new NativeDataView(r.data)
           : new NativeDataView(new NativeArrayBuffer(0))
-        device.dispatchEvent(
+        eventTargetOps.dispatchEvent(
+          state.eventTarget,
           new HIDInputReportEvent('inputreport', {
             device: device,
             reportId: r.reportId,
@@ -1600,7 +1648,8 @@
       : new NativeDataView(new NativeArrayBuffer(0))
     const device = state.self
     if (device)
-      device.dispatchEvent(
+      eventTargetOps.dispatchEvent(
+        state.eventTarget,
         new HIDInputReportEvent('inputreport', {
           device: device,
           reportId: data.reportId,
@@ -1617,7 +1666,7 @@
     deviceInfoCache = null
     reconcileAuthoritativeLifetime(state)
     const device = state.self
-    if (device) device.dispatchEvent(new HIDConnectionEvent('disconnect', { device: device }))
+    if (device) eventTargetOps.dispatchEvent(state.eventTarget, new HIDConnectionEvent('disconnect', { device: device }))
   }
 
   /** @type {object} */
@@ -1647,7 +1696,8 @@
   function deepFreeze(target) {
     const propNames = reflect.ownKeys(target)
 
-    for (const name of propNames) {
+    for (let i = 0; i < propNames.length; i++) {
+      const name = propNames[i]
       const value = target[name]
 
       if ((value && typeof value === 'object') || typeof value === 'function') {
@@ -1826,14 +1876,28 @@
       if (value == null) throw new TypeError(name + ' must be a sequence')
       const values = []
       try {
-        for (const item of value) arrayOps.push(values, item)
+        if (arrayIsArray(value)) {
+          for (let i = 0; i < value.length; i++) arrayOps.push(values, value[i])
+        } else {
+          const iteratorMethod = nativeSymbolIterator && value[nativeSymbolIterator]
+          if (typeof iteratorMethod !== 'function') {
+            throw new TypeError(name + ' must be a sequence')
+          }
+          const iterator = callNative(iteratorMethod, value)
+          for (;;) {
+            const step = callNative(iterator.next, iterator)
+            if (step.done) break
+            arrayOps.push(values, step.value)
+          }
+        }
       } catch {
         throw new TypeError(name + ' must be a sequence')
       }
       return values
     }
     const filters = toSequence(dictionary.filters, 'HIDDeviceRequestOptions.filters')
-    for (const filter of filters) {
+    for (let i = 0; i < filters.length; i++) {
+      const filter = filters[i]
       if (!isValidFilter(filter)) {
         throw new TypeError('Invalid filter in HIDDeviceRequestOptions.filters')
       }
@@ -1850,7 +1914,8 @@
           'HIDDeviceRequestOptions.exclusionFilters must not be empty when present'
         )
       }
-      for (const filter of exclusionFilters) {
+      for (let i = 0; i < exclusionFilters.length; i++) {
+        const filter = exclusionFilters[i]
         if (!isValidFilter(filter)) {
           throw new TypeError('Invalid filter in HIDDeviceRequestOptions.exclusionFilters')
         }
@@ -1939,8 +2004,8 @@
           const pairedHashes = await getPairedDevices()
           const deviceCache = await getDeviceCache()
           const granted = []
-          for (const hash of pairedHashes) {
-            const device = deviceCache.get(hash)
+          for (let i = 0; i < pairedHashes.length; i++) {
+            const device = deviceCache.get(pairedHashes[i])
             if (device) arrayOps.push(granted, getOrCreateDevice(device))
           }
           logger.debug('getDevices returned ' + granted.length + ' device(s)')
@@ -2113,7 +2178,9 @@
     if (nativeWorkerAddEventListener) {
       callNative(nativeWorkerAddEventListener, instance, 'message', (e) => {
         if (e.data === null && e.ports && e.ports[0]) {
-          e.stopImmediatePropagation()
+          if (nativeEventStopImmediatePropagation) {
+            callNative(nativeEventStopImmediatePropagation, e)
+          }
           promiseOps.then(bridgeReady, () => {
             if (!bridgePort) return
             const id = frameNonce + ':' + ++nextReqId
@@ -2126,7 +2193,7 @@
               nativeMessagePortPostMessage,
               bridgePort,
               { id, action: 'workerPort', payload: {} },
-              [e.ports[0]]
+              makePristineIterable([e.ports[0]])
             )
           })
         }
