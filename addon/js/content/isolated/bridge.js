@@ -327,8 +327,9 @@
 
   browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
     const origin = typeof request.origin === 'string' ? request.origin : ''
-    if (request.action === 'getOpenDeviceIds') {
-      sendResponse({ ids: Array.from(getOpenDeviceIds(origin)) })
+    const knownOrigin = !origin || collectFrameOrigins().includes(origin)
+    if (!knownOrigin && (request.action === 'getOpenDeviceIds' || request.action === 'getDataPlaneStatus')) {
+      sendResponse(request.action === 'getOpenDeviceIds' ? { ids: [] } : { planes: [], defaultPlane: webhid.import('GLOBAL_DEFAULTS').dataPlane })
       return true
     }
     if (request.action === 'getFrameOrigins') {

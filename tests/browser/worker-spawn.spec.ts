@@ -667,28 +667,45 @@ test('site settings stay isolated across frame origins', async ({
   backgroundPage
 }) => {
   const topOrigin = `http://localhost:${servers.main.port}`
+  const topUrl = pageUrl('/iframe-parent?settings-origin-test=' + Date.now())
   const childOrigin = `http://localhost:${servers.cross.port}`
-  const keys = [`settings :: ${topOrigin} :: dataPlane`, `settings :: ${childOrigin} :: dataPlane`]
+  const keys = [
+    `settings :: ${topOrigin} :: dataPlane`,
+    `settings :: ${childOrigin} :: dataPlane`,
+    `settings :: ${childOrigin} :: workerPolyfillEnabled`
+  ]
   await backgroundPage.evaluate(
-    ({ keys, topOrigin, childOrigin }) =>
+    ({ keys }) =>
       browser.storage.local.set({
         [keys[0]]: 'nm',
         [keys[1]]: 'ws',
-        [`settings :: ${childOrigin} :: workerPolyfillEnabled`]: true
+        [keys[2]]: true
       }),
-    { keys, topOrigin, childOrigin }
+    { keys }
   )
   try {
-    await page.goto(pageUrl('/iframe-parent'), { waitUntil: 'domcontentloaded', timeout: 15000 })
+    await page.goto(topUrl, { waitUntil: 'domcontentloaded', timeout: 15000 })
     await page.evaluate((origin) => {
       const iframe = document.createElement('iframe')
       iframe.src = origin + '/policy-check'
       document.body.appendChild(iframe)
     }, childOrigin)
-    await expect.poll(() => page.frames().some((frame) => frame.url().startsWith(childOrigin))).toBe(true)
-    const statuses = await backgroundPage.evaluate(async ({ topOrigin, childOrigin }) => {
+    await expect
+      .poll(
+        () =>
+          backgroundPage.evaluate(async ({ topUrl, childOrigin }) => {
+            const tabs = await browser.tabs.query({})
+            const tab = tabs.find((entry) => entry.url?.startsWith(topUrl))
+            if (!tab?.id) return false
+            const response = await browser.tabs.sendMessage(tab.id, { action: 'getFrameOrigins' })
+            return response?.origins?.includes(childOrigin) === true
+          }, { topUrl, childOrigin }),
+        { timeout: 10000 }
+      )
+      .toBe(true)
+    const statuses = await backgroundPage.evaluate(async ({ topUrl, topOrigin, childOrigin }) => {
       const tabs = await browser.tabs.query({})
-      const tab = tabs.find((entry) => entry.url?.startsWith(topOrigin))
+      const tab = tabs.find((entry) => entry.url?.startsWith(topUrl))
       if (!tab?.id) return null
       return {
         top: await browser.tabs.sendMessage(tab.id, {
@@ -698,12 +715,17 @@ test('site settings stay isolated across frame origins', async ({
         child: await browser.tabs.sendMessage(tab.id, {
           action: 'getDataPlaneStatus',
           origin: childOrigin
+        }),
+        unknown: await browser.tabs.sendMessage(tab.id, {
+          action: 'getDataPlaneStatus',
+          origin: 'http://unknown.invalid'
         })
       }
-    }, { topOrigin, childOrigin })
+    }, { topUrl, topOrigin, childOrigin })
     expect(statuses).toEqual({
       top: expect.objectContaining({ defaultPlane: 'nm' }),
-      child: expect.objectContaining({ defaultPlane: 'ws' })
+      child: expect.objectContaining({ defaultPlane: 'ws' }),
+      unknown: expect.objectContaining({ planes: [], defaultPlane: expect.any(String) })
     })
   } finally {
     await backgroundPage.evaluate((keys) => browser.storage.local.remove(keys), keys)
