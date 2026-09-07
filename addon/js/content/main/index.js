@@ -1291,10 +1291,12 @@
       /** @returns {Promise<void>} */
       value: async function () {
         const state = devState.get(this)
-        if (!state) return
-        if (state.forgotten) return
+        if (!state || state.forgotten) return
+        const response = await sendRequest('unpairDevice', { deviceId: state.deviceId })
+        if (!response || response.success !== true) {
+          throw new NativeDOMException('Failed to forget device', 'NetworkError')
+        }
         await teardownForgottenDevice(this, state)
-        await sendRequest('unpairDevice', { deviceId: state.deviceId })
       },
       enumerable: false,
       configurable: true,

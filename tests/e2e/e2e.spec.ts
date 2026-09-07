@@ -324,21 +324,53 @@ test.describe.serial('WebHID E2E', () => {
     }, VENDOR_CTX)
   })
 
-  test('forget unpairs the device and sendReport fails after', async ({ sharedPage }) => {
-    const result = await sharedPage.evaluate(async (ctx: VendorCtx) => {
-      const ds = await navigator.hid.getDevices()
-      const d = ds.find((x) => x.vendorId === ctx.f.vendorId && x.productId === ctx.f.productId)!
-      await d.open()
-      await d.forget()
-      let sendError: string | null = null
-      try {
-        await d.sendReport(ctx.outputId, new Uint8Array(ctx.size))
-      } catch (e) {
-        sendError = e instanceof Error ? e.name : String(e)
-      }
-      return { sendError, remaining: (await navigator.hid.getDevices()).length }
-    }, VENDOR_CTX)
-    expect(result.sendError).toBe('InvalidStateError')
-    expect(result.remaining).toBe(1)
+  test('forget revokes sibling origin session and permission', async ({ sharedPage, httpPort }) => {
+    const siblingPage = await sharedPage.context().newPage()
+    try {
+      await siblingPage.goto(`http://localhost:${httpPort}/tests/test-page.html`, {
+        waitUntil: 'domcontentloaded',
+        timeout: 15000
+      })
+      await siblingPage.waitForFunction(() => typeof navigator.hid !== 'undefined', {
+        timeout: 15000
+      })
+      await sharedPage.evaluate(async (ctx: VendorCtx) => {
+        const ds = await navigator.hid.getDevices()
+        const d = ds.find((x) => x.vendorId === ctx.f.vendorId && x.productId === ctx.f.productId)!
+        await d.open()
+      }, VENDOR_CTX)
+      await siblingPage.evaluate(async (ctx: VendorCtx) => {
+        const ds = await navigator.hid.getDevices()
+        const d = ds.find((x) => x.vendorId === ctx.f.vendorId && x.productId === ctx.f.productId)!
+        await d.open()
+        ;(globalThis as typeof globalThis & { __siblingDevice?: HIDDevice }).__siblingDevice = d
+      }, VENDOR_CTX)
+      const result = await sharedPage.evaluate(async (ctx: VendorCtx) => {
+        const ds = await navigator.hid.getDevices()
+        const d = ds.find((x) => x.vendorId === ctx.f.vendorId && x.productId === ctx.f.productId)!
+        await d.forget()
+        let sendError: string | null = null
+        try {
+          await d.sendReport(ctx.outputId, new Uint8Array(ctx.size))
+        } catch (e) {
+          sendError = e instanceof Error ? e.name : String(e)
+        }
+        return { sendError, remaining: (await navigator.hid.getDevices()).length }
+      }, VENDOR_CTX)
+      const siblingError = await siblingPage.evaluate(async (ctx: VendorCtx) => {
+        const d = (globalThis as typeof globalThis & { __siblingDevice?: HIDDevice }).__siblingDevice
+        try {
+          await d!.sendReport(ctx.outputId, new Uint8Array(ctx.size))
+          return null
+        } catch (e) {
+          return e instanceof Error ? e.name : String(e)
+        }
+      }, VENDOR_CTX)
+      expect(result.sendError).toBe('InvalidStateError')
+      expect(result.remaining).toBe(1)
+      expect(siblingError).toBe('InvalidStateError')
+    } finally {
+      await siblingPage.close()
+    }
   })
 })

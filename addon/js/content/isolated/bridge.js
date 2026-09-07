@@ -2026,7 +2026,12 @@
           nmOpenAttempt = true
         }
       }
-      const effectiveAction = action === 'enumerate' ? 'enumeratePaired' : action
+      const effectiveAction =
+        action === 'enumerate'
+          ? 'enumeratePaired'
+          : action === 'unpairDevice'
+            ? 'revokeDevice'
+            : action
       const msg = Object.assign({}, payload || {}, {
         action: effectiveAction,
         origin,
