@@ -135,8 +135,8 @@
    * Marks the current tab as using WebHID so its page action becomes visible.
    * @returns {void}
    */
-  function markPageActionUsed() {
-    if (pageActionMarked || settings.hidePageAction) return
+  function markPageActionUsed(origin = window.location.origin) {
+    if (pageActionMarked || settingsForOrigin(origin).hidePageAction) return
     pageActionMarked = true
     sendBackgroundRequest({ action: 'showPageAction' }).catch(() => {
       pageActionMarked = false
@@ -359,7 +359,14 @@
         if (!context || (origin && context.origin !== origin)) continue
         planes.push(statusFor(key, 'nm', null))
       }
-      sendResponse({ planes, defaultPlane: settings.dataPlane })
+      loadSettingsForOrigin(origin || window.location.origin)
+        .then((store) => sendResponse({ planes, defaultPlane: store.dataPlane }))
+        .catch(() =>
+          sendResponse({
+            planes,
+            defaultPlane: webhid.import('GLOBAL_DEFAULTS').dataPlane
+          })
+        )
       return true
     }
   })
@@ -516,10 +523,42 @@
   let wtCertHash = null
   /** @type {import("./types.js").SettingsStore} */
   const settings = createSettingsStore(webhid.import('GLOBAL_DEFAULTS'))
-  logger.bindSettings(settings)
-  settings.on('hidePageAction', (hidden) => {
-    if (!hidden) pageActionMarked = false
-  })
+  /** @type {Map<string, import("./types.js").SettingsStore>} */
+  const settingsByOrigin = new Map([[window.location.origin, settings]])
+  /** @type {Map<string, Promise<import("./types.js").SettingsStore>>} */
+  const settingsLoads = new Map()
+  /**
+   * @param {string} origin
+   * @returns {import("./types.js").SettingsStore}
+   */
+  function settingsForOrigin(origin) {
+    if (settingsByOrigin.has(origin)) return settingsByOrigin.get(origin)
+    const store = createSettingsStore(webhid.import('GLOBAL_DEFAULTS'))
+    settingsByOrigin.set(origin, store)
+    installSettingsListeners(origin, store)
+    return store
+  }
+  /**
+   * @param {string} origin
+   * @returns {Promise<import("./types.js").SettingsStore>}
+   */
+  function loadSettingsForOrigin(origin) {
+    const existing = settingsLoads.get(origin)
+    if (existing) return existing
+    const load = loadEffectiveSettings(origin)
+      .then((values) => {
+        const store = settingsForOrigin(origin)
+        store.set(values)
+        return store
+      })
+      .catch((error) => {
+        logger.warn('load settings failed for', origin, ':', error.message)
+        return settingsForOrigin(origin)
+      })
+    settingsLoads.set(origin, load)
+    return load
+  }
+  installSettingsListeners(window.location.origin, settings)
   /** @type {Map<Window, MessagePort>} */
   const pagePorts = new Map()
   /** @type {Map<MessagePort, Window>} */
@@ -650,6 +689,8 @@
   const allowedByOrigin = new Map()
   /** @type {Set<string>} origins whose allowed set is loaded. */
   const loadedOrigins = new Set()
+  /** @type {Map<string, Promise<void>>} */
+  const allowedLoads = new Map()
   const allowedDeviceIdsQueue = []
 
   /**
@@ -669,19 +710,25 @@
   }
 
   /**
-   * Checks whether a device is in the allowed set for `origin`, queuing if
-   * that origin's set is not yet loaded.
+   * Checks whether a device is in the allowed set for `origin`, loading that
+   * origin lazily when necessary.
    * @param {string} deviceId
    * @param {string} origin
    * @returns {Promise<boolean>}
    */
   function isDeviceAllowed(deviceId, origin) {
+    if (!origin) return Promise.resolve(false)
     if (loadedOrigins.has(origin)) {
       return Promise.resolve((allowedByOrigin.get(origin) || new Set()).has(deviceId))
     }
-    return new Promise((resolve) => {
+    const pending = new Promise((resolve) => {
       allowedDeviceIdsQueue.push({ origin, deviceId, resolve })
     })
+    if (!allowedLoads.has(origin)) {
+      const load = loadAllowedDeviceIds(origin).finally(() => allowedLoads.delete(origin))
+      allowedLoads.set(origin, load)
+    }
+    return pending
   }
 
   /**
@@ -812,49 +859,53 @@
     readyGenerations.delete(key)
     maybeDisconnectRuntimeDataPort(deviceId)
   }
-  let cachedSpawnMode = null
+  /** @type {Map<string, string>} */
+  const cachedSpawnModes = new Map()
 
   /**
+   * @param {FrameContext} context
    * @returns {Promise<string>}
    */
-  async function resolveSpawnMode() {
-    if (cachedSpawnMode) return cachedSpawnMode
+  async function resolveSpawnMode(context) {
+    const origin = context.origin
+    const originSettings = await loadSettingsForOrigin(origin)
+    const cached = cachedSpawnModes.get(origin)
+    if (cached) return cached
     if (isChromium) {
-      cachedSpawnMode = 'blob'
+      cachedSpawnModes.set(origin, 'blob')
       return 'blob'
     }
-    const origin = window.location.origin
-    let mode = settings.workerSpawnMode
+    let mode = originSettings.workerSpawnMode
     if (origin) {
       const site = await loadSiteSettings(origin)
       if (site.workerSpawnMode !== undefined) mode = site.workerSpawnMode
     }
     if (mode === 'blob') {
-      cachedSpawnMode = 'blob'
+      cachedSpawnModes.set(origin, 'blob')
       return 'blob'
     }
     try {
       const info = await sendBackgroundRequest({
         action: 'getCspInfo',
-        origin: window.location.origin
+        origin
       })
       if (info && info.needsBlobFallback) {
         if (mode === 'shadow') {
-          cachedSpawnMode = 'nm'
+          cachedSpawnModes.set(origin, 'nm')
           return 'nm'
         }
         const mv2 = browser.runtime.getManifest().manifest_version === 2
         if (!mv2 && info.headerShadowBlocked) {
-          cachedSpawnMode = 'nm'
+          cachedSpawnModes.set(origin, 'nm')
           return 'nm'
         }
-        cachedSpawnMode = 'blob'
+        cachedSpawnModes.set(origin, 'blob')
         return 'blob'
       }
     } catch (e) {
-      logger.debug('getCspInfo failed', e)
+      logger.debug('getCspInfo failed for', origin, e)
     }
-    cachedSpawnMode = 'shadow'
+    cachedSpawnModes.set(origin, 'shadow')
     return 'shadow'
   }
 
@@ -1002,7 +1053,7 @@
       return false
     }
     let spawnResult = null
-    const spawnMode = await resolveSpawnMode()
+    const spawnMode = await resolveSpawnMode(context)
     if (spawnMode === 'nm') return false
     try {
       spawnResult = await attemptWorkerSpawn(
@@ -1172,7 +1223,7 @@
     const gen = beginPlaneGeneration(key)
     const spawnOpts = { ...opts, clientKey, generation: gen }
     let ok
-    if (settings.useWorker === false && opts.wtPort != null) {
+    if (settingsForOrigin(context.origin).useWorker === false && opts.wtPort != null) {
       ok = await spawnInPageDataPlane(context, deviceId, sessionToken, spawnOpts)
     } else {
       ok = await spawnWorker(context, deviceId, sessionToken, wsPort, spawnOpts, gen)
@@ -1281,7 +1332,7 @@
               'WS data plane will fall back to NM'
           )
         }
-        settings.set(await loadEffectiveSettings(window.location.origin))
+        await loadSettingsForOrigin(window.location.origin)
         loadAllowedDeviceIds(window.location.origin)
       }
     } catch (e) {
@@ -1419,13 +1470,14 @@
     })
     const generation = spawnGen.get(key)
     if (context.destroyed || !frameContexts.has(context.key)) return null
-    if (settings.dataPlane === 'nm') {
+    const originSettings = settingsForOrigin(context.origin)
+    if (originSettings.dataPlane === 'nm') {
       return fallbackToNm(context, deviceId, token, clientKey, generation, {
         rewire: true,
         clientPort
       })
     }
-    if (settings.dataPlane === 'wt' && wtPort != null) {
+    if (originSettings.dataPlane === 'wt' && wtPort != null) {
       return spawnDataPlane(context, deviceId, token, null, {
         wtPort,
         wtCertHash,
@@ -1434,7 +1486,7 @@
         rewire: true
       })
     }
-    if (settings.dataPlane === 'ws' || settings.dataPlane === 'wt') {
+    if (originSettings.dataPlane === 'ws' || originSettings.dataPlane === 'wt') {
       return spawnDataPlane(context, deviceId, token, wsPort, {
         clientKey,
         clientPort,
@@ -1677,10 +1729,11 @@
           logger.info('worker ready for', deviceId)
           workerReadyDevices.add(key)
           markPlaneReady(key, generation)
+          const originSettings = settingsForOrigin(context.origin)
           proxy.postMessage({
             type: 'settings',
-            dataPlane: settings.dataPlane,
-            logLevel: settings.logLevel
+            dataPlane: originSettings.dataPlane,
+            logLevel: originSettings.logLevel
           })
           return
         }
@@ -1787,11 +1840,12 @@
    * @param {object} data
    * @returns {Promise<void>}
    */
-  async function handleGetSettingsRequest(data) {
+  async function handleGetSettingsRequest(data, _ports, requestPort) {
     try {
-      const global = await loadEffectiveSettings(window.location.origin)
-      settings.set(global)
-      replyToPage({ type: 'response', id: data.id, result: global })
+      const context = frameContextForPort(requestPort)
+      const origin = context ? context.origin : ''
+      const store = await loadSettingsForOrigin(origin)
+      replyToPage({ type: 'response', id: data.id, result: store.getAll() })
     } catch {
       replyToPage({ type: 'response', id: data.id, result: {} })
     }
@@ -1801,12 +1855,17 @@
    * @param {object} data
    * @returns {Promise<void>}
    */
-  async function handleRequestDeviceRequest(data) {
+  async function handleRequestDeviceRequest(data, _ports, requestPort) {
     const payload = data.payload || {}
     const filters = payload.filters || []
     const exclusionFilters = payload.exclusionFilters || []
+    const context = frameContextForPort(requestPort)
+    const origin = context ? context.origin : window.location.origin
+    const originSettings = await loadSettingsForOrigin(origin)
     const pickerMode =
-      isChromium && settings.devicePickerMode === 'pageAction' ? 'modal' : settings.devicePickerMode
+      isChromium && originSettings.devicePickerMode === 'pageAction'
+        ? 'modal'
+        : originSettings.devicePickerMode
 
     if (pickerMode === 'pageAction' || pickerMode === 'window') {
       sendBackgroundRequest({
@@ -1814,8 +1873,8 @@
         requestId: data.id,
         filters,
         exclusionFilters,
-        origin: getRequestOrigin(data),
-        mode: pickerMode
+        mode: pickerMode,
+        origin,
       }).catch((e) => logger.debug('showPicker send failed', e))
       const pickerTimeout = setTimeout(() => {
         browser.runtime.onMessage.removeListener(onPickerResult)
@@ -1898,7 +1957,7 @@
     }).catch((e) => logger.debug('deviceCountChanged (open) failed', e))
     logger.debug('open ok deviceId=' + deviceId + ' wsPort=' + response.w)
     const key = planeKeyForClient(context, deviceId, clientKey)
-    const dataPlane = settings.dataPlane
+    const dataPlane = settingsForOrigin(context.origin).dataPlane
     let generation
     if (dataPlane === 'nm' || nmPlanes.has(key)) {
       generation = beginPlaneGeneration(key)
@@ -2001,6 +2060,7 @@
         replyToPage({ type: 'response', id, result: { s: 403 } })
         return
       }
+      if (action === 'open') await loadSettingsForOrigin(origin)
       if (action === 'open') {
         const allowed = await isDeviceAllowed(deviceId, origin)
         if (!allowed) {
@@ -2020,7 +2080,7 @@
           replyToPage({ type: 'response', id, result: { s: 503 } })
           return
         }
-        if (settings.dataPlane === 'nm' || nmPlanes.has(key)) {
+        if (settingsForOrigin(origin).dataPlane === 'nm' || nmPlanes.has(key)) {
           ensureRuntimeDataPort(deviceId)
           retainNmOpenAttempt(key)
           nmOpenAttempt = true
@@ -2180,7 +2240,10 @@
     if (!data || data.id === undefined) return
 
     logger.debug('req action=' + data.action + ' id=' + data.id)
-    if (PAGE_ACTION_API_ACTIONS.has(data.action)) markPageActionUsed()
+    const requestContext = frameContextForPort(requestPort)
+    if (PAGE_ACTION_API_ACTIONS.has(data.action)) {
+      markPageActionUsed(requestContext ? requestContext.origin : window.location.origin)
+    }
 
     const handler = REQUEST_HANDLERS[data.action]
     if (handler) {
@@ -2504,7 +2567,7 @@
           : msg.type === 'sendFeature'
             ? 'sendFeatureReport'
             : 'receiveFeatureReport'
-      markPageActionUsed()
+      markPageActionUsed(context.origin)
       const payload = { deviceId, reportId: msg.reportId }
       if (msg.type === 'send' || msg.type === 'sendFeature') payload.data = msg.data
       const reqId = allocateDataReqId()
@@ -2522,13 +2585,15 @@
   }
 
   /**
-   * Respawns every active frame/device plane for the requested mode.
+   * Respawns active planes for the requested origin and mode.
    * @param {string} dp
+   * @param {string} origin
    * @returns {void}
    */
-  function respawnPlanesForMode(dp) {
+  function respawnPlanesForMode(dp, origin) {
     if (dp !== 'ws' && dp !== 'wt') return
     for (const context of frameContexts.values()) {
+      if (context.origin !== origin) continue
       for (const { sessions } of sessionsForContext(context)) {
         const clientKey = clientKeyForSessions(sessions)
         const clientPort = clientPortForSessions(sessions)
@@ -2550,11 +2615,13 @@
 
   /**
    * @param {string} dp
+   * @param {string} origin
    * @returns {Promise<void>}
    */
-  async function applyDataPlane(dp) {
+  async function applyDataPlane(dp, origin) {
     const active = []
     for (const context of frameContexts.values()) {
+      if (context.origin !== origin) continue
       for (const { sessions } of sessionsForContext(context)) {
         const clientKey = clientKeyForSessions(sessions)
         const clientPort = clientPortForSessions(sessions)
@@ -2603,7 +2670,7 @@
         })
       }
     } else {
-      respawnPlanesForMode(dp)
+      respawnPlanesForMode(dp, origin)
       for (const { context, deviceId, token, clientKey } of active) {
         sendBackgroundRequest({
           action: 'setDataPlane',
@@ -2619,43 +2686,48 @@
     logger.info('data plane changed:', dp, 'open devices:', active.length)
   }
 
-  settings.on('dataPlane', (dp) => applyDataPlane(dp))
-
-  settings.on('workerSpawnMode', () => {
-    cachedSpawnMode = null
-    applyDataPlane(settings.dataPlane)
-  })
-
-  settings.on('useWorker', () => applyDataPlane(settings.dataPlane))
-
-  settings.on(['dataPlane', 'logLevel'], () => {
-    const all = settings.getAll()
-    const patch = {}
-    for (const k of ['dataPlane', 'logLevel']) {
-      patch[k] = all[k]
-    }
-    replyToPage({ type: 'settings', settings: patch })
-    const workerMsg = { type: 'settings', ...patch }
-    for (const entry of workers.values()) {
-      if (entry.worker) entry.worker.postMessage(workerMsg)
-    }
-  })
+  /**
+   * @param {string} origin
+   * @param {import("./types.js").SettingsStore} store
+   * @returns {void}
+   */
+  function installSettingsListeners(origin, store) {
+    logger.bindSettings(store)
+    store.on('hidePageAction', (hidden) => {
+      if (!hidden) pageActionMarked = false
+    })
+    store.on('dataPlane', (dp) => applyDataPlane(dp, origin))
+    store.on('workerSpawnMode', () => {
+      cachedSpawnModes.delete(origin)
+      applyDataPlane(store.dataPlane, origin)
+    })
+    store.on('useWorker', () => applyDataPlane(store.dataPlane, origin))
+    store.on(['dataPlane', 'logLevel'], () => {
+      const all = store.getAll()
+      const patch = { dataPlane: all.dataPlane, logLevel: all.logLevel }
+      for (const [port, context] of frameContextByPort) {
+        if (context.origin === origin) port.postMessage({ type: 'settings', settings: patch })
+      }
+      for (const [key, entry] of workers) {
+        const context = contextForPlaneKey(key)
+        if (context && context.origin === origin && entry.worker) {
+          entry.worker.postMessage({ type: 'settings', ...patch })
+        }
+      }
+    })
+  }
 
   browser.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return
-    const origin = window.location.origin
-    const patch = {}
     for (const [key, change] of Object.entries(changes)) {
       const parsed = parseSettingsKey(key)
       if (!parsed) continue
       if (parsed.scope === 'global') {
-        patch[parsed.name] = change.newValue
-      } else if (parsed.scope === 'site' && parsed.origin === origin) {
-        patch[parsed.name] = change.newValue
+        for (const store of settingsByOrigin.values()) store.set({ [parsed.name]: change.newValue })
+      } else {
+        settingsForOrigin(parsed.origin).set({ [parsed.name]: change.newValue })
       }
     }
-    if (Object.keys(patch).length === 0) return
-    settings.set(patch)
   })
 
   browser.runtime.onMessage.addListener((message) => {

@@ -659,3 +659,53 @@ test.describe('Worker spawn mode detection', () => {
       .toBe(0)
   })
 })
+test('site settings stay isolated across frame origins', async ({
+  page,
+  pageUrl,
+  crossUrl,
+  servers,
+  backgroundPage
+}) => {
+  const topOrigin = `http://localhost:${servers.main.port}`
+  const childOrigin = `http://localhost:${servers.cross.port}`
+  const keys = [`settings :: ${topOrigin} :: dataPlane`, `settings :: ${childOrigin} :: dataPlane`]
+  await backgroundPage.evaluate(
+    ({ keys, topOrigin, childOrigin }) =>
+      browser.storage.local.set({
+        [keys[0]]: 'nm',
+        [keys[1]]: 'ws',
+        [`settings :: ${childOrigin} :: workerPolyfillEnabled`]: true
+      }),
+    { keys, topOrigin, childOrigin }
+  )
+  try {
+    await page.goto(pageUrl('/iframe-parent'), { waitUntil: 'domcontentloaded', timeout: 15000 })
+    await page.evaluate((origin) => {
+      const iframe = document.createElement('iframe')
+      iframe.src = origin + '/policy-check'
+      document.body.appendChild(iframe)
+    }, childOrigin)
+    await expect.poll(() => page.frames().some((frame) => frame.url().startsWith(childOrigin))).toBe(true)
+    const statuses = await backgroundPage.evaluate(async ({ topOrigin, childOrigin }) => {
+      const tabs = await browser.tabs.query({})
+      const tab = tabs.find((entry) => entry.url?.startsWith(topOrigin))
+      if (!tab?.id) return null
+      return {
+        top: await browser.tabs.sendMessage(tab.id, {
+          action: 'getDataPlaneStatus',
+          origin: topOrigin
+        }),
+        child: await browser.tabs.sendMessage(tab.id, {
+          action: 'getDataPlaneStatus',
+          origin: childOrigin
+        })
+      }
+    }, { topOrigin, childOrigin })
+    expect(statuses).toEqual({
+      top: expect.objectContaining({ defaultPlane: 'nm' }),
+      child: expect.objectContaining({ defaultPlane: 'ws' })
+    })
+  } finally {
+    await backgroundPage.evaluate((keys) => browser.storage.local.remove(keys), keys)
+  }
+})
