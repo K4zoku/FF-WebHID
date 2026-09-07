@@ -72,7 +72,7 @@
    * @returns {Promise<void>}
    */
   async function notifyAllowedDevicesChanged(origin, deviceIds) {
-    await forTabsOfOrigin(origin, (tab) =>
+    await forTabsOfOrigin(null, (tab) =>
       browser.tabs
         .sendMessage(tab.id, { action: 'allowedDevicesChanged', origin, deviceIds })
         .catch(() => {})

@@ -2041,12 +2041,13 @@
       )
     )
     if (devices.length > 1) {
-      sendBackgroundRequest({
+      await sendBackgroundRequest({
         action: 'recordGrantGroup',
         origin,
         deviceIds: devices.map((device) => device.deviceId)
-      }).catch(() => {})
+      }).catch((e) => logger.debug('recordGrantGroup failed', e))
     }
+    await loadAllowedDeviceIds(origin)
   }
 
   /**

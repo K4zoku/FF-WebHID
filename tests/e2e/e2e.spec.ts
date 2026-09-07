@@ -323,6 +323,27 @@ test.describe.serial('WebHID E2E', () => {
       }
     }, VENDOR_CTX)
   })
+  test('hot grant cache refreshes before immediate open', async ({ sharedPage, gamepadDevice }) => {
+    await sharedPage.evaluate(async (filter: DeviceFilter) => {
+      const device = (await navigator.hid.getDevices()).find(
+        (entry) => entry.vendorId === filter.vendorId && entry.productId === filter.productId
+      )
+      if (!device) throw new Error('gamepad device missing before regrant')
+      if (device.opened) await device.close()
+    }, GAMEPAD)
+    expect(await grantDevicePermission(sharedPage, [GAMEPAD])).toBe(1)
+    const opened = await sharedPage.evaluate(async (filter: DeviceFilter) => {
+      const device = (await navigator.hid.getDevices()).find(
+        (entry) => entry.vendorId === filter.vendorId && entry.productId === filter.productId
+      )
+      if (!device) return false
+      await device.open()
+      await device.close()
+      return true
+    }, GAMEPAD)
+    expect(opened).toBe(true)
+    expect(gamepadDevice.vid).toBe(0x16c0)
+  })
 
   test('MAIN HID operations survive hostile prototype patches', async ({ sharedPage }) => {
     const result = await sharedPage.evaluate(async (ctx: VendorCtx) => {
