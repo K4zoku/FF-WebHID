@@ -1627,6 +1627,7 @@
     deleteReservation: (source) => bootstrapReservations.delete(source),
     getContext: (source) => frameContextBySource.get(source) || null,
     getIdentity: browserFrameIdentity,
+    getCurrentIdentity: browserFrameIdentity,
     hasLifetime: hasBrowserLifetime,
     sameLifetime: sameBrowserLifetime,
     accept: acceptBootstrapPort,

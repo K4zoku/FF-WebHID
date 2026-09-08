@@ -13,6 +13,7 @@
       deleteReservation,
       getContext,
       getIdentity,
+      getCurrentIdentity,
       hasLifetime,
       sameLifetime,
       accept,
@@ -28,52 +29,68 @@
       }
       const port = ports[0]
       const source = event.source
-      if (getReservation(source)) {
-        reject(port)
+      const identity = getIdentity(source)
+      const reservation = getReservation(source)
+      if (reservation) {
+        if (
+          !hasLifetime(identity) ||
+          !hasLifetime(reservation.identity) ||
+          sameLifetime(reservation.identity, identity)
+        ) {
+          reject(port)
+          return
+        }
+        reject(reservation.port)
+        reservation.port = port
+        reservation.identity = identity
+        reservation.origin = event.origin
+        reservation.failed = false
         return
       }
-      const identity = getIdentity(source)
       const previous = getContext(source)
       if (!previous) {
         accept(port, source, event.origin, identity)
         return
       }
-      if (
-        sameLifetime(previous, identity) ||
-        !hasLifetime(previous) ||
-        !hasLifetime(identity)
-      ) {
+      if (sameLifetime(previous, identity) || !hasLifetime(previous) || !hasLifetime(identity)) {
         reject(port)
         return
       }
-      const reservation = {
+      const transition = {
         previous,
         identity,
         port,
         origin: event.origin,
         failed: false
       }
-      setReservation(source, reservation)
-      const rejectReservation = () => {
-        reservation.failed = true
-        reject(reservation.port)
+      setReservation(source, transition)
+      const rejectTransition = () => {
+        transition.failed = true
+        reject(transition.port)
+        deleteReservation(source)
       }
       destroy(previous).then(
         () => {
-          if (getReservation(source) !== reservation || reservation.failed) return
+          const current = getReservation(source)
+          if (current !== transition || transition.failed) return
           if (!previous.destroyed) {
-            rejectReservation()
+            rejectTransition()
+            return
+          }
+          const browserIdentity = getCurrentIdentity(source)
+          if (!hasLifetime(browserIdentity) || !sameLifetime(transition.identity, browserIdentity)) {
+            rejectTransition()
             return
           }
           try {
-            accept(reservation.port, source, reservation.origin, reservation.identity)
+            accept(transition.port, source, transition.origin, transition.identity)
             deleteReservation(source)
           } catch {
-            rejectReservation()
+            rejectTransition()
           }
         },
         () => {
-          if (getReservation(source) === reservation) rejectReservation()
+          if (getReservation(source) === transition) rejectTransition()
         }
       )
     }

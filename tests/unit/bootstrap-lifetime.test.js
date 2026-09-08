@@ -60,6 +60,19 @@ function identity(documentId) {
   return { frameId: 7, documentId }
 }
 
+function makeState(cleanup, nextDocumentId, currentDocumentId = nextDocumentId) {
+  return {
+    contexts: new Map(),
+    reservations: new Map(),
+    accepted: [],
+    rejected: [],
+    destroyed: [],
+    cleanup,
+    nextIdentity: identity(nextDocumentId),
+    currentIdentity: identity(currentDocumentId)
+  }
+}
+
 function dependencies(state) {
   return {
     getReservation: (source) => state.reservations.get(source),
@@ -67,6 +80,7 @@ function dependencies(state) {
     deleteReservation: (source) => state.reservations.delete(source),
     getContext: (source) => state.contexts.get(source),
     getIdentity: (_source) => state.nextIdentity,
+    getCurrentIdentity: (_source) => state.currentIdentity,
     hasLifetime: (value) => value.frameId != null && value.documentId != null,
     sameLifetime: (context, value) =>
       context.frameId === value.frameId && context.documentId === value.documentId,
@@ -92,16 +106,27 @@ function dependencies(state) {
   }
 }
 
-test('bootstrap gate enforces one structural port per document', () => {
-  const state = {
-    contexts: new Map(),
-    reservations: new Map(),
-    accepted: [],
-    rejected: [],
-    destroyed: [],
-    cleanup: Promise.resolve(),
-    nextIdentity: identity('document-a')
+function bindOldContext(state, source) {
+  const oldContext = {
+    port: port(),
+    source,
+    frameId: 7,
+    documentId: 'document-a',
+    destroyed: false
   }
+  state.contexts.set(source, oldContext)
+  return oldContext
+}
+
+async function finishCleanup(state, oldContext, releaseCleanup) {
+  oldContext.destroyed = true
+  releaseCleanup()
+  await state.cleanup
+  await Promise.resolve()
+}
+
+test('bootstrap gate enforces one structural port per document', () => {
+  const state = makeState(Promise.resolve(), 'document-a')
   const source = {}
   const gate = loadGate(dependencies(state))
   const valid = port()
@@ -123,30 +148,14 @@ test('bootstrap gate enforces one structural port per document', () => {
   assert.deepEqual(state.accepted, [valid])
 })
 
-test('transition reserves the first new-document port until cleanup completes', async () => {
+test('A to B rejects a same-lifetime duplicate and promotes B', async () => {
   let releaseCleanup
   const cleanup = new Promise((resolve) => {
     releaseCleanup = resolve
   })
-  const state = {
-    contexts: new Map(),
-    reservations: new Map(),
-    accepted: [],
-    rejected: [],
-    destroyed: [],
-    cleanup,
-    nextIdentity: identity('document-b')
-  }
+  const state = makeState(cleanup, 'document-b')
   const source = {}
-  const oldPort = port()
-  const oldContext = {
-    port: oldPort,
-    source,
-    frameId: 7,
-    documentId: 'document-a',
-    destroyed: false
-  }
-  state.contexts.set(source, oldContext)
+  const oldContext = bindOldContext(state, source)
   const gate = loadGate(dependencies(state))
   const reserved = port()
   gate({ data: null, ports: [reserved], source, origin: 'https://page.test' })
@@ -157,15 +166,99 @@ test('transition reserves the first new-document port until cleanup completes', 
   assert.deepEqual(state.accepted, [])
   assert.deepEqual(state.destroyed, [oldContext])
   assert.equal(state.reservations.get(source).port, reserved)
-  assert.equal(state.contexts.get(source), oldContext)
 
-  oldContext.destroyed = true
-  releaseCleanup()
-  await cleanup
-  await Promise.resolve()
-
+  await finishCleanup(state, oldContext, releaseCleanup)
   assert.deepEqual(state.accepted, [reserved])
   assert.equal(state.reservations.has(source), false)
   assert.equal(state.contexts.get(source).port, reserved)
+})
+
+test('A to B to C keeps only C while A cleanup is pending', async () => {
+  let releaseCleanup
+  const cleanup = new Promise((resolve) => {
+    releaseCleanup = resolve
+  })
+  const state = makeState(cleanup, 'document-b')
+  const source = {}
+  const oldContext = bindOldContext(state, source)
+  const gate = loadGate(dependencies(state))
+  const candidateB = port()
+  gate({ data: null, ports: [candidateB], source, origin: 'https://page.test' })
+
+  state.nextIdentity = identity('document-c')
+  state.currentIdentity = identity('document-c')
+  const candidateC = port()
+  gate({ data: null, ports: [candidateC], source, origin: 'https://page.test' })
+
+  assert.equal(candidateB.closed, true)
+  assert.equal(candidateC.closed, false)
+  assert.deepEqual(state.destroyed, [oldContext])
+  assert.equal(state.reservations.get(source).port, candidateC)
+
+  await finishCleanup(state, oldContext, releaseCleanup)
+  assert.deepEqual(state.accepted, [candidateC])
+  assert.equal(state.reservations.has(source), false)
+})
+
+test('A to B to C to D promotes only the latest candidate', async () => {
+  let releaseCleanup
+  const cleanup = new Promise((resolve) => {
+    releaseCleanup = resolve
+  })
+  const state = makeState(cleanup, 'document-b')
+  const source = {}
+  const oldContext = bindOldContext(state, source)
+  const gate = loadGate(dependencies(state))
+  const candidates = [port(), port(), port()]
+  gate({ data: null, ports: [candidates[0]], source, origin: 'https://page.test' })
+  for (const documentId of ['document-c', 'document-d']) {
+    state.nextIdentity = identity(documentId)
+    state.currentIdentity = identity(documentId)
+    const candidate = candidates[documentId === 'document-c' ? 1 : 2]
+    gate({ data: null, ports: [candidate], source, origin: 'https://page.test' })
+  }
+
+  assert.equal(candidates[0].closed, true)
+  assert.equal(candidates[1].closed, true)
+  assert.equal(candidates[2].closed, false)
+  assert.deepEqual(state.destroyed, [oldContext])
+
+  await finishCleanup(state, oldContext, releaseCleanup)
+  assert.deepEqual(state.accepted, [candidates[2]])
+  assert.equal(state.reservations.has(source), false)
+})
+
+test('identity change before promotion rejects the stale candidate', async () => {
+  let releaseCleanup
+  const cleanup = new Promise((resolve) => {
+    releaseCleanup = resolve
+  })
+  const state = makeState(cleanup, 'document-b')
+  const source = {}
+  const oldContext = bindOldContext(state, source)
+  const gate = loadGate(dependencies(state))
+  const candidateB = port()
+  gate({ data: null, ports: [candidateB], source, origin: 'https://page.test' })
+  state.currentIdentity = identity('document-c')
+
+  await finishCleanup(state, oldContext, releaseCleanup)
+  assert.equal(candidateB.closed, true)
+  assert.deepEqual(state.accepted, [])
+  assert.equal(state.reservations.has(source), false)
+})
+
+test('same-lifetime duplicate preserves the original reserved port', () => {
+  const cleanup = new Promise(() => {})
+  const state = makeState(cleanup, 'document-b')
+  const source = {}
+  bindOldContext(state, source)
+  const gate = loadGate(dependencies(state))
+  const reserved = port()
+  gate({ data: null, ports: [reserved], source, origin: 'https://page.test' })
+  const duplicate = port()
+  gate({ data: null, ports: [duplicate], source, origin: 'https://page.test' })
+
   assert.equal(duplicate.closed, true)
+  assert.equal(reserved.closed, false)
+  assert.equal(state.reservations.get(source).port, reserved)
 })
