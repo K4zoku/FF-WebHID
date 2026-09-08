@@ -90,6 +90,7 @@
         "js/utils/theme-sync.js",
         "js/content/isolated/picker/index.js",
         "js/utils/input-report.js",
+        "js/content/isolated/bootstrap-lifetime.js",
         "js/content/isolated/bridge.js"
       ],
       "world": "ISOLATED",

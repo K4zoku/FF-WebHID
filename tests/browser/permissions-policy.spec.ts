@@ -304,6 +304,31 @@ test.describe('Cross-origin iframe', () => {
     })
     expect(state).toBe('granted')
   })
+  test('only null with one transferred port is bootstrap-shaped', async ({ page, pageUrl }) => {
+    await page.goto(pageUrl('/policy-check'), {
+      waitUntil: 'domcontentloaded',
+      timeout: 15000
+    })
+    expect((await waitForPermResult(page))?.queryHid).toBe('granted')
+    await page.evaluate(() => {
+      const nonNull = new MessageChannel()
+      window.top!.postMessage({ bootstrap: true }, '*', [nonNull.port2])
+      const zero = new MessageChannel()
+      window.top!.postMessage(null, '*')
+      const first = new MessageChannel()
+      const second = new MessageChannel()
+      window.top!.postMessage(null, '*', [first.port2, second.port2])
+      nonNull.port1.close()
+      zero.port1.close()
+      first.port1.close()
+      second.port1.close()
+    })
+    const state = await page.evaluate(async () => {
+      const result = await navigator.permissions.query({ name: 'hid' })
+      return result.state
+    })
+    expect(state).toBe('granted')
+  })
 
   test('new document lifetime bootstraps after navigation', async ({ page, pageUrl }) => {
     await page.goto(pageUrl('/policy-check'), {

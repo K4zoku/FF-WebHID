@@ -11,6 +11,7 @@
   const loadSiteSettings = webhid.import('loadSiteSettings')
   const parseSettingsKey = webhid.import('parseSettingsKey')
   const WebHidDevicePicker = webhid.import('WebHidDevicePicker')
+  const createBootstrapGate = webhid.import('createBootstrapGate')
   logger.initLogger('bridge')
   if (typeof pristine.host.cryptoRandomUUID !== 'function')
     throw new Error('WebHID bridge requires pristine crypto.randomUUID')
@@ -167,6 +168,16 @@
   const clientKeysByPort = new Map()
   /** @type {Map<Window, FrameContext>} */
   const frameContextBySource = new Map()
+  /**
+   * @typedef {object} BootstrapReservation
+   * @property {FrameContext} previous
+   * @property {{frameId: number|null, documentId: string|null}} identity
+   * @property {MessagePort} port
+   * @property {string} origin
+   * @property {boolean} failed
+   */
+  /** @type {Map<Window, BootstrapReservation>} */
+  const bootstrapReservations = new Map()
   let nextFrameGeneration = 0
 
   /**
@@ -1610,42 +1621,19 @@
       ),
     frameDestroyed: handleFrameDestroyedMessage
   }
-  /**
-   * Receives the one-time MAIN bootstrap MessagePort.
-   * @param {MessageEvent} event
-   * @returns {void}
-   */
-  window.addEventListener('message', (event) => {
-    const port = event.ports != null ? event.ports[0] : undefined
-    if (!port || !event.source) {
-      if (port) rejectBootstrapPort(port)
-      return
-    }
-    const source = event.source
-    const identity = browserFrameIdentity(source)
-    const previous = frameContextBySource.get(source)
-    if (previous) {
-      if (
-        sameBrowserLifetime(previous, identity) ||
-        !hasBrowserLifetime(previous) ||
-        !hasBrowserLifetime(identity)
-      ) {
-        rejectBootstrapPort(port)
-        return
-      }
-      destroyFrameContext(previous)
-        .catch(() => {})
-        .finally(() => {
-          if (!previous.destroyed || frameContextBySource.get(source) === previous) {
-            rejectBootstrapPort(port)
-            return
-          }
-          acceptBootstrapPort(port, source, event.origin, identity)
-        })
-      return
-    }
-    acceptBootstrapPort(port, source, event.origin, identity)
+  const handleBootstrap = createBootstrapGate({
+    getReservation: (source) => bootstrapReservations.get(source) || null,
+    setReservation: (source, reservation) => bootstrapReservations.set(source, reservation),
+    deleteReservation: (source) => bootstrapReservations.delete(source),
+    getContext: (source) => frameContextBySource.get(source) || null,
+    getIdentity: browserFrameIdentity,
+    hasLifetime: hasBrowserLifetime,
+    sameLifetime: sameBrowserLifetime,
+    accept: acceptBootstrapPort,
+    destroy: destroyFrameContext,
+    reject: rejectBootstrapPort
   })
+  window.addEventListener('message', handleBootstrap)
 
   /**
    * @param {object} data
