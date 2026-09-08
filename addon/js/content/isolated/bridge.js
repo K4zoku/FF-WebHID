@@ -16,6 +16,7 @@
   if (typeof pristine.host.cryptoRandomUUID !== 'function')
     throw new Error('WebHID bridge requires pristine crypto.randomUUID')
   const bridgeInstanceId = 'bridge-' + pristine.host.cryptoRandomUUID()
+  const BOOTSTRAP_PROBE_TIMEOUT_MS = 1000
   const controlPort = browser.runtime.connect({ name: 'webhid-control' })
   const controlQueue = []
   let controlPending = null
@@ -170,10 +171,11 @@
   const frameContextBySource = new Map()
   /**
    * @typedef {object} BootstrapReservation
-   * @property {FrameContext} previous
-   * @property {{frameId: number|null, documentId: string|null}} identity
-   * @property {MessagePort} port
-   * @property {string} origin
+   * @property {FrameContext|null} previous
+   * @property {{frameId: number|null, documentId: string|null}} targetIdentity
+   * @property {Array<object>} candidates
+   * @property {boolean} cleanupComplete
+   * @property {number} nextSequence
    * @property {boolean} failed
    */
   /** @type {Map<Window, BootstrapReservation>} */
@@ -1631,8 +1633,13 @@
     hasLifetime: hasBrowserLifetime,
     sameLifetime: sameBrowserLifetime,
     accept: acceptBootstrapPort,
+    accepted: (port) => port.postMessage({ type: 'bootstrapAccepted' }),
     destroy: destroyFrameContext,
-    reject: rejectBootstrapPort
+    reject: rejectBootstrapPort,
+    createChallenge: () => pristine.host.cryptoRandomUUID(),
+    schedule: (callback, delay) => setTimeout(callback, delay),
+    cancel: (handle) => clearTimeout(handle),
+    probeTimeoutMs: BOOTSTRAP_PROBE_TIMEOUT_MS
   })
   window.addEventListener('message', handleBootstrap)
 

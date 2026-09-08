@@ -735,24 +735,32 @@
   /** @type {string} */
   const frameNonce = nativeCryptoRandomUUID()
 
+  /** @type {(() => void)|null} */
+  let resolveBridgeReady = null
+  let bridgeReadySettled = false
   /** @type {MessagePort|null} */
   let bridgePort = null
   const bridgeReady = isWorker
     ? (() => {
+        bridgeReadySettled = true
         const ch = new NativeMessageChannel()
         bridgePort = ch.port1
         setupBridgePort()
         if (nativeSelfPostMessage) nativeSelfPostMessage(null, makePristineIterable([ch.port2]))
         return Promise.resolve()
       })()
-    : (() => {
+    : new Promise((resolve) => {
+        resolveBridgeReady = () => {
+          if (bridgeReadySettled) return
+          bridgeReadySettled = true
+          resolve()
+        }
         const target = windowObject === windowObject.top ? windowObject : windowObject.top
         const channel = new NativeMessageChannel()
         bridgePort = channel.port1
-        callNative(nativeWindowPostMessage, target, null, '*', makePristineIterable([channel.port2]))
         setupBridgePort()
-        return Promise.resolve()
-      })()
+        callNative(nativeWindowPostMessage, target, null, '*', makePristineIterable([channel.port2]))
+      })
   if (!isWorker) setupTrustedTypesSharing()
 
   /** @returns {void} */
@@ -804,8 +812,25 @@
     }
   }
 
+  /**
+   * @param {object} data
+   * @returns {void}
+   */
+  function handleBootstrapProbe(data) {
+    if (typeof data.challenge !== 'string' || !bridgePort) return
+    callNative(nativeMessagePortPostMessage, bridgePort, {
+      type: 'bootstrapProbeResponse',
+      challenge: data.challenge
+    })
+  }
+  /** @returns {void} */
+  function handleBootstrapAccepted() {
+    if (resolveBridgeReady) resolveBridgeReady()
+  }
   /** @type {object} */
   const BRIDGE_MESSAGE_HANDLERS = {
+    bootstrapProbe: handleBootstrapProbe,
+    bootstrapAccepted: handleBootstrapAccepted,
     dataPlaneConnect: handleDataPlaneConnect,
     dataPlaneDisconnect: handleDataPlaneDisconnect,
     dataPlaneReady: handleDataPlaneReady,
