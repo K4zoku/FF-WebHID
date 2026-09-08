@@ -2,7 +2,7 @@
   const webhid = globalThis.webhid
   const logger = webhid.import('logger')
   const isChromium = webhid.import('isChromium')
-  const { workerPolyfillSites, permissionsPolicy, allowedCrossOrigin, shadowArms } =
+  const { workerPolyfillSites, permissionsPolicy, frameDelegations, shadowArms } =
     webhid.import('bgState')
   const { ensureWorkerBundle, ensureWorkerPolyfillBundle } = webhid.import('bgBundle')
   const {
@@ -11,6 +11,7 @@
     rewriteCspForBlob,
     urlOrigin,
     frameKey,
+    documentFrameKey,
     allowInlineScript
   } = webhid.import('bgCsp')
   const loadSiteSettings = webhid.import('loadSiteSettings')
@@ -542,18 +543,27 @@
   }
 
   /**
-   * Records a frame's own `hid` policy and its effective policy resolved
-   * down the frame ancestry (deny dominates: any ancestor's `()` denies the
-   * whole subtree, even delegated children). Every main/sub frame stores an
-   * entry (defaulting to allowed) so the chain is complete even when the
-   * frame itself sends no Permissions-Policy header. Keys are
-   * `(tabId, frameId)` only; origin is part of the value so inheritance
-   * never depends on guessing another frame's origin.
+   * Records a frame document's own `hid` policy and its effective policy
+   * resolved down the exact browser frame ancestry.
    * @param {object} details
    * @returns {void}
    */
   function storePermissionsPolicy(details) {
     const origin = urlOrigin(details.url)
+    const documentId =
+      typeof details.documentId === 'string' && details.documentId ? details.documentId : ''
+    const parentFrameId =
+      Number.isInteger(details.parentFrameId) && details.parentFrameId >= 0
+        ? details.parentFrameId
+        : -1
+    const parentDocumentId =
+      typeof details.parentDocumentId === 'string' && details.parentDocumentId
+        ? details.parentDocumentId
+        : ''
+    const parentKey =
+      parentFrameId >= 0 && parentDocumentId
+        ? documentFrameKey(details.tabId, parentFrameId, parentDocumentId)
+        : null
     const headers = (details.responseHeaders || [])
       .filter((h) => h.name.toLowerCase() === 'permissions-policy')
       .map((h) => h.value || '')
@@ -571,8 +581,6 @@
     if (declarations.length) {
       self = declarations.reduce(intersectAllowlists)
       if (self.kind === 'list') {
-        // Resolve 'self' against this frame's origin now so children can
-        // intersect without knowing the parent's origin lookup key.
         self = {
           kind: 'list',
           origins: self.origins.map((o) => (o === 'self' ? origin : o))
@@ -581,37 +589,59 @@
     }
     let effective = self
     if (self.kind !== 'none') {
-      const parent =
-        details.parentFrameId !== undefined && details.parentFrameId >= 0
-          ? permissionsPolicy.get(`${details.tabId}:${details.parentFrameId}`)
-          : null
+      let parent = parentKey ? permissionsPolicy.get(parentKey) : null
+      if (!parent && parentKey) {
+        const pendingParentKey = documentFrameKey(details.tabId, parentFrameId, '')
+        parent = permissionsPolicy.get(pendingParentKey) || null
+        if (parent) {
+          permissionsPolicy.delete(pendingParentKey)
+          parent.documentId = parentDocumentId
+          permissionsPolicy.set(parentKey, parent)
+        }
+      }
       const parentEffective = parent ? parent.effective : { kind: 'all', origins: [] }
       if (!listAllows(parentEffective, origin)) {
         effective = { kind: 'none', origins: [] }
       }
     }
-    permissionsPolicy.set(`${details.tabId}:${details.frameId}`, {
+    const key = documentFrameKey(details.tabId, details.frameId, documentId)
+    permissionsPolicy.set(key, {
+      tabId: details.tabId,
+      frameId: details.frameId,
+      documentId,
       origin,
       url: details.url,
-      parentFrameId: details.parentFrameId ?? -1,
+      parentFrameId,
+      parentDocumentId,
+      parentKey,
       self,
       effective
     })
-    logger.debug(
-      'Permissions-Policy stored: ' +
-        `${details.tabId}:${details.frameId}` +
-        ' hid=' +
-        JSON.stringify(effective)
-    )
+    logger.debug('Permissions-Policy stored: ' + key + ' hid=' + JSON.stringify(effective))
+  }
+  /**
+   * @param {number} tabId
+   * @param {number} frameId
+   * @returns {void}
+   */
+  function clearPolicyFrame(tabId, frameId) {
+    const prefix = `${tabId}:${frameId}:`
+    for (const store of [permissionsPolicy, frameDelegations]) {
+      for (const key of store.keys()) {
+        if (key.startsWith(prefix)) store.delete(key)
+      }
+    }
   }
   /**
    * @param {number} tabId
    * @returns {void}
    */
-  function clearTabUrlAllows(tabId) {
-    const prefix = `url:${tabId}:`
-    for (const key of allowedCrossOrigin.keys()) {
-      if (key.startsWith(prefix)) allowedCrossOrigin.delete(key)
+  function clearPolicyTab(tabId) {
+    const prefix = `${tabId}:`
+    for (const store of [permissionsPolicy, frameDelegations]) {
+      for (const key of store.keys()) {
+        if (key.startsWith(prefix)) store.delete(key)
+      }
     }
   }
 
@@ -631,9 +661,9 @@
       )
       browser.webRequest.onBeforeRequest.addListener(
         (details) => {
-          if (details.type === 'main_frame') clearTabUrlAllows(details.tabId)
           if (details.tabId === undefined || details.frameId === undefined) return
-          permissionsPolicy.delete(`${details.tabId}:${details.frameId}`)
+          if (details.type === 'main_frame') clearPolicyTab(details.tabId)
+          else clearPolicyFrame(details.tabId, details.frameId)
         },
         { urls: ['<all_urls>'], types: ['main_frame', 'sub_frame'] }
       )
@@ -762,10 +792,10 @@
 
     browser.webRequest.onBeforeRequest.addListener(
       (details) => {
-        if (details.type === 'main_frame') clearTabUrlAllows(details.tabId)
         if (details.tabId === undefined || details.frameId === undefined) return
+        if (details.type === 'main_frame') clearPolicyTab(details.tabId)
+        else clearPolicyFrame(details.tabId, details.frameId)
         const key = `${details.tabId}:${details.frameId}`
-        permissionsPolicy.delete(key)
         browser.storage.session
           .get(null)
           .then((all) => {

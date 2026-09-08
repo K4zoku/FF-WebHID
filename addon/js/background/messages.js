@@ -1,6 +1,6 @@
 ;(function () {
   const webhid = globalThis.webhid
-  const { registerContentPort, postToContentPorts } = webhid.import('content-ports')
+  const { registerContentPort } = webhid.import('content-ports')
   const http = webhid.import('http')
   const logger = webhid.import('logger')
   const isChromium = webhid.import('isChromium')
@@ -10,7 +10,7 @@
     deviceCache,
     pendingPicker,
     permissionsPolicy,
-    allowedCrossOrigin,
+    frameDelegations,
     pageActionVisibility
   } = webhid.import('bgState')
   const {
@@ -41,7 +41,7 @@
     getDeviceSessionOwner,
     closeForCleanup
   } = webhid.import('bgStateOps')
-  const { urlOrigin, frameKey } = webhid.import('bgCsp')
+  const { urlOrigin, frameKey, documentFrameKey } = webhid.import('bgCsp')
   const NativeMessaging = webhid.import('NativeMessaging')
   const bgPacked = webhid.import('bgPacked')
   const { ensureWorkerBundle } = webhid.import('bgBundle')
@@ -415,6 +415,19 @@
     await purgeFrame(tabId, request.frameKey, (deviceId, token) =>
       NativeMessaging.closeDevice(deviceId, token)
     )
+    const frameId =
+      Number.isInteger(request.frameId) && request.frameId >= 0 ? request.frameId : sender.frameId
+    const documentId =
+      typeof request.documentId === 'string' && request.documentId
+        ? request.documentId
+        : frameId === sender.frameId
+          ? sender.documentId
+          : null
+    if (tabId != null && Number.isInteger(frameId) && documentId) {
+      const key = documentFrameKey(tabId, frameId, documentId)
+      frameDelegations.delete(key)
+      permissionsPolicy.delete(key)
+    }
     sendResponse({ s: 204 })
     return true
   }
@@ -935,51 +948,61 @@
     return false
   }
 
-
   /**
+   * Resolves a policy record to the document ID observed by the browser.
    * @param {number} tabId
-   * @param {string} embedderOrigin
-   * @param {string} childUrl
-   * @returns {string}
+   * @param {number} frameId
+   * @param {string} documentId
+   * @param {string} origin
+   * @returns {object|null}
    */
-  function frameAllowUrlKey(tabId, embedderOrigin, childUrl) {
-    return `url:${tabId}:${embedderOrigin}:${childUrl}`
+  function policyEntryForDocument(tabId, frameId, documentId, origin) {
+    const exactKey = documentFrameKey(tabId, frameId, documentId)
+    let entry = permissionsPolicy.get(exactKey)
+    if (!entry) {
+      const pendingKey = documentFrameKey(tabId, frameId, '')
+      entry = permissionsPolicy.get(pendingKey) || null
+      if (entry && entry.origin === origin) {
+        permissionsPolicy.delete(pendingKey)
+        entry.documentId = documentId
+        permissionsPolicy.set(exactKey, entry)
+      }
+    }
+    return entry && entry.origin === origin ? entry : null
   }
   /**
-   * Computes the effective `hid` policy for the authenticated sender frame.
+   * Computes the effective `hid` policy for one browser-authenticated frame
+   * document.
    * @param {object} request
    * @param {object} sender
    * @returns {{policy: {hid: string}}}
    */
   function policyForRequest(request, sender) {
-    const tid = sender.tab?.id
+    const tabId = sender.tab?.id
+    const frameId =
+      Number.isInteger(request.frameId) && request.frameId >= 0
+        ? request.frameId
+        : sender.frameId
+    const documentId =
+      typeof request.documentId === 'string' && request.documentId
+        ? request.documentId
+        : frameId === sender.frameId
+          ? sender.documentId
+          : null
     const requestedOrigin = urlOrigin(request.origin || '')
-    const owner =
-      request.frameAuthority === true && sender.frameId != null
-        ? { tabId: tid, frameId: sender.frameId }
-        : null
-    if (tid == null || !requestedOrigin) {
+    if (tabId == null || frameId == null || !documentId || !requestedOrigin) {
       return { policy: { hid: 'none' } }
     }
-    let entry = null
-    if (owner && owner.tabId === tid) {
-      entry = permissionsPolicy.get(`${tid}:${owner.frameId}`) || null
-      if (entry && entry.origin !== requestedOrigin) entry = null
-    }
-    if (!entry) return { policy: { hid: 'none' } }
-    if (entry.effective.kind === 'none') return { policy: { hid: 'none' } }
-    const parent =
-      entry.parentFrameId >= 0
-        ? permissionsPolicy.get(`${tid}:${entry.parentFrameId}`)
-        : null
-    if (entry.parentFrameId >= 0 && (!parent || !parent.origin)) {
+    const exactKey = documentFrameKey(tabId, frameId, documentId)
+    const entry = policyEntryForDocument(tabId, frameId, documentId, requestedOrigin)
+    if (!entry || entry.effective.kind === 'none') {
       return { policy: { hid: 'none' } }
     }
-    if (parent && parent.origin !== entry.origin) {
-      const frameAllowed =
-        allowedCrossOrigin.has(frameKey(tid, owner.frameId, entry.origin)) ||
-        allowedCrossOrigin.has(frameAllowUrlKey(tid, parent.origin, entry.url))
-      if (!frameAllowed) {
+    if (entry.parentFrameId >= 0) {
+      if (!entry.parentKey) return { policy: { hid: 'none' } }
+      const parent = permissionsPolicy.get(entry.parentKey)
+      if (!parent || !parent.origin) return { policy: { hid: 'none' } }
+      if (parent.origin !== entry.origin && frameDelegations.get(exactKey) !== true) {
         return { policy: { hid: 'none' } }
       }
     }
@@ -996,25 +1019,49 @@
    * @returns {boolean}
    */
   function handleGetPolicy(request, sender, sendResponse) {
-    const response = policyForRequest(request, sender)
+    sendResponse(policyForRequest(request, sender))
+    return false
+  }
+  /**
+   * Records exact iframe delegation observed by the top isolated bridge.
+   * @param {object} request
+   * @param {object} sender
+   * @param {function(*): void} sendResponse
+   * @returns {boolean}
+   */
+  function handleSetFrameDelegation(request, sender, sendResponse) {
+    const tabId = sender.tab?.id
+    const frameId =
+      Number.isInteger(request.frameId) && request.frameId >= 0
+        ? request.frameId
+        : sender.frameId
+    const documentId =
+      typeof request.documentId === 'string' && request.documentId
+        ? request.documentId
+        : frameId === sender.frameId
+          ? sender.documentId
+          : null
+    const origin = urlOrigin(request.origin || '')
     if (
-      request.frameAuthority === true &&
-      typeof request.bridgeInstanceId === 'string' &&
-      typeof request.requestId === 'string' &&
-      sender.tab?.id != null
+      typeof request.bridgeInstanceId !== 'string' ||
+      tabId == null ||
+      !Number.isInteger(frameId) ||
+      frameId < 0 ||
+      typeof documentId !== 'string' ||
+      !documentId ||
+      !origin
     ) {
-      postToContentPorts(
-        [sender.tab.id],
-        {
-          action: 'framePolicyResponse',
-          bridgeInstanceId: request.bridgeInstanceId,
-          requestId: request.requestId,
-          policy: response.policy
-        },
-        'webhid-control'
-      )
+      sendResponse({ ok: false })
+      return false
     }
-    sendResponse(response)
+    const exactKey = documentFrameKey(tabId, frameId, documentId)
+    const entry = policyEntryForDocument(tabId, frameId, documentId, origin)
+    if (!entry || entry.origin !== origin) {
+      sendResponse({ ok: false })
+      return false
+    }
+    frameDelegations.set(exactKey, request.delegated === true)
+    sendResponse({ ok: true })
     return false
   }
 
@@ -1049,50 +1096,6 @@
     const url = typeof request.url === 'string' ? request.url : ''
     const unarm = webhid.import('unarmShadowSpawn')
     if (unarm) unarm(tabId, url)
-    sendResponse({ ok: true })
-    return false
-  }
-  /**
-   * @param {object} request
-   * @param {object} sender
-   * @param {function(*): void} sendResponse
-   * @returns {boolean}
-   */
-  function handleClearFrameAllows(request, sender, sendResponse) {
-    const tabId = sender.tab?.id
-    if (tabId == null || sender.frameId !== 0) {
-      sendResponse({ ok: false })
-      return false
-    }
-    const prefix = `url:${tabId}:`
-    for (const key of allowedCrossOrigin.keys()) {
-      if (key.startsWith(prefix)) allowedCrossOrigin.delete(key)
-    }
-    sendResponse({ ok: true })
-    return false
-  }
-  function handleSetFrameAllow(request, sender, sendResponse) {
-    let key
-    const tabId = sender.tab?.id
-    const embedderOrigin = urlOrigin(sender.tab && sender.tab.url)
-    if (tabId == null || !embedderOrigin) {
-      sendResponse({ ok: false })
-      return false
-    }
-    if (request.frameId === -1 && request.url) {
-      if (!urlOrigin(request.url)) {
-        sendResponse({ ok: false })
-        return false
-      }
-      key = frameAllowUrlKey(tabId, embedderOrigin, request.url.split('#', 1)[0])
-    } else {
-      key = frameKey(
-        tabId,
-        request.frameId,
-        urlOrigin(request.url || (sender.tab && sender.tab.url) || '')
-      )
-    }
-    allowedCrossOrigin.set(key, true)
     sendResponse({ ok: true })
     return false
   }
@@ -1166,11 +1169,10 @@
     showPicker: handleShowPicker,
     cancelPicker: handleCancelPicker,
     getPendingPicker: handleGetPendingPicker,
+    setFrameDelegation: handleSetFrameDelegation,
     getPolicy: handleGetPolicy,
-    clearFrameAllows: handleClearFrameAllows,
     armShadowSpawn: handleArmShadowSpawn,
     unarmShadowSpawn: handleUnarmShadowSpawn,
-    setFrameAllow: handleSetFrameAllow,
     pickerResult: handlePickerResult
   }
 

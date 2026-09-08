@@ -745,21 +745,14 @@
         if (nativeSelfPostMessage) nativeSelfPostMessage(null, makePristineIterable([ch.port2]))
         return Promise.resolve()
       })()
-    : new Promise((resolve) => {
+    : (() => {
         const target = windowObject === windowObject.top ? windowObject : windowObject.top
-        const onReady = (event) => {
-          if (!event.data || event.data.type !== 'webhidBridgeReady' || event.source !== target)
-            return
-          callNative(nativeWindowRemoveEventListener, windowObject, 'message', onReady)
-          const channel = new NativeMessageChannel()
-          bridgePort = channel.port1
-          callNative(nativeWindowPostMessage, target, null, '*', makePristineIterable([channel.port2]))
-          setupBridgePort()
-          resolve()
-        }
-        callNative(nativeWindowAddEventListener, windowObject, 'message', onReady)
-        callNative(nativeWindowPostMessage, target, { type: 'webhidBridgeRequest' }, '*')
-      })
+        const channel = new NativeMessageChannel()
+        bridgePort = channel.port1
+        callNative(nativeWindowPostMessage, target, null, '*', makePristineIterable([channel.port2]))
+        setupBridgePort()
+        return Promise.resolve()
+      })()
   if (!isWorker) setupTrustedTypesSharing()
 
   /** @returns {void} */

@@ -78,13 +78,14 @@ test('same-origin document policies stay isolated across tabs', async ({ page, p
 
 test.describe('Cross-origin iframe', () => {
   async function waitForFrame(p: Page, urlSubstring: string, timeout = 10000) {
-    const deadline = Date.now() + timeout
-    while (Date.now() < deadline) {
-      const frame = p.frames().find((f: Frame) => f.url().includes(urlSubstring))
-      if (frame) return frame
-      await new Promise((r) => setTimeout(r, 100))
-    }
-    throw new Error('Frame with URL containing "' + urlSubstring + '" not found')
+    await expect
+      .poll(() => p.frames().some((frame: Frame) => frame.url().includes(urlSubstring)), {
+        timeout
+      })
+      .toBe(true)
+    const frame = p.frames().find((candidate: Frame) => candidate.url().includes(urlSubstring))
+    if (!frame) throw new Error('Frame with URL containing "' + urlSubstring + '" not found')
+    return frame
   }
 
   interface PermResult {
@@ -114,6 +115,51 @@ test.describe('Cross-origin iframe', () => {
       return r && typeof r === 'object' ? (r as PermResult) : null
     })
     return raw
+  }
+  async function readFrameResult(frame: Frame) {
+    await expect
+      .poll(
+        () =>
+          frame
+            .evaluate(() => {
+              const pageState = window as unknown as {
+                tests?: { results?: Record<string, unknown> }
+              }
+              const result = pageState.tests?.results?.perm
+              return result && typeof result === 'object' ? result : null
+            })
+            .catch(() => null),
+        { timeout: 10000 }
+      )
+      .not.toBeNull()
+    return frame.evaluate<PermResult | null>(() => {
+      const pageState = window as unknown as {
+        tests?: { results?: Record<string, unknown> }
+      }
+      const result = pageState.tests?.results?.perm
+      return result && typeof result === 'object' ? (result as PermResult) : null
+    })
+  }
+  async function frameWithId(p: Page, id: string, urlSubstring: string) {
+    await expect
+      .poll(
+        async () => {
+          for (const frame of p.frames()) {
+            if (!frame.url().includes(urlSubstring)) continue
+            const element = await frame.frameElement().catch(() => null)
+            if (element && (await element.getAttribute('id')) === id) return true
+          }
+          return false
+        },
+        { timeout: 10000 }
+      )
+      .toBe(true)
+    for (const frame of p.frames()) {
+      if (!frame.url().includes(urlSubstring)) continue
+      const element = await frame.frameElement().catch(() => null)
+      if (element && (await element.getAttribute('id')) === id) return frame
+    }
+    throw new Error('Frame #' + id + ' not found')
   }
 
   test.beforeAll(async ({ sharedPage, pageUrl, crossUrl }) => {
@@ -217,8 +263,8 @@ test.describe('Cross-origin iframe', () => {
     const childFrame = await waitForFrame(page, '/iframe-worker-policy')
     await childFrame.waitForFunction(
       () => {
-        const result = (window as unknown as { tests?: { results?: Record<string, unknown> } }).tests
-          ?.results?.workerPolicy
+        const result = (window as unknown as { tests?: { results?: Record<string, unknown> } })
+          .tests?.results?.workerPolicy
         return result !== null && typeof result === 'object'
       },
       { timeout: 15000 }
@@ -230,65 +276,120 @@ test.describe('Cross-origin iframe', () => {
     } | null>(() => {
       const result = (window as unknown as { tests?: { results?: Record<string, unknown> } }).tests
         ?.results?.workerPolicy
-      return result && typeof result === 'object'
-        ? (result as { queryHid?: string; getDevices?: { ok: boolean; name?: string }; error?: string })
-        : null
+      return result && typeof result === 'object' ? result : null
     })
     expect(result).not.toBeNull()
     expect(result!.error).toBeUndefined()
     expect(result!.queryHid).toBe('denied')
-    expect(result!.getDevices).toEqual(expect.objectContaining({ ok: false, name: 'SecurityError' }))
+    expect(result!.getDevices).toEqual(
+      expect.objectContaining({ ok: false, name: 'SecurityError' })
+    )
   })
-  test('same-origin frame identity cannot be rebound through DOM messages', async ({
+  test('duplicate bootstrap cannot replace the live document context', async ({
     page,
     pageUrl
   }) => {
-    await page.addInitScript(() => {
-      ;(window as unknown as { frameKeys?: string[] }).frameKeys = []
-      window.addEventListener('message', (event) => {
-        if (event.data?.type === 'webhidFrameContext') {
-          ;(window as unknown as { frameKeys: string[] }).frameKeys.push(event.data.frameKey)
-        }
-      })
-    })
-    await page.goto(pageUrl('/iframe-same-origin-parent'), {
+    await page.goto(pageUrl('/policy-check'), {
       waitUntil: 'domcontentloaded',
       timeout: 15000
     })
-    await page.waitForFunction(
-      () =>
-        document.querySelector('#same-origin-allowed')?.contentWindow != null &&
-        document.querySelector('#same-origin-blocked')?.contentWindow != null
-    )
-    const frameKeys = await Promise.all(
-      page.frames().map((frame) =>
-        frame
-          .evaluate(() => (window as unknown as { frameKeys?: string[] }).frameKeys || [])
-          .catch(() => [])
-      )
-    )
-    expect(frameKeys.flat()).toEqual([])
+    expect((await waitForPermResult(page))?.queryHid).toBe('granted')
     await page.evaluate(() => {
-      document
-        .querySelector('#same-origin-allowed')
-        ?.contentWindow?.postMessage({ type: 'webhidFrameContext', frameKey: 'K1' }, '*')
-      document
-        .querySelector('#same-origin-blocked')
-        ?.contentWindow?.postMessage({ type: 'webhidFrameContext', frameKey: 'K2' }, '*')
-      document
-        .querySelector('#same-origin-allowed')
-        ?.contentWindow?.postMessage({ type: 'webhidFrameContext', frameKey: 'K2' }, '*')
+      const channel = new MessageChannel()
+      window.top!.postMessage(null, '*', [channel.port2])
     })
-    const allowed = await readIframeResult(page, '/same-origin-policy-allowed')
-    const blocked = await readIframeResult(page, '/same-origin-policy-blocked')
-    expect(allowed?.queryHid).toBe('granted')
-    expect(blocked?.queryHid).toBe('denied')
+    const state = await page.evaluate(async () => {
+      const result = await navigator.permissions.query({ name: 'hid' })
+      return result.state
+    })
+    expect(state).toBe('granted')
+  })
 
-    await page.evaluate((url) => {
-      const frame = document.querySelector('#same-origin-blocked') as HTMLIFrameElement
-      frame.src = url
-    }, pageUrl('/same-origin-policy-blocked?frame=recreated'))
-    const recreated = await readIframeResult(page, '/same-origin-policy-blocked?frame=recreated')
-    expect(recreated?.queryHid).toBe('denied')
+  test('new document lifetime bootstraps after navigation', async ({ page, pageUrl }) => {
+    await page.goto(pageUrl('/policy-check'), {
+      waitUntil: 'domcontentloaded',
+      timeout: 15000
+    })
+    expect((await waitForPermResult(page))?.queryHid).toBe('granted')
+    await page.goto(pageUrl('/policy-check-blocked'), {
+      waitUntil: 'domcontentloaded',
+      timeout: 15000
+    })
+    expect((await waitForPermResult(page))?.queryHid).toBe('denied')
+  })
+
+  test('same URL siblings keep independent iframe delegation', async ({
+    page,
+    pageUrl,
+    crossUrl
+  }) => {
+    await page.goto(pageUrl('/iframe-parent'), {
+      waitUntil: 'domcontentloaded',
+      timeout: 15000
+    })
+    await page.evaluate((src) => {
+      const allowed = document.createElement('iframe')
+      allowed.id = 'same-url-allowed'
+      allowed.src = src
+      allowed.allow = 'hid'
+      document.body.appendChild(allowed)
+      const denied = document.createElement('iframe')
+      denied.id = 'same-url-denied'
+      denied.src = src
+      document.body.appendChild(denied)
+    }, crossUrl('/iframe-child-no-allow'))
+    await expect
+      .poll(() => page.frames().filter((f) => f.url().includes('/iframe-child-no-allow')).length)
+      .toBe(2)
+    const allowedFrame = await frameWithId(page, 'same-url-allowed', '/iframe-child-no-allow')
+    const deniedFrame = await frameWithId(page, 'same-url-denied', '/iframe-child-no-allow')
+    expect((await readFrameResult(allowedFrame))?.queryHid).toBe('granted')
+    expect((await readFrameResult(deniedFrame))?.queryHid).toBe('denied')
+  })
+
+  test('recreated and navigated frames do not inherit delegation', async ({
+    page,
+    pageUrl,
+    crossUrl
+  }) => {
+    await page.goto(pageUrl('/iframe-parent'), {
+      waitUntil: 'domcontentloaded',
+      timeout: 15000
+    })
+    await page.evaluate((src) => {
+      const frame = document.createElement('iframe')
+      frame.id = 'recreated'
+      frame.src = src
+      frame.allow = 'hid'
+      document.body.appendChild(frame)
+    }, crossUrl('/iframe-child-no-allow'))
+    await expect
+      .poll(() => page.frames().filter((f) => f.url().includes('/iframe-child-no-allow')).length)
+      .toBe(1)
+    const initial = await frameWithId(page, 'recreated', '/iframe-child-no-allow')
+    expect((await readFrameResult(initial))?.queryHid).toBe('granted')
+    await page.evaluate((src) => {
+      const frame = document.querySelector('#recreated')
+      if (!(frame instanceof HTMLIFrameElement)) throw new Error('recreated frame missing')
+      frame.allow = ''
+      frame.src = src
+    }, crossUrl('/iframe-child-no-allow?navigation=1'))
+    await expect
+      .poll(() => page.frames().filter((f) => f.url().includes('/iframe-child-no-allow')).length)
+      .toBe(1)
+    const navigated = await frameWithId(page, 'recreated', '/iframe-child-no-allow')
+    expect((await readFrameResult(navigated))?.queryHid).toBe('denied')
+    await page.evaluate((src) => {
+      document.querySelector('#recreated')?.remove()
+      const frame = document.createElement('iframe')
+      frame.id = 'recreated'
+      frame.src = src
+      document.body.appendChild(frame)
+    }, crossUrl('/iframe-child-no-allow?recreated=1'))
+    await expect
+      .poll(() => page.frames().filter((f) => f.url().includes('/iframe-child-no-allow')).length)
+      .toBe(1)
+    const recreated = await frameWithId(page, 'recreated', '/iframe-child-no-allow')
+    expect((await readFrameResult(recreated))?.queryHid).toBe('denied')
   })
 })

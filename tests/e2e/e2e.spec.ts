@@ -95,6 +95,29 @@ test.describe.serial('WebHID E2E', () => {
     }, VENDOR_CTX)
     expect(opened).toBe(true)
   })
+  test('duplicate bootstrap leaves the open session alive', async ({
+    sharedPage,
+    vendorDevice
+  }) => {
+    await grantDevicePermission(sharedPage, [VENDOR])
+    await sharedPage.evaluate(async (ctx: VendorCtx) => {
+      const ds = await navigator.hid.getDevices()
+      const d = ds.find((x) => x.vendorId === ctx.f.vendorId && x.productId === ctx.f.productId)!
+      await d.open()
+    }, VENDOR_CTX)
+    const outputPromise = waitForOutputReport(vendorDevice)
+    const opened = await sharedPage.evaluate(async (ctx: VendorCtx) => {
+      const channel = new MessageChannel()
+      window.top!.postMessage(null, '*', [channel.port2])
+      const ds = await navigator.hid.getDevices()
+      const d = ds.find((x) => x.vendorId === ctx.f.vendorId && x.productId === ctx.f.productId)!
+      await d.sendReport(ctx.outputId, new Uint8Array(ctx.size).fill(0x52))
+      return d.opened
+    }, VENDOR_CTX)
+    const output = await outputPromise
+    expect(opened).toBe(true)
+    expect(output.data[0]).toBe(VENDOR_OUTPUT_ID)
+  })
 
   test('receive 64-byte input packet', async ({ sharedPage, vendorDevice }) => {
     const reportPromise = nextInputReport(sharedPage, VENDOR)
@@ -262,10 +285,7 @@ test.describe.serial('WebHID E2E', () => {
     expect(event.data.length).toBe(GAMEPAD_INPUT_SIZE)
   })
 
-  test('device disconnect closes opened HIDDevice state', async ({
-    sharedPage,
-    vendorDevice
-  }) => {
+  test('device disconnect closes opened HIDDevice state', async ({ sharedPage, vendorDevice }) => {
     const disconnected = sharedPage.evaluate(async () => {
       const device = (await navigator.hid.getDevices())[0]
       if (!device) throw new Error('vendor device missing before disconnect')
@@ -434,7 +454,8 @@ test.describe.serial('WebHID E2E', () => {
         return { sendError, remaining: (await navigator.hid.getDevices()).length }
       }, VENDOR_CTX)
       const siblingError = await siblingPage.evaluate(async (ctx: VendorCtx) => {
-        const d = (globalThis as typeof globalThis & { __siblingDevice?: HIDDevice }).__siblingDevice
+        const d = (globalThis as typeof globalThis & { __siblingDevice?: HIDDevice })
+          .__siblingDevice
         try {
           await d!.sendReport(ctx.outputId, new Uint8Array(ctx.size))
           return null

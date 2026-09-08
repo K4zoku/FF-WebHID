@@ -18,11 +18,8 @@
   const controlPort = browser.runtime.connect({ name: 'webhid-control' })
   const controlQueue = []
   let controlPending = null
-  const handshakePending = new Map()
-  let nextPolicyRequestId = 0
-  /** @type {Map<string, {context: FrameContext, pageRequestId: string}>} */
-  const pendingPolicyRequests = new Map()
   let nextHandshakeReqId = 0
+  const handshakePending = new Map()
   /** @returns {void} */
   function pumpControlQueue() {
     if (controlPending || controlQueue.length === 0) return
@@ -78,22 +75,6 @@
       handleBackgroundEvent(message)
       return
     }
-    if (
-      message &&
-      message.action === 'framePolicyResponse' &&
-      message.bridgeInstanceId === bridgeInstanceId &&
-      typeof message.requestId === 'string'
-    ) {
-      const pending = pendingPolicyRequests.get(message.requestId)
-      if (!pending) return
-      pendingPolicyRequests.delete(message.requestId)
-      replyToPage({
-        type: 'response',
-        id: pending.pageRequestId,
-        result: message.policy || { hid: 'none' }
-      })
-      return
-    }
     if (message && message.reqId != null) {
       const pending = handshakePending.get(message.reqId)
       if (pending) {
@@ -133,7 +114,8 @@
     'getDeviceCache',
     'getDeviceInfo',
     'showPicker',
-    'pickerResult'
+    'pickerResult',
+    'setFrameDelegation'
   ])
 
   const PAGE_ACTION_API_ACTIONS = new Set([
@@ -170,6 +152,8 @@
    * @property {MessagePort} port
    * @property {Window|null} source
    * @property {string} origin
+   * @property {number|null} frameId
+   * @property {string|null} documentId
    * @property {boolean} destroyed
    * @property {Map<string, string>} sessions
    */
@@ -186,18 +170,103 @@
   let nextFrameGeneration = 0
 
   /**
+   * Reads browser-authenticated identity for a window represented by the
+   * bootstrap event.
+   * @param {Window} source
+   * @returns {{frameId: number|null, documentId: string|null}}
+   */
+  function browserFrameIdentity(source) {
+    let frameId = null
+    let documentId = null
+    try {
+      const getFrameId = browser.runtime.getFrameId
+      if (typeof getFrameId === 'function') frameId = getFrameId(source)
+    } catch {}
+    try {
+      const getDocumentId = browser.runtime.getDocumentId
+      if (typeof getDocumentId === 'function') documentId = getDocumentId(source)
+    } catch {}
+    return {
+      frameId: Number.isInteger(frameId) && frameId >= 0 ? frameId : null,
+      documentId: typeof documentId === 'string' && documentId ? documentId : null
+    }
+  }
+  /**
+   * @param {MessagePort} port
+   * @returns {void}
+   */
+  function rejectBootstrapPort(port) {
+    try {
+      port.close()
+    } catch (e) {
+      logger.debug('duplicate bootstrap port close failed', e)
+    }
+  }
+  /**
+   * @param {FrameContext} context
+   * @param {{frameId: number|null, documentId: string|null}} identity
+   * @returns {boolean}
+   */
+  function sameBrowserLifetime(context, identity) {
+    return (
+      context.frameId != null &&
+      context.documentId != null &&
+      context.frameId === identity.frameId &&
+      context.documentId === identity.documentId
+    )
+  }
+  /**
+   * @param {{frameId: number|null, documentId: string|null}} identity
+   * @returns {boolean}
+   */
+  function hasBrowserLifetime(identity) {
+    return identity.frameId != null && identity.documentId != null
+  }
+  /**
+   * @param {MessagePort} port
+   * @param {Window} source
+   * @param {string} origin
+   * @param {{frameId: number|null, documentId: string|null}} identity
+   * @returns {FrameContext}
+   */
+  function acceptBootstrapPort(port, source, origin, identity) {
+    const context = createFrameContext(port, source, origin, identity)
+    pagePorts.set(source, port)
+    pageSourceByPort.set(port, source)
+    portOrigin.set(port, origin)
+    port.onmessage = (event) => {
+      const data = event.data
+      if (!data) return
+      const handler = PAGE_PORT_HANDLERS[data.type]
+      if (handler) {
+        handler(data, port)
+        return
+      }
+      dispatchPortMessage(port, event, source)
+    }
+    logger.debug(
+      '[bridge] page port established for',
+      source === window ? 'window' : 'child',
+      context.key
+    )
+    return context
+  }
+  /**
    * @param {MessagePort} port
    * @param {Window|null} source
    * @param {string} origin
+   * @param {{frameId: number|null, documentId: string|null}} identity
    * @returns {FrameContext}
    */
-  function createFrameContext(port, source, origin) {
+  function createFrameContext(port, source, origin, identity) {
     const context = {
       key: bridgeInstanceId + '/frame-' + ++nextFrameGeneration,
       generation: nextFrameGeneration,
       port,
       source,
       origin,
+      frameId: identity.frameId,
+      documentId: identity.documentId,
       destroyed: false,
       sessions: new Map()
     }
@@ -1360,37 +1429,6 @@
     }
   })()
 
-  /**
-   * Reports iframe src URLs with allow="hid" to the background so cross-origin
-   * permissions can be tracked.
-   * @returns {void}
-   */
-  function reportIframes() {
-    sendBackgroundRequest({ action: 'clearFrameAllows' })
-      .then(() => {
-        const iframes = document.querySelectorAll('iframe[allow*="hid" i]')
-        for (const iframe of iframes) {
-          const src = iframe.src || iframe.getAttribute('src') || ''
-          if (!src) continue
-          sendBackgroundRequest({
-            action: 'setFrameAllow',
-            url: src,
-            frameId: -1
-          }).catch((e) => logger.debug('setFrameAllow failed', e))
-        }
-      })
-      .catch((e) => logger.debug('clearFrameAllows failed', e))
-  }
-  if (window === window.top) {
-    reportIframes()
-    const observer = new MutationObserver(() => reportIframes())
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['allow', 'src'],
-      childList: true,
-      subtree: true
-    })
-  }
 
   /**
    * @param {object} msg
@@ -1573,40 +1611,40 @@
     frameDestroyed: handleFrameDestroyedMessage
   }
   /**
-   * Signals that the isolated bridge can receive the MAIN bootstrap port.
+   * Receives the one-time MAIN bootstrap MessagePort.
    * @param {MessageEvent} event
    * @returns {void}
    */
-
-  window.addEventListener('message', (event) => {
-    if (!event.data || event.data.type !== 'webhidBridgeRequest' || !event.source) return
-    event.source.postMessage({ type: 'webhidBridgeReady' }, event.origin)
-  })
   window.addEventListener('message', (event) => {
     const port = event.ports != null ? event.ports[0] : undefined
-    if (!port) return
+    if (!port || !event.source) {
+      if (port) rejectBootstrapPort(port)
+      return
+    }
     const source = event.source
-    const previous = source ? frameContextBySource.get(source) : null
-    if (previous) destroyFrameContext(previous).catch(() => {})
-    const context = createFrameContext(port, source, event.origin)
-    pagePorts.set(source, port)
-    pageSourceByPort.set(port, source)
-    portOrigin.set(port, event.origin)
-    port.onmessage = (event) => {
-      const data = event.data
-      if (!data) return
-      const handler = PAGE_PORT_HANDLERS[data.type]
-      if (handler) {
-        handler(data, port)
+    const identity = browserFrameIdentity(source)
+    const previous = frameContextBySource.get(source)
+    if (previous) {
+      if (
+        sameBrowserLifetime(previous, identity) ||
+        !hasBrowserLifetime(previous) ||
+        !hasBrowserLifetime(identity)
+      ) {
+        rejectBootstrapPort(port)
         return
       }
-      dispatchPortMessage(port, event, source)
+      destroyFrameContext(previous)
+        .catch(() => {})
+        .finally(() => {
+          if (!previous.destroyed || frameContextBySource.get(source) === previous) {
+            rejectBootstrapPort(port)
+            return
+          }
+          acceptBootstrapPort(port, source, event.origin, identity)
+        })
+      return
     }
-    logger.debug(
-      '[bridge] page port established for',
-      source === window ? 'window' : 'child',
-      context.key
-    )
+    acceptBootstrapPort(port, source, event.origin, identity)
   })
 
   /**
@@ -1820,6 +1858,22 @@
     }
   }
   /**
+   * @param {FrameContext} context
+   * @returns {boolean}
+   */
+  function hasHidDelegation(context) {
+    if (!context.source || context.source === window) return true
+    try {
+      const frames = document.querySelectorAll('iframe,frame')
+      for (const frame of frames) {
+        if (frame.contentWindow !== context.source) continue
+        const allow = frame.getAttribute('allow') || ''
+        return allow.split(';').some((directive) => /^\s*hid(?:\s|$)/i.test(directive))
+      }
+    } catch {}
+    return false
+  }
+  /**
    * @param {object} data
    * @param {MessagePort[]} _ports
    * @param {MessagePort} requestPort
@@ -1831,28 +1885,35 @@
       replyToPage({ type: 'response', id: data.id, result: { hid: 'none' } })
       return
     }
-    const origin = context.origin
-    const requestId = bridgeInstanceId + '/policy-' + ++nextPolicyRequestId
-    pendingPolicyRequests.set(requestId, { context, pageRequestId: data.id })
     try {
-      context.source.postMessage(
-        {
-          type: 'webhidPolicyRequest',
-          requestId
-        },
-        origin
-      )
-    } catch {
-      pendingPolicyRequests.delete(requestId)
-      replyToPage({ type: 'response', id: data.id, result: { hid: 'none' } })
-      return
+      const delegation = hasHidDelegation(context)
+      const delegationResponse = await sendBackgroundRequest({
+        action: 'setFrameDelegation',
+        origin: context.origin,
+        frameId: context.frameId,
+        documentId: context.documentId,
+        delegated: delegation
+      })
+      const response = delegationResponse?.ok
+        ? await sendBackgroundRequest({
+            action: 'getPolicy',
+            origin: context.origin,
+            frameId: context.frameId,
+            documentId: context.documentId
+          })
+        : null
+      replyToPage({
+        type: 'response',
+        id: data.id,
+        result: response ? response.policy || { hid: 'none' } : { hid: 'none' }
+      })
+    } catch (e) {
+      replyToPage({
+        type: 'response',
+        id: data.id,
+        result: { hid: 'none', _err: String(e) }
+      })
     }
-    setTimeout(() => {
-      const pending = pendingPolicyRequests.get(requestId)
-      if (!pending) return
-      pendingPolicyRequests.delete(requestId)
-      replyToPage({ type: 'response', id: pending.pageRequestId, result: { hid: 'none' } })
-    }, 3000)
   }
 
   /**
@@ -2345,9 +2406,12 @@
       pending.reject(new Error('frame destroyed'))
     }
     if (close) {
-      await sendBackgroundRequest({ action: 'frameDestroyed', frameKey: context.key }).catch((e) =>
-        logger.debug('frame session cleanup request failed', e)
-      )
+      await sendBackgroundRequest({
+        action: 'frameDestroyed',
+        frameKey: context.key,
+        frameId: context.frameId,
+        documentId: context.documentId
+      }).catch((e) => logger.debug('frame session cleanup request failed', e))
     }
     const notifiedDevices = new Set()
     for (const { deviceId, clientKey, clientPort } of planes.values()) {

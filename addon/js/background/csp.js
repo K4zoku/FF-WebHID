@@ -69,6 +69,16 @@
   function frameKey(tabId, frameId, origin) {
     return `${tabId}:${frameId}:${origin || ''}`
   }
+  /**
+   * Builds the exact key for one browser frame document.
+   * @param {number} tabId
+   * @param {number} frameId
+   * @param {string|null|undefined} documentId
+   * @returns {string}
+   */
+  function documentFrameKey(tabId, frameId, documentId) {
+    return `${tabId}:${frameId}:${documentId || ''}`
+  }
 
   /**
    * @param {string} csp
@@ -297,6 +307,7 @@
   webhid.export('bgCsp', {
     urlOrigin,
     frameKey,
+    documentFrameKey,
     allowInlineScript,
     rewriteCspValue,
     rewriteCspForBlob,
