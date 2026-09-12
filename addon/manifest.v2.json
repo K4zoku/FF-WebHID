@@ -82,10 +82,10 @@
         "js/utils/settings.js",
         "js/utils/theme-sync.js",
         "js/content/isolated/picker/index.js",
-        "js/content/isolated/bootstrap-lifetime.js",
         "js/content/isolated/bridge.js"
       ],
-      "run_at": "document_start"
+      "run_at": "document_start",
+      "all_frames": true
     }
   ],
   "web_accessible_resources": [],

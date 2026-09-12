@@ -13,6 +13,8 @@
   const permissionsPolicy = new Map()
   const frameDelegations = new Map()
   const pendingPicker = new Map()
+  /** @type {Map<object, object>} */
+  const frameEndpoints = new Map()
   const workerPolyfillSites = new Set()
   const shadowArms = new Map()
   const pageActionVisibility = {
@@ -38,7 +40,9 @@
           const visible = pageActionDesired(tabId)
           try {
             await browser.pageAction[visible ? 'show' : 'hide'](tabId)
-          } catch {}
+          } catch {
+            void 0
+          }
           if (pageActionDesired(tabId) === visible) return
         }
       })
@@ -79,6 +83,7 @@
     orphanCleanup,
     permissionsPolicy,
     frameDelegations,
+    frameEndpoints,
     pageActionVisibility,
     pendingPicker,
     workerPolyfillSites,

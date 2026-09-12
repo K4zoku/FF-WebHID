@@ -5,8 +5,8 @@ import { sendInput } from '../helpers/e2e-process.js'
 const VENDOR = mockIdFor('vendor')
 const PACKET = [0x10, 0x20, 0x30, 0x40, 0x50].concat(new Array(59).fill(0))
 
-test.describe.serial('NM runtime port topology', () => {
-  test('shared NM port survives one frame teardown', async ({
+test.describe.serial('Exact frame endpoint fanout', () => {
+  test('background fanout survives one frame teardown', async ({
     sharedPage,
     backgroundPage,
     vendorDevice
@@ -30,7 +30,10 @@ test.describe.serial('NM runtime port topology', () => {
         waitUntil: 'domcontentloaded'
       })
       await sharedPage.evaluate(() => {
-        window.postMessage({ type: 'startFanout', iframeCount: 1, includeWorker: false }, location.origin)
+        window.postMessage(
+          { type: 'startFanout', iframeCount: 1, includeWorker: false },
+          location.origin
+        )
       })
       await sharedPage.waitForFunction(
         () => {
@@ -78,10 +81,12 @@ test.describe.serial('NM runtime port topology', () => {
         },
         { timeout: 15000 }
       )
-      await expect(sharedPage.evaluate(() => window.tests?.results?.fanoutCounts)).resolves.toEqual({
-        page: 2,
-        'iframe-0': 1
-      })
+      await expect(sharedPage.evaluate(() => window.tests?.results?.fanoutCounts)).resolves.toEqual(
+        {
+          page: 2,
+          'iframe-0': 1
+        }
+      )
     } finally {
       await sharedPage.evaluate(async () => {
         for (const device of await navigator.hid.getDevices()) {

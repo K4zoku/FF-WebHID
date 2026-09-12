@@ -14,16 +14,28 @@
   const { saveDeviceInfo } = webhid.import('bgStorage')
   const {
     tabsForEvent,
+    collectDeviceSessionOwners,
     broadcastGlobalReset,
     clearAuthorityOwnership,
     clearDeviceOwnership,
     forTabsOfOrigin
   } = webhid.import('bgStateOps')
   const http = webhid.import('http')
-  const { postToContentPorts } = webhid.import('content-ports')
-
+  const { postToContentPorts, postToContentPort } = webhid.import('content-ports')
   const NM_HOST_FORWARDER = 'webhid.forwarder_nm_host'
   const NM_HOST_DAEMON = 'webhid.daemon_nm_host'
+  /**
+   * Sends one authority reset to every exact frame endpoint.
+   * @returns {void}
+   */
+  function broadcastExactGlobalReset() {
+    const message = { action: 'globalReset' }
+    const reached = postToContentPorts(null, message, 'webhid-control')
+    forTabsOfOrigin(null, (tab) => {
+      if (reached.has(tab.id)) return
+      return browser.tabs.sendMessage(tab.id, message).catch(() => {})
+    }).catch((e) => logger.debug('broadcastGlobalReset failed', e))
+  }
 
   const NativeMessaging = {
     port: null,
@@ -147,7 +159,6 @@
     },
 
     /**
-     * Retires one exact Native Messaging port and its authority lifetime.
      * @param {object} port
      * @returns {boolean}
      */
@@ -157,7 +168,7 @@
       for (const [, p] of this.pending) p.resolve({ s: 503 })
       this.pending.clear()
       clearAuthorityOwnership()
-      broadcastGlobalReset()
+      broadcastGlobalReset(broadcastExactGlobalReset)
       return true
     },
 
@@ -297,8 +308,12 @@
       try {
         if (bin.length < 8 || bin[0] !== PKG_INPUT_REPORT) return
         const deviceId = (bin[1] | (bin[2] << 8) | (bin[3] << 16) | (bin[4] << 24)) >>> 0
-        const targets = tabsForEvent({ i: deviceId })
-        if (!targets) return
+        const targets = new Set(
+          collectDeviceSessionOwners(deviceId)
+            .map((owner) => owner.port)
+            .filter((port) => port != null)
+        )
+        if (targets.size === 0) return
         let offset = 5
         while (offset + 3 <= bin.length) {
           const reportId = bin[offset]
@@ -314,13 +329,12 @@
             reportId,
             data: payload
           }
-          const message = { action: 'webhidDeviceEvent', event }
-          const reached = postToContentPorts(targets, message, `webhid-data:${deviceId}`)
-          for (const tabId of targets) {
-            if (reached.has(tabId)) continue
-            browser.tabs
-              .sendMessage(tabId, message)
-              .catch((e) => logger.debug('event forward to target tab failed', e))
+          for (const port of targets) {
+            const copy = payloadLen > 0 ? new Uint8Array(payload) : payload
+            postToContentPort(port, {
+              action: 'webhidDeviceEvent',
+              event: { ...event, data: copy }
+            })
           }
         }
       } catch (e) {
@@ -347,20 +361,36 @@
           })
           .catch((e) => logger.debug('enumerateDevices failed', e))
       }
-      if (message.e === EVT_DISCONNECT) clearDeviceOwnership(message.i)
       const normalized = {
         eventType: message.e === EVT_CONNECT ? 'connect' : 'disconnect',
         deviceId: message.i,
         device: message.v || null
       }
+      const owners =
+        message.e === EVT_DISCONNECT
+          ? new Set(
+              collectDeviceSessionOwners(message.i)
+                .map((owner) => owner.port)
+                .filter((port) => port != null)
+            )
+          : null
+      if (message.e === EVT_DISCONNECT) clearDeviceOwnership(message.i)
       browser.runtime
         .sendMessage({ action: 'webhidDeviceEvent', event: normalized })
         .catch((e) => logger.debug('event forward to runtime failed', e))
-      forTabsOfOrigin(null, (tab) =>
-        browser.tabs
-          .sendMessage(tab.id, { action: 'webhidDeviceEvent', event: normalized })
-          .catch((e) => logger.debug('event forward to all tabs failed', e))
-      ).catch((e) => logger.debug('tabs.query failed', e))
+      if (owners && owners.size > 0) {
+        const eventMessage = { action: 'webhidDeviceEvent', event: normalized }
+        for (const port of owners) postToContentPort(port, eventMessage)
+      } else {
+        forTabsOfOrigin(null, (tab) => {
+          const eventMessage = { action: 'webhidDeviceEvent', event: normalized }
+          const reached = postToContentPorts([tab.id], eventMessage, 'webhid-control')
+          if (reached.has(tab.id)) return
+          return browser.tabs
+            .sendMessage(tab.id, eventMessage)
+            .catch((e) => logger.debug('event forward to all tabs failed', e))
+        }).catch((e) => logger.debug('tabs.query failed', e))
+      }
     },
 
     onControlEvent(message) {
@@ -369,13 +399,24 @@
         this.handleDeviceConnectionEvent(message)
         return
       }
+      const owners = new Set(
+        collectDeviceSessionOwners(message.i)
+          .map((owner) => owner.port)
+          .filter((port) => port != null)
+      )
+      const eventMessage = { action: 'webhidDeviceEvent', event: message }
+      if (owners.size > 0) {
+        for (const port of owners) postToContentPort(port, eventMessage)
+        return
+      }
       const targets = tabsForEvent(message)
-      if (targets) {
-        for (const tabId of targets) {
-          browser.tabs
-            .sendMessage(tabId, { action: 'webhidDeviceEvent', event: message })
-            .catch((e) => logger.debug('event forward to target tab failed', e))
-        }
+      if (!targets) return
+      const reached = postToContentPorts(targets, eventMessage, 'webhid-control')
+      for (const tabId of targets) {
+        if (reached.has(tabId)) continue
+        browser.tabs
+          .sendMessage(tabId, eventMessage)
+          .catch((e) => logger.debug('event forward to target tab failed', e))
       }
     }
   }

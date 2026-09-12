@@ -11,23 +11,29 @@
   const loadSiteSettings = webhid.import('loadSiteSettings')
   const parseSettingsKey = webhid.import('parseSettingsKey')
   const WebHidDevicePicker = webhid.import('WebHidDevicePicker')
-  const createBootstrapGate = webhid.import('createBootstrapGate')
   logger.initLogger('bridge')
   if (typeof pristine.host.cryptoRandomUUID !== 'function')
     throw new Error('WebHID bridge requires pristine crypto.randomUUID')
-  const bridgeInstanceId = 'bridge-' + pristine.host.cryptoRandomUUID()
-  const BOOTSTRAP_PROBE_TIMEOUT_MS = 1000
+  const frameInstanceId = 'frame-' + pristine.host.cryptoRandomUUID()
   const controlPort = browser.runtime.connect({ name: 'webhid-control' })
+  const pageChannel = new MessageChannel()
+  if (isChromium) window.postMessage(null, '*', [pageChannel.port2])
+  else
+    window.wrappedJSObject.webhid = globalThis.cloneInto(pageChannel.port2, window, {
+      wrapReflectors: true
+    })
+  const pagePort = pageChannel.port1
   const controlQueue = []
   let controlPending = null
   let nextHandshakeReqId = 0
   const handshakePending = new Map()
+  const pickerResultHandlers = new Map()
   /** @returns {void} */
   function pumpControlQueue() {
     if (controlPending || controlQueue.length === 0) return
     controlPending = controlQueue.shift()
     try {
-      controlPort.postMessage({ ...controlPending.request, bridgeInstanceId })
+      controlPort.postMessage(controlPending.request)
     } catch (error) {
       controlPending.reject(error)
       controlPending = null
@@ -54,7 +60,7 @@
       const reqId = 'handshake:' + ++nextHandshakeReqId
       handshakePending.set(reqId, { resolve, reject })
       try {
-        controlPort.postMessage({ action: 'handshake', reqId, bridgeInstanceId })
+        controlPort.postMessage({ action: 'handshake', reqId })
       } catch (error) {
         handshakePending.delete(reqId)
         reject(error)
@@ -62,6 +68,34 @@
     })
   }
   controlPort.onMessage.addListener((message) => {
+    if (message && message.action === 'pickerResult') {
+      const handler = pickerResultHandlers.get(message.requestId)
+      if (handler) handler(message)
+      return
+    }
+    if (message && message.action === 'frameDelegationQuery') {
+      controlPort.postMessage({
+        action: 'frameDelegationResult',
+        requestId: message.requestId,
+        delegated: frameDelegationForChild(message)
+      })
+      return
+    }
+    if (message && message.action === 'showInlinePicker') {
+      if (!devicePicker) return
+      devicePicker
+        .show(message.filters || [], message.exclusionFilters || [])
+        .then((result) =>
+          controlPort.postMessage({
+            action: 'inlinePickerResult',
+            requestId: message.requestId,
+            selected: !!(result.devices && result.devices.length),
+            devices: result.devices || null
+          })
+        )
+        .catch((e) => logger.debug('inline picker failed', e))
+      return
+    }
     if (message && message.action === 'globalReset') {
       handleGlobalReset()
       return
@@ -104,8 +138,8 @@
     controlQueue.length = 0
     handleGlobalReset()
   })
-  const devicePicker = new WebHidDevicePicker()
-  document.documentElement.appendChild(devicePicker.host)
+  const devicePicker = window === window.top ? new WebHidDevicePicker() : null
+  if (devicePicker) document.documentElement.appendChild(devicePicker.host)
 
   const PAGE_BLOCKED_ACTIONS = new Set([
     'pairDevice',
@@ -147,44 +181,32 @@
   }
 
   /**
-   * A trusted browser document lifetime owned by this tab bridge.
+   * The exact browser document represented by this bridge instance.
    * @typedef {object} FrameContext
    * @property {string} key
    * @property {number} generation
    * @property {MessagePort} port
-   * @property {Window|null} source
+   * @property {Window} source
    * @property {string} origin
    * @property {number|null} frameId
    * @property {string|null} documentId
    * @property {boolean} destroyed
    * @property {Map<string, string>} sessions
    */
-  /** @type {Map<string, FrameContext>} */
-  const frameContexts = new Map()
+  /** @type {FrameContext|null} */
+  let frameContext = null
   /** @type {Map<MessagePort, FrameContext>} */
   const frameContextByPort = new Map()
   /** @type {Map<MessagePort, Map<string, string>>} */
   const clientSessions = new Map()
   /** @type {Map<MessagePort, string>} */
   const clientKeysByPort = new Map()
-  /** @type {Map<Window, FrameContext>} */
-  const frameContextBySource = new Map()
-  /**
-   * @typedef {object} BootstrapReservation
-   * @property {FrameContext|null} previous
-   * @property {{frameId: number|null, documentId: string|null}} targetIdentity
-   * @property {Array<object>} candidates
-   * @property {boolean} cleanupComplete
-   * @property {number} nextSequence
-   * @property {boolean} failed
-   */
-  /** @type {Map<Window, BootstrapReservation>} */
-  const bootstrapReservations = new Map()
+  /** @type {Map<string, MessagePort>} */
+  const requestPortMap = new Map()
   let nextFrameGeneration = 0
 
   /**
-   * Reads browser-authenticated identity for a window represented by the
-   * bootstrap event.
+   * Reads browser-authenticated identity for this exact document.
    * @param {Window} source
    * @returns {{frameId: number|null, documentId: string|null}}
    */
@@ -194,48 +216,22 @@
     try {
       const getFrameId = browser.runtime.getFrameId
       if (typeof getFrameId === 'function') frameId = getFrameId(source)
-    } catch {}
+    } catch {
+      void 0
+    }
     try {
       const getDocumentId = browser.runtime.getDocumentId
       if (typeof getDocumentId === 'function') documentId = getDocumentId(source)
-    } catch {}
+    } catch {
+      void 0
+    }
     return {
       frameId: Number.isInteger(frameId) && frameId >= 0 ? frameId : null,
       documentId: typeof documentId === 'string' && documentId ? documentId : null
     }
   }
   /**
-   * @param {MessagePort} port
-   * @returns {void}
-   */
-  function rejectBootstrapPort(port) {
-    try {
-      port.close()
-    } catch (e) {
-      logger.debug('duplicate bootstrap port close failed', e)
-    }
-  }
-  /**
-   * @param {FrameContext} context
-   * @param {{frameId: number|null, documentId: string|null}} identity
-   * @returns {boolean}
-   */
-  function sameBrowserLifetime(context, identity) {
-    return (
-      context.frameId != null &&
-      context.documentId != null &&
-      context.frameId === identity.frameId &&
-      context.documentId === identity.documentId
-    )
-  }
-  /**
-   * @param {{frameId: number|null, documentId: string|null}} identity
-   * @returns {boolean}
-   */
-  function hasBrowserLifetime(identity) {
-    return identity.frameId != null && identity.documentId != null
-  }
-  /**
+   * Installs the exact same-document page endpoint.
    * @param {MessagePort} port
    * @param {Window} source
    * @param {string} origin
@@ -244,9 +240,6 @@
    */
   function acceptBootstrapPort(port, source, origin, identity) {
     const context = createFrameContext(port, source, origin, identity)
-    pagePorts.set(source, port)
-    pageSourceByPort.set(port, source)
-    portOrigin.set(port, origin)
     port.onmessage = (event) => {
       const data = event.data
       if (!data) return
@@ -257,23 +250,20 @@
       }
       dispatchPortMessage(port, event, source)
     }
-    logger.debug(
-      '[bridge] page port established for',
-      source === window ? 'window' : 'child',
-      context.key
-    )
+    if (typeof port.start === 'function') port.start()
+    logger.debug('[bridge] exact page port established', context.key)
     return context
   }
   /**
    * @param {MessagePort} port
-   * @param {Window|null} source
+   * @param {Window} source
    * @param {string} origin
    * @param {{frameId: number|null, documentId: string|null}} identity
    * @returns {FrameContext}
    */
   function createFrameContext(port, source, origin, identity) {
     const context = {
-      key: bridgeInstanceId + '/frame-' + ++nextFrameGeneration,
+      key: frameInstanceId + '/exact-' + ++nextFrameGeneration,
       generation: nextFrameGeneration,
       port,
       source,
@@ -283,13 +273,18 @@
       destroyed: false,
       sessions: new Map()
     }
-    frameContexts.set(context.key, context)
+    frameContext = context
     frameContextByPort.set(port, context)
     clientSessions.set(port, context.sessions)
     clientKeysByPort.set(port, 'window')
-    if (source) frameContextBySource.set(source, context)
     return context
   }
+  frameContext = acceptBootstrapPort(
+    pagePort,
+    window,
+    window.location.origin,
+    browserFrameIdentity(window)
+  )
 
   /**
    * @param {MessagePort} port
@@ -325,7 +320,8 @@
    */
   function contextForPlaneKey(key) {
     const separator = key.indexOf('\u0000')
-    return separator >= 0 ? frameContexts.get(key.slice(0, separator)) || null : null
+    if (!frameContext || separator < 0) return null
+    return frameContext.key === key.slice(0, separator) ? frameContext : null
   }
 
   /**
@@ -429,8 +425,15 @@
   browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
     const origin = typeof request.origin === 'string' ? request.origin : ''
     const knownOrigin = !origin || collectFrameOrigins().includes(origin)
-    if (!knownOrigin && (request.action === 'getOpenDeviceIds' || request.action === 'getDataPlaneStatus')) {
-      sendResponse(request.action === 'getOpenDeviceIds' ? { ids: [] } : { planes: [], defaultPlane: webhid.import('GLOBAL_DEFAULTS').dataPlane })
+    if (
+      !knownOrigin &&
+      (request.action === 'getOpenDeviceIds' || request.action === 'getDataPlaneStatus')
+    ) {
+      sendResponse(
+        request.action === 'getOpenDeviceIds'
+          ? { ids: [] }
+          : { planes: [], defaultPlane: webhid.import('GLOBAL_DEFAULTS').dataPlane }
+      )
       return true
     }
     if (request.action === 'getFrameOrigins') {
@@ -661,14 +664,6 @@
     return load
   }
   installSettingsListeners(window.location.origin, settings)
-  /** @type {Map<Window, MessagePort>} */
-  const pagePorts = new Map()
-  /** @type {Map<MessagePort, Window>} */
-  const pageSourceByPort = new Map()
-  /** @type {Map<string, MessagePort>} */
-  const requestPortMap = new Map()
-  /** @type {Map<MessagePort, string>} */
-  const portOrigin = new Map()
   /** @type {Map<string, number>} */
   const spawnGen = new Map()
   /**
@@ -1262,7 +1257,7 @@
       })
       generation = spawnGen.get(key)
     }
-    if (context.destroyed || !frameContexts.has(context.key) || spawnGen.get(key) !== generation)
+    if (context.destroyed || frameContext !== context || spawnGen.get(key) !== generation)
       return null
     ensureRuntimeDataPort(deviceId)
     let response
@@ -1286,7 +1281,7 @@
       }
       return null
     }
-    if (context.destroyed || !frameContexts.has(context.key) || spawnGen.get(key) !== generation) {
+    if (context.destroyed || frameContext !== context || spawnGen.get(key) !== generation) {
       if (spawnGen.get(key) === generation)
         await despawnDataPlane(context, deviceId, { clientKey, clientPort })
       return null
@@ -1366,7 +1361,7 @@
    */
   function waitForPlaneReady(context, deviceId, clientKey, generation, sessionToken) {
     const key = planeKeyForClient(context, deviceId, clientKey)
-    if (context.destroyed || !frameContexts.has(context.key))
+    if (context.destroyed || frameContext !== context)
       return Promise.resolve({ ok: false, destroyed: true })
     if (spawnGen.get(key) !== generation) return Promise.resolve({ ok: false, stale: true })
     if (readyGenerations.get(key) === generation) return Promise.resolve({ ok: true })
@@ -1442,7 +1437,6 @@
     }
   })()
 
-
   /**
    * @param {object} msg
    * @param {ArrayBuffer[]} [transfer]
@@ -1458,7 +1452,11 @@
       }
     }
     if (msg != null && (msg.type === 'event' || msg.type === 'settings')) {
-      for (const port of pagePorts.values()) port.postMessage(msg, transfer)
+      try {
+        frameContext.port.postMessage(msg, transfer)
+      } catch (e) {
+        logger.debug('page event delivery failed', e)
+      }
     }
   }
 
@@ -1546,7 +1544,7 @@
       unavailableReason: 'data plane recovery'
     })
     const generation = spawnGen.get(key)
-    if (context.destroyed || !frameContexts.has(context.key)) return null
+    if (context.destroyed || frameContext !== context) return null
     const originSettings = settingsForOrigin(context.origin)
     if (originSettings.dataPlane === 'nm') {
       return fallbackToNm(context, deviceId, token, clientKey, generation, {
@@ -1623,25 +1621,6 @@
       ),
     frameDestroyed: handleFrameDestroyedMessage
   }
-  const handleBootstrap = createBootstrapGate({
-    getReservation: (source) => bootstrapReservations.get(source) || null,
-    setReservation: (source, reservation) => bootstrapReservations.set(source, reservation),
-    deleteReservation: (source) => bootstrapReservations.delete(source),
-    getContext: (source) => frameContextBySource.get(source) || null,
-    getIdentity: browserFrameIdentity,
-    getCurrentIdentity: browserFrameIdentity,
-    hasLifetime: hasBrowserLifetime,
-    sameLifetime: sameBrowserLifetime,
-    accept: acceptBootstrapPort,
-    accepted: (port) => port.postMessage({ type: 'bootstrapAccepted' }),
-    destroy: destroyFrameContext,
-    reject: rejectBootstrapPort,
-    createChallenge: () => pristine.host.cryptoRandomUUID(),
-    schedule: (callback, delay) => setTimeout(callback, delay),
-    cancel: (handle) => clearTimeout(handle),
-    probeTimeoutMs: BOOTSTRAP_PROBE_TIMEOUT_MS
-  })
-  window.addEventListener('message', handleBootstrap)
 
   /**
    * @param {object} data
@@ -1649,30 +1628,16 @@
    */
   function getRequestOrigin(data) {
     const port = requestPortMap.get(data.id)
-    return port ? portOrigin.get(port) : window.location.origin
+    return frameContextForPort(port)?.origin || window.location.origin
   }
 
   /**
-   * Distinct http(s) origins of every frame running the polyfill in this tab,
-   * top-level first. Origins come from the engine-set `event.origin` of each
-   * page port, never from page-visible state.
+   * Returns this exact document's origin for local settings and UI requests.
    * @returns {string[]}
    */
   function collectFrameOrigins() {
-    const seen = new Set()
-    const origins = []
-    const topOrigin = window.location.origin
-    if (topOrigin && (topOrigin.startsWith('http:') || topOrigin.startsWith('https:'))) {
-      seen.add(topOrigin)
-      origins.push(topOrigin)
-    }
-    for (const o of portOrigin.values()) {
-      if (!o || seen.has(o)) continue
-      if (!(o.startsWith('http:') || o.startsWith('https:'))) continue
-      seen.add(o)
-      origins.push(o)
-    }
-    return origins
+    const origin = frameContext.origin
+    return origin && (origin.startsWith('http:') || origin.startsWith('https:')) ? [origin] : []
   }
 
   /**
@@ -1709,7 +1674,6 @@
       workerPagePorts.set(context, workerPorts)
     }
     workerPorts.add(p)
-    portOrigin.set(p, context.origin)
     p.onmessage = (event) => dispatchPortMessage(p, event, null)
     if (typeof p.start === 'function') p.start()
     requestPort.postMessage({
@@ -1854,20 +1818,31 @@
     }
   }
   /**
+   * @param {{childFrameId: number, childDocumentId: string}} query
+   * @returns {boolean}
+   */
+  function frameDelegationForChild(query) {
+    try {
+      const getFrameId = browser.runtime.getFrameId
+      const getDocumentId = browser.runtime.getDocumentId
+      if (typeof getFrameId !== 'function' || typeof getDocumentId !== 'function') return false
+      for (const frame of document.querySelectorAll('iframe,frame')) {
+        if (getFrameId(frame) !== query.childFrameId) continue
+        if (getDocumentId(frame) !== query.childDocumentId) continue
+        const allow = frame.getAttribute('allow') || ''
+        return allow.split(';').some((directive) => /^\s*hid(?:\s|$)/i.test(directive))
+      }
+    } catch {
+      void 0
+    }
+    return false
+  }
+  /**
    * @param {FrameContext} context
    * @returns {boolean}
    */
   function hasHidDelegation(context) {
-    if (!context.source || context.source === window) return true
-    try {
-      const frames = document.querySelectorAll('iframe,frame')
-      for (const frame of frames) {
-        if (frame.contentWindow !== context.source) continue
-        const allow = frame.getAttribute('allow') || ''
-        return allow.split(';').some((directive) => /^\s*hid(?:\s|$)/i.test(directive))
-      }
-    } catch {}
-    return false
+    return context.frameId === 0
   }
   /**
    * @param {object} data
@@ -1882,22 +1857,16 @@
       return
     }
     try {
-      const delegation = hasHidDelegation(context)
-      const delegationResponse = await sendBackgroundRequest({
-        action: 'setFrameDelegation',
-        origin: context.origin,
-        frameId: context.frameId,
-        documentId: context.documentId,
-        delegated: delegation
-      })
-      const response = delegationResponse?.ok
-        ? await sendBackgroundRequest({
-            action: 'getPolicy',
-            origin: context.origin,
-            frameId: context.frameId,
-            documentId: context.documentId
-          })
-        : null
+      let response = null
+      if (hasHidDelegation(context)) {
+        const delegationResponse = await sendBackgroundRequest({
+          action: 'setFrameDelegation',
+          delegated: true
+        })
+        if (delegationResponse?.ok) response = await sendBackgroundRequest({ action: 'getPolicy' })
+      } else {
+        response = await sendBackgroundRequest({ action: 'getPolicy' })
+      }
       replyToPage({
         type: 'response',
         id: data.id,
@@ -1943,59 +1912,47 @@
         ? 'modal'
         : originSettings.devicePickerMode
 
-    if (pickerMode === 'pageAction' || pickerMode === 'window') {
+    sendBackgroundRequest({
+      action: 'showPicker',
+      requestId: data.id,
+      filters,
+      exclusionFilters,
+      mode: pickerMode,
+      origin
+    }).catch((e) => logger.debug('showPicker send failed', e))
+    const pickerTimeout = setTimeout(() => {
+      pickerResultHandlers.delete(data.id)
       sendBackgroundRequest({
-        action: 'showPicker',
-        requestId: data.id,
-        filters,
-        exclusionFilters,
-        mode: pickerMode,
-        origin,
-      }).catch((e) => logger.debug('showPicker send failed', e))
-      const pickerTimeout = setTimeout(() => {
-        browser.runtime.onMessage.removeListener(onPickerResult)
-        sendBackgroundRequest({
-          action: 'cancelPicker',
-          requestId: data.id
-        }).catch((e) => logger.debug('cancelPicker send failed', e))
+        action: 'cancelPicker',
+        requestId: data.id
+      }).catch((e) => logger.debug('cancelPicker send failed', e))
+      replyToPage({
+        type: 'response',
+        id: data.id,
+        result: { cancelled: true }
+      })
+    }, 30000)
+    const onPickerResult = async (msg) => {
+      if (msg.action !== 'pickerResult' || msg.requestId !== data.id) return
+      clearTimeout(pickerTimeout)
+      pickerResultHandlers.delete(data.id)
+      if (msg.selected && msg.devices) {
+        await grantSelectedDevices(getRequestOrigin(data), msg.devices)
+        replyToPage({
+          type: 'response',
+          id: data.id,
+          result: { devices: msg.devices }
+        })
+      } else {
         replyToPage({
           type: 'response',
           id: data.id,
           result: { cancelled: true }
         })
-      }, 30000)
-      const onPickerResult = async (msg) => {
-        if (msg.action !== 'pickerResult' || msg.requestId !== data.id) return
-        clearTimeout(pickerTimeout)
-        browser.runtime.onMessage.removeListener(onPickerResult)
-        if (msg.selected && msg.devices) {
-          await grantSelectedDevices(getRequestOrigin(data), msg.devices)
-          replyToPage({
-            type: 'response',
-            id: data.id,
-            result: { devices: msg.devices }
-          })
-        } else {
-          replyToPage({
-            type: 'response',
-            id: data.id,
-            result: { cancelled: true }
-          })
-        }
       }
-      browser.runtime.onMessage.addListener(onPickerResult)
-      return
     }
-
-    const result = await devicePicker.show(filters, exclusionFilters)
-    if (result.devices && result.devices.length) {
-      await grantSelectedDevices(getRequestOrigin(data), result.devices)
-    }
-    replyToPage({
-      type: 'response',
-      id: data.id,
-      result: result.devices.length ? { devices: result.devices } : { cancelled: true }
-    })
+    pickerResultHandlers.set(data.id, onPickerResult)
+    return
   }
 
   /**
@@ -2011,7 +1968,7 @@
     if (
       !context ||
       context.destroyed ||
-      !frameContexts.has(context.key) ||
+      frameContext !== context ||
       !client ||
       client.sessions !== sessions
     )
@@ -2147,7 +2104,7 @@
         const currentClient = clientForPort(context, requestPort)
         if (
           context.destroyed ||
-          !frameContexts.has(context.key) ||
+          frameContext !== context ||
           frameContextForPort(requestPort) !== context ||
           !currentClient ||
           currentClient.port !== client.port ||
@@ -2224,7 +2181,6 @@
     } catch {
       if (action === 'open' && nmOpenAttempt) {
         releaseNmOpenAttempt(key)
-        nmOpenAttempt = false
       }
       if (action === 'open') {
         if (sessions) sessions.delete(deviceId)
@@ -2281,7 +2237,6 @@
     clientSessions.delete(workerPort)
     clientKeysByPort.delete(workerPort)
     frameContextByPort.delete(workerPort)
-    portOrigin.delete(workerPort)
     try {
       workerPort.onmessage = null
       workerPort.close()
@@ -2336,7 +2291,7 @@
    * @returns {Promise<void>}
    */
   async function destroyFrameContext(context, { close = true, notify = false } = {}) {
-    if (!context || context.destroyed || !frameContexts.has(context.key)) return
+    if (!context || context.destroyed || frameContext !== context) return
     const clientRecords = sessionsForContext(context).map(({ port, sessions, clientKey }) => ({
       port,
       sessions,
@@ -2376,11 +2331,6 @@
     }
 
     context.destroyed = true
-    frameContexts.delete(context.key)
-    if (frameContextBySource.get(context.source) === context) {
-      frameContextBySource.delete(context.source)
-      pagePorts.delete(context.source)
-    }
     const workerPorts = new Set(workerPagePorts.get(context) || [])
     const allClientPorts = new Set(clientRecords.map(({ port }) => port))
     for (const port of workerPorts) allClientPorts.add(port)
@@ -2388,8 +2338,6 @@
       frameContextByPort.delete(port)
       clientSessions.delete(port)
       clientKeysByPort.delete(port)
-      portOrigin.delete(port)
-      pageSourceByPort.delete(port)
       for (const [id, mappedPort] of requestPortMap) {
         if (mappedPort === port) requestPortMap.delete(id)
       }
@@ -2439,6 +2387,7 @@
     } catch (e) {
       logger.debug('frame page port cleanup failed', e)
     }
+    if (frameContext === context) frameContext = null
   }
 
   /**
@@ -2446,7 +2395,7 @@
    * @returns {Promise<void>}
    */
   async function resetAuthorityState() {
-    const contexts = [...frameContexts.values()]
+    const contexts = frameContext ? [frameContext] : []
     for (const context of contexts) {
       const clientSessionsForFrame = sessionsForContext(context)
       const deviceIds = new Set()
@@ -2513,7 +2462,7 @@
    */
   function forwardInputReportToPage(messageEvent) {
     let handled = false
-    for (const context of frameContexts.values()) {
+    for (const context of frameContext ? [frameContext] : []) {
       for (const { port, sessions, clientKey } of sessionsForContext(context)) {
         if (!sessions.has(messageEvent.deviceId)) continue
         const key = planeKeyForClient(context, messageEvent.deviceId, clientKey)
@@ -2545,16 +2494,15 @@
       return
     }
     if (messageEvent.eventType === 'disconnect') {
-      const contexts = [...frameContexts.values()]
+      const contexts = frameContext ? [frameContext] : []
       for (const context of contexts) {
         reconcileFrameDevice(context, messageEvent.deviceId, messageEvent).catch((e) =>
           logger.debug('disconnect reconciliation failed', e)
         )
       }
     } else if (messageEvent.eventType === 'revoked') {
-      const contexts = [...frameContexts.values()].filter(
-        (context) => context.origin === messageEvent.origin
-      )
+      const contexts =
+        frameContext && frameContext.origin === messageEvent.origin ? [frameContext] : []
       for (const context of contexts) {
         reconcileFrameDevice(context, messageEvent.deviceId, messageEvent).catch((e) =>
           logger.debug('revoke reconciliation failed', e)
@@ -2672,7 +2620,7 @@
    */
   function respawnPlanesForMode(dp, origin) {
     if (dp !== 'ws' && dp !== 'wt') return
-    for (const context of frameContexts.values()) {
+    for (const context of frameContext ? [frameContext] : []) {
       if (context.origin !== origin) continue
       for (const { sessions } of sessionsForContext(context)) {
         const clientKey = clientKeyForSessions(sessions)
@@ -2700,7 +2648,7 @@
    */
   async function applyDataPlane(dp, origin) {
     const active = []
-    for (const context of frameContexts.values()) {
+    for (const context of frameContext ? [frameContext] : []) {
       if (context.origin !== origin) continue
       for (const { sessions } of sessionsForContext(context)) {
         const clientKey = clientKeyForSessions(sessions)

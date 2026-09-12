@@ -28,6 +28,19 @@
     }
     return reached
   }
-
-  webhid.export('content-ports', { registerContentPort, postToContentPorts })
+  /**
+   * Sends one message to a registered exact endpoint.
+   * @param {object} port
+   * @param {object} message
+   * @returns {void}
+   */
+  function postToContentPort(port, message) {
+    if (!ports.has(port)) return
+    try {
+      port.postMessage(message)
+    } catch {
+      ports.delete(port)
+    }
+  }
+  webhid.export('content-ports', { registerContentPort, postToContentPorts, postToContentPort })
 })()

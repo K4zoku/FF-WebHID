@@ -3,7 +3,10 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { runInNewContext } from 'node:vm'
 
-const source = readFileSync(new URL('../../addon/js/background/state_ops.js', import.meta.url), 'utf8')
+const source = readFileSync(
+  new URL('../../addon/js/background/state_ops.js', import.meta.url),
+  'utf8'
+)
 
 function loadStateOps() {
   let exported
@@ -38,7 +41,13 @@ async function flush() {
 
 test('tab cleanup preserves sibling sessions and retains failed closes', async () => {
   const { ops, deviceTabMap, deviceSessions, orphanCleanup } = loadStateOps()
-  deviceTabMap.set(7, new Map([[11, 1], [22, 1]]))
+  deviceTabMap.set(
+    7,
+    new Map([
+      [11, 1],
+      [22, 1]
+    ])
+  )
   deviceSessions.set(
     7,
     new Map([
@@ -266,34 +275,26 @@ test('physical ownership reset removes every session for one device', () => {
   assert.equal(ops.isFrameLifetimeActive(11, 'frame-a'), true)
   assert.equal(ops.isFrameLifetimeActive(11, 'frame-b'), true)
 })
-test('bridge cleanup cannot retire a newer bridge lifetime', async () => {
+test('exact endpoint cleanup cannot retire a replacement lifetime', async () => {
   const { ops, deviceSessions, deviceTabMap } = loadStateOps()
-  ops.registerFrameLifetime(11, 'bridge-old/frame-1')
-  ops.registerFrameLifetime(11, 'bridge-new/frame-1')
+  ops.registerFrameLifetime(11, 'endpoint-old')
+  ops.registerFrameLifetime(11, 'endpoint-new')
   ops.registerDeviceTab(7, 11)
   ops.registerDeviceTab(7, 11)
   ops.registerDeviceSession(7, 'session-old', {
     tabId: 11,
     origin: 'https://a.test',
-    frameKey: 'bridge-old/frame-1',
-    bridgeInstanceId: 'bridge-old'
+    frameKey: 'endpoint-old'
   })
   ops.registerDeviceSession(7, 'session-new', {
     tabId: 11,
     origin: 'https://a.test',
-    frameKey: 'bridge-new/frame-1',
-    bridgeInstanceId: 'bridge-new'
+    frameKey: 'endpoint-new'
   })
-  const { promise, resolve } = Promise.withResolvers()
-  const cleanup = ops.purgeBridge(11, 'bridge-old', async () => {
-    await promise
-    return { s: 204 }
-  })
-  resolve()
-  await cleanup
+  await ops.purgeFrame(11, 'endpoint-old', async () => ({ s: 204 }))
 
-  assert.equal(ops.isFrameLifetimeActive(11, 'bridge-old/frame-1'), false)
-  assert.equal(ops.isFrameLifetimeActive(11, 'bridge-new/frame-1'), true)
+  assert.equal(ops.isFrameLifetimeActive(11, 'endpoint-old'), false)
+  assert.equal(ops.isFrameLifetimeActive(11, 'endpoint-new'), true)
   assert.deepEqual([...deviceSessions.get(7).keys()], ['session-new'])
   assert.equal(deviceTabMap.get(7).get(11), 1)
 })

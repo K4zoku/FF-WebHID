@@ -262,14 +262,6 @@
     else shadowArms.set(key, { count: existing.count - 1, at: existing.at })
   })
 
-  /**
-   * Hides page actions from every open tab.
-   * @returns {void}
-   */
-  function hidePageActions() {
-    pageActionVisibility.setHidden(true).catch((e) => logger.debug('pageAction.hide failed', e))
-  }
-
   browser.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return
     let hasSiteChange = false

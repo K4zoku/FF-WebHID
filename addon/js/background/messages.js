@@ -1,16 +1,16 @@
 ;(function () {
   const webhid = globalThis.webhid
-  const { registerContentPort } = webhid.import('content-ports')
+  const { registerContentPort, postToContentPort } = webhid.import('content-ports')
   const http = webhid.import('http')
   const logger = webhid.import('logger')
   const isChromium = webhid.import('isChromium')
-  const globalSettingKey = webhid.import('globalSettingKey')
   const decodeDeviceCollections = webhid.import('decodeDeviceCollections')
   const {
     deviceCache,
     pendingPicker,
     permissionsPolicy,
     frameDelegations,
+    frameEndpoints,
     pageActionVisibility
   } = webhid.import('bgState')
   const {
@@ -35,8 +35,6 @@
     registerFrameLifetime,
     isFrameLifetimeActive,
     purgeFrame,
-    purgeBridge,
-    forTabsOfOrigin,
     collectDeviceSessionsForOrigin,
     getDeviceSessionOwner,
     closeForCleanup
@@ -52,6 +50,111 @@
   /** @type {object|null} */
   let actionApi = null
 
+  let nextEndpointId = 0
+  /**
+   * Registers one browser-owned exact frame endpoint.
+   * @param {object} port
+   * @returns {object|null}
+   */
+  function registerFrameEndpoint(port) {
+    const sender = port.sender || {}
+    const tabId = sender.tab?.id
+    const frameId = Number.isInteger(sender.frameId) ? sender.frameId : null
+    const documentId =
+      typeof sender.documentId === 'string' && sender.documentId ? sender.documentId : null
+    const origin = urlOrigin(sender.url || '')
+    if (tabId == null || frameId == null || !origin) return null
+    const endpoint = {
+      id: 'endpoint-' + ++nextEndpointId,
+      port,
+      tabId,
+      frameId,
+      documentId,
+      origin,
+      url: sender.url,
+      frameKey: 'endpoint-' + nextEndpointId
+    }
+    frameEndpoints.set(port, endpoint)
+    if (!registerFrameLifetime(tabId, endpoint.frameKey)) {
+      frameEndpoints.delete(port)
+      return null
+    }
+    return endpoint
+  }
+  /**
+   * @param {object} port
+   * @returns {object|null}
+   */
+  function endpointForPort(port) {
+    return (port && frameEndpoints.get(port)) || null
+  }
+  /**
+   * @param {object} sender
+   * @param {object} port
+   * @returns {object|null}
+   */
+  function endpointForRequest(sender, port) {
+    return endpointForPort(port)
+  }
+  const delegationPending = new Map()
+  let nextDelegationId = 0
+  /**
+   * Resolves the parent endpoint for an exact child document.
+   * @param {object} endpoint
+   * @returns {object|null}
+   */
+  function parentEndpointFor(endpoint) {
+    const entry = policyEntryForDocument(
+      endpoint.tabId,
+      endpoint.frameId,
+      endpoint.documentId,
+      endpoint.origin
+    )
+    const parentFrameId = entry && entry.parentFrameId >= 0 ? entry.parentFrameId : 0
+    const parentDocumentId = entry && entry.parentDocumentId
+    if (endpoint.frameId === 0) return null
+    for (const candidate of frameEndpoints.values()) {
+      if (
+        candidate.tabId === endpoint.tabId &&
+        candidate.frameId === parentFrameId &&
+        (!parentDocumentId || candidate.documentId === parentDocumentId) &&
+        candidate.documentId &&
+        candidate.port !== endpoint.port
+      )
+        return candidate
+    }
+    return null
+  }
+  /**
+   * Queries the exact parent endpoint for iframe delegation.
+   * @param {object} endpoint
+   * @returns {Promise<boolean>}
+   */
+  function queryFrameDelegation(endpoint) {
+    const parent = parentEndpointFor(endpoint)
+    if (!parent) return Promise.resolve(false)
+    const requestId = 'delegation:' + ++nextDelegationId
+    return new Promise((resolve) => {
+      delegationPending.set(requestId, { endpoint, parent, resolve })
+      postToContentPort(parent.port, {
+        action: 'frameDelegationQuery',
+        requestId,
+        childFrameId: endpoint.frameId,
+        childDocumentId: endpoint.documentId
+      })
+    })
+  }
+  /**
+   * Sends an origin-scoped event to every registered exact frame endpoint.
+   * @param {string} origin
+   * @param {object} message
+   * @returns {void}
+   */
+  function postToOriginEndpoints(origin, message) {
+    for (const endpoint of frameEndpoints.values()) {
+      if (endpoint.origin === origin) postToContentPort(endpoint.port, message)
+    }
+  }
   /**
    * Replaces the in-memory device cache with `devices` (decoded), persisting
    * them afterwards.
@@ -71,11 +174,7 @@
    * @returns {Promise<void>}
    */
   async function notifyAllowedDevicesChanged(origin, deviceIds) {
-    await forTabsOfOrigin(null, (tab) =>
-      browser.tabs
-        .sendMessage(tab.id, { action: 'allowedDevicesChanged', origin, deviceIds })
-        .catch(() => {})
-    )
+    postToOriginEndpoints(origin, { action: 'allowedDevicesChanged', origin, deviceIds })
   }
 
   /**
@@ -101,19 +200,13 @@
     }
     await deleteGrantGroups(memberGroups.map((g) => g.id))
     const deviceIds = await getAllowedDevices(origin)
-    await forTabsOfOrigin(null, (tab) => {
-      for (const deviceId of toRevoke) {
-        browser.tabs
-          .sendMessage(tab.id, {
-            action: 'webhidDeviceEvent',
-            event: { eventType: 'revoked', deviceId, origin }
-          })
-          .catch(() => {})
-      }
-      browser.tabs
-        .sendMessage(tab.id, { action: 'allowedDevicesChanged', origin, deviceIds })
-        .catch(() => {})
-    })
+    for (const deviceId of toRevoke) {
+      postToOriginEndpoints(origin, {
+        action: 'webhidDeviceEvent',
+        event: { eventType: 'revoked', deviceId, origin }
+      })
+    }
+    postToOriginEndpoints(origin, { action: 'allowedDevicesChanged', origin, deviceIds })
   }
 
   /**
@@ -284,20 +377,21 @@
    * @param {object} request
    * @param {object} sender
    * @param {function(*): void} sendResponse
+   * @param {object} port
    * @returns {boolean}
    */
-  function handleOpen(request, sender, sendResponse) {
-    const tabId = sender.tab != null ? sender.tab.id : undefined
-    const ownerFrameKey = request.frameKey || 'tab:' + tabId
-    if (tabId == null) {
+  function handleOpen(request, sender, sendResponse, port) {
+    const endpoint = endpointForRequest(sender, port)
+    if (!endpoint) {
       sendResponse({ s: 403 })
       return true
     }
-    if (!registerFrameLifetime(tabId, ownerFrameKey)) {
+    const { tabId, origin, frameKey } = endpoint
+    if (!isFrameLifetimeActive(tabId, frameKey)) {
       sendResponse({ s: 503 })
       return true
     }
-    getAllowedDevices(request.origin)
+    getAllowedDevices(origin)
       .then((deviceIds) => {
         if (!deviceIds.includes(request.deviceId)) {
           sendResponse({ s: 403 })
@@ -307,21 +401,13 @@
           .then(async (response) => {
             if (typeof response.P === 'number') lastHidPermission = response.P
             if (http.isOk(response.s) && response.i) {
-              const stillAllowed = (await getAllowedDevices(request.origin)).includes(
-                request.deviceId
-              )
-              const ownerStillAlive = isFrameLifetimeActive(tabId, ownerFrameKey)
+              const stillAllowed = (await getAllowedDevices(origin)).includes(request.deviceId)
+              const ownerStillAlive = isFrameLifetimeActive(tabId, frameKey)
               if (!stillAllowed || !ownerStillAlive) {
-                logger.warn(
-                  'open for device',
-                  request.deviceId,
-                  !stillAllowed ? 'revoked while in flight' : 'owner died while in flight'
-                )
-                if (response.t) {
+                if (response.t)
                   await closeForCleanup(response.i, response.t, (id, token) =>
                     NativeMessaging.closeDevice(id, token)
                   )
-                }
                 sendResponse({ s: ownerStillAlive ? 403 : 503 })
                 return
               }
@@ -329,18 +415,19 @@
               if (response.t) {
                 sessionRegistered = registerDeviceSession(response.i, response.t, {
                   tabId,
-                  origin: request.origin,
-                  frameKey: ownerFrameKey,
-                  bridgeInstanceId: request.bridgeInstanceId,
+                  frameId: endpoint.frameId,
+                  documentId: endpoint.documentId,
+                  origin,
+                  frameKey,
+                  port,
                   clientKey: request.clientKey
                 })
               }
               if (!sessionRegistered) {
-                if (response.t) {
+                if (response.t)
                   await closeForCleanup(response.i, response.t, (id, token) =>
                     NativeMessaging.closeDevice(id, token)
                   )
-                }
                 sendResponse({ s: 503 })
                 return
               }
@@ -368,12 +455,13 @@
    * @param {object} request
    * @param {object} sender
    * @param {function(*): void} sendResponse
+   * @param {object} port
    * @returns {boolean}
    */
-  function handleClose(request, sender, sendResponse) {
-    const tabId = sender.tab != null ? sender.tab.id : undefined
-    const frame = request.frameKey || 'tab:' + tabId
-    if (!isTabAuthorizedForDevice(tabId, request.deviceId)) {
+  function handleClose(request, sender, sendResponse, port) {
+    const endpoint = endpointForRequest(sender, port)
+    const tabId = endpoint?.tabId
+    if (!endpoint || !isTabAuthorizedForDevice(tabId, request.deviceId)) {
       sendResponse({ s: 403 })
       return true
     }
@@ -382,10 +470,11 @@
       !isSessionOwnedBy(
         request.deviceId,
         request.T,
-        request.origin,
-        tabId,
-        frame,
-        request.clientKey
+        endpoint.origin,
+        endpoint.tabId,
+        endpoint.frameKey,
+        request.clientKey,
+        port
       )
     ) {
       sendResponse({ s: 403 })
@@ -404,29 +493,22 @@
   }
 
   /**
-   * Closes all sessions owned by one bridge document lifetime.
+   * Closes all sessions owned by one exact bridge endpoint.
    * @param {object} request
    * @param {object} sender
    * @param {function(*): void} sendResponse
+   * @param {object} port
    * @returns {boolean}
    */
-  async function handleFrameDestroyed(request, sender, sendResponse) {
-    const tabId = sender.tab != null ? sender.tab.id : undefined
-    await purgeFrame(tabId, request.frameKey, (deviceId, token) =>
-      NativeMessaging.closeDevice(deviceId, token)
-    )
-    const frameId =
-      Number.isInteger(request.frameId) && request.frameId >= 0 ? request.frameId : sender.frameId
-    const documentId =
-      typeof request.documentId === 'string' && request.documentId
-        ? request.documentId
-        : frameId === sender.frameId
-          ? sender.documentId
-          : null
-    if (tabId != null && Number.isInteger(frameId) && documentId) {
-      const key = documentFrameKey(tabId, frameId, documentId)
-      frameDelegations.delete(key)
-      permissionsPolicy.delete(key)
+  async function handleFrameDestroyed(request, sender, sendResponse, port) {
+    const endpoint = endpointForRequest(sender, port)
+    if (endpoint) {
+      await purgeFrame(endpoint.tabId, endpoint.frameKey, (deviceId, token) =>
+        NativeMessaging.closeDevice(deviceId, token)
+      )
+      const exactKey = documentFrameKey(endpoint.tabId, endpoint.frameId, endpoint.documentId)
+      frameDelegations.delete(exactKey)
+      permissionsPolicy.delete(exactKey)
     }
     sendResponse({ s: 204 })
     return true
@@ -484,29 +566,29 @@
    * @param {object} request
    * @param {object} sender
    * @param {function(*): void} sendResponse
+   * @param {object} port
    * @returns {boolean}
    */
-  function handleSetDataPlane(request, sender, sendResponse) {
-    if (!tabAllowsDevice(sender, request.deviceId)) {
+  function handleSetDataPlane(request, sender, sendResponse, port) {
+    const endpoint = endpointForRequest(sender, port)
+    if (!endpoint || !tabAllowsDevice(sender, request.deviceId)) {
       sendResponse({ s: 403 })
       return true
     }
-    if (request.sessionToken) {
-      const tabId = sender.tab != null ? sender.tab.id : undefined
-      const frame = request.frameKey || 'tab:' + tabId
-      if (
-        !isSessionOwnedBy(
-          request.deviceId,
-          request.sessionToken,
-          request.origin,
-          tabId,
-          frame,
-          request.clientKey
-        )
-      ) {
-        sendResponse({ s: 403 })
-        return true
-      }
+    if (
+      request.sessionToken &&
+      !isSessionOwnedBy(
+        request.deviceId,
+        request.sessionToken,
+        endpoint.origin,
+        endpoint.tabId,
+        endpoint.frameKey,
+        request.clientKey,
+        port
+      )
+    ) {
+      sendResponse({ s: 403 })
+      return true
     }
     NativeMessaging.sendRequest({
       a: bgPacked.ACT.sdp,
@@ -761,7 +843,11 @@
       sendResponse(null)
       return false
     }
-    const origin = urlOrigin(request.origin || (sender.tab && sender.tab.url) || '')
+    const origin = urlOrigin(sender.url || '')
+    if (!origin) {
+      sendResponse(null)
+      return false
+    }
     const key = `csp:${frameKey(tabId, sender.frameId ?? 0, origin)}`
     browser.storage.session
       .get(key)
@@ -784,11 +870,18 @@
       sendResponse({ origins: [] })
       return false
     }
-    browser.tabs
-      .sendMessage(tabId, { action: 'getFrameOrigins' })
-      .then((r) => sendResponse({ origins: (r && r.origins) || [] }))
-      .catch(() => sendResponse({ origins: [] }))
-    return true
+    const origins = []
+    const seen = new Set()
+    const endpoints = [...frameEndpoints.values()]
+      .filter((endpoint) => endpoint.tabId === tabId)
+      .sort((a, b) => a.frameId - b.frameId)
+    for (const endpoint of endpoints) {
+      if (seen.has(endpoint.origin)) continue
+      seen.add(endpoint.origin)
+      origins.push(endpoint.origin)
+    }
+    sendResponse({ origins })
+    return false
   }
 
   /**
@@ -911,28 +1004,73 @@
    * @param {object} request
    * @param {object} sender
    * @param {function(*): void} sendResponse
+   * @param {object} port
    * @returns {boolean}
    */
-  function handleShowPicker(request, sender, sendResponse) {
-    const tabId = sender.tab != null ? sender.tab.id : undefined
-    if (tabId == null) {
-      sendResponse({ error: 'no tab' })
+  function handleShowPicker(request, sender, sendResponse, port) {
+    const endpoint = endpointForRequest(sender, port)
+    const tabId = endpoint?.tabId
+    if (!endpoint) {
+      sendResponse({ error: 'no frame endpoint' })
       return false
     }
     const req = {
       requestId: request.requestId,
       tabId,
+      port,
       filters: request.filters || [],
       exclusionFilters: request.exclusionFilters || [],
-      origin: request.origin,
+      origin: endpoint.origin,
       mode: request.mode || 'pageAction'
     }
-    pendingPicker.set(tabId, req)
-    if (req.mode === 'window') {
-      openPickerWindow()
+    if (req.mode === 'modal') {
+      const top = [...frameEndpoints.values()].find(
+        (candidate) => candidate.tabId === tabId && candidate.frameId === 0
+      )
+      if (!top) {
+        sendResponse({ error: 'top frame endpoint unavailable' })
+        return false
+      }
+      req.uiPort = top.port
+      pendingPicker.set(tabId, req)
+      postToContentPort(top.port, {
+        action: 'showInlinePicker',
+        requestId: req.requestId,
+        filters: req.filters,
+        exclusionFilters: req.exclusionFilters
+      })
     } else {
-      openPickerPageAction(tabId, request.origin)
+      pendingPicker.set(tabId, req)
+      if (req.mode === 'window') openPickerWindow()
+      else openPickerPageAction(tabId, endpoint.origin)
     }
+    sendResponse({ ok: true })
+    return false
+  }
+
+  /**
+   * Accepts a picker result from the registered top-frame UI host.
+   * @param {object} request
+   * @param {object} sender
+   * @param {function(*): void} sendResponse
+   * @param {object} port
+   * @returns {boolean}
+   */
+  function handleInlinePickerResult(request, sender, sendResponse, port) {
+    const req = [...pendingPicker.values()].find(
+      (candidate) => candidate.requestId === request.requestId
+    )
+    if (!req || req.uiPort !== port) {
+      sendResponse({ ok: false })
+      return false
+    }
+    pendingPicker.delete(req.tabId)
+    postToContentPort(req.port, {
+      action: 'pickerResult',
+      requestId: req.requestId,
+      selected: request.selected === true,
+      devices: request.selected === true ? request.devices : null
+    })
     sendResponse({ ok: true })
     return false
   }
@@ -979,17 +1117,9 @@
    */
   function policyForRequest(request, sender) {
     const tabId = sender.tab?.id
-    const frameId =
-      Number.isInteger(request.frameId) && request.frameId >= 0
-        ? request.frameId
-        : sender.frameId
-    const documentId =
-      typeof request.documentId === 'string' && request.documentId
-        ? request.documentId
-        : frameId === sender.frameId
-          ? sender.documentId
-          : null
-    const requestedOrigin = urlOrigin(request.origin || '')
+    const frameId = Number.isInteger(sender.frameId) ? sender.frameId : null
+    const documentId = typeof sender.documentId === 'string' ? sender.documentId : null
+    const requestedOrigin = urlOrigin(sender.url || '')
     if (tabId == null || frameId == null || !documentId || !requestedOrigin) {
       return { policy: { hid: 'none' } }
     }
@@ -1016,14 +1146,35 @@
    * @param {object} request
    * @param {object} sender
    * @param {function(*): void} sendResponse
+   * @param {object} port
    * @returns {boolean}
    */
-  function handleGetPolicy(request, sender, sendResponse) {
+  async function handleGetPolicy(request, sender, sendResponse, port) {
+    const endpoint = endpointForRequest(sender, port)
+    if (endpoint) {
+      const key = documentFrameKey(endpoint.tabId, endpoint.frameId, endpoint.documentId)
+      const entry = policyEntryForDocument(
+        endpoint.tabId,
+        endpoint.frameId,
+        endpoint.documentId,
+        endpoint.origin
+      )
+      if (
+        entry &&
+        endpoint.frameId !== 0 &&
+        entry.parentFrameId >= 0 &&
+        entry.parentKey &&
+        permissionsPolicy.get(entry.parentKey)?.origin !== entry.origin
+      ) {
+        const delegated = await queryFrameDelegation(endpoint)
+        frameDelegations.set(key, delegated)
+      }
+    }
     sendResponse(policyForRequest(request, sender))
     return false
   }
   /**
-   * Records exact iframe delegation observed by the top isolated bridge.
+   * Records delegation for this browser-authenticated frame document.
    * @param {object} request
    * @param {object} sender
    * @param {function(*): void} sendResponse
@@ -1031,26 +1182,10 @@
    */
   function handleSetFrameDelegation(request, sender, sendResponse) {
     const tabId = sender.tab?.id
-    const frameId =
-      Number.isInteger(request.frameId) && request.frameId >= 0
-        ? request.frameId
-        : sender.frameId
-    const documentId =
-      typeof request.documentId === 'string' && request.documentId
-        ? request.documentId
-        : frameId === sender.frameId
-          ? sender.documentId
-          : null
-    const origin = urlOrigin(request.origin || '')
-    if (
-      typeof request.bridgeInstanceId !== 'string' ||
-      tabId == null ||
-      !Number.isInteger(frameId) ||
-      frameId < 0 ||
-      typeof documentId !== 'string' ||
-      !documentId ||
-      !origin
-    ) {
+    const frameId = Number.isInteger(sender.frameId) ? sender.frameId : null
+    const documentId = typeof sender.documentId === 'string' ? sender.documentId : null
+    const origin = urlOrigin(sender.url || '')
+    if (tabId == null || frameId == null || !documentId || !origin) {
       sendResponse({ ok: false })
       return false
     }
@@ -1064,7 +1199,6 @@
     sendResponse({ ok: true })
     return false
   }
-
   /**
    * Arms the shadow-URL interception for the next worker script request from
    * the given tab+document, so the polyfill's own data-worker spawn is
@@ -1123,15 +1257,14 @@
       if (browser.notifications) browser.notifications.clear('webhid-picker').catch(() => {})
     }
     if (request.windowId != null) browser.windows.remove(request.windowId).catch(() => {})
-    if (tabId != null)
-      browser.tabs
-        .sendMessage(tabId, {
-          action: 'pickerResult',
-          requestId,
-          selected,
-          devices: selected ? devices : null
-        })
-        .catch(() => {})
+    if (req?.port) {
+      postToContentPort(req.port, {
+        action: 'pickerResult',
+        requestId,
+        selected,
+        devices: selected ? devices : null
+      })
+    }
     sendResponse({ ok: true })
     return false
   }
@@ -1173,7 +1306,8 @@
     getPolicy: handleGetPolicy,
     armShadowSpawn: handleArmShadowSpawn,
     unarmShadowSpawn: handleUnarmShadowSpawn,
-    pickerResult: handlePickerResult
+    pickerResult: handlePickerResult,
+    inlinePickerResult: handleInlinePickerResult
   }
 
   /**
@@ -1190,15 +1324,16 @@
     })
     browser.runtime.onConnect.addListener((port) => {
       registerContentPort(port)
-      let bridgeInstanceId = null
+      const endpoint = port.name === 'webhid-control' ? registerFrameEndpoint(port) : null
       port.onMessage.addListener((request) => {
+        if (request.action === 'frameDelegationResult') {
+          const pending = delegationPending.get(request.requestId)
+          if (!pending || pending.parent.port !== port) return
+          delegationPending.delete(request.requestId)
+          pending.resolve(request.delegated === true)
+          return
+        }
         const handler = HANDLERS[request.action]
-        if (
-          port.name === 'webhid-control' &&
-          bridgeInstanceId === null &&
-          typeof request.bridgeInstanceId === 'string'
-        )
-          bridgeInstanceId = request.bridgeInstanceId
         if (!handler) return
         let responded = false
         const sendPortResponse = (response) => {
@@ -1206,10 +1341,14 @@
           responded = true
           const responseMessage = { ...(response || {}) }
           if (request.reqId != null) responseMessage.reqId = request.reqId
-          port.postMessage(responseMessage)
+          try {
+            port.postMessage(responseMessage)
+          } catch {
+            void 0
+          }
         }
         try {
-          const result = handler(request, port.sender, sendPortResponse)
+          const result = handler(request, port.sender, sendPortResponse, port)
           if (result && typeof result.then === 'function') {
             result.catch(() => sendPortResponse({ s: 500 }))
           } else if (result !== true && !responded) {
@@ -1219,13 +1358,22 @@
           sendPortResponse({ s: 500 })
         }
       })
-      if (port.name === 'webhid-control') {
+      if (endpoint) {
         port.onDisconnect.addListener(() => {
-          const tabId = port.sender && port.sender.tab ? port.sender.tab.id : undefined
-          if (!bridgeInstanceId || tabId == null) return
-          purgeBridge(tabId, bridgeInstanceId, (deviceId, token) =>
+          if (frameEndpoints.get(port) !== endpoint) return
+          frameEndpoints.delete(port)
+          for (const [tabId, request] of pendingPicker) {
+            if (request.port !== port && request.uiPort !== port) continue
+            pendingPicker.delete(tabId)
+          }
+          for (const [requestId, pending] of delegationPending) {
+            if (pending.endpoint !== endpoint && pending.parent !== endpoint) continue
+            delegationPending.delete(requestId)
+            pending.resolve(false)
+          }
+          purgeFrame(endpoint.tabId, endpoint.frameKey, (deviceId, token) =>
             NativeMessaging.closeDevice(deviceId, token)
-          ).catch((e) => logger.debug('bridge session cleanup failed', e))
+          ).catch((e) => logger.debug('frame endpoint cleanup failed', e))
         })
       }
     })

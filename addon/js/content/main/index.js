@@ -16,6 +16,7 @@
   }
 
   const http = webhid.import('http')
+  const isChromium = webhid.import('isChromium')
   const GLOBAL_DEFAULTS = webhid.import('GLOBAL_DEFAULTS')
   const createSettingsStore = webhid.import('createSettingsStore')
   const isValidFilter = webhid.import('isValidFilter')
@@ -59,7 +60,6 @@
   const nativeWorkerAddEventListener = types.Worker
     ? types.Worker.getDescriptor('addEventListener').value
     : null
-  const nativeWindowPostMessage = !isWorker ? host.windowPostMessageMethod : null
   const nativeWorkerTerminate = types.Worker ? types.Worker.getDescriptor('terminate').value : null
   const nativeWindowAddEventListener = host.windowAddEventListener
   const nativeWindowRemoveEventListener = host.windowRemoveEventListener
@@ -76,9 +76,7 @@
   const Object = NativeObject
   const arrayIsArray = types.Array.getStaticDescriptor('isArray').value
   const arrayOps = types.Array.proto.methods
-  const nativeArrayIterator = nativeSymbolIterator
-    ? arrayOps[nativeSymbolIterator]
-    : null
+  const nativeArrayIterator = nativeSymbolIterator ? arrayOps[nativeSymbolIterator] : null
   const stringOps = types.String.proto.methods
   const nativeClearTimeout = host.timers.clearTimeout
   const nativeCreateTrustedTypePolicy = host.trustedTypesCreatePolicy
@@ -735,32 +733,51 @@
   /** @type {string} */
   const frameNonce = nativeCryptoRandomUUID()
 
-  /** @type {(() => void)|null} */
-  let resolveBridgeReady = null
-  let bridgeReadySettled = false
   /** @type {MessagePort|null} */
   let bridgePort = null
   const bridgeReady = isWorker
     ? (() => {
-        bridgeReadySettled = true
         const ch = new NativeMessageChannel()
         bridgePort = ch.port1
         setupBridgePort()
         if (nativeSelfPostMessage) nativeSelfPostMessage(null, makePristineIterable([ch.port2]))
         return Promise.resolve()
       })()
-    : new Promise((resolve) => {
-        resolveBridgeReady = () => {
-          if (bridgeReadySettled) return
-          bridgeReadySettled = true
-          resolve()
-        }
-        const target = windowObject === windowObject.top ? windowObject : windowObject.top
-        const channel = new NativeMessageChannel()
-        bridgePort = channel.port1
-        setupBridgePort()
-        callNative(nativeWindowPostMessage, target, null, '*', makePristineIterable([channel.port2]))
-      })
+    : isChromium
+      ? new Promise((resolve) => {
+          const onBridgeMessage = (event) => {
+            if (
+              event.source !== windowObject ||
+              event.data !== null ||
+              !event.ports ||
+              event.ports.length !== 1
+            )
+              return
+            nativeWindowRemoveEventListener(windowObject, 'message', onBridgeMessage)
+            bridgePort = event.ports[0]
+            setupBridgePort()
+            resolve()
+          }
+          nativeWindowAddEventListener(windowObject, 'message', onBridgeMessage)
+        })
+      : new Promise((resolve) => {
+          const capturePageBridge = (candidate) => {
+            if (!candidate || typeof candidate.postMessage !== 'function') return
+            reflect.deleteProperty(globalThis, 'webhid')
+            bridgePort = candidate
+            setupBridgePort()
+            resolve()
+          }
+          try {
+            capturePageBridge(windowObject.webhid)
+          } catch {
+            void 0
+          }
+          object.defineProperty(windowObject, 'webhid', {
+            configurable: true,
+            set: capturePageBridge
+          })
+        })
   if (!isWorker) setupTrustedTypesSharing()
 
   /** @returns {void} */
@@ -793,7 +810,12 @@
     promiseOps.then(handleSpawnWorkerRequest(data), (r) => {
       const msg = { type: 'spawnWorkerResponse', id: data.id, result: r.result }
       if (r.transfer) {
-        callNative(nativeMessagePortPostMessage, bridgePort, msg, makePristineIterable([r.transfer]))
+        callNative(
+          nativeMessagePortPostMessage,
+          bridgePort,
+          msg,
+          makePristineIterable([r.transfer])
+        )
       } else {
         callNative(nativeMessagePortPostMessage, bridgePort, msg)
       }
@@ -812,25 +834,8 @@
     }
   }
 
-  /**
-   * @param {object} data
-   * @returns {void}
-   */
-  function handleBootstrapProbe(data) {
-    if (typeof data.challenge !== 'string' || !bridgePort) return
-    callNative(nativeMessagePortPostMessage, bridgePort, {
-      type: 'bootstrapProbeResponse',
-      challenge: data.challenge
-    })
-  }
-  /** @returns {void} */
-  function handleBootstrapAccepted() {
-    if (resolveBridgeReady) resolveBridgeReady()
-  }
   /** @type {object} */
   const BRIDGE_MESSAGE_HANDLERS = {
-    bootstrapProbe: handleBootstrapProbe,
-    bootstrapAccepted: handleBootstrapAccepted,
     dataPlaneConnect: handleDataPlaneConnect,
     dataPlaneDisconnect: handleDataPlaneDisconnect,
     dataPlaneReady: handleDataPlaneReady,
@@ -1450,7 +1455,8 @@
               detail.data.byteLength
             )
           : new NativeDataView(new NativeArrayBuffer(0))
-        eventTargetOps.dispatchEvent(devState.get(device).eventTarget,
+        eventTargetOps.dispatchEvent(
+          devState.get(device).eventTarget,
           new HIDInputReportEvent('inputreport', {
             device: device,
             reportId: detail.reportId,
@@ -1684,7 +1690,11 @@
     deviceInfoCache = null
     reconcileAuthoritativeLifetime(state)
     const device = state.self
-    if (device) eventTargetOps.dispatchEvent(state.eventTarget, new HIDConnectionEvent('disconnect', { device: device }))
+    if (device)
+      eventTargetOps.dispatchEvent(
+        state.eventTarget,
+        new HIDConnectionEvent('disconnect', { device: device })
+      )
   }
 
   /** @type {object} */
